@@ -758,7 +758,9 @@ impl QueueClaimLedger {
             return Vec::new();
         };
         let mut ledger = self.clone();
-        ledger.follow_edits(now_secs, &heads);
+        if let Some(rows) = crate::queue_continuation::live_queue_head_rows(content) {
+            ledger.follow_edits(now_secs, &rows);
+        }
         let live = crate::queue_continuation::live_queue_head_identities(content);
         let claimed = ledger.claimed_items(now_secs, live.as_ref());
         heads
@@ -1318,15 +1320,23 @@ impl QueueClaimLedger {
     /// whose identity is no longer a live head follows the line its anchored
     /// line(s) became, so `#gh-fix …/agent-foc/issues/272` edited into
     /// `#gh-fix …/agent-doc/issues/272` stays claimed by the same owner and is
-    /// never re-offered as new dispatch work. Two identical claimed lines are
-    /// one claim: it holds while either line (or a line edited from either)
-    /// is live, and when several descendants differ it follows the first in
-    /// queue order rather than being dropped. This multi-copy case is legacy
-    /// migration only: new duplicate effects have distinct annotated identities.
-    /// A descendant whose identity
-    /// another live claim holds is never taken over. A claim with no anchor
-    /// (stored before anchors existed) falls back to the word-boundary
-    /// annotation rule ([`is_edit_continuation`]).
+    /// never re-offered as new dispatch work.
+    ///
+    /// A located claim is bound to its ROW, never to whichever row shares its
+    /// text (`#claimrowmigrate`). Once its anchor locates its line(s), or
+    /// exactly one candidate row carries this attempt's visible
+    /// `[#owner#generation]` projection, a text-identical sibling added later
+    /// never joins its slots, and an `⟦effect:N⟧` annotation of the queue
+    /// moves the claim to the annotated successor of ITS row, not to the first
+    /// annotated copy. `live_heads` may therefore carry the lifecycle
+    /// projection: the work text is stripped here and the owner annotation is
+    /// kept only as row evidence. Only an unlocated claim (no anchor yet, or
+    /// no anchored line survives) holds every line with its identity; when
+    /// such legacy copies are later edited apart it follows the first in queue
+    /// order rather than being dropped. A descendant whose identity another
+    /// live claim holds is never taken over. A claim with no anchor (stored
+    /// before anchors existed) falls back to the word-boundary annotation rule
+    /// ([`is_edit_continuation`]).
     ///
     /// The followed claim's `item_text` becomes the line's text (so the
     /// on-load [`Self::rekey`] keeps it) and its previous text is remembered
@@ -1336,12 +1346,29 @@ impl QueueClaimLedger {
         use crate::queue_head_alignment::{
             QueueHeadPairing, normalize_queue_head_text, pair_queue_heads,
         };
-        let norms: Vec<String> = live_heads
+        use agent_doc_document::queue_projection::{
+            QueueOwnerProjection, owner_projection, strip_in_progress_marker,
+        };
+        // Rows may carry the binary-owned lifecycle projection. Work text and
+        // identity never include it; the exact owner annotation is kept apart
+        // as row evidence (`#claimrowmigrate`).
+        let texts: Vec<String> = live_heads
+            .iter()
+            .map(|head| strip_in_progress_marker(head.trim()))
+            .collect();
+        let row_owners: Vec<Option<QueueOwnerProjection>> = live_heads
+            .iter()
+            .map(|head| owner_projection(head))
+            .collect();
+        let norms: Vec<String> = texts
             .iter()
             .map(|head| normalize_queue_head_text(head))
             .collect();
-        let live: Vec<QueueItemIdentity> =
-            live_heads.iter().map(|head| claim_identity(head)).collect();
+        let live: Vec<QueueItemIdentity> = texts.iter().map(|head| claim_identity(head)).collect();
+        let families: Vec<QueueItemIdentity> = texts
+            .iter()
+            .map(|head| effect_family_identity(head))
+            .collect();
         let held: HashSet<QueueItemIdentity> = self
             .claims
             .iter()
@@ -1349,15 +1376,24 @@ impl QueueClaimLedger {
             .map(|claim| claim.identity.clone())
             .collect();
 
-        // Per claim: the live lines descending from its anchored lines.
+        // Per claim: the live lines it holds, and whether they are exclusive.
+        // Exclusive lines were identified as THIS claim's row (by its anchor or
+        // by its exact owner/generation projection), so a text-identical
+        // sibling never joins them (`#claimrowmigrate`). Only a claim whose row
+        // cannot be located (no anchor yet, or no anchored line survives) falls
+        // back to every line with its identity.
         let mut pairings: Vec<(&Vec<String>, QueueHeadPairing)> = Vec::new();
         let mut descendants: Vec<Vec<usize>> = Vec::with_capacity(self.claims.len());
+        let mut exclusive: Vec<bool> = Vec::with_capacity(self.claims.len());
         for claim in &self.claims {
-            let mut lines: Vec<usize> = Vec::new();
             if !claim.blocks_dispatch(now_secs) {
-                descendants.push(lines);
+                descendants.push(Vec::new());
+                exclusive.push(false);
                 continue;
             }
+            // Never a line another live claim holds.
+            let unheld = |n: &usize| live[*n] == claim.identity || !held.contains(&live[*n]);
+            let mut anchored: Vec<usize> = Vec::new();
             if let Some(anchor) = &claim.anchor {
                 let pairing = match pairings
                     .iter()
@@ -1369,34 +1405,71 @@ impl QueueClaimLedger {
                         &pairings[pairings.len() - 1].1
                     }
                 };
-                lines.extend(
+                anchored.extend(
                     anchor
                         .slots
                         .iter()
                         .filter_map(|&slot| pairing.new_index_of(slot)),
                 );
             }
-            lines.extend(
-                live.iter()
-                    .enumerate()
-                    .filter(|(_, id)| **id == claim.identity)
-                    .map(|(index, _)| index),
-            );
-            // Never a line another live claim holds.
-            lines.retain(|&n| live[n] == claim.identity || !held.contains(&live[n]));
+            anchored.retain(unheld);
+            let identity_lines: Vec<usize> = live
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| **id == claim.identity)
+                .map(|(index, _)| index)
+                .collect();
+            // The visible `[#owner#generation]` annotation is the binary's own
+            // projection of this exact attempt onto its row. Among the rows
+            // that could be this claim's (anchored descendants, same-identity
+            // lines, and effect-annotated copies of the same authored text),
+            // exactly one attested row is the row; text alignment cannot tell
+            // apart rows whose text is identical, the projection can.
+            let family = effect_family_identity(&claim.item_text);
+            let attested: Vec<usize> = row_owners
+                .iter()
+                .enumerate()
+                .filter(|(_, owner)| {
+                    owner.as_ref().is_some_and(|owner| {
+                        owner.owner == claim.owner && owner.generation == claim.generation
+                    })
+                })
+                .map(|(index, _)| index)
+                .filter(unheld)
+                .filter(|n| {
+                    anchored.contains(n) || identity_lines.contains(n) || families[*n] == family
+                })
+                .collect();
+            let (mut lines, is_exclusive) = if let [only] = attested.as_slice() {
+                (vec![*only], true)
+            } else if !anchored.is_empty() {
+                (anchored, true)
+            } else {
+                (identity_lines, false)
+            };
+            lines.retain(unheld);
             lines.sort_unstable();
             lines.dedup();
             descendants.push(lines);
+            exclusive.push(is_exclusive);
         }
         drop(pairings);
 
         let mut proposals: Vec<(usize, usize)> = Vec::new();
         for (claim_idx, claim) in self.claims.iter().enumerate() {
-            if !claim.blocks_dispatch(now_secs) || live.contains(&claim.identity) {
+            if !claim.blocks_dispatch(now_secs) {
                 continue;
             }
-            if let Some(&first) = descendants[claim_idx].first() {
+            let lines = &descendants[claim_idx];
+            if lines.iter().any(|&n| live[n] == claim.identity) {
+                // Still on (one of) its own line(s).
+                continue;
+            }
+            if let Some(&first) = lines.first() {
                 proposals.push((claim_idx, first));
+                continue;
+            }
+            if live.contains(&claim.identity) {
                 continue;
             }
             if claim.identity.is_id_backed() {
@@ -1448,7 +1521,7 @@ impl QueueClaimLedger {
             {
                 continue;
             }
-            let text = live_heads[*head_idx].trim().to_string();
+            let text = texts[*head_idx].trim().to_string();
             let claim = &mut self.claims[*claim_idx];
             let previous = std::mem::replace(&mut claim.item_text, text.clone());
             claim.identity = live[*head_idx].clone();
@@ -1465,18 +1538,22 @@ impl QueueClaimLedger {
 
         // Re-anchor every live claim whose line is in view, so the next
         // alignment starts from this snapshot. A claim whose line is not in
-        // view (a lagging disk read, or a closed line) keeps its anchor.
+        // view (a lagging disk read, or a closed line) keeps its anchor. An
+        // exclusive claim keeps exactly its located lines; only an unlocated
+        // claim holds every line with its identity.
         for (claim_idx, claim) in self.claims.iter_mut().enumerate() {
             if claim.is_expired(now_secs) || !live.contains(&claim.identity) {
                 continue;
             }
             let mut slots = descendants[claim_idx].clone();
-            slots.extend(
-                live.iter()
-                    .enumerate()
-                    .filter(|(_, id)| **id == claim.identity)
-                    .map(|(index, _)| index),
-            );
+            if !exclusive[claim_idx] {
+                slots.extend(
+                    live.iter()
+                        .enumerate()
+                        .filter(|(_, id)| **id == claim.identity)
+                        .map(|(index, _)| index),
+                );
+            }
             slots.sort_unstable();
             slots.dedup();
             claim.anchor = Some(ClaimAnchor {
@@ -1623,6 +1700,15 @@ impl QueueClaimLedger {
 /// goes through this one function.
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
     queue_head_identity(item.trim())
+}
+
+/// The claim identity of `item`'s authored work with any trailing
+/// `⟦effect:N⟧` suffix removed: equal for a row, its effect-annotated
+/// successor, and its text-identical siblings (`#claimrowmigrate`).
+fn effect_family_identity(item: &str) -> QueueItemIdentity {
+    claim_identity(&crate::document_queue::strip_queue_effect_annotation(
+        item.trim(),
+    ))
 }
 
 /// Binary attestation key for one exact generated claim attempt and its
@@ -2952,6 +3038,188 @@ mod tests {
             vec![(foc.to_string(), fixed.to_string())]
         );
         assert_eq!(ledger.claims[0].identity, claim_identity(fixed));
+    }
+
+    /// A reported claim on `release + publish`, rendered as the binary
+    /// projects it: `☑️ [#<owner>#<generation>] <text>`.
+    fn reported_release_row(ledger: &QueueClaimLedger, text: &str) -> String {
+        use agent_doc_document::queue_projection::{
+            QueueLifecycleMarker, QueueOwnerProjection, apply_lifecycle_marker,
+            apply_owner_projection,
+        };
+        let claim = &ledger.claims[0];
+        apply_owner_projection(
+            &apply_lifecycle_marker(text, QueueLifecycleMarker::Reported),
+            Some(&QueueOwnerProjection {
+                owner: claim.owner.clone(),
+                generation: claim.generation,
+            }),
+        )
+    }
+
+    fn reported_release_ledger(now: u64) -> QueueClaimLedger {
+        let mut ledger = QueueClaimLedger::default();
+        let owner = "subagent:release_publish_patch";
+        ledger.claim("release + publish", owner, now, 3600);
+        let generation = ledger.claims[0].generation;
+        ledger
+            .start(
+                "release + publish",
+                owner,
+                "worker:release",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        ledger
+            .report("release + publish", Some(generation))
+            .unwrap();
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
+        ledger
+    }
+
+    /// `#claimrowmigrate` (agent-doc-bugs.md, 2026-10-26): a 52h-old reported
+    /// `release + publish` claim sat on its row when the operator restored a
+    /// text-identical `release + publish` row ABOVE it. Every ledger read then
+    /// widened the claim's anchor onto the restored copy (one identity, two
+    /// slots), and when preflight annotated the pair `⟦effect:1⟧`/`⟦effect:2⟧`
+    /// the legacy migration followed "the first descendant": the claim jumped
+    /// onto the restored row and its own row became `📥`. A located claim is
+    /// bound to its row; a text-identical sibling never joins its slots.
+    #[test]
+    fn a_located_claim_never_widens_onto_a_restored_identical_sibling() {
+        let now = 100;
+        let mut ledger = reported_release_ledger(now);
+        let claimed = reported_release_row(&ledger, "release + publish");
+        ledger.follow_edits(
+            now,
+            &strings(&["#gh-fix https://x.test/issues/1", &claimed]),
+        );
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![1]);
+
+        // 52 hours later the operator restores an identical, unclaimed row above.
+        let later = now + 52 * 3600;
+        let restored = strings(&[
+            "release + publish",
+            "#gh-fix https://x.test/issues/1",
+            &claimed,
+        ]);
+        assert!(ledger.follow_edits(later, &restored).is_empty());
+        assert_eq!(
+            ledger.claims[0].anchor.as_ref().unwrap().slots,
+            vec![2],
+            "the restored copy is not this claim's row"
+        );
+
+        // Preflight annotates the duplicate pair in queue order.
+        let annotated = strings(&[
+            "release + publish ⟦effect:1⟧",
+            "#gh-fix https://x.test/issues/1",
+            &reported_release_row(&ledger, "release + publish ⟦effect:2⟧"),
+        ]);
+        let followed = ledger.follow_edits(later + 1, &annotated);
+        assert_eq!(
+            followed,
+            vec![(
+                "release + publish".to_string(),
+                "release + publish ⟦effect:2⟧".to_string()
+            )]
+        );
+        let claim = &ledger.claims[0];
+        assert_eq!(
+            claim.identity,
+            claim_identity("release + publish ⟦effect:2⟧")
+        );
+        assert_eq!(claim.owner, "subagent:release_publish_patch");
+        assert_eq!(claim.state, QueueClaimState::Reported);
+        assert_eq!(claim.anchor.as_ref().unwrap().slots, vec![2]);
+        let live: HashSet<_> = annotated
+            .iter()
+            .map(|head| {
+                claim_identity(
+                    &agent_doc_document::queue_projection::strip_in_progress_marker(head),
+                )
+            })
+            .collect();
+        let claimed_items = ledger.claimed_items(later + 1, Some(&live));
+        assert!(claimed_items.claims("release + publish ⟦effect:2⟧"));
+        assert!(
+            !claimed_items.claims("release + publish ⟦effect:1⟧"),
+            "the restored sibling never inherits the reported claim"
+        );
+    }
+
+    /// `#claimrowmigrate`: the same incident when the restore and the effect
+    /// annotation land in ONE queue cut, with the restored row directly above
+    /// the claimed one. Text alignment alone cannot tell the two copies apart
+    /// (both annotated rows contain the claimed text), so the claim follows the
+    /// row carrying its own `[#owner#generation]` projection.
+    #[test]
+    fn an_effect_annotation_follows_the_row_carrying_the_claims_own_projection() {
+        let now = 100;
+        let mut ledger = reported_release_ledger(now);
+        let claimed = reported_release_row(&ledger, "release + publish");
+        ledger.follow_edits(now, &strings(&["inline", &claimed]));
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![1]);
+
+        let annotated = strings(&[
+            "inline",
+            "release + publish ⟦effect:1⟧",
+            &reported_release_row(&ledger, "release + publish ⟦effect:2⟧"),
+        ]);
+        let followed = ledger.follow_edits(now + 1, &annotated);
+        assert_eq!(
+            followed,
+            vec![(
+                "release + publish".to_string(),
+                "release + publish ⟦effect:2⟧".to_string()
+            )]
+        );
+        assert_eq!(
+            ledger.claims[0].identity,
+            claim_identity("release + publish ⟦effect:2⟧")
+        );
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![2]);
+
+        // A further read of the same cut is stable.
+        assert!(ledger.follow_edits(now + 2, &annotated).is_empty());
+        assert_eq!(
+            ledger.claims[0].identity,
+            claim_identity("release + publish ⟦effect:2⟧")
+        );
+    }
+
+    /// `#claimrowmigrate`: a legacy claim that legitimately anchored every
+    /// identical copy migrates onto the copy carrying its projection, and an
+    /// owner annotation for a DIFFERENT generation is not evidence.
+    #[test]
+    fn a_legacy_multi_slot_claim_migrates_onto_its_projected_row_only() {
+        let now = 100;
+        let mut ledger = reported_release_ledger(now);
+        ledger.follow_edits(now, &strings(&["release + publish", "release + publish"]));
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![0, 1]);
+
+        let generation = ledger.claims[0].generation;
+        let stale = agent_doc_document::queue_projection::apply_owner_projection(
+            "release + publish ⟦effect:1⟧",
+            Some(
+                &agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: ledger.claims[0].owner.clone(),
+                    generation: generation + 7,
+                },
+            ),
+        );
+        let annotated = vec![
+            stale,
+            reported_release_row(&ledger, "release + publish ⟦effect:2⟧"),
+        ];
+        ledger.follow_edits(now + 1, &annotated);
+        assert_eq!(
+            ledger.claims[0].identity,
+            claim_identity("release + publish ⟦effect:2⟧")
+        );
+        assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![1]);
     }
 
     /// A deleted claimed line closes its claim, while an in-place rewrite keeps

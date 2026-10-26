@@ -1029,6 +1029,22 @@ pub fn live_queue_head_texts(content: &str) -> Option<Vec<String>> {
     )
 }
 
+/// Live queue-head rows in queue order, each still carrying its binary-owned
+/// lifecycle and `[#owner#generation]` projection (`None` when no queue
+/// parses). The claim ledger's edit follow reads the projection as row
+/// evidence, so a claim stays on the row it was projected onto even when a
+/// text-identical sibling exists (`#claimrowmigrate`). Callers comparing work
+/// text use [`live_queue_head_texts`].
+pub fn live_queue_head_rows(content: &str) -> Option<Vec<String>> {
+    let (_, entries) = queue_component_entries(content)?;
+    Some(
+        document_queue::prompts(&entries)
+            .into_iter()
+            .map(|prompt| prompt.text.trim().to_string())
+            .collect(),
+    )
+}
+
 /// Count active queue entries that are predicate-proven non-drainable noise.
 pub fn queue_stale_noise_lines(content: &str) -> usize {
     let Some((queue_facts, entries)) = queue_component_entries(content) else {

@@ -3734,6 +3734,18 @@ fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
     (base.to_string(), Some(effect))
 }
 
+/// The operator-authored work text of `text` with a trailing binary-owned
+/// `⟦effect:N⟧` suffix removed (unchanged when it carries none).
+///
+/// Two rows share an effect family exactly when their bases normalize equally:
+/// `release + publish` and `release + publish ⟦effect:2⟧` are the same authored
+/// work at different effect identities. Claim migration uses this to recognize
+/// an effect annotation of a claimed row and its text-identical siblings
+/// (`#claimrowmigrate`).
+pub fn strip_queue_effect_annotation(text: &str) -> String {
+    split_queue_effect_annotation(text).0
+}
+
 fn queue_effect_family_identity(
     prompt: &QueuePrompt,
 ) -> agent_doc_element_queue::QueueItemIdentity {

@@ -115,6 +115,11 @@ worker, completion, and receipt identity; lifecycle/priority markers remain
 cosmetic. Existing positive ids are stable, missing ids receive the lowest unused
 integer in queue order, and a lone survivor is never renumbered. Id-backed and
 multiline heads are outside this projection.
+Annotating a claimed row never moves its claim to a text-identical sibling
+(`#claimrowmigrate`): the claim follows its own row's annotated successor,
+identified by its anchor and, where text alone is ambiguous, by the row's
+binary-written `[#owner#generation]` projection. Full rule:
+`07-orchestration-commands.md` § Duplicate queue-effect identity.
 
 **Durable operation log (`#op-scoped-drift-1`):** Phase 1 of the operation-scoped drift model (`tasks/agent-doc/plan-operation-scoped-drift.md`) persists each cycle's node-keyed operations to derived tables in the controller's sole `.agent-doc/state.db`, tagged with **actor** and a **causal clock**. The actor (`agent_doc_turn::op_log::OpActor`) is one of `agent`, `user`, `foreign_supervisor`, or `live_buffer`; `classify_actor` maps an `OpSource` provenance signal to the actor. At preflight the diff is snapshot↔document, so every observed node op is a `user` edit — the agent's own committed output already lives in the snapshot. The causal clock (`agent_doc_turn::op_log::CausalClock`) carries a monotonic per-document Lamport tick plus the originating `agent_doc_session`. The durable store (`agent-doc-sqlite::op_log`) owns Lamport assignment: each appended op receives the next per-document tick so the log is totally ordered per document; a repeated preflight pass over the same uncommitted diff is idempotent (no duplicate row, clock unchanged) because append dedupes against the most recent op for the same node. Writes are best effort — the op-log tables are rebuildable derived state and a write failure never blocks a cycle. This op log is the substrate the later phases read: phase 2 emits the TurnScope read/write set, and phase 3's affectedness classifier intersects incoming ops against that scope so independent ops integrate and persist without affecting the current turn.
 

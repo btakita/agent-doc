@@ -1429,6 +1429,79 @@ mod tests {
         }));
     }
 
+    /// `#claimrowmigrate` (agent-doc-bugs.md, 2026-10-26): a reported
+    /// `release + publish` handback sat on its row when a text-identical row
+    /// was restored beside it and preflight annotated the pair
+    /// `⟦effect:1⟧`/`⟦effect:2⟧`. The claim jumped onto the restored row
+    /// (`☑️ … ⟦effect:1⟧`) and its own row became `📥 … ⟦effect:2⟧`. The
+    /// reported claim stays on the row it was projected onto.
+    #[test]
+    fn reported_claim_keeps_its_row_through_a_duplicate_effect_annotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            "- #gh-fix https://x.test/issues/1\n- release + publish\n",
+        );
+        let owner = "subagent:release_publish_patch";
+        let (_, claim) =
+            crate::queue_claim::claim_with_session(&doc, "release + publish", owner, 600, None)
+                .unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            "release + publish",
+            owner,
+            "worker:release",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, "release + publish", Some(claim.generation))
+            .unwrap();
+        let reported_row = format!("- ☑️ [#{owner}#{}] release + publish", claim.generation);
+        let projection =
+            derive_claim_runtime_projection(&doc, &std::fs::read_to_string(&doc).unwrap(), None)
+                .unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("{reported_row}\n")),
+            "{}",
+            projection.target_content
+        );
+        std::fs::write(&doc, &projection.target_content).unwrap();
+
+        // The operator restores an identical row directly above the claimed
+        // one, and preflight annotates both copies in the same queue cut.
+        let restored = projection.target_content.replace(
+            &format!("{reported_row}\n"),
+            &format!("- release + publish ⟦effect:1⟧\n{reported_row} ⟦effect:2⟧\n"),
+        );
+        std::fs::write(&doc, &restored).unwrap();
+
+        let projection = derive_claim_runtime_projection(&doc, &restored, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("{reported_row} ⟦effect:2⟧\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- 📥 release + publish ⟦effect:1⟧\n"),
+            "{}",
+            projection.target_content
+        );
+        let reports = crate::queue_claim::claim_reports_for_content(&doc, &restored).unwrap();
+        assert_eq!(reports.len(), 1, "{reports:#?}");
+        assert_eq!(reports[0].claim.item_text, "release + publish ⟦effect:2⟧");
+        assert_eq!(
+            reports[0].claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+    }
+
     #[test]
     fn claim_projection_marks_only_the_exact_duplicate_effect() {
         let dir = tempfile::tempdir().unwrap();

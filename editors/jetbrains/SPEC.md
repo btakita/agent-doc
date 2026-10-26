@@ -938,7 +938,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   forwarded. A monolithic IDE's own authenticated frontend remains valid detached-view transport,
   but it leaves `layoutAuthorityActive=false`, does not retire the classic
   `EditorTabSyncListener` projection, and does not open a `jetbrains-rd` layout endpoint: its
-  windows are already measured by the classic path. This classification gates the authority
+  windows are already measured by the classic path. That classic path must also stay
+  *subscribed*: the modular backend compiles a generated `PluginLifecycleListener`, and the
+  generator keeps the classic block that subscribes `EditorTabSyncListener` to the project
+  `FileEditorManager` topic, installs `EditorFocusSyncListener`, and republishes on IDE
+  activation, appending the one-sided Remote Dev fallback diagnostic after it. The generator fails
+  the build if any of those edges is missing. Stripping them left a local 263 IDE with no
+  tab-selection publisher at all: tmux followed a tab switch only at the next native-library
+  reload (each `make install`), Run Agent Doc, or editor container change. This classification gates the authority
   transition itself, not merely the later delivery; otherwise the local lease can retire the
   classic publisher before the forwarder rejects it as `local_client`, leaving automatic tmux sync
   with no source. A schema-1 peer has no

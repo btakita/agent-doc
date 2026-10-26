@@ -553,6 +553,11 @@ decide it.
   endpoint may publish or retire. This guard must precede the handoff: filtering
   only the later forward creates a no-publisher state in which the classic source
   is retired and the local snapshot is rejected as `local_client`.
+  The classic source must also remain *installed* in that package: a modular
+  backend lifecycle that omits the classic selection/focus/activation edges is the
+  same no-publisher state reached by a different route, because nothing then
+  publishes a local tab switch until an unrelated republish (native-library
+  reload, Run Agent Doc, container change).
 - **Command applicability is derived from the retained Source's authority.** A
   route may consume flat Remote Dev evidence as a non-structural `ensure`
   request. An exact `Sync Tmux Panes` command requires measured columns; after

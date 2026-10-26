@@ -93,23 +93,42 @@ val generateModularLifecycle by tasks.registering {
         val start = original.indexOf(startMarker)
         val end = original.indexOf(endMarker)
         check(start >= 0 && end > start) {
-            "legacy lifecycle layout-listener markers changed; review the 262 fail-closed override"
+            "legacy lifecycle layout-listener markers changed; review the 262 local selection ingress"
         }
-        val replacement = """
-        // The frontend module remains the preferred pane-tagged surface authority. A one-sided
-        // Remote Dev install has no frontend bridge, though, and GuestFileEditorManager does not
-        // publish the project FileEditorManager topic. Observe that remote (Remote Dev controller
-        // or Code With Me guest) selection flow only while no frontend snapshot generation is
-        // accepted.
-        val editorTabSync = EditorTabSyncListener.install(project)
+        // The classic block owns the local tab-selection, split-focus, and IDE-activation edges.
+        // A monolithic 262/263 IDE runs the modular frontend as a *local* lease, which is
+        // detached-view transport and never pane-layout authority (`local_client`), so these
+        // classic edges are its only automatic tmux auto-sync source. Stripping them left tab
+        // switches unsynced until an unrelated republish (a native-library reload during an
+        // install, a Run Agent Doc surface reference, or a container change). A remote
+        // measured-layout lease still fences the classic projection itself
+        // (`frontend_measured_layout_authority`), and GuestFileEditorManager does not publish the
+        // project FileEditorManager topic, so keeping the block adds no remote publisher.
+        val classicBlock = original.substring(start, end)
+        val requiredClassicEdges = listOf(
+            "val editorTabSync = EditorTabSyncListener.install(project)",
+            "FileEditorManagerListener.FILE_EDITOR_MANAGER,\n                editorTabSync,",
+            "EditorFocusSyncListener.install(project, editorTabSync)",
+            "editorTabSync.onIdeActivated(project)",
+            "ApplicationActivationListener.TOPIC",
+        )
+        val missingClassicEdges = requiredClassicEdges.filterNot(classicBlock::contains)
+        check(missingClassicEdges.isEmpty()) {
+            "legacy lifecycle no longer installs the local editor-selection edges " +
+                "$missingClassicEdges; the 262/263 local tmux auto-sync source would be lost"
+        }
+        val fallback = """
+        // The frontend module remains the preferred pane-tagged surface authority for Remote Dev.
+        // A one-sided Remote Dev install has no frontend bridge, though, and GuestFileEditorManager
+        // does not publish the project FileEditorManager topic, so that topology records its
+        // unavailable fallback diagnostic here.
         com.github.btakita.agentdoc.split.backend.BackendGuestSelectionFallback.install(
             project,
             lifecycle,
             editorTabSync,
         )
-
 """
-        val transformed = original.substring(0, start) + replacement + original.substring(end)
+        val transformed = original.substring(0, end) + fallback + original.substring(end)
         val target = output.get().asFile
         Files.createDirectories(target.toPath().parent)
         target.writeText(transformed)

@@ -4256,10 +4256,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"}",
             )
         }
-        if (bootstrapFromControllerCanonical) {
-            nativeReloadResumeStates.remove(filePath)
-        } else if (retainedResumeState != null) {
-            nativeReloadResumeStates.remove(filePath, retainedResumeState)
+        // `#resumefrontierlostonfailedattach`: the retained native frontier is
+        // released only when this registration commits (see
+        // [releaseRetainedResumeStateOnCommitUtil] at each commit point below).
+        // Releasing it here, before the swap checks, lost it to any attempt that
+        // then refused: every later registration sent no state vector, the
+        // controller answered `canonical_covers_retained_frontier = unknown`,
+        // and a buffer still equal to its settled shadow held forever
+        // (agent-doc-bugs.md, 2026-10-26 14:36-14:59, 20+ refusals).
+        val commitRegistration = { committed: CrdtReplicaForwarder ->
+            releaseRetainedResumeStateOnCommitUtil(
+                nativeReloadResumeStates,
+                filePath,
+                bootstrapFromControllerCanonical,
+                retainedResumeState,
+            )
+            committed
         }
         if (
             expectedEditorTextAtSwap != null &&
@@ -4270,6 +4282,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             // the captured editor cut before swapping the endpoint; the
             // still-authoritative cached forwarder will drain those local
             // deltas and a later refresh can retry from a fresh cut.
+            log.info(
+                "[crdt-replica] registration swap refused for ${File(filePath).name}; " +
+                    "the live buffer moved or a local delta is pending; " +
+                    "retained_frontier=${if (retainedResumeState != null) "kept" else "none"}",
+            )
             forwarder.deregister()
             return null
         }
@@ -4312,7 +4329,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     return cached
                 }
                 cached.deregister()
-                return forwarder
+                return commitRegistration(forwarder)
             }
             // The manager worker is serialized, but preserve a concurrently
             // installed winner without sending a false document-close event.
@@ -4338,7 +4355,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             forwarder.deregister()
             return null
         }
-        return forwarder
+        return commitRegistration(forwarder)
     }
 
     /**
@@ -6441,6 +6458,28 @@ internal enum class RetainedRegistrationProjectionAction {
      * ambiguity hold gets an exit that does not overwrite the operator.
      */
     MergeForward,
+}
+
+/**
+ * `#resumefrontierlostonfailedattach`: release a registration's retained native
+ * resume state, called only once that registration has committed (its endpoint
+ * owns the forwarder slot and its projection finalized). A canonical bootstrap
+ * supersedes any retained frontier for the path; otherwise only the exact state
+ * this registration consumed is released, so a newer capture survives. An
+ * attempt that held, raced the operator, or failed promotion keeps the state, so
+ * the next registration can still prove `canonical_covers_retained_frontier`.
+ */
+internal fun <V : Any> releaseRetainedResumeStateOnCommitUtil(
+    states: java.util.concurrent.ConcurrentMap<String, V>,
+    filePath: String,
+    bootstrapFromControllerCanonical: Boolean,
+    retainedResumeState: V?,
+) {
+    if (bootstrapFromControllerCanonical) {
+        states.remove(filePath)
+    } else if (retainedResumeState != null) {
+        states.remove(filePath, retainedResumeState)
+    }
 }
 
 /**

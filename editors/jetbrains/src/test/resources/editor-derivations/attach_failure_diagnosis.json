@@ -1,6 +1,6 @@
 {
   "derivation": "attach_failure_diagnosis",
-  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. The answer also owns whether another attach is automatic or must await operator evidence. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose.",
+  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. The answer also owns whether another attach is automatic or must await operator evidence. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose. A case whose native answer diverged on purpose keeps the frozen floor's answer in `frozen_expected`.",
   "cases": [
     {
       "name": "an IDE running a plugin generation older than the install names a restart",
@@ -66,6 +66,14 @@
         "file_name": "agent-doc-bugs.md"
       },
       "expected": {
+        "remedy": "Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing.",
+        "status_token": "ambiguous-retained-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged."
+      },
+      "frozen_expected": {
         "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
         "status_token": "ambiguous-retained-projection",
         "needs_operator_surface": true,
@@ -81,6 +89,14 @@
         "file_name": "session.md"
       },
       "expected": {
+        "remedy": "Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing.",
+        "status_token": "ambiguous-reregister-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged."
+      },
+      "frozen_expected": {
         "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
         "status_token": "ambiguous-reregister-projection",
         "needs_operator_surface": true,

@@ -63,79 +63,236 @@ pub fn rebase(
             resulting_text: canonical.to_owned(),
         });
     }
-    // `#struckqueuepruneattach`: a settled struck queue row is already
-    // terminal. If the operator changed *only* by deleting such rows, apply
-    // those cell tombstones to canonical instead of holding the replica merely
-    // because canonical decorated the same retired row. The semantic helper
-    // accepts no other operator edit and preserves canonical as the output
-    // spine, including every live queue head.
-    if let Some(merged) = crate::crdt::merge_operator_deleted_struck_queue_items(
-        base,
-        &batch.resulting_text,
-        canonical,
-    ) {
-        let target: Vec<char> = merged.chars().collect();
-        let edits = splices_between(&current, &target);
-        let mut replayed = current.clone();
-        for edit in &edits {
-            apply(&mut replayed, edit)?;
+    let planned = (|| -> Result<CapturedSpliceBatch> {
+        // `#struckqueuepruneattach`: a settled struck queue row is already
+        // terminal. If the operator changed *only* by deleting such rows, apply
+        // those cell tombstones to canonical instead of holding the replica merely
+        // because canonical decorated the same retired row. The semantic helper
+        // accepts no other operator edit and preserves canonical as the output
+        // spine, including every live queue head.
+        if let Some(merged) = crate::crdt::merge_operator_deleted_struck_queue_items(
+            base,
+            &batch.resulting_text,
+            canonical,
+        ) {
+            let target: Vec<char> = merged.chars().collect();
+            let edits = splices_between(&current, &target);
+            let mut replayed = current.clone();
+            for edit in &edits {
+                apply(&mut replayed, edit)?;
+            }
+            ensure!(
+                replayed == target,
+                "struck queue deletion splices did not reproduce the semantic merge"
+            );
+            return Ok(CapturedSpliceBatch {
+                edits,
+                resulting_text: merged,
+            });
+        }
+        let captured_changes = char_diff(&old, &captured_result);
+        let canonical_changes = char_diff(&old, &current);
+        // `#steerreplicachurn`: a captured change that touches a canonical change
+        // is never translated splice by splice. Equal-span translation beside an
+        // overlapping canonical insert is exactly how a burst canonical already
+        // ingested (a lost receipt) would be inserted a second time.
+        let windows = captured_windows(
+            &old,
+            &current,
+            &canonical_changes,
+            &captured_result,
+            &captured_changes,
+        );
+        let exact = if windows.iter().any(|window| window.canonical_ops > 0) {
+            merge_windows(&captured_result, &current, &canonical_changes, &windows)
+        } else {
+            // A splice inside the burst may touch a canonical change even when
+            // the burst's net change does not; the net change still translates.
+            translate_edits(&old, &current, batch).or_else(|_| {
+                merge_windows(&captured_result, &current, &canonical_changes, &windows)
+            })
+        };
+        let answer = exact.or_else(|refusal| {
+            merge_forward(&old, &current, &captured_result, &windows)
+                .map_err(|merge| anyhow::anyhow!("{refusal}; merge-forward refused: {merge}"))
+        })?;
+        // `#mergecapturedsplice`: the planners above work by code point, and a
+        // line the operator deleted or rewrote can keep a few code points by
+        // coincidence; a canonical change anchored between them then lands on the
+        // operator's new text. Every answer is held to whole-line anchoring:
+        // where the line-granular merge exists the answer must be it, and no answer
+        // keeps a canonical change whose anchor line the operator deleted or
+        // rewrote. Refusing is the existing overlap outcome: the plugin keeps the
+        // captured batch and the operator's visible text, and the
+        // controller-licensed roll-forward settles it.
+        if let Some(line_merged) = line_merge(base, &batch.resulting_text, canonical) {
+            ensure!(
+                answer.resulting_text == line_merged,
+                "the code-point plan anchors canonical text at a different line than the \
+                 line-granular merge"
+            );
         }
         ensure!(
-            replayed == target,
-            "struck queue deletion splices did not reproduce the semantic merge"
+            !canonical_change_lost_its_anchor(base, canonical, &batch.resulting_text),
+            "canonical changed a line the operator deleted or rewrote; its anchor is gone"
         );
-        return Ok(CapturedSpliceBatch {
-            edits,
-            resulting_text: merged,
-        });
+        Ok(answer)
+    })();
+    // `#lagcanonicalrollforward`: the dual proof, consulted only when every
+    // planner refused. Canonical moved past `base` only by changes the captured
+    // cut already carries: the controller ingested a prefix of the operator's
+    // own burst (a structure-quarantined live relay whose durable ops still
+    // landed, or a lost receipt) and the operator kept typing, or it added only
+    // binary-owned projection (a claim marker on the row being edited, a
+    // boundary or `(HEAD)` placement) that it re-projects from its own state.
+    // Every planner refuses that shape ("canonical already carries captured
+    // operator text", or an overlap on the edited line), and nothing else can
+    // ever change the answer, so registration held the buffer forever
+    // (agent-doc-bugs.md 2026-10-26 13:48-13:53; docs.md 14:56, a queue row
+    // deleted and pasted into a claimed row). The captured cut is then the
+    // lossless answer: the editor text is the base and no canonical operator
+    // text is dropped.
+    match planned {
+        Ok(answer) => Ok(answer),
+        Err(refusal) => {
+            if cut_carries_every_canonical_operator_change(base, canonical, &batch.resulting_text) {
+                Ok(CapturedSpliceBatch {
+                    edits: splices_between(&current, &captured_result),
+                    resulting_text: batch.resulting_text.clone(),
+                })
+            } else {
+                Err(refusal)
+            }
+        }
     }
-    let captured_changes = char_diff(&old, &captured_result);
-    let canonical_changes = char_diff(&old, &current);
-    // `#steerreplicachurn`: a captured change that touches a canonical change
-    // is never translated splice by splice. Equal-span translation beside an
-    // overlapping canonical insert is exactly how a burst canonical already
-    // ingested (a lost receipt) would be inserted a second time.
-    let windows = captured_windows(
-        &old,
-        &current,
-        &canonical_changes,
-        &captured_result,
-        &captured_changes,
-    );
-    let exact = if windows.iter().any(|window| window.canonical_ops > 0) {
-        merge_windows(&captured_result, &current, &canonical_changes, &windows)
-    } else {
-        // A splice inside the burst may touch a canonical change even when
-        // the burst's net change does not; the net change still translates.
-        translate_edits(&old, &current, batch)
-            .or_else(|_| merge_windows(&captured_result, &current, &canonical_changes, &windows))
-    };
-    let answer = exact.or_else(|refusal| {
-        merge_forward(&old, &current, &captured_result, &windows)
-            .map_err(|merge| anyhow::anyhow!("{refusal}; merge-forward refused: {merge}"))
-    })?;
-    // `#mergecapturedsplice`: the planners above work by code point, and a
-    // line the operator deleted or rewrote can keep a few code points by
-    // coincidence; a canonical change anchored between them then lands on the
-    // operator's new text. Every answer is held to whole-line anchoring:
-    // where the line-granular merge exists the answer must be it, and no answer
-    // keeps a canonical change whose anchor line the operator deleted or
-    // rewrote. Refusing is the existing overlap outcome: the plugin keeps the
-    // captured batch and the operator's visible text, and the
-    // controller-licensed roll-forward settles it.
-    if let Some(line_merged) = line_merge(base, &batch.resulting_text, canonical) {
-        ensure!(
-            answer.resulting_text == line_merged,
-            "the code-point plan anchors canonical text at a different line than the \
-             line-granular merge"
-        );
-    }
-    ensure!(
-        !canonical_change_lost_its_anchor(base, canonical, &batch.resulting_text),
-        "canonical changed a line the operator deleted or rewrote; its anchor is gone"
-    );
-    Ok(answer)
 }
+
+/// `#lagcanonicalrollforward`: whether `captured` carries every net change
+/// `base -> canonical` makes, so adopting `captured` drops nothing canonical
+/// changed. Both sides are diffed against `base` (line-granular, as every
+/// planner here). Each canonical change must lie inside one captured change
+/// over the same base: a canonical deletion counts only when the cut replaced
+/// those base characters too, and canonical's inserted text inside one captured
+/// change must reappear in the cut's replacement in order, with at most
+/// [`LAG_ROLL_FORWARD_MAX_INSERTED_RUNS`] run of later typing inside it and
+/// nothing of it removed. Base text canonical kept and the cut
+/// removed is the operator's own deletion and needs no carrying. A
+/// whitespace-only canonical insertion is never counted, because it cannot be
+/// told apart from an independent controller line break. A canonical change
+/// found anywhere else in the cut is not proof; the refusal stands.
+fn cut_carries_every_canonical_change(
+    base: &[char],
+    canonical: &[char],
+    captured: &[char],
+) -> bool {
+    if canonical == base {
+        return false;
+    }
+    // Whole changed lines, never refined by char: a char refinement of two
+    // different rewrites of one line fragments them at coincidental equal
+    // characters, and the fragments then never line up.
+    let canonical_changes = changed_line_hunks(base, canonical);
+    let captured_changes = changed_line_hunks(base, captured);
+    let mut carried_inserts: Vec<Vec<char>> = vec![Vec::new(); captured_changes.len()];
+    for (old, new) in &canonical_changes {
+        let Some(owner) = captured_changes
+            .iter()
+            .position(|(within, _)| within.start <= old.start && old.end <= within.end)
+        else {
+            return false;
+        };
+        carried_inserts[owner].extend_from_slice(&canonical[new.clone()]);
+    }
+    carried_inserts
+        .iter()
+        .zip(&captured_changes)
+        .all(|(inserted, (_, replacement))| {
+            if inserted.is_empty() {
+                return true;
+            }
+            if inserted.iter().all(|ch| ch.is_whitespace()) {
+                return false;
+            }
+            let replacement = &captured[replacement.clone()];
+            let mut inserted_runs = 0;
+            for op in capture_diff_slices(Algorithm::Myers, inserted, replacement) {
+                match op.tag() {
+                    DiffTag::Equal => {}
+                    DiffTag::Insert => inserted_runs += 1,
+                    DiffTag::Delete | DiffTag::Replace => return false,
+                }
+            }
+            inserted_runs <= LAG_ROLL_FORWARD_MAX_INSERTED_RUNS
+        })
+}
+
+/// The changed hunks of a whole-line diff, as `(base chars, new chars)`.
+fn changed_line_hunks(old: &[char], new: &[char]) -> Vec<(Range<usize>, Range<usize>)> {
+    let old_lines = line_ranges(old);
+    let new_lines = line_ranges(new);
+    let old_keys: Vec<&[char]> = old_lines.iter().map(|range| &old[range.clone()]).collect();
+    let new_keys: Vec<&[char]> = new_lines.iter().map(|range| &new[range.clone()]).collect();
+    capture_diff_slices(Algorithm::Myers, &old_keys, &new_keys)
+        .into_iter()
+        .filter(|op| op.tag() != DiffTag::Equal)
+        .map(|op| {
+            (
+                lines_to_chars(&old_lines, op.old_range(), old.len()),
+                lines_to_chars(&new_lines, op.new_range(), new.len()),
+            )
+        })
+        .collect()
+}
+
+/// [`cut_carries_every_canonical_change`] over operator text: binary-owned
+/// markers ([`without_binary_owned_markers`]) and the attempt projection a
+/// queue row carries (`🟡 [#subagent:x#1] `, lifecycle and pin markers,
+/// [`agent_doc_element_queue::strip_attempt_projection_prefix`]) are removed
+/// from every line first. A canonical that changed only that projection is
+/// carried by any cut: the controller re-projects it from its own claim and
+/// boundary state (`ProjectionDrift` → `ProjectExpectedMarker`).
+fn cut_carries_every_canonical_operator_change(
+    base: &str,
+    canonical: &str,
+    captured: &str,
+) -> bool {
+    if canonical == base {
+        return false;
+    }
+    let base = operator_projection_text(base);
+    let canonical = operator_projection_text(canonical);
+    let captured = operator_projection_text(captured);
+    let base: Vec<char> = base.chars().collect();
+    let canonical: Vec<char> = canonical.chars().collect();
+    let captured: Vec<char> = captured.chars().collect();
+    canonical == base || cut_carries_every_canonical_change(&base, &canonical, &captured)
+}
+
+/// `text` without binary-owned markers and without the attempt projection
+/// prefix of each list row.
+fn operator_projection_text(text: &str) -> String {
+    let unmarked = without_binary_owned_markers(text);
+    let mut out = String::with_capacity(unmarked.len());
+    for line in unmarked.split_inclusive('\n') {
+        let indent = line.len() - line.trim_start().len();
+        let rest = &line[indent..];
+        match rest.strip_prefix("- ").or_else(|| rest.strip_prefix("* ")) {
+            Some(body) => {
+                out.push_str(&line[..indent + 2]);
+                out.push_str(agent_doc_element_queue::strip_attempt_projection_prefix(
+                    body,
+                ));
+            }
+            None => out.push_str(line),
+        }
+    }
+    out
+}
+
+/// Later typing continues at one cursor inside the region canonical already
+/// carries. A second run is as likely a coincidental alignment of unrelated
+/// text (`ok` inside `I looked into it`) as a continuation, so it refuses.
+const LAG_ROLL_FORWARD_MAX_INSERTED_RUNS: usize = 1;
 
 /// `#jetbrainscleanregistrati`: whether `merged`, a conflict-free three-way
 /// merge of `yours` and `agent` over `base` produced by some other planner
@@ -1780,6 +1937,195 @@ mod tests {
                 "case {case}"
             );
         }
+    }
+
+    /// Replay `answer` on `canonical` and check it reproduces its text.
+    fn replays_on(canonical: &str, answer: &CapturedSpliceBatch) -> String {
+        let mut replay: Vec<char> = canonical.chars().collect();
+        for edit in &answer.edits {
+            apply(&mut replay, edit).unwrap();
+        }
+        let replay: String = replay.iter().collect();
+        assert_eq!(
+            replay, answer.resulting_text,
+            "splices are canonical-relative"
+        );
+        replay
+    }
+
+    /// `#lagcanonicalrollforward` (live 2026-10-26 13:48-13:53, agent-doc-bugs.md).
+    /// The editor buffer failed the component-structure guard, so the live relay
+    /// quarantined every update and the settled shadow never advanced, while the
+    /// durable op path still ingested the operator's earlier keystrokes into
+    /// canonical. Each re-registration then met three distinct generations:
+    /// canonical held a prefix of the operator's text, the buffer held all of it.
+    /// The merge refused ("canonical already carries captured operator text"),
+    /// the containment proof failed (the later typing is not in canonical), and
+    /// the hold could never change its answer. The buffer already carries every
+    /// canonical change, so it is the lossless answer: editor text as the base,
+    /// nothing rolled back toward the stale shadow.
+    #[test]
+    fn a_canonical_that_lags_the_cut_by_operator_typing_rolls_the_cut_forward() {
+        // A rewritten line whose first keystrokes canonical ingested.
+        let shadow = "<!-- agent:queue -->\ninvestigate the stale replica wedge on bugs\n<!-- /agent:queue -->\n";
+        let canonical = shadow.replace(
+            "investigate the stale replica wedge on bugs",
+            "root-cause the",
+        );
+        let buffer = shadow.replace(
+            "investigate the stale replica wedge on bugs",
+            "root-cause the attach hold after the fence",
+        );
+        let answer = rebase(shadow, &canonical, &single(shadow, &buffer))
+            .expect("the cut carries every canonical change");
+        assert_eq!(
+            replays_on(&canonical, &answer),
+            buffer,
+            "editor text is the base"
+        );
+
+        // The structure fault: the operator removed the loop close marker and
+        // typed in its place; canonical ingested the typing, not the removal.
+        let shadow = "a\n<!-- agent:loop -->\nwatch row\n<!-- /agent:loop -->\n## Todo\nb\n";
+        let canonical = shadow.replacen(
+            "<!-- /agent:loop -->\n",
+            "- typed\n<!-- /agent:loop -->\n",
+            1,
+        );
+        let buffer = shadow.replacen("<!-- /agent:loop -->\n", "- typed more\n", 1);
+        let answer = rebase(shadow, &canonical, &single(shadow, &buffer))
+            .expect("the cut carries every canonical change");
+        assert_eq!(replays_on(&canonical, &answer), buffer);
+        assert_eq!(
+            answer.resulting_text.matches("- typed").count(),
+            1,
+            "never inserted twice"
+        );
+
+        // The registration path asks the same rebase.
+        let registration =
+            crate::captured_splice_request::registration_rebase(shadow, &buffer, &canonical)
+                .expect("registration merge-forward answers the cut");
+        assert_eq!(registration.resulting_text, buffer);
+
+        // A canonical change the cut lacks still refuses: a controller response
+        // beside the ingested typing is not in the buffer.
+        let with_response = canonical.replacen("## Todo\n", "## Todo\n### Re: response\n", 1);
+        let refused = rebase(shadow, &with_response, &single(shadow, &buffer));
+        assert!(
+            refused
+                .as_ref()
+                .map(|batch| batch.resulting_text.contains("### Re: response"))
+                .unwrap_or(true),
+            "a canonical change the cut lacks is never dropped: {refused:?}"
+        );
+    }
+
+    /// `#lagcanonicalrollforward`, the operator sequence behind the 2026-10-26
+    /// 14:56 docs.md hold: in one edit window the operator deleted a queue row
+    /// and pasted part of its prompt into an existing row. Claim edit-following
+    /// (`queue_claim_followed_edit previous_bytes=228 current_bytes=490`) then
+    /// claimed the grown row, and the claim projection put `🟡 [#subagent:x#1] `
+    /// on it in canonical while the operator kept typing on that same row
+    /// (delivery was deferred behind the typing). Canonical also ingested the
+    /// delete and the paste through the durable op path. Re-registration met the
+    /// stale settled shadow, a buffer with the later typing and no marker, and a
+    /// canonical with the marker and without the typing: the line merge overlaps
+    /// on the edited row and the containment proof fails. The marker is
+    /// binary-owned projection the controller re-projects from its claim; every
+    /// operator change in canonical is in the buffer, so the buffer is lossless.
+    #[test]
+    fn a_deleted_row_pasted_into_a_claimed_row_rolls_the_cut_forward() {
+        let shadow = concat!(
+            "<!-- agent:queue subagents -->\n",
+            "- [#docsnav] fix the docs navigation\n",
+            "- [#docsapi] document the CLI flags for PR 65\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let merged_row = "- [#docsnav] fix the docs navigation and document the CLI flags";
+        let pasted = shadow.replacen(
+            "- [#docsnav] fix the docs navigation\n- [#docsapi] document the CLI flags for PR 65\n",
+            &format!("{merged_row}\n"),
+            1,
+        );
+        let canonical = pasted.replacen("- [#docsnav]", "- 🟡 [#subagent:pr65cli#1] [#docsnav]", 1);
+        let buffer = pasted.replacen(merged_row, &format!("{merged_row} with examples"), 1);
+        let whole = single(shadow, &buffer);
+
+        let answer = rebase(shadow, &canonical, &whole)
+            .expect("the claim marker is projection, every operator change is in the cut");
+        assert_eq!(
+            replays_on(&canonical, &answer),
+            buffer,
+            "editor text is the base"
+        );
+        assert!(
+            !answer.resulting_text.contains("[#docsapi]"),
+            "the deleted row stays deleted"
+        );
+        assert_eq!(
+            answer
+                .resulting_text
+                .matches("document the CLI flags")
+                .count(),
+            1
+        );
+        let registration =
+            crate::captured_splice_request::registration_rebase(shadow, &buffer, &canonical)
+                .expect("registration merge-forward answers the cut");
+        assert_eq!(registration.resulting_text, buffer);
+
+        // Operator text in canonical the cut lacks is never dropped: another
+        // queue row the controller appended still refuses.
+        let appended = canonical.replacen(
+            "<!-- /agent:queue -->",
+            "- follow-up from the controller\n<!-- /agent:queue -->",
+            1,
+        );
+        let refused = rebase(shadow, &appended, &whole);
+        assert!(
+            refused
+                .as_ref()
+                .map(|batch| batch
+                    .resulting_text
+                    .contains("follow-up from the controller"))
+                .unwrap_or(true),
+            "{refused:?}"
+        );
+    }
+
+    /// The dual proof is exact: a canonical deletion counts as carried only
+    /// when the cut deleted the same base range.
+    #[test]
+    fn the_dual_proof_never_resurrects_text_canonical_deleted() {
+        let shadow = "alpha\nbeta\ngamma\n";
+        // Canonical deleted `beta`; the cut kept it and typed elsewhere.
+        let canonical = "alpha\ngamma\n";
+        let buffer = "alpha\nbeta\ngamma\ndelta\n";
+        let answer = rebase(shadow, canonical, &single(shadow, buffer));
+        assert!(
+            answer
+                .as_ref()
+                .map(|batch| batch.resulting_text != buffer)
+                .unwrap_or(true),
+            "the cut never wins over a canonical deletion it does not carry: {answer:?}"
+        );
+        // An unrelated rewrite of one line by both sides is not a continuation.
+        let shadow = "q\nold line\nz\n";
+        let canonical = "q\nok\nz\n";
+        let buffer = "q\nI looked into it\nz\n";
+        let answer = rebase(shadow, canonical, &single(shadow, buffer));
+        assert!(
+            answer
+                .as_ref()
+                .map(|batch| batch.resulting_text != buffer)
+                .unwrap_or(true),
+            "{answer:?}"
+        );
+    }
+
+    fn single(before: &str, after: &str) -> CapturedSpliceBatch {
+        crate::captured_splice_request::single_splice(before, after)
     }
 
     /// `#captureddeltalivelock` (live 2026-10-15, agent-doc-bugs.md). The plugin

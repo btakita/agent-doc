@@ -1275,25 +1275,29 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         let first = queues.next()?;
         queues.next().is_none().then_some(first)
     };
-    let Some(queue_component) = selected.or_else(only_queue) else {
+    if !components.iter().any(|component| component.name == "queue") {
         return Ok(current.to_string());
-    };
-    let body = queue_component.content(current);
-    let entries = agent_doc_queue::document_queue::parse(body)?;
-    let live_heads = entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                Some(prompt.text.clone())
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    }
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    ledger.follow_edits(now_secs, &live_heads);
+    // Claim edit-following stays anchored to the scheduler-selected queue (the
+    // queue claims are dispatched from); marker projection below then reaches
+    // every queue that displays the identity.
+    if let Some(queue_component) = selected.or_else(only_queue) {
+        let entries = agent_doc_queue::document_queue::parse(queue_component.content(current))?;
+        let live_heads = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                    Some(prompt.text.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        ledger.follow_edits(now_secs, &live_heads);
+    }
     let cancellations = ledger.cancellations;
     let claim_states = ledger
         .claims
@@ -1327,76 +1331,86 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             })
             .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
             .collect::<std::collections::HashSet<_>>();
-    let targets = entries
-        .iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-                let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
-                let claim = claim_states.get(&identity);
-                let receipt = receipts.get(&identity);
-                let durable_on_struck = matches!(
-                    entry,
-                    agent_doc_queue::document_queue::QueueEntry::Completed(_)
-                ) && (claim.is_some()
-                    || receipt.is_some()
-                    || completion_evidence.contains(&identity));
-                if matches!(
-                    entry,
-                    agent_doc_queue::document_queue::QueueEntry::Completed(_)
-                ) && !durable_on_struck
-                {
-                    return None;
-                }
-                let marker = if state_degraded || durable_on_struck {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
-                } else if let Some(claim) = claim {
-                    claim.state.projection_marker()
-                } else if receipt.is_some() {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                } else if completion_evidence.contains(&identity) {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                } else if matches!(
-                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
-                    Some(
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
-                            | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
-                    )
-                ) {
-                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
-                        .expect("matched Some lifecycle marker")
-                } else {
-                    agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                };
-                let owner = claim
-                    .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                        owner: claim.owner.clone(),
-                        generation: claim.generation,
-                    })
-                    .or_else(|| {
-                        receipt.map(|receipt| {
-                            agent_doc_document::queue_projection::QueueOwnerProjection {
-                                owner: receipt.owner.clone(),
-                                generation: receipt.generation,
-                            }
+    // `#queuemirrormarkers`: claims are keyed by work identity, so every queue
+    // that displays an identity receives its durable attempt state. Only the
+    // scheduler-selected queue may reopen a struck row; a sibling's struck row
+    // is its own terminal (or `agent:loop` pass-owned) evidence.
+    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+        block
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+                    let struck = matches!(
+                        entry,
+                        agent_doc_queue::document_queue::QueueEntry::Completed(_)
+                    );
+                    if struck && !block.scheduler_selected {
+                        return None;
+                    }
+                    let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                    let claim = claim_states.get(&identity);
+                    let receipt = receipts.get(&identity);
+                    let durable_on_struck = struck
+                        && (claim.is_some()
+                            || receipt.is_some()
+                            || completion_evidence.contains(&identity));
+                    if struck && !durable_on_struck {
+                        return None;
+                    }
+                    let marker = if state_degraded || durable_on_struck {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
+                    } else if let Some(claim) = claim {
+                        claim.state.projection_marker()
+                    } else if receipt.is_some() {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    } else if completion_evidence.contains(&identity) {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+                    } else if matches!(
+                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                        Some(
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Skipped
+                                | agent_doc_document::queue_projection::QueueLifecycleMarker::AwaitingOperator
+                        )
+                    ) {
+                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                            .expect("matched Some lifecycle marker")
+                    } else {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    };
+                    let owner = claim
+                        .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: claim.owner.clone(),
+                            generation: claim.generation,
                         })
-                    });
-                Some(agent_doc_queue::document_queue::QueueRowProjection {
-                    text: prompt.text.clone(),
-                    marker,
-                    owner,
-                    reopen_completed: durable_on_struck,
-                })
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let Some((projected_body, _)) =
-        agent_doc_queue::document_queue::project_prompt_runtime_projections(body, &targets)?
-    else {
-        return Ok(current.to_string());
+                        .or_else(|| {
+                            receipt.map(|receipt| {
+                                agent_doc_document::queue_projection::QueueOwnerProjection {
+                                    owner: receipt.owner.clone(),
+                                    generation: receipt.generation,
+                                }
+                            })
+                        });
+                    Some(agent_doc_queue::document_queue::QueueRowProjection {
+                        text: prompt.text.clone(),
+                        marker,
+                        owner,
+                        reopen_completed: durable_on_struck,
+                    })
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
     };
-    Ok(queue_component.replace_content(current, &projected_body))
+    Ok(
+        agent_doc_queue::queue_mirror_projection::project_runtime_projections_across_queues(
+            current,
+            None,
+            targets_for,
+        )?
+        .unwrap_or_else(|| current.to_string()),
+    )
 }
 
 /// Apply [`durable_queue_attempt_projection`] to one materialized relay cut.

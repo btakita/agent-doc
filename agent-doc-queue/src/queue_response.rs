@@ -24,8 +24,15 @@ fn direct_response_text(text: &str) -> Cow<'_, str> {
 }
 
 pub fn queue_prompt_done_id(text: &str) -> Option<String> {
-    let marker = text.find('#')?;
-    let tail = &text[marker + 1..];
+    // `#claimrowtombstone`: lifecycle markers and the binary-owned
+    // `[#owner#generation]` attempt annotation are projection metadata, never
+    // the row's id. Reading the first `#` of the raw row named a claimed
+    // `☑️ [#subagent:x#1] do [#x]` row `subagent`, so the operator-delete
+    // tombstone ledger recorded `x` as deleted the moment its claim projected,
+    // and lifecycle convergence then dropped the live claimed row.
+    let visible = strip_priority_markers(text);
+    let marker = visible.find('#')?;
+    let tail = &visible[marker + 1..];
     let id = tail
         .chars()
         .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
@@ -1348,6 +1355,31 @@ mod tests {
             Some("jbrsrbusyint".to_string())
         );
         assert_eq!(queue_prompt_done_id("plain prompt"), None);
+    }
+
+    /// `#claimrowtombstone`: the binary's own attempt annotation is never the
+    /// row's id. Observed 2026-10-26: `☑️ [#subagent:claimrowmigrate#1] do
+    /// [#claimrowmigrate]` read as `subagent`, which tombstoned
+    /// `claimrowmigrate` as operator-deleted and let convergence drop the row.
+    #[test]
+    fn queue_prompt_done_id_ignores_lifecycle_and_owner_projection() {
+        for row in [
+            "☑️ [#subagent:claimrowmigrate#1] do [#claimrowmigrate]",
+            "🚧 [#subagent:claimrowmigrate#12] do [#claimrowmigrate]",
+            "🟡 ⟦subagent:claimrowmigrate#1⟧ do [#claimrowmigrate]",
+            "📥 do [#claimrowmigrate]",
+        ] {
+            assert_eq!(
+                queue_prompt_done_id(row),
+                Some("claimrowmigrate".to_string()),
+                "{row}"
+            );
+        }
+        assert_eq!(
+            queue_prompt_done_id("☑️ [#subagent:release_publish_patch#3] release + publish"),
+            None,
+            "a free-text row carries no id once its attempt annotation is ignored"
+        );
     }
 
     #[test]

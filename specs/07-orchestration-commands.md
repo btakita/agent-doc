@@ -528,6 +528,24 @@ Semantics:
   repeated `--backlog-add` batch; generated ids are never scheduling tie-breakers.
   It never sweeps all open backlog ids at closeout, because doing so would
   resurrect unrelated operator-deleted queue entries.
+- **Operator-delete tombstones read row ids through the projection
+  (`#claimrowtombstone`).** The mirror's operator-delete tombstone ledger
+  records an id that was an active head in the committed snapshot (or the last
+  observed frontier) and is now absent from the live queue, and lifecycle
+  convergence gives a tombstoned `do [#id]` a lawful multiplicity of zero
+  (`#qdelauth`). Both sides must read a row's id the same way: lifecycle
+  markers and the binary-owned `[#owner#generation]` attempt annotation are
+  projection metadata, never the row's id
+  (`queue_response::queue_prompt_done_id` strips them before reading the first
+  `#`). Observed 2026-10-26 on `tasks/agent-doc/agent-doc-bugs.md`: the snapshot
+  held `📥 do [#claimrowmigrate]`, the claim projected
+  `☑️ [#subagent:claimrowmigrate#1] do [#claimrowmigrate]`, reconciliation read
+  that row's id as `subagent`, tombstoned `claimrowmigrate` as deleted, and the
+  13:09:26Z queue-maintenance write removed the reported row with no closeout
+  (the claim record stayed in the ledger, unprojected). Regressions:
+  `queue_response::tests::queue_prompt_done_id_ignores_lifecycle_and_owner_projection`
+  and `tests::run_queue_maintenance_keeps_a_claimed_mirror_row_whose_snapshot_was_bare`
+  (`agent-doc-preflight-io`).
 - `agent:backlog` and the legacy `pending` alias may carry the attribute; the
   first queue-tagged component's mode wins and active ids from every queue-tagged
   source are taken in document order. `agent:icebox queue` warns and does not
@@ -663,6 +681,41 @@ became `📥 … ⟦effect:2⟧`. Regressions:
 `an_effect_annotation_follows_the_row_carrying_the_claims_own_projection`,
 `a_legacy_multi_slot_claim_migrates_onto_its_projected_row_only`, and
 `queue_cmd::tests::reported_claim_keeps_its_row_through_a_duplicate_effect_annotation`.
+
+**Every queue that displays a claimed identity shows its attempt
+(`#queuemirrormarkers`).** A claim, report receipt, and completion cell are
+keyed by work identity, never by queue id, and a claimed identity is already
+held out of every queue's drain. Its visible lifecycle marker and
+`[#owner#generation]` annotation are a projection of that same state, so the
+projection covers every queue component, not only the scheduler-selected one:
+the claim command path (`queue_cmd::derive_claim_runtime_projection`, run after
+every claim, start, report, and release, and by completion feedback) and the
+relay's durable-attempt overlay project all queues; preflight maintenance
+projects its selected queue with pass-local evidence and then repaints the
+sibling queues' live rows from the same ledgers
+(`ClaimProjectionScope::SiblingsOf`, carrying the pass's selected heads so a
+sibling copy of a selected head shows the same `🚧`). The traversal is
+`queue_mirror_projection::project_runtime_projections_across_queues`. A
+sibling row with no claim, receipt, or completion cell for its identity
+projects `📥` (`#queueworkevidence`), so a sibling copy can never keep an
+expired generation, a released report annotation, or a `🚧` left behind by an
+earlier pass that selected its queue. Struck rows are reopened on durable live
+evidence only in the scheduler-selected queue: a sibling's struck row is that
+queue's own terminal or `agent:loop` pass-owned evidence, so another queue's
+claim never resurrects it, and no strike is propagated into a sibling (loop
+rows close only through their own pass, GH #361/#364). Claim edit-following
+(`follow_edits`) stays anchored to the selected queue. Observed 2026-10-26 on
+`tasks/agent-doc/agent-doc-bugs.md`: preflight selects the first queue that is
+not entirely claimed, so passes that selected `issues` painted
+`🚧 [#subagent:layout_liveverify#1]`, `☑️ [#subagent:release_publish_patch#3]`,
+and a selection `🚧` on its rows; once `main` was selected again those rows
+froze while `main` moved to generation 2 and closed claim #3. Regressions:
+`queue_mirror_projection::tests::every_queue_displaying_an_identity_receives_its_authoritative_attempt`,
+`queue_cmd::tests::claim_projection_reaches_every_queue_displaying_the_identity`,
+`queue_cmd::tests::claim_release_clears_every_queue_and_never_reopens_a_sibling_struck_row`,
+`queue_cmd::tests::sibling_scope_leaves_the_projected_queue_untouched`, and
+`tests::run_queue_maintenance_projects_claim_state_onto_sibling_queue_rows`
+(`agent-doc-preflight-io`).
 
 Evidence inputs are one immutable current queue cut plus the committed snapshot
 used by lifecycle convergence. No timestamp, claim-ledger ordering, release

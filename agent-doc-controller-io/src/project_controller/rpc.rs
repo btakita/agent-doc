@@ -34338,11 +34338,21 @@ fn rejected_focus_should_resume_latest(
     reject_reason: FocusPaneRejectReason,
     session_id: Option<&str>,
 ) -> bool {
+    // A durable actor row whose pane no longer proves ownership is unusable in
+    // exactly the same way as a closed actor or a missing row. ObserveOnly
+    // still refuses it (and therefore can never focus the wrong pane), while
+    // the explicit recovery/layout policies may provision a fresh owner for
+    // the known session. Omitting ActorOwnershipUnproven here leaves a dead
+    // cross-root actor binding permanently wedged: the parent layout asks the
+    // owning controller to provision, but the owning controller returns the
+    // stale binding as a terminal focus rejection before reaching auto-start.
     missing_pane_policy.provisions_missing()
         && session_id.is_some()
         && matches!(
             reject_reason,
-            FocusPaneRejectReason::ActorNotFocusable | FocusPaneRejectReason::MissingActorRecord
+            FocusPaneRejectReason::ActorNotFocusable
+                | FocusPaneRejectReason::ActorOwnershipUnproven
+                | FocusPaneRejectReason::MissingActorRecord
         )
 }
 
@@ -52577,6 +52587,11 @@ mod tests {
         ));
         assert!(rejected_focus_should_resume_latest(
             MissingFocusPanePolicy::ResumeLatest,
+            FocusPaneRejectReason::ActorOwnershipUnproven,
+            Some("session"),
+        ));
+        assert!(rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ResumeLatest,
             FocusPaneRejectReason::MissingActorRecord,
             Some("session"),
         ));
@@ -52588,6 +52603,25 @@ mod tests {
         assert!(!rejected_focus_should_resume_latest(
             MissingFocusPanePolicy::ResumeLatest,
             FocusPaneRejectReason::ActorNotFocusable,
+            None,
+        ));
+    }
+
+    #[test]
+    fn layout_policy_reprovisions_unproven_actor_without_weakening_observe_only() {
+        assert!(rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ProvisionForLayout,
+            FocusPaneRejectReason::ActorOwnershipUnproven,
+            Some("session"),
+        ));
+        assert!(!rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ObserveOnly,
+            FocusPaneRejectReason::ActorOwnershipUnproven,
+            Some("session"),
+        ));
+        assert!(!rejected_focus_should_resume_latest(
+            MissingFocusPanePolicy::ProvisionForLayout,
+            FocusPaneRejectReason::ActorOwnershipUnproven,
             None,
         ));
     }

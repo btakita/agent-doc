@@ -1327,14 +1327,14 @@ fn resolve_pane_document_cli_prints_the_claim_and_fails_closed_otherwise() {
     agent_doc()
         .current_dir(tmp.path())
         .env("TMUX_PANE", "%42")
-        .arg("resolve-pane-document")
+        .arg("document")
         .assert()
         .success()
         .stdout("session.md\n");
     agent_doc()
         .current_dir(tmp.path())
         .env_remove("TMUX_PANE")
-        .args(["resolve-pane-document", "--pane", "%42", "--json"])
+        .args(["document", "--pane", "%42", "--json"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"document\":\"session.md\""));
@@ -1342,13 +1342,13 @@ fn resolve_pane_document_cli_prints_the_claim_and_fails_closed_otherwise() {
     agent_doc()
         .current_dir(tmp.path())
         .env_remove("TMUX_PANE")
-        .arg("resolve-pane-document")
+        .arg("document")
         .assert()
         .failure()
         .stderr(predicate::str::contains("`$TMUX_PANE` is unset"));
     agent_doc()
         .current_dir(tmp.path())
-        .args(["resolve-pane-document", "--pane", "%99", "--json"])
+        .args(["document", "--pane", "%99", "--json"])
         .assert()
         .failure()
         .stdout(predicate::str::contains("\"kind\":\"unclaimed\""));
@@ -1373,7 +1373,7 @@ fn resolve_pane_document_cli_prints_the_claim_and_fails_closed_otherwise() {
     agent_doc_session_registry_io::save_in(tmp.path(), &registry).unwrap();
     agent_doc()
         .current_dir(tmp.path())
-        .args(["resolve-pane-document", "--pane", "%42"])
+        .args(["document", "--pane", "%42"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("refusing to guess"));

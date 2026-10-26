@@ -17,7 +17,7 @@ Use the harness-native entrypoint:
 - Codex: `agent-doc <FILE>` as a normal message (never a project slash command)
 - OpenCode: `/agent-doc <FILE>`
 
-With no FILE, the cycle runs on the document this tmux pane claims: Claude Code and Codex hooks resolve it and name it in the admitted context; connected admission (`agent_doc_admit` without `file`) returns it as `file`; other harnesses run `agent-doc resolve-pane-document` and use the printed path. A refusal is reported, never guessed.
+With no FILE, the cycle runs on the document this tmux pane claims: Claude Code and Codex hooks resolve it and name it in the admitted context; connected admission (`agent_doc_admit` without `file`) returns it as `file`; other harnesses run `agent-doc document` and use the printed path. A refusal is reported, never guessed.
 
 Subcommands are `claim <FILE>`, `compact <FILE>`, and `compact exchange <FILE>`.
 

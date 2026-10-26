@@ -99,7 +99,7 @@ mod read;
 mod reliable_sync_status_cmd;
 mod rename;
 mod reset;
-mod resolve_pane_document_cmd;
+mod document_cmd;
 mod runbook;
 mod runtime_update;
 mod self_install;
@@ -2771,7 +2771,7 @@ enum Commands {
     /// the FILE that the no-argument `/agent-doc` /
     /// `agent-doc` entrypoint runs on. Fails closed (exit 1) outside tmux,
     /// for an unclaimed pane, or when the pane claims several documents.
-    ResolvePaneDocument {
+    Document {
         /// Pane to resolve instead of `$TMUX_PANE` (for example `%7`)
         #[arg(long)]
         pane: Option<String>,
@@ -6100,8 +6100,8 @@ fn try_main() -> anyhow::Result<()> {
             steering_cmd::run(&file, json, peek, follow)
         }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
-        Commands::ResolvePaneDocument { pane, json } => {
-            resolve_pane_document_cmd::run(pane.as_deref(), json)
+        Commands::Document { pane, json } => {
+            document_cmd::run(pane.as_deref(), json)
         }
         Commands::AutoDag { file, json } => auto_dag::run_command(&file, json),
         Commands::Board {

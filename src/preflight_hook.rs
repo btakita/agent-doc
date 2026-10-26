@@ -314,7 +314,7 @@ enum PaneTriggerExpansion {
 /// the sealed contract, and a later same-turn repeat all name the resolved
 /// document through one canonical prompt. The decision is the shared
 /// [`agent_doc_session_registry_io::pane_document::resolve_pane_document`],
-/// the same one `agent-doc resolve-pane-document` prints.
+/// the same one `agent-doc document` prints.
 fn expand_pane_document_trigger(
     input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
     pane: Option<&str>,

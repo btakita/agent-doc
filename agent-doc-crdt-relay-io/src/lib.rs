@@ -13925,4 +13925,8 @@ mod tests {
             "an exact native-save receipt is delivery proof and recovers the episode"
         );
     }
+
+    /// Relay-hub SimWorld coverage for editor attach (`#resumefrontierlostonfailedattach`,
+    /// `#lagcanonicalrollforward`).
+    mod editor_attach_simworld;
 }

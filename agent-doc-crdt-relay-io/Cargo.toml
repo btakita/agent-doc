@@ -47,5 +47,8 @@ similar = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# The editor-attach SimWorld (`src/tests/editor_attach_simworld.rs`) asks the
+# native `registration_projection` derivation the JetBrains plugin asks.
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.555" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"

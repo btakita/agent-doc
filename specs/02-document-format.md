@@ -93,6 +93,25 @@ overlay map the raw name through `overlay::projected_component_name` first
 (`run` and `loop` project to `queue`), so an `agent:run` component merges by
 node identity exactly like `agent:queue` instead of being dropped.
 
+The document-cell merge pairs each component across base, agent, and operator
+by **component identity**, never by name alone: the projected name, the
+effective `id=`, and the occurrence among that side's components with the same
+name and effective id. The effective id is the explicit `id=` value (a bare
+`id`, an empty value, or `true` is no id); a lone unkeyed queue has the
+legacy queue identity `default`, so `<!-- agent:run -->` and
+`<!-- agent:run id=default -->` are one component; any other unkeyed
+component has no id and pairs by document-order occurrence among the unkeyed
+components of its name. Pairing is exact: a component is never merged against
+a same-name component with a different id, and one with no counterpart is
+classified on its own side (operator-only components keep their operator
+items; agent-only components are carried over). Each operator opener resolves
+to the overlay component that starts on that line, so in a document with
+`agent:run id="main"` and `agent:loop id=issues` each queue's items merge
+against their own queue's items, including when the operator reorders the
+queues, and an item id shared by both queues stays two independent nodes.
+Before, the merge took the first component of the projected name on every
+side, so the second queue was merged against the first one's items.
+
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue
 semantics, attributes, node identity, and mutation behavior. Agent Doc accepts

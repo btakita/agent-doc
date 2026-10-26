@@ -10,7 +10,8 @@
 //! The classic line-based merge sees two concurrent edits to *different* items as
 //! a text conflict and fail-closes (dropping the agent's work). This function
 //! instead keys every change on a stable [`agent_doc_markdown_ast::overlay::Item::id`] within its
-//! component (component identity = `name`) so node-disjoint change-sets — the
+//! component (component identity = projected name + effective `id=` +
+//! occurrence, see `ComponentIdentity`) so node-disjoint change-sets — the
 //! common case — merge cleanly, and only true same-node conflicts surface, each
 //! with a deterministic outcome.
 //!
@@ -201,6 +202,7 @@ pub fn document_cell_merge(
 
     let merged_body = merge_components_into_body(
         theirs_body,
+        theirs_operator.len() - theirs_body.len(),
         &theirs_comps,
         &base_comps,
         &ours_comps,
@@ -668,15 +670,104 @@ fn find_item<'a>(comp: Option<&'a Component>, id: &str) -> Option<&'a Item> {
     comp?.items.iter().find(|i| i.id == id)
 }
 
-/// Look up a component by its raw source tag name or its overlay name.
+/// The queue id a lone unkeyed runnable component carries: the legacy
+/// singleton identity (`agent_doc_queue::queue_graph::DEFAULT_QUEUE_ID`, which
+/// this crate cannot depend on). Queue maintenance rewrites
+/// `<!-- agent:run -->` to `<!-- agent:run id=default -->` when a second queue
+/// is created, so the two spellings name one component.
+const DEFAULT_QUEUE_ID: &str = "default";
+
+/// The identity a component is paired by across `base`, `ours`, and `theirs`.
 ///
-/// The body scan matches raw open/close tags (`agent:run`), while the overlay
-/// projects the runnable spellings to `queue`. Comparing the raw name directly
-/// never found an `agent:run` component, so its whole body was dropped from the
-/// merged document (GH #374).
-fn find_comp<'a>(comps: &'a [Component], name: &str) -> Option<&'a Component> {
-    let name = agent_doc_markdown_ast::overlay::projected_component_name(name);
-    comps.iter().find(|c| c.name == name)
+/// A component is the same component on two sides when its projected overlay
+/// name (`run`/`loop` -> `queue`, GH #374), its effective `id=`, and its
+/// occurrence among that side's components with the same name and id all
+/// agree. Pairing by name alone matched the FIRST component of a name, so in a
+/// document with `agent:run id="main"` and `agent:loop id=issues` the second
+/// queue was merged against the first queue's items.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ComponentIdentity {
+    name: String,
+    /// Explicit `id=`; `default` for a lone unkeyed queue; `None` otherwise.
+    id: Option<String>,
+    /// Zero-based index among this side's components sharing `name` and `id`:
+    /// document order for unkeyed components, and a deterministic tiebreak for
+    /// a (malformed) duplicate explicit id.
+    occurrence: usize,
+}
+
+/// A component's explicit `id=` attribute. A bare `id` flag, an empty value, or
+/// the literal `true` is not an id (the queue graph rejects those as malformed).
+fn explicit_component_id(component: &Component) -> Option<String> {
+    let attrs = agent_doc_element::element::parse_attrs(&component.attrs);
+    let id = attrs.get("id")?.trim();
+    (!id.is_empty() && id != "true").then(|| id.to_string())
+}
+
+/// Every component's [`ComponentIdentity`], index-aligned with `comps`.
+fn component_identities(comps: &[Component]) -> Vec<ComponentIdentity> {
+    let queue_count = comps.iter().filter(|c| c.name == "queue").count();
+    let mut seen: std::collections::HashMap<(String, Option<String>), usize> =
+        std::collections::HashMap::new();
+    comps
+        .iter()
+        .map(|c| {
+            let id = explicit_component_id(c).or_else(|| {
+                (c.name == "queue" && queue_count == 1).then(|| DEFAULT_QUEUE_ID.to_string())
+            });
+            let slot = seen.entry((c.name.clone(), id.clone())).or_insert(0);
+            let occurrence = *slot;
+            *slot += 1;
+            ComponentIdentity {
+                name: c.name.clone(),
+                id,
+                occurrence,
+            }
+        })
+        .collect()
+}
+
+/// Which `base` and `ours` component each `theirs` component pairs with, and
+/// which `ours` components have no `theirs` counterpart (agent-only).
+///
+/// Pairing is exact on [`ComponentIdentity`]: it never falls back to a
+/// same-name component with a different id, so an unpaired component is
+/// classified on its own (operator-only or agent-only) rather than merged
+/// against a guessed counterpart.
+struct ComponentPairing {
+    /// Per `theirs` index: `(base index, ours index)`.
+    theirs: Vec<(Option<usize>, Option<usize>)>,
+    /// Per `ours` index: the paired `base` index.
+    ours_base: Vec<Option<usize>>,
+    /// Per `ours` index: whether a `theirs` component pairs with it.
+    ours_paired: Vec<bool>,
+}
+
+impl ComponentPairing {
+    fn new(base: &[Component], ours: &[Component], theirs: &[Component]) -> Self {
+        let base_ids = component_identities(base);
+        let ours_ids = component_identities(ours);
+        let theirs_ids = component_identities(theirs);
+        let index = |ids: &[ComponentIdentity], key: &ComponentIdentity| {
+            ids.iter().position(|candidate| candidate == key)
+        };
+        let theirs_pairs: Vec<(Option<usize>, Option<usize>)> = theirs_ids
+            .iter()
+            .map(|key| (index(&base_ids, key), index(&ours_ids, key)))
+            .collect();
+        let mut ours_paired = vec![false; ours.len()];
+        for (_, ours_idx) in &theirs_pairs {
+            if let Some(i) = ours_idx {
+                ours_paired[*i] = true;
+            }
+        }
+        let ours_base = ours_ids.iter().map(|key| index(&base_ids, key)).collect();
+        ComponentPairing {
+            theirs: theirs_pairs,
+            ours_base,
+            ours_paired,
+        }
+    }
 }
 
 /// The raw bullet line for an item, reconstructed from `Item.raw`. We re-emit a
@@ -1274,9 +1365,15 @@ fn merge_nonexchange_inner(inner: &[String], merged_items: &[String]) -> String 
 /// Line-scanning: the operator body is the layout skeleton. Non-component lines
 /// pass through verbatim. When an open marker is seen, all lines up to the close
 /// marker are dropped and replaced by the merged item lines for that component.
+///
+/// Each opener is resolved to the overlay component that starts on that line
+/// (`theirs_body_offset` is where `theirs_body` begins in the operator source),
+/// and that component is merged against its [`ComponentPairing`] counterparts,
+/// never against the first same-name component on the other sides.
 #[allow(clippy::too_many_arguments)]
 fn merge_components_into_body(
     theirs_body: &str,
+    theirs_body_offset: usize,
     theirs_comps: &[Component],
     base_comps: &[Component],
     ours_comps: &[Component],
@@ -1284,8 +1381,18 @@ fn merge_components_into_body(
     outcomes: &mut Vec<NodeOutcome>,
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> String {
+    let pairing = ComponentPairing::new(base_comps, ours_comps, theirs_comps);
+    let sides = MergeSides {
+        pairing: &pairing,
+        theirs_comps,
+        base_comps,
+        ours_comps,
+        ours_source,
+    };
     let mut out = String::new();
-    let mut open: Option<String> = None; // currently-open component name
+    // The currently-open component: its raw tag name (matched against the close
+    // marker) and the index of the overlay component that opens on that line.
+    let mut open: Option<(String, Option<usize>)> = None;
     // The inner lines of the currently-open component are buffered verbatim so the
     // reconstruction can preserve operator content the item model cannot represent:
     // `### Re:` heading-prose turns in `exchange`, and free-text / fenced / separator
@@ -1293,45 +1400,22 @@ fn merge_components_into_body(
     // At the close marker the buffer is rewritten — by [`merge_exchange_inner`] for
     // `exchange`, or [`merge_nonexchange_inner`] elsewhere.
     let mut component_inner: Vec<String> = Vec::new();
+    let mut offset = theirs_body_offset;
 
     for line in theirs_body.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
         let content = line.trim_end_matches('\n');
         let trimmed = content.trim();
 
-        if let Some(name) = open.as_ref() {
+        if let Some((name, theirs_idx)) = open.as_ref() {
             // Inside a component: look for its close marker.
             if let Some(close) = close_marker_name(trimmed)
                 && &close == name
             {
-                let theirs_comp = find_comp(theirs_comps, name);
-                let base_comp = find_comp(base_comps, name);
-                let ours_comp = find_comp(ours_comps, name);
-                if name == EXCHANGE_COMPONENT {
-                    // Exchange: preserve theirs' inner lines verbatim, then append
-                    // any `### Re:` heading-blocks that exist only in the agent body.
-                    let merged_inner = merge_exchange_inner(
-                        &component_inner,
-                        base_comp,
-                        ours_comp,
-                        theirs_comp,
-                        ours_source,
-                        outcomes,
-                        advisories,
-                    );
-                    out.push_str(&merged_inner);
-                } else if let Some(tc) = theirs_comp {
-                    // `#qdup-freetext`: rebuild the component preserving operator
-                    // non-bullet inner content (free-text heads, fenced blocks,
-                    // separators) verbatim while replacing the bullet-item region
-                    // with the merged item set. Dropping that content used to make
-                    // the merge silently lose a free-text queue head, trip the
-                    // anti-data-loss gate, and decline forever (the persistent
-                    // `live_prompt_drift` churn).
-                    let merged = merge_component_items(
-                        &tc.name, base_comp, ours_comp, tc, outcomes, advisories,
-                    );
-                    out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
-                }
+                let merged =
+                    sides.merge_component(*theirs_idx, &component_inner, outcomes, advisories);
+                out.push_str(&merged);
                 component_inner.clear();
                 out.push_str(line); // close marker line, verbatim
                 open = None;
@@ -1345,7 +1429,8 @@ fn merge_components_into_body(
         // Not inside a component.
         if let Some(name) = open_marker_name(content.trim_end_matches('\r')) {
             out.push_str(line); // open marker line, verbatim
-            open = Some(name);
+            let theirs_idx = theirs_comps.iter().position(|c| c.start_byte == line_start);
+            open = Some((name, theirs_idx));
             continue;
         }
         // Plain prose line — pass through.
@@ -1353,42 +1438,22 @@ fn merge_components_into_body(
     }
 
     // An unterminated operator component (no recognized close) — flush its items.
-    if let Some(name) = open.take() {
-        let base_comp = find_comp(base_comps, &name);
-        let ours_comp = find_comp(ours_comps, &name);
-        if name == EXCHANGE_COMPONENT {
-            let theirs_comp = find_comp(theirs_comps, &name);
-            let merged_inner = merge_exchange_inner(
-                &component_inner,
-                base_comp,
-                ours_comp,
-                theirs_comp,
-                ours_source,
-                outcomes,
-                advisories,
-            );
-            if !out.ends_with('\n') && !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&merged_inner);
-        } else if let Some(tc) = find_comp(theirs_comps, &name) {
-            let merged =
-                merge_component_items(&tc.name, base_comp, ours_comp, tc, outcomes, advisories);
-            if !out.ends_with('\n') && !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
+    if let Some((_, theirs_idx)) = open.take() {
+        let merged = sides.merge_component(theirs_idx, &component_inner, outcomes, advisories);
+        if !out.ends_with('\n') && !out.is_empty() {
+            out.push('\n');
         }
+        out.push_str(&merged);
     }
 
-    // Append agent-only components (present in agent, absent in operator).
-    for oc in ours_comps {
-        if find_comp(theirs_comps, &oc.name).is_some() {
+    // Append agent-only components (no operator counterpart by identity).
+    for (ours_idx, oc) in ours_comps.iter().enumerate() {
+        if pairing.ours_paired[ours_idx] {
             continue;
         }
         // Every item in an agent-only component is an agent add (or revival of a
         // base node the operator dropped along with the component). Classify per id.
-        let base_comp = find_comp(base_comps, &oc.name);
+        let base_comp = pairing.ours_base[ours_idx].map(|i| &base_comps[i]);
         let mut lines = Vec::new();
         for item in &oc.items {
             let kind = if find_item(base_comp, &item.id).is_some() {
@@ -1416,6 +1481,68 @@ fn merge_components_into_body(
     }
 
     out
+}
+
+/// The three parsed sides of a body merge plus their component pairing.
+struct MergeSides<'a> {
+    pairing: &'a ComponentPairing,
+    theirs_comps: &'a [Component],
+    base_comps: &'a [Component],
+    ours_comps: &'a [Component],
+    ours_source: &'a str,
+}
+
+impl MergeSides<'_> {
+    /// Merge the inner body of the operator component at `theirs_idx` against
+    /// its paired base and agent components.
+    ///
+    /// `None` means the overlay recognizes no component at that opener (the
+    /// body scan is a plain line scan; the overlay also skips markers inside
+    /// code), so there is nothing to pair: the operator's inner lines are kept
+    /// verbatim rather than merged against a same-name component elsewhere.
+    fn merge_component(
+        &self,
+        theirs_idx: Option<usize>,
+        inner: &[String],
+        outcomes: &mut Vec<NodeOutcome>,
+        advisories: &mut Vec<MergeConflictAdvisory>,
+    ) -> String {
+        let Some(theirs_idx) = theirs_idx else {
+            return inner.concat();
+        };
+        let tc = &self.theirs_comps[theirs_idx];
+        let (base_idx, ours_idx) = self.pairing.theirs[theirs_idx];
+        let base_comp = base_idx.map(|i| &self.base_comps[i]);
+        let ours_comp = ours_idx.map(|i| &self.ours_comps[i]);
+        if tc.name == EXCHANGE_COMPONENT {
+            // Exchange: preserve theirs' inner lines verbatim, then append any
+            // `### Re:` heading-blocks that exist only in the agent body.
+            // The heading-turn scan reads the agent source from the PAIRED
+            // agent exchange's opener, never the first exchange by name; with
+            // no paired agent exchange there are no agent turns to append.
+            let ours_exchange_source = ours_comp.map_or("", |c| &self.ours_source[c.start_byte..]);
+            merge_exchange_inner(
+                inner,
+                base_comp,
+                ours_comp,
+                Some(tc),
+                ours_exchange_source,
+                outcomes,
+                advisories,
+            )
+        } else {
+            // `#qdup-freetext`: rebuild the component preserving operator
+            // non-bullet inner content (free-text heads, fenced blocks,
+            // separators) verbatim while replacing the bullet-item region with
+            // the merged item set. Dropping that content used to make the merge
+            // silently lose a free-text queue head, trip the anti-data-loss
+            // gate, and decline forever (the persistent `live_prompt_drift`
+            // churn).
+            let merged =
+                merge_component_items(&tc.name, base_comp, ours_comp, tc, outcomes, advisories);
+            merge_nonexchange_inner(inner, &merged)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1490,6 +1617,184 @@ mod tests {
                 m.outcomes
             );
         }
+    }
+
+    /// The two runnable components of the live `agent-doc-bugs.md` shape.
+    fn two_queue_doc(main: &str, issues: &str) -> String {
+        format!(
+            "# T\n\n<!-- agent:run id=\"main\" -->\n{main}<!-- /agent:run -->\n\n\
+             <!-- agent:loop id=issues -->\n{issues}<!-- /agent:loop -->\n"
+        )
+    }
+
+    /// Item ids per runnable component, keyed by its `id=`, in document order.
+    fn queue_ids_by_component_id(doc: &str) -> Vec<(String, Vec<String>)> {
+        components(doc)
+            .into_iter()
+            .filter(|c| c.name == "queue")
+            .map(|c| {
+                (
+                    explicit_component_id(&c).unwrap_or_default(),
+                    c.items.into_iter().map(|i| i.id).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// Multi-queue documents pair components by `id=`, not by name. Pairing by
+    /// projected name took the FIRST `queue` on every side, so the `issues`
+    /// loop was merged against `main`'s items: the agent's `issues` strike and
+    /// add were measured against the wrong base, and the shared item id `#a`
+    /// let one queue's edit land on the other.
+    #[test]
+    fn two_runnable_components_merge_their_items_independently() {
+        let base = two_queue_doc("- do [#a] main task\n", "- do [#a] issue task\n");
+        // Agent: strike main's #a, add #c to issues.
+        let ours = two_queue_doc(
+            "- ~~do [#a] main task~~\n",
+            "- do [#a] issue task\n- do [#c] agent issue\n",
+        );
+        // Operator: add #b to main, edit issues' #a.
+        let theirs = two_queue_doc(
+            "- do [#a] main task\n- do [#b] operator main\n",
+            "- do [#a] issue task, edited\n",
+        );
+
+        let m = document_cell_merge(&base, &ours, &theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            two_queue_doc(
+                "- ~~do [#a] main task~~\n- do [#b] operator main\n",
+                "- do [#a] issue task, edited\n- do [#c] agent issue\n",
+            ),
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
+        let kinds: Vec<(&str, &OutcomeKind)> = m
+            .outcomes
+            .iter()
+            .map(|o| (o.id.as_str(), &o.kind))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("a", &OutcomeKind::AppliedAgentEdit),
+                ("b", &OutcomeKind::AppliedOperatorAdd),
+                ("a", &OutcomeKind::AppliedOperatorEdit),
+                ("c", &OutcomeKind::AppliedAgentAdd),
+            ],
+        );
+        assert_eq!(
+            queue_ids_by_component_id(&m.merged_doc),
+            vec![
+                ("main".to_string(), vec!["a".to_string(), "b".to_string()]),
+                ("issues".to_string(), vec!["a".to_string(), "c".to_string()]),
+            ],
+        );
+    }
+
+    /// An `id=` pairs a component wherever it moved: the operator reordered the
+    /// two queues while the agent edited both, and each agent edit lands on its
+    /// own component in the operator's new order.
+    #[test]
+    fn id_keyed_components_pair_across_an_operator_reorder() {
+        let base = two_queue_doc("- do [#m] main\n", "- do [#i] issue\n");
+        let ours = two_queue_doc(
+            "- ~~do [#m] main~~\n",
+            "- do [#i] issue\n- do [#j] new issue\n",
+        );
+        let theirs = "# T\n\n<!-- agent:loop id=issues -->\n- do [#i] issue\n<!-- /agent:loop -->\n\n\
+                      <!-- agent:run id=\"main\" -->\n- do [#m] main\n<!-- /agent:run -->\n";
+
+        let m = document_cell_merge(&base, &ours, theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            "# T\n\n<!-- agent:loop id=issues -->\n- do [#i] issue\n- do [#j] new issue\n<!-- /agent:loop -->\n\n\
+             <!-- agent:run id=\"main\" -->\n- ~~do [#m] main~~\n<!-- /agent:run -->\n",
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
+    }
+
+    /// A component never pairs with a same-name component of a different `id=`:
+    /// with no counterpart it is classified on its own instead of being merged
+    /// against a guessed one. Name-only pairing folded the agent's `agentq`
+    /// item into the operator's `opq` queue; by identity, `opq` keeps its
+    /// operator item and `agentq` is carried as a separate agent-only component.
+    #[test]
+    fn components_with_different_ids_never_pair() {
+        let base = "# T\n";
+        let ours = "# T\n<!-- agent:run id=agentq -->\n- do [#a] agent\n<!-- /agent:run -->\n";
+        let theirs = "# T\n<!-- agent:run id=opq -->\n- do [#b] operator\n<!-- /agent:run -->\n";
+
+        let m = document_cell_merge(base, ours, theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            "# T\n<!-- agent:run id=opq -->\n- do [#b] operator\n<!-- /agent:run -->\n\n\
+             <!-- agent:queue id=agentq -->\n- do [#a] agent\n<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            queue_ids_by_component_id(&m.merged_doc),
+            vec![
+                ("opq".to_string(), vec!["b".to_string()]),
+                ("agentq".to_string(), vec!["a".to_string()]),
+            ],
+        );
+    }
+
+    /// A lone unkeyed queue IS the `default` queue: queue maintenance rewrites
+    /// its opener to `id=default` when it creates a second queue, so the agent's
+    /// edit of the unkeyed queue lands on the operator's `id=default` queue.
+    #[test]
+    fn lone_unkeyed_queue_pairs_with_id_default() {
+        let base = "<!-- agent:run -->\n- do [#a] task\n<!-- /agent:run -->\n";
+        let ours = "<!-- agent:run -->\n- ~~do [#a] task~~\n<!-- /agent:run -->\n";
+        let theirs = "<!-- agent:run id=default -->\n- do [#a] task\n<!-- /agent:run -->\n\n\
+                      <!-- agent:run id=later -->\n- do [#z] later\n<!-- /agent:run -->\n";
+
+        let m = document_cell_merge(base, ours, theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            "<!-- agent:run id=default -->\n- ~~do [#a] task~~\n<!-- /agent:run -->\n\n\
+             <!-- agent:run id=later -->\n- do [#z] later\n<!-- /agent:run -->\n",
+        );
+    }
+
+    /// Repeated unkeyed components of one name pair by occurrence order, so the
+    /// second one's items are merged against the second one's, not the first's.
+    #[test]
+    fn repeated_unkeyed_components_pair_by_occurrence() {
+        let doc = |first: &str, second: &str| {
+            format!(
+                "<!-- agent:review -->\n{first}<!-- /agent:review -->\n\n\
+                 <!-- agent:review -->\n{second}<!-- /agent:review -->\n"
+            )
+        };
+        let base = doc("- check [#a] one\n", "- check [#a] two\n");
+        let ours = doc("- check [#a] one\n", "- ~~check [#a] two~~\n");
+        let theirs = doc("- check [#a] one, edited\n", "- check [#a] two\n");
+
+        let m = document_cell_merge(&base, &ours, &theirs);
+
+        assert_eq!(
+            m.merged_doc,
+            doc("- check [#a] one, edited\n", "- ~~check [#a] two~~\n"),
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
     }
 
     // ----- transition table: one test per row ------------------------------

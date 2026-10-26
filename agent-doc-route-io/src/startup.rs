@@ -7,7 +7,7 @@
 //! Layout provisioning preserves paused queue control and uses an idle owner;
 //! restoring geometry never grants authority to dispatch queued work.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -976,22 +976,7 @@ pub fn auto_start_in_session_with_lock_mode(
         &new_pane,
         "route_owned_start_target_not_visible",
     );
-    agent_doc_tmux_io::input_diag::log_text_submit(
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
-        "route.auto_start",
-        &format!("pane:{new_pane}"),
-        &start_cmd,
-        Some(&harness.binary),
-        "route_owned_start_enter",
-        "Enter",
-    );
-    agent_doc_tmux_io::send_submitted_text_logged(
-        tmux,
-        &new_pane,
-        &start_cmd,
-        agent_doc_tmux_io::input_diag::InputDiagSink::new(None, agent_doc_ops_log_io::log_op),
-        "sessions.send_submitted_text",
-    )?;
+    launch_route_owned_start(tmux, file, &new_pane, &cwd, &start_cmd, &harness.binary)?;
 
     eprintln!(
         "[route] Started {} for {} in pane {} (session {})",
@@ -1327,6 +1312,44 @@ pub fn auto_start_in_session_with_lock_mode(
     Ok(Some(final_pane))
 }
 
+/// Run the route-owned `agent-doc start` as the just-created pane's own
+/// process (then the operator's shell once it exits), never typed into the
+/// pane's fresh shell.
+///
+/// Nothing proves when an interactive shell starts reading its command line,
+/// and an rc step that reads the terminal first swallows typed bytes: zsh with
+/// no `~/.zshrc` ate the leading `/` of the absolute agent-doc path in the
+/// outside-tmux start (2026-10-26), and a route pane is just as fresh. The
+/// launch runs in `cwd`, the directory `start_cmd`'s document path was
+/// rewritten against. Logged as `transform=route_owned_start_launch key=launch`
+/// (the command's length and hash only); it replaces the typed path's
+/// `route_owned_start_enter` text + `Enter` events.
+fn launch_route_owned_start(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    cwd: &Path,
+    start_cmd: &str,
+    harness_binary: &str,
+) -> Result<()> {
+    agent_doc_tmux_io::input_diag::log_pane_launch(
+        agent_doc_tmux_io::input_diag::InputDiagSink::new(Some(file), agent_doc_ops_log_io::log_op),
+        "route.auto_start",
+        &format!("pane:{pane}"),
+        start_cmd,
+        Some(harness_binary),
+        "route_owned_start_launch",
+    );
+    agent_doc_tmux_io::launch_command_in_pane_at(
+        tmux,
+        pane,
+        cwd,
+        start_cmd,
+        agent_doc_tmux_io::PaneLaunchExit::HandOffToShell,
+    )
+    .with_context(|| format!("failed to launch route-owned agent-doc start in pane {pane}"))
+}
+
 /// (#jbtsiftnosub2) Resubmit a fresh-start trigger that the harness composer
 /// typed but never submitted, then re-classify the pane.
 ///
@@ -1387,6 +1410,93 @@ fn resubmit_stranded_fresh_start_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A route-owned start pane is created moments before the start runs, and
+    /// its shell may read the terminal before its first command line (zsh with
+    /// no `~/.zshrc`). The start still runs whole, as the pane's own process,
+    /// in the directory its document path was rewritten against; the pane
+    /// keeps a shell afterwards; the ops log records a hashed `key=launch`
+    /// event instead of typed text + `Enter`; and nothing was typed for the
+    /// shell to swallow. Isolated tmux server with a clean `HOME` only.
+    #[cfg(unix)]
+    #[test]
+    fn route_owned_start_runs_as_the_pane_process_under_a_terminal_reading_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let cwd = dir.path().join("proj");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(cwd.join(".agent-doc")).unwrap();
+        let file = cwd.join("session.md");
+        std::fs::write(&file, "---\nagent_doc_session: route-launch\n---\n").unwrap();
+        let shell = agent_doc_tmux_io::write_terminal_reading_test_shell(dir.path());
+        let tmux = agent_doc_tmux_io::isolated_test_tmux_with_default_shell(
+            "agent-doc-route-start-launch",
+            &shell,
+            &home,
+        );
+        let pane = tmux.auto_start("main", &cwd).unwrap();
+        tmux.enable_remain_on_exit(&pane).unwrap();
+        let launched = dir.path().join("launched");
+        // An absolute program path first, like the real route-owned start.
+        let start_cmd = format!("/bin/sh -c 'pwd > {}'", launched.display());
+
+        launch_route_owned_start(&tmux, &file, &pane, &cwd, &start_cmd, "claude").unwrap();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let recorded = loop {
+            if let Some(text) = std::fs::read_to_string(&launched)
+                .ok()
+                .filter(|text| !text.is_empty())
+            {
+                break text;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the route-owned start never ran in pane {pane}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(
+            std::fs::canonicalize(recorded.trim()).unwrap(),
+            std::fs::canonicalize(&cwd).unwrap(),
+            "the start runs in the directory its document path is relative to"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("consumed")).unwrap_or_default(),
+            "",
+            "nothing was typed for the pane's shell to swallow"
+        );
+        assert_eq!(
+            agent_doc_tmux_io::display_message_value(&*tmux, Some(&pane), "#{pane_dead}")
+                .unwrap_or_default(),
+            "0",
+            "the pane hands off to the operator's shell once the start exits"
+        );
+        let ops_log = agent_doc_text_under(&cwd.join(".agent-doc"));
+        assert!(
+            ops_log.contains("source=route.auto_start destination=pane:")
+                && ops_log.contains("transform=route_owned_start_launch key=launch"),
+            "{ops_log}"
+        );
+        assert!(
+            !ops_log.contains("route_owned_start_enter") && !ops_log.contains("key=Enter"),
+            "a launch types nothing, so it logs no submit key: {ops_log}"
+        );
+    }
+
+    /// Every text file under `dir` (the project's `.agent-doc`), concatenated.
+    fn agent_doc_text_under(dir: &Path) -> String {
+        let mut text = String::new();
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                text.push_str(&agent_doc_text_under(&path));
+            } else if let Ok(contents) = std::fs::read_to_string(&path) {
+                text.push_str(&contents);
+            }
+        }
+        text
+    }
 
     #[test]
     #[ignore = "isolated tmux integration test; run make tmux-ci"]

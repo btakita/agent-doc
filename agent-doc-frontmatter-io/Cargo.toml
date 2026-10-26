@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-frontmatter-io"
-version = "0.35.552"
+version = "0.35.553"
 edition = "2024"
 description = "I/O adapters for agent-doc frontmatter policy"
 license = "Apache-2.0"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_frontmatter_io"
 
 [dependencies]
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.552" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.552" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.552" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.553" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.553" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.553" }
 anyhow = "1"
 
 [dev-dependencies]

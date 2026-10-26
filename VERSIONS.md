@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.553
+
+- **Release promotion no longer drops the aggregate channel update.** The release aggregate and per-target promotion
+  workflows still serialize stable-channel writes in one concurrency group, but both now queue pending runs instead of
+  letting rapid per-target dispatches evict the pending aggregate job, so a tag no longer needs a manual promotion
+  rerun.
+- **Editor packages are unchanged.** JetBrains classic, 2026.2, and 2026.3 remain at 0.2.825, 0.2.826, and 0.2.827,
+  and VS Code remains at 0.2.83, because their sources are byte-identical to the 0.35.552 release.
+
 ## 0.35.552
 
 - **Queue and tracked-work lifecycle state now converges through coordinator closeout.** Reported handoffs become

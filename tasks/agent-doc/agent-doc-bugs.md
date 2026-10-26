@@ -468,7 +468,7 @@ The other ☑️ rows in `Queue: Main` are completed handbacks that shipped in v
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
-- ☑️ [#subagent:release_publish_patch#3] release + publish ⟦effect:1⟧
+- ~~release + publish ⟦effect:1⟧~~
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -575,7 +575,7 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
-- do [#claimrowmigrate]
+- 📥 do [#claimrowmigrate]
 <!-- /agent:run -->
 
 ## Run: Issues

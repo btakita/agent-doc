@@ -21,11 +21,9 @@ dogfood:
 queue: go
 ---
 
-## Status
+## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-<!-- agent:status patch=replace sync="##sync-release" -->
-
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -34,9 +32,7 @@ agent-doc v0.35.553 (`a0a525fb65`) is the stable latest release: GitHub Latest, 
 <!-- /agent:status -->
  
 
-## Exchange
-
-<!-- agent:exchange patch=append subagents -->
+## Exchange <!-- agent:exchange patch=append subagents -->
 ### Session Summary
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/9b6e92d236cca996f590233b78ee7610f8c87e138c23d521f032418d6629e816-20261024-044925.md`*
@@ -827,15 +823,44 @@ In practice only tests were affected. A production process runs one controller f
 There are two new regressions. In the first, controller B's tick runs while A's dead pid is still listed, and B never creates a `state.db`. The second covers hydration. With the filters removed, both fail. After the rebase, the controller-io lib passed 834 tests twice, and `make check-fast` passed.
 
 The worker hit an unrelated flake once in 5 lib runs, `plugin_publications_project_into_the_publishing_clients_navigation_lane`. It is queued and running as `subagent:laneplaneflake`. Your strikethrough report is running as `subagent:strikeformat`. The row body starts with an inline-code backtick and holds unbalanced code spans, so the `~~…~~` delimiters collide with them.
+
+### Re: v0.35.555 and coordinator handoff — opus-5 · 2026-10-26T13:51-04:00
+
+> **Chat prompt (#chatprompt:26bba7ddac60):** Is the new release out for Coder to install?
+
+> **Chat prompt (#chatprompt:37d938926795):** Is 555 published for Coder?
+
+**v0.35.555** (`f11ad5932f`) is out for Coder's CLI. Its release gate passed: `make check` ran 11,553 tests. The x86_64 Linux gnu and musl stable channels already point to 0.35.555, so `agent-doc upgrade` gets it. To install by script, pin the version with `AGENT_DOC_VERSION=0.35.555`, because `install.sh` follows Latest. Release run `40368074628` was still building macOS and Windows at handoff. Until it finishes, GitHub still marks 0.35.555 as a pre-release and PyPI is on 0.35.553.
+
+On Coder, run `agent-doc plugin install jetbrains` on the backend. The Client and the backend both need 2026.3 plugin 0.2.835, then a restart. That fixes #377 and brings the #376 layout wait.
+
+v0.35.554 was never published. It stays a pre-release, and 0.35.555 replaces it.
+
+**Coordinator handoff (state at 13:51).**
+
+- **Queue dispatch for this document is PAUSED** with `admin queue pause`, receipt 7. I paused it so the `issues` loop's pass 6 could not run 15 resurrected rows.
+- **Loop-resurrection cause:** it was the loop's own pass restore, not anything after v0.35.553. The fix is `ddd960d632`, which is installed: loops never receive inserted items, and they restore only rows that are still struck in that loop.
+- **Operator action:** in `## Run: Issues`, delete every row except the Watch row. Do not strike them. Then resume with `agent-doc admin queue resume tasks/agent-doc/agent-doc-bugs.md --observed-generation <gen>`, using the gen from `agent-doc admin inspect`.
+- **On main and installed:** everything in v0.35.555, plus `ddd960d632`.
+- **Ready to integrate, in this order.** Each needs a rebase, `check-fast`, a push, then one `make install`.
+  - `fix/queue-strike-format` is already rebased, and `check-fast` passed with 11,567 tests.
+  - The others are `feat/any-heading-component-prefix`, `docs/onboarding-quickstart`, `feat/queue-marker-legend`, `fix/doctor-fresh-doc-healthy`, and `fix/start-shell-readiness`.
+- **Held for your naming decision:** `feat/skill-no-arg-pane-document` adds `agent-doc resolve-pane-document`. Confirm or rename the command.
+- **GH #377:** the same bug as #375, with no code change needed. Close it when 0.35.555 becomes Latest.
+- **Not yet dispatched:**
+  - the two follow-ups after strike-format lands, ending a Reported claim on every strike path and the one-time stale-cell repair
+  - `doctor` exiting 0, to build on the doctor branch
+  - the load flake in `retained_capture_repairs_legacy_welded_queue_close_before_validation`
+  - the route-owned and fan-out panes, which still type their commands like `start` used to (suggested by the start-shell-readiness worker)
+- **Released back to pending:** the Marketplace publishing item. It needs your accounts.
+- **Your live check:** `#layoutunprovenliveverify`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
-## Queue: Main
-<!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]~~
+## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
 - ☑️ [#subagent:laneplaneflake#1] fix nondeterministic agent-doc-controller-io rpc::tests plugin_publications_project_into_the_publishing_clients_navigation_lane — await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO) returned false in 1 of 5 full lib runs (rpc.rs:43910), found during the exit-watcher root-scope fix, 2026-10-26
@@ -846,37 +871,31 @@ The worker hit an unrelated flake once in 5 lib runs, `plugin_publications_proje
 - ☑️ [#subagent:rowidentity#1] key merge/overlay queue-row identity by the work identity, not the first `[#...]` token: a claimed row`s owner tag `[#subagent:x#N]` makes it a different node from its bare struck copy, so a stale editor copy with a different marker can resurrect a struck row (found by the fenced-marker fix, 2026-10-26)
 - 🚧 [#subagent:strikeformat#1] The strikethrough in the first current queue item is malformed.
 - 📥 release + publish: Issue 376 fix
-- 🚧 [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
-- 🚧 [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
-- 🚧 [#subagent:sameheading#1] agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
-- 🚧 [#subagent:loopmisroute#1] Items are being added by this agent + agent-doc into `agent:loop` in error. The items should go into `agent:run`.
+- ☑️ [#subagent:onboarding#1] We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+- 🟡 [#subagent:mktpublish#1] publish the agent-doc VS Code extension to the VS Code Marketplace and update the stale Open VSX listing (0.2.1); check why JetBrains Marketplace lists nothing for com.github.btakita.agent-doc despite recorded uploads (likely the hidden listing under moderation, see #jetbrainsmarketplaceprofile) (found by the onboarding pass, 2026-10-26)
+- ☑️ [#subagent:doctorblocked#1] `agent-doc doctor` reports outcome=blocked (queue_continuation) on a brand-new document with no queue; it should report healthy (found by the onboarding pass, 2026-10-26)
+- 📥 `agent-doc doctor` exits 0 even when its outcome is blocked or recoverable; exit non-zero so scripts and CI can act on it (found by the doctor fresh-document fix, 2026-10-26)
+- 🚧 [#subagent:startshellready#1] `agent-doc start` types its command into a new tmux pane before the shell is ready (zsh with no ~/.zshrc lost the leading `/`); wait for shell readiness (found by the onboarding pass, 2026-10-26)
+- ☑️ [#subagent:markerdocs#1] What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
+- ☑️ [#subagent:sameheading#1] agent-doc should support the header being on the same line as the open tag: e.g. `## Queue: Main ` as a prefix to the `agent:run` open tag.
+- 📥 fix nondeterministic agent-doc-document-realtime-io tests::retained_capture_repairs_legacy_welded_queue_close_before_validation — waits on a background delivery thread and failed under check-fast load once (2026-10-26, any-heading worker); find what it races, do not rerun to green
+- ☑️ [#subagent:loopmisroute#1] Items are being added by this agent + agent-doc into `agent:loop` in error. The items should go into `agent:run`.
+- ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
+- ☑️ [#subagent:gh377#1] #gh-fix https://github.com/btakita/agent-doc/issues/377
+- 📥 `agent:loop` in this document should only have `- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.`. agent-doc is treating `agent:loop` as the kitchen sink which is wrong. The items belong in `agent:run`.
+- [#jb263-feed-verify]: done?
+- [#layoutunprovenliveverify]: [#autosync-restart-verify]: The tmux panes are syncing.
+- Idea error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.
 <!-- /agent:run -->
 
-## Run: Issues
-<!-- agent:loop id=issues interval=1h priority -->
-- 📥 do [#layoutunprovenliveverify]
-- 📥 do [#grokqueuesubagents]
-- 🔄 release + publish
-- 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
-- 📥 What does `🔄` mean? Is it documented? The prefixes meanings should be in the help command response and in each document. 
+## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
-## Todo
-<!-- agent:todo -->
-- [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
-- [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
-- [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
-- [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
-- [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
-- [ ] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
-<!-- /agent:todo -->
-
-## Backlog
-<!-- agent:backlog priority queue -->
+## Backlog <!-- agent:backlog priority queue -->
 <!-- /agent:backlog -->
 
-## Review
-<!-- agent:review -->
+## Review <!-- agent:review -->
 - [/] [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
@@ -884,12 +903,11 @@ The worker hit an unrelated flake once in 5 lib runs, `plugin_publications_proje
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:review -->
 
-<!-- agent:icebox -->
+## Icebox <!-- agent:icebox -->
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 
-## Completed / Reaped
-<!-- agent:done archive=tasks/agent-doc/agent-doc-bugs.done.md -->
+## Done <!-- agent:done archive=tasks/agent-doc/agent-doc-bugs.done.md -->
 
 <!-- completed work archived in tasks/agent-doc/agent-doc-bugs.done.md -->
 <!-- /agent:done -->

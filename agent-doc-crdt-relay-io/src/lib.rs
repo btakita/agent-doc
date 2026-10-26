@@ -3451,6 +3451,33 @@ fn is_component_marker_line(line: &str) -> bool {
         })
 }
 
+/// `#componentownclose`: whether an editor edit from `before` to `after`
+/// **removed** a component marker and broke the pairing. Returns the
+/// [`agent_doc_element::element::structural_corruption_reason`] of `after`
+/// (a `parse_error: ...`) when it did, `None` otherwise.
+///
+/// The one predicate both editor paths share: the live relay fence (a replica
+/// update) and the editor-op path (`#componentownclose`, a captured op
+/// burst that carries only offsets and lengths), so the two can never disagree
+/// about which edit warns the operator.
+///
+/// - Only component *parse* failures count (unclosed / mismatched / unmatched
+///   markers). Duplicate boundaries and duplicate singletons have their own
+///   repair paths and can be a legitimate transient state during closeout.
+/// - `before` must have been structurally sound: an edit to an already broken
+///   document did not break it.
+/// - `#typingfencerevert` / `#markerlineedit` (GH #239): only a deleted marker
+///   line counts. An edit that kept every marker and still fails to parse is
+///   operator text in progress (a half-typed code fence, a retyped name).
+pub fn edit_removed_component_marker(before: &str, after: &str) -> Option<String> {
+    let reason = agent_doc_element::element::structural_corruption_reason(after)
+        .filter(|reason| reason.starts_with("parse_error:"))?;
+    if agent_doc_element::element::structural_corruption_reason(before).is_some() {
+        return None;
+    }
+    update_removed_component_marker(before, after).then_some(reason)
+}
+
 /// `#typingfencerevert` / `#markerlineedit` (GH #239): whether merging an editor
 /// update **deleted** a component marker line, as opposed to editing characters
 /// inside one.
@@ -3765,23 +3792,7 @@ pub fn relay_replica_update_for_file(
             // deliberately excluded: those have dedicated repair paths
             // (preflight boundary dedup, response-cell singleton repair) and
             // can be a legitimate transient canonical state during closeout.
-            let introduced_parse_failure = matches!(
-                agent_doc_element::element::structural_corruption_reason(&after_text),
-                Some(reason) if reason.starts_with("parse_error:")
-            )
-                && agent_doc_element::element::structural_corruption_reason(&before_text).is_none()
-                // `#typingfencerevert`: only a lost marker proves a stale or
-                // truncated buffer. An update that kept every marker and still
-                // fails to parse inserted text, e.g. an operator mid-way
-                // through typing a code fence; restoring would erase it.
-                // `#markerlineedit` (GH #239): a marker line edited in place
-                // (retyped name, changed attributes, a slip inside `<!--`) is
-                // not lost either; only a deleted marker line is.
-                && update_removed_component_marker(&before_text, &after_text);
-            if introduced_parse_failure
-                && let Some(reason) =
-                    agent_doc_element::element::structural_corruption_reason(&after_text)
-            {
+            if let Some(reason) = edit_removed_component_marker(&before_text, &after_text) {
                 // `#componentownclose` (live path): the update removed a
                 // component marker and broke the pairing. The editor buffer is
                 // operator-visible text and stays authoritative, so nothing is
@@ -5884,6 +5895,92 @@ fn clear_component_structure_refusal(file: &Path, event: &str, source: &str, act
             ),
         );
     }
+}
+
+/// ops.log event for a captured editor-op burst that removed a component
+/// marker (`#componentownclose`).
+pub const EDITOR_OPS_MARKERS_REMOVED_EVENT: &str = "editor_ops_component_markers_removed";
+
+/// ops.log event for a captured editor-op burst that repaired the markers a
+/// marker diagnostic named (`#componentownclose`).
+pub const EDITOR_OPS_MARKERS_REPAIRED_EVENT: &str = "editor_ops_component_markers_repaired";
+
+/// What [`check_editor_ops_component_markers`] decided about one captured
+/// editor-op burst.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorOpsMarkerCheck {
+    /// The burst left the component structure as it was (still sound, still
+    /// broken, or broken only by text the operator is still typing).
+    Unchanged,
+    /// The burst removed a component marker; the `⚠ agent-doc:` marker
+    /// diagnostic names the parse failure.
+    MarkersRemoved(String),
+    /// The burst turned a document whose markers did not pair into one whose
+    /// markers do, and any marker diagnostic was cleared.
+    MarkersRepaired,
+}
+
+impl EditorOpsMarkerCheck {
+    /// The FFI return code: `0` unchanged, `1` markers removed (diagnostic
+    /// shown), `2` markers repaired (diagnostic cleared).
+    pub fn code(&self) -> i32 {
+        match self {
+            Self::Unchanged => 0,
+            Self::MarkersRemoved(_) => 1,
+            Self::MarkersRepaired => 2,
+        }
+    }
+}
+
+/// `#componentownclose` (gap 1 of the todo-collapse fix): run the
+/// component-marker check on the editor buffer before a captured editor-op
+/// burst is recorded.
+///
+/// The op path carries only offsets and lengths, so nothing downstream of it
+/// can see that a deleted range held a component marker. While the editor
+/// replica is detached (for example across an install recycle) no relay update
+/// carries the edit either, so without this check the operator learns about a
+/// deleted `<!-- /agent:NAME -->` only when a later adoption refuses it. The
+/// editor reports the text the burst was typed into (`before`) and the buffer
+/// it produced (`after`); the check uses [`edit_removed_component_marker`],
+/// the live relay fence's own predicate, and surfaces the same `⚠ agent-doc:`
+/// marker diagnostic (`.agent-doc/state/editor-route-errors/<doc>.txt`).
+///
+/// It only warns: the editor text is never changed, and the burst is still
+/// recorded. A later burst that makes the markers pair again clears the
+/// diagnostic. The diagnostic is written once per distinct refusal, so the
+/// relay path and this path never log the same break twice.
+pub fn check_editor_ops_component_markers(
+    file: &Path,
+    before: &str,
+    after: &str,
+) -> EditorOpsMarkerCheck {
+    if edit_removed_component_marker(before, after).is_some() {
+        // The diagnostic names the same parse failure the relay fence reports,
+        // so both paths write identical text.
+        let reason = agent_doc_element::element::component_parse_failure(after)
+            .unwrap_or_else(|| "component markers do not pair".to_string());
+        surface_component_structure_refusal(
+            file,
+            EDITOR_OPS_MARKERS_REMOVED_EVENT,
+            "editor_ops",
+            &reason,
+            "action=editor_text_kept warn=edit_time",
+        );
+        return EditorOpsMarkerCheck::MarkersRemoved(reason);
+    }
+    if agent_doc_element::element::component_parse_failure(after).is_none()
+        && agent_doc_element::element::component_parse_failure(before).is_some()
+    {
+        clear_component_structure_refusal(
+            file,
+            EDITOR_OPS_MARKERS_REPAIRED_EVENT,
+            "editor_ops",
+            "action=repaired_buffer_kept",
+        );
+        return EditorOpsMarkerCheck::MarkersRepaired;
+    }
+    EditorOpsMarkerCheck::Unchanged
 }
 
 /// Current canonical lineage returned to a newly registered editor.

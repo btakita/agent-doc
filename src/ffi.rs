@@ -1746,6 +1746,56 @@ pub unsafe extern "C" fn agent_doc_record_editor_ops_json(
     }
 }
 
+/// Run the component-marker check on the editor buffer before a captured
+/// editor-op burst is recorded (`#componentownclose`, gap 1 of the
+/// todo-collapse fix).
+///
+/// [`agent_doc_record_editor_ops_json`] carries only offsets and lengths, so it
+/// cannot see that a deleted range held a `<!-- agent:NAME -->` /
+/// `<!-- /agent:NAME -->` marker. The editor passes the text the burst was typed
+/// into (`pre_text`) and the buffer it produced (`post_text`), and this applies
+/// the live relay fence's own predicate
+/// ([`agent_doc_crdt_relay_io::edit_removed_component_marker`]). An edit that
+/// removed a marker writes the `⚠ agent-doc:` marker diagnostic the editor
+/// status label renders; an edit that made the markers pair again clears it.
+/// The editor text is never changed and the burst is still recorded.
+///
+/// Returns `0` when the burst left the component structure unchanged, `1`
+/// when it removed a marker (diagnostic shown), `2` when it repaired the
+/// markers (diagnostic cleared), and `-1` on invalid UTF-8 or a caught panic.
+///
+/// # Safety
+///
+/// `file_path`, `pre_text`, and `post_text` must be valid, NUL-terminated
+/// UTF-8 strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_check_editor_ops_component_markers(
+    file_path: *const c_char,
+    pre_text: *const c_char,
+    post_text: *const c_char,
+) -> i32 {
+    if file_path.is_null() || pre_text.is_null() || post_text.is_null() {
+        return -1;
+    }
+    let (Ok(file), Ok(before), Ok(after)) = (
+        unsafe { CStr::from_ptr(file_path) }.to_str(),
+        unsafe { CStr::from_ptr(pre_text) }.to_str(),
+        unsafe { CStr::from_ptr(post_text) }.to_str(),
+    ) else {
+        eprintln!(
+            "[op-capture] agent_doc_check_editor_ops_component_markers: non-UTF-8 argument; skipping check"
+        );
+        return -1;
+    };
+    let file = std::path::PathBuf::from(file);
+    let mut code = -1;
+    catch_ffi_void("agent_doc_check_editor_ops_component_markers", || {
+        code = agent_doc_crdt_relay_io::check_editor_ops_component_markers(&file, before, after)
+            .code();
+    });
+    code
+}
+
 /// Decode the `ops_json` argument of [`agent_doc_record_editor_ops_json`]: a
 /// bare op array (legacy, no lineage) or a lineage-attested burst object
 /// (`#keylogrebase`). `None` when it is neither, or when an attested burst
@@ -4865,6 +4915,135 @@ mod tests {
             agent_doc_record_editor_ops_json(file_c.as_ptr(), base_c.as_ptr(), empty.as_ptr())
         };
         assert_eq!(rc, 0);
+    }
+
+    /// `#componentownclose`: the incident edit (one burst deleting the
+    /// loop's close, the todo heading, its opener and items) reaches the
+    /// editor-op path as offsets and lengths only. The check must warn at edit
+    /// time with the same `⚠ agent-doc:` diagnostic the relay fence writes,
+    /// once, and the repairing burst must clear it.
+    #[test]
+    fn editor_ops_marker_check_warns_on_a_removed_marker_and_clears_on_repair() {
+        use agent_doc_element::sibling_span_fixture::{
+            ALL_EDITS, ALL_STYLES, LoopEdit, document, edit_is_structurally_valid,
+        };
+        for style in ALL_STYLES {
+            for edit in ALL_EDITS {
+                let dir = tempfile::TempDir::new().unwrap();
+                std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+                let doc = dir.path().join("bugs.md");
+                let valid = document(style, LoopEdit::None);
+                std::fs::write(&doc, &valid).unwrap();
+                let edited = document(style, edit);
+                let label = format!("{style:?}/{edit:?}");
+
+                let check = |before: &str, after: &str| {
+                    let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+                    let pre_c = CString::new(before).unwrap();
+                    let post_c = CString::new(after).unwrap();
+                    unsafe {
+                        agent_doc_check_editor_ops_component_markers(
+                            file_c.as_ptr(),
+                            pre_c.as_ptr(),
+                            post_c.as_ptr(),
+                        )
+                    }
+                };
+                let diagnostic_path =
+                    agent_doc_controller::editor_route_error::editor_route_error_path_for_file(
+                        &doc,
+                    )
+                    .expect("diagnostic path");
+                let ops_log = || {
+                    std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                        .unwrap_or_default()
+                };
+
+                if edit_is_structurally_valid(edit) {
+                    assert_eq!(check(&valid, &edited), 0, "{label}: a valid edit is silent");
+                    assert!(!diagnostic_path.exists(), "{label}");
+                    continue;
+                }
+
+                assert_eq!(
+                    check(&valid, &edited),
+                    1,
+                    "{label}: a removed marker must warn"
+                );
+                let reason = agent_doc_element::element::component_parse_failure(&edited)
+                    .expect("the edit breaks the markers");
+                assert_eq!(
+                    std::fs::read_to_string(&diagnostic_path).expect("diagnostic written"),
+                    agent_doc_crdt_relay_io::reseed_structure_refusal_diagnostic(&doc, &reason),
+                    "{label}: the editor-op path writes the relay fence's diagnostic"
+                );
+                // Only a warning: disk (and so the editor text) is untouched.
+                assert_eq!(std::fs::read_to_string(&doc).unwrap(), valid, "{label}");
+
+                // Typing on in the broken buffer neither re-warns nor clears.
+                let typed_on = format!("{edited}more\n");
+                assert_eq!(check(&edited, &typed_on), 0, "{label}");
+                assert!(diagnostic_path.is_file(), "{label}");
+                assert_eq!(
+                    ops_log()
+                        .matches(agent_doc_crdt_relay_io::EDITOR_OPS_MARKERS_REMOVED_EVENT)
+                        .count(),
+                    1,
+                    "{label}: one receipt per distinct break: {}",
+                    ops_log()
+                );
+
+                // The repairing burst (restoring the markers) clears it.
+                assert_eq!(check(&typed_on, &valid), 2, "{label}");
+                assert!(!diagnostic_path.exists(), "{label}");
+                assert!(
+                    ops_log().contains(agent_doc_crdt_relay_io::EDITOR_OPS_MARKERS_REPAIRED_EVENT),
+                    "{label}: {}",
+                    ops_log()
+                );
+            }
+        }
+    }
+
+    /// `#componentownclose`: only a deleted marker warns. A marker retyped
+    /// in place or a half-typed code fence is operator text in progress, and a
+    /// check that cannot read its arguments refuses instead of guessing.
+    #[test]
+    fn editor_ops_marker_check_ignores_in_place_marker_edits_and_bad_input() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("plan.md");
+        let before =
+            "intro\n<!-- agent:backlog priority queue -->\n- [ ] item\n<!-- /agent:backlog -->\n";
+        std::fs::write(&doc, before).unwrap();
+        let file_c = CString::new(doc.to_str().unwrap()).unwrap();
+        let pre_c = CString::new(before).unwrap();
+        for after in [
+            before.replace("agent:backlog priority", "agent: priority"),
+            before.replace("- [ ] item\n", "- [ ] item\n```\n"),
+        ] {
+            let post_c = CString::new(after.as_str()).unwrap();
+            let rc = unsafe {
+                agent_doc_check_editor_ops_component_markers(
+                    file_c.as_ptr(),
+                    pre_c.as_ptr(),
+                    post_c.as_ptr(),
+                )
+            };
+            assert_eq!(rc, 0, "{after}");
+        }
+        let diagnostic_path =
+            agent_doc_controller::editor_route_error::editor_route_error_path_for_file(&doc)
+                .expect("diagnostic path");
+        assert!(!diagnostic_path.exists());
+        let rc = unsafe {
+            agent_doc_check_editor_ops_component_markers(
+                std::ptr::null(),
+                pre_c.as_ptr(),
+                pre_c.as_ptr(),
+            )
+        };
+        assert_eq!(rc, -1);
     }
 
     #[test]

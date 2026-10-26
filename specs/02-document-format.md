@@ -188,6 +188,23 @@ guesses a span:
   agent-doc never reverts the operator's text to repair it. The editor buffer
   stays authoritative, and the guidance points to the marker lines or to
   `git show HEAD:./<doc>`.
+- An editor edit that removes a marker is also warned about at edit time,
+  before its captured ops are recorded (gap 1 of the todo-collapse fix). The
+  editor-op path (`agent_doc_record_editor_ops_json`) carries only offsets and
+  lengths, so nothing downstream of it can see that a deleted range held a
+  marker. While the editor replica is detached, for example across an install
+  recycle, no relay update carries the edit either. The JetBrains plugin
+  therefore passes each burst's attested pre-text and resulting buffer to
+  `agent_doc_check_editor_ops_component_markers`. That check applies the live
+  fence's own predicate (`agent_doc_crdt_relay_io::edit_removed_component_marker`:
+  a new `parse_error:` in a sound document, caused by a deleted marker line) and
+  writes the same `⚠ agent-doc:` diagnostic, logging
+  `editor_ops_component_markers_removed`. A burst that turns a document whose
+  markers do not pair into one whose markers do clears it
+  (`editor_ops_component_markers_repaired`). The plugin re-renders the status
+  label from the last controller frame and raises one Event Log warning per
+  break. The check only warns: the editor text is never changed, and the burst
+  is still recorded.
 
 On 2026-10-26 one editor transaction in `agent-doc-bugs.md` deleted 4,596
 bytes. The span ran from just after the loop's Watch row up to

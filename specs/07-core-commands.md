@@ -142,12 +142,35 @@ Two modes:
 
 - `agent-doc init` initializes the project-level `.agent-doc/` directories and installs bundled skill content.
 - `agent-doc init <FILE> [TITLE] [--agent NAME]` scaffolds a new session document and lazily runs project init first when needed.
+- Project init reports only installs it made: the skill installer prints the
+  real harness and path. When no harness is detected from the calling shell
+  (the generic `.agent/skills/` target, which no harness reads on its own), init
+  prints the `agent-doc skill install --harness <claude|codex|grok|opencode>` /
+  `--all` command to run. It never claims a `.claude/skills` install it did not
+  make. Its next steps name the first-document command, the three ways to run a
+  turn, that `.agent-doc/` is local state to ignore in git, and the README
+  `#getting-started` link.
+
+## Top-level help
+
+`agent-doc --help` ends with a short `Getting started:` block (project init,
+skill install, plugin install, first document, first turn) and the README
+`#getting-started` link, so a new user is not left with only the full command
+list. The block, the README "Getting started" section, and the book Quick Start
+teach the same commands; `tests/test_cli.rs` runs the README and Quick Start
+commands in order on a clean temporary project (network and agent commands are
+parse-checked with `--help`) and pins the help block against the README.
 
 ## install
 
 `agent-doc install [--editor jetbrains|vscode] [--skip-prereqs] [--skip-plugins]`
 
 - Verifies `tmux` and the configured agent CLI are present unless skipped.
+  A tmux client with no running server ("no server running", or "error
+  connecting to <socket> (No such file or directory)") is `ok`: that is the
+  normal state of a fresh machine and agent-doc starts a server on first use.
+  Only a handshake failure against a server that exists reports `BROKEN` with
+  the `tmux_bin` hint.
 - Installs editor plugins either for the requested editor or for auto-detected editors.
 - Local source installs inside the `agent-loop` workspace must resolve sibling crates without ad hoc Cargo patch flags.
 
@@ -586,7 +609,14 @@ of the binary.
 The printed `install.sh` recovery path follows the same platform-pair contract:
 it selects GNU versus musl from the active Linux x86_64 loader and verifies the
 archive-specific `.sha256` sidecar before extraction. An absent or mismatched
-sidecar fails closed without replacing the installed binary (GH #363).
+sidecar fails closed without replacing the installed binary (GH #363). It
+installs the archive's native library (`libagent_doc.so`, `libagent_doc.dylib`,
+or `agent_doc.dll`) beside the binary, copied to a temporary name in the install
+directory and renamed into place so an IDE holding the previous library keeps
+its inode; `lib-path` resolves the library as the executable's sibling, so an
+installer that dropped it left every editor plugin in degraded file-based IPC.
+It ends with next-step commands and the README `#getting-started` link.
+`scripts/test-install-script.py` pins both the library and the next steps.
 
 `agent-doc upgrade --auto [--interval-seconds N]` is a foreground release watcher.
 It checks immediately and then polls every 900 seconds by default; the interval
@@ -713,6 +743,11 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   fallback walk can still reach an older asset. `SHA256SUMS` stays
   platform-archives-only — the PyPI bootstrap launcher parses exactly that
   manifest.
+- A downloaded editor package keeps its release asset's extension in its
+  temporary file name. `code --install-extension <path>` treats only a path
+  ending in `.vsix` as a package; an extensionless temp path is read as a
+  marketplace extension ID and the install fails with "Extension '<path>' not
+  found" after a verified download.
 - VS Code-family installs resolve the editor CLI (`cursor`, `codium`, `code`)
   BEFORE downloading, and report an absent CLI as a missing prerequisite with
   install guidance (GH #57). Detection returning a candidate it has just proven

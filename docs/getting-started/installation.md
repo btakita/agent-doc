@@ -1,15 +1,23 @@
 # Installation
 
+New here? Use the shell installer below, then follow the
+[Quick Start](quick-start.md). Use PyPI on Windows or where Python tooling is
+already how you install CLIs. Build from source only to work on agent-doc
+itself. Every method installs the same `agent-doc` binary plus the native
+library (`libagent_doc.so` / `.dylib` / `agent_doc.dll`) that the editor plugins
+load; `agent-doc version` shows both.
+
 ## Shell installer (Linux, macOS, Windows via a POSIX shell)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/btakita/agent-doc/main/install.sh | sh
 ```
 
-This downloads the latest prebuilt binary from
+This downloads the latest prebuilt binary and its native library from
 [GitHub Releases](https://github.com/btakita/agent-doc/releases) into
 `~/.cargo/bin` (if it exists) or `~/.local/bin`. Set `AGENT_DOC_INSTALL_DIR` to
-choose another directory, or `AGENT_DOC_VERSION` to pin a release.
+choose another directory, or `AGENT_DOC_VERSION` to pin a release. If the
+directory is not on your `PATH`, the installer prints the line to add.
 
 Release archives appear independently: each platform archive is public as soon
 as that platform build succeeds, alongside an archive-specific `.sha256`

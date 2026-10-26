@@ -3,7 +3,9 @@
 //! ## Spec
 //! - `run(file, title, agent, mode, config)`: dispatches on whether a file path was provided.
 //!   - No file: calls `init_project()` — checks prerequisites, creates `.agent-doc/`, and installs
-//!     `SKILL.md`. Per-document state is stored in the typed ledger, not a filesystem sidecar.
+//!     `SKILL.md` for the detected harness (generic `.agent/skills/` when none is detected, in
+//!     which case it prints the `skill install --harness` command to run), then prints next
+//!     steps ending in the README "Getting started" link. Per-document state is stored in the typed ledger, not a filesystem sidecar.
 //!   - With file: calls `init_file()` — lazily runs project init if `.agent-doc/` is absent, then
 //!     scaffolds a new session document.  Fails if the file already exists.
 //! - `init_file` scaffolds two document formats depending on `mode`:
@@ -23,6 +25,9 @@
 //! - `SKILL.md` installation is delegated to `crate::skill::install_and_check_updated`.
 //!
 //! ## Evals
+//! - project_init_next_steps_name_the_harness_install_when_none_was_detected: with no detected
+//!   harness, init names `agent-doc skill install --harness <h>` instead of claiming a
+//!   `.claude/skills` install; both variants point to the Getting started section.
 //! - init_project_creates_dirs: `.agent-doc` is created without a snapshots sidecar directory.
 //! - init_file_template_mode: `mode="template"` → scaffolded file contains `agent_doc_format: template` and `agent:exchange` component
 //! - init_file_append_mode: `mode="append"` → scaffolded file contains `## User` block, no exchange component
@@ -117,17 +122,46 @@ fn init_project() -> Result<()> {
     std::fs::create_dir_all(agent_doc_dir)?;
     eprintln!("[init] Created {}", agent_doc_dir.display());
 
-    // Install SKILL.md
+    // Install SKILL.md. The installer prints the real harness and path.
+    let generic = crate::skill::install_env_is_generic();
     crate::skill::install_and_check_updated()?;
-    eprintln!("[init] Installed .claude/skills/agent-doc/SKILL.md");
 
-    eprintln!("[init] Project initialized. Quick start:");
-    eprintln!("[init]   agent-doc init <file.md>   # scaffold a session document");
-    eprintln!("[init]   agent-doc run <file.md>     # run a session");
-    eprintln!("[init]   agent-doc watch             # watch for changes and auto-run");
+    for line in project_init_next_steps(generic) {
+        eprintln!("{line}");
+    }
 
     Ok(())
 }
+
+/// The "what now" lines `agent-doc init` prints after project init.
+///
+/// `generic` is true when no harness was detected from the calling shell (the
+/// usual case for a new user running `init` in a plain terminal), so the skill
+/// went to `.agent/skills/`, which no harness reads on its own.
+pub(crate) fn project_init_next_steps(generic: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    if generic {
+        lines.push(
+            "[init] No agent harness detected from this shell, so the skill went to .agent/skills/ (no harness reads it automatically).".to_string(),
+        );
+        lines.push(
+            "[init]   Install it for your agent: agent-doc skill install --harness claude   # or: codex, grok, opencode, --all".to_string(),
+        );
+    }
+    lines.push("[init] Project initialized. Next steps:".to_string());
+    lines.push(
+        "[init]   agent-doc init notes.md \"My Topic\"   # create a session document".to_string(),
+    );
+    lines.push(
+        "[init]   write a request in it, then run a turn: your editor plugin, /agent-doc notes.md in Claude Code, or agent-doc run notes.md".to_string(),
+    );
+    lines.push("[init]   .agent-doc/ holds local runtime state; add it to .gitignore".to_string());
+    lines.push(format!("[init]   Getting started: {GETTING_STARTED_URL}"));
+    lines
+}
+
+/// Public entry point for a new user, printed by `init` and `--help`.
+pub(crate) const GETTING_STARTED_URL: &str = "https://github.com/btakita/agent-doc#getting-started";
 
 /// Scaffold a new session document, lazily initializing the project if needed.
 fn init_file(
@@ -192,6 +226,28 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_init_next_steps_name_the_harness_install_when_none_was_detected() {
+        let generic = project_init_next_steps(true).join("\n");
+        assert!(
+            generic.contains("agent-doc skill install --harness claude"),
+            "{generic}"
+        );
+        // Init must never claim a `.claude/skills` install it did not make.
+        assert!(!generic.contains("Installed .claude/skills"), "{generic}");
+
+        let detected = project_init_next_steps(false).join("\n");
+        assert!(
+            !detected.contains("No agent harness detected"),
+            "{detected}"
+        );
+        for lines in [&generic, &detected] {
+            assert!(lines.contains("agent-doc init notes.md"), "{lines}");
+            assert!(lines.contains(".gitignore"), "{lines}");
+            assert!(lines.contains(GETTING_STARTED_URL), "{lines}");
+        }
+    }
 
     #[test]
     fn editor_session_uses_filename_title_and_preserves_plain_markdown() {

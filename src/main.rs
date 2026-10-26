@@ -1770,11 +1770,25 @@ pub enum TurnStatusAction {
     },
 }
 
+/// Shown after the (long) command list so a new user knows which handful of
+/// commands to start with. Keep it in step with the README "Getting started"
+/// section; `tests/test_cli.rs` pins both.
+const GETTING_STARTED_HELP: &str = "\
+Getting started:
+  cd your-project && agent-doc init          Set up .agent-doc/ in a git repository
+  agent-doc skill install --harness claude   Teach your agent the workflow (or: codex, grok, opencode, --all)
+  agent-doc plugin install jetbrains         Optional editor plugin (or: vscode)
+  agent-doc init notes.md \"My Topic\"         Create a session document, then write a request in it
+  agent-doc run notes.md                     Run one turn (or /agent-doc notes.md in Claude Code)
+
+Guide: https://github.com/btakita/agent-doc#getting-started";
+
 #[derive(Parser)]
 #[command(
     name = "agent-doc",
     version,
-    about = "Interactive document sessions with AI agents"
+    about = "Interactive document sessions with AI agents",
+    after_help = GETTING_STARTED_HELP
 )]
 struct Cli {
     #[command(subcommand)]

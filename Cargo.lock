@@ -1325,6 +1325,7 @@ version = "0.35.553"
 name = "agent-doc-markdown-ast"
 version = "0.35.553"
 dependencies = [
+ "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-queue-icons",
  "serde_json",

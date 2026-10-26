@@ -172,6 +172,30 @@ fn parse_open_marker(trimmed: &str) -> Option<(String, String)> {
     Some((name, attrs))
 }
 
+/// Parse a component opener line, returning `(name, attrs)`.
+///
+/// `line` is one source line without its terminator. The opener either stands
+/// alone on the line (surrounding whitespace allowed) or follows the ATX
+/// heading whose text matches its exact tag name, e.g.
+/// `## Run <!-- agent:run priority subagents -->` (GH #374). The heading rule
+/// is owned by [`agent_doc_element::element::component_heading_prefix_matches_tag`],
+/// the same predicate the element parser and structural gate use, so the
+/// overlay that `respond`/queue mutations resolve components through cannot
+/// disagree with `read --component`, `patch`, or `lint` about whether a
+/// heading-anchored opener exists. Text after the marker, or a heading whose
+/// text is not the tag name, is not an opener.
+pub fn parse_open_marker_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("<!--") {
+        return parse_open_marker(trimmed);
+    }
+    let marker_start = line.find("<!--")?;
+    let (name, attrs) = parse_open_marker(line[marker_start..].trim())?;
+    let tag = format!("agent:{name}");
+    agent_doc_element::element::component_heading_prefix_matches_tag(&line[..marker_start], &tag)
+        .then_some((name, attrs))
+}
+
 /// Parse a close marker, returning the name. Accepts both spellings:
 ///   `<!-- /agent:name -->` — the standard slash-then-`agent:name` form
 ///   `<!-- agent:/name -->` — the legacy `agent:`-then-slash form
@@ -188,10 +212,22 @@ fn parse_close_marker(trimmed: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// The overlay [`Component::name`] a raw source tag name projects to:
+/// the runnable spellings `run` and `loop` resolve to `queue`; every other
+/// name is unchanged. Line scanners that match raw open/close tags and then
+/// look the component up in [`components`] must map the raw name through this
+/// first, or an `agent:run` component is never found.
+pub fn projected_component_name(raw_name: &str) -> &str {
+    match raw_name {
+        "run" | "loop" => "queue",
+        other => other,
+    }
+}
+
 /// Project public runnable-component spellings onto the queue AST model after
 /// exact raw open/close matching has succeeded.
 fn project_runnable_component(component: &mut Component) {
-    if matches!(component.name.as_str(), "run" | "loop") {
+    if projected_component_name(&component.name) != component.name {
         if component.name == "loop"
             && !component
                 .attrs
@@ -955,7 +991,7 @@ pub fn components(source: &str) -> Vec<Component> {
             }
             continue;
         }
-        if let Some((name, attrs)) = parse_open_marker(trimmed) {
+        if let Some((name, attrs)) = parse_open_marker_line(content) {
             // A new open marker closes any dangling component implicitly.
             if let Some(mut comp) = open.take() {
                 project_runnable_component(&mut comp);
@@ -1064,6 +1100,83 @@ trailing residue
         assert!(!queue.items[3].text.contains("beta"));
         assert!(queue.items[4].struck);
         assert!(!queue.items[4].text.contains("residue"));
+    }
+
+    /// GH #374: an opener that shares a line with its matching ATX heading is a
+    /// component opener here too, exactly as `agent_doc_element::element::parse`
+    /// accepts it. Before the fix the overlay required `<!--` to lead the line,
+    /// so every respond mutation resolving `queue` through this model reported
+    /// "component `queue` was not found" while `read --component queue`,
+    /// `patch`, and `lint` all saw the component.
+    #[test]
+    fn heading_anchored_openers_parse_like_the_element_parser() {
+        let doc = concat!(
+            "# Session\n\n",
+            "## Run <!-- agent:run priority subagents -->\n",
+            "- ship it\n",
+            "  indented continuation\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Loop <!-- agent:loop interval=5m -->\n",
+            "- poll ci\n",
+            "<!-- /agent:loop -->\n\n",
+            "## Backlog <!-- agent:backlog priority -->\n",
+            "1. [ ] [#alpha] first task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let parsed = components(doc);
+        let element = agent_doc_element::element::parse(doc).expect("element parser accepts");
+        assert_eq!(
+            parsed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            element.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            "overlay and element parser must resolve the same components"
+        );
+        assert_eq!(
+            parsed.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+            vec!["queue", "queue", "backlog"]
+        );
+        let run = &parsed[0];
+        assert_eq!(run.attrs, "priority subagents");
+        assert_eq!(
+            run.items
+                .iter()
+                .map(|i| i.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["ship it\n  indented continuation", "do [#alpha]"]
+        );
+        assert!(doc[run.start_byte..].starts_with("## Run <!-- agent:run"));
+        assert!(doc[..run.end_byte].ends_with("<!-- /agent:run -->\n"));
+        let looped = &parsed[1];
+        assert!(looped.attrs.split_whitespace().any(|a| a == "loop"));
+        assert_eq!(looped.items[0].text, "poll ci");
+        assert_eq!(parsed[2].items[0].id, "alpha");
+    }
+
+    /// The heading anchor stays fail-closed: prose that is not the exact tag
+    /// name, text after the marker, a closing tag after a heading, and a
+    /// marker inside inline code never open a component.
+    #[test]
+    fn non_matching_heading_prefixes_do_not_open_components() {
+        for line in [
+            "## Notes about runs <!-- agent:run -->",
+            "## Run <!-- agent:run --> trailing",
+            "Run <!-- agent:run -->",
+            "####### Run <!-- agent:run -->",
+            "    ## Run <!-- agent:run -->",
+            "## Run `<!-- agent:run -->`",
+            "## Run <!-- /agent:run -->",
+        ] {
+            assert_eq!(parse_open_marker_line(line), None, "{line}");
+        }
+        assert_eq!(
+            parse_open_marker_line("  ### RUN <!-- agent:run go -->"),
+            Some(("run".to_string(), "go".to_string()))
+        );
+        assert_eq!(
+            parse_open_marker_line("  <!-- agent:queue go -->  "),
+            Some(("queue".to_string(), "go".to_string()))
+        );
     }
 
     #[test]

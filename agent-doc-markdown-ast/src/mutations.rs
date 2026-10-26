@@ -761,6 +761,38 @@ mod tests {
         );
     }
 
+    /// GH #374: respond resolves the runnable component through these node
+    /// mutations. A `## Run <!-- agent:run ... -->` heading-anchored opener must
+    /// resolve as `queue` and consume by node key instead of failing with
+    /// "component `queue` was not found".
+    #[test]
+    fn heading_anchored_run_component_resolves_for_node_mutations() {
+        let doc = concat!(
+            "## Run <!-- agent:run priority subagents -->\n",
+            "- do [#alpha]\n",
+            "- free-text head\n",
+            "<!-- /agent:run -->\n",
+        );
+        let nodes = item_nodes_all(doc, "queue").expect("queue component resolves");
+        assert_eq!(nodes.len(), 2);
+        let head = nodes
+            .iter()
+            .find(|node| node.item.text == "free-text head")
+            .unwrap();
+
+        let updated = consume_node(doc, "queue", &head.node_key).unwrap();
+
+        assert_eq!(
+            updated,
+            concat!(
+                "## Run <!-- agent:run priority subagents -->\n",
+                "- do [#alpha]\n",
+                "- ~~free-text head~~\n",
+                "<!-- /agent:run -->\n",
+            )
+        );
+    }
+
     #[test]
     fn consume_strikes_exact_node_key_without_matching_text() {
         let nodes = item_nodes(DOC, "queue").unwrap();

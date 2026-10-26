@@ -1268,7 +1268,14 @@ fn component_marker_tag(doc: &str, marker_start: usize, marker_end: usize) -> Op
 /// Requiring the heading text to equal the exact source tag name keeps prose
 /// such as `## Notes about queues <!-- agent:run -->` fail-closed. Closing tags
 /// remain standalone.
-fn component_heading_prefix_matches_tag(prefix: &str, tag: &str) -> bool {
+///
+/// `prefix` is the raw line text before `<!--` (indentation included) and
+/// `tag` is the exact opening tag token (`agent:run`). This is the single
+/// owner of the heading-anchor rule: the element parser, the structural gate,
+/// and the markdown-AST overlay that respond/queue mutations resolve
+/// components through all call it, so no scanner can accept a heading-anchored
+/// opener that another rejects (GH #374).
+pub fn component_heading_prefix_matches_tag(prefix: &str, tag: &str) -> bool {
     let Some(name) = tag.strip_prefix("agent:") else {
         return false;
     };

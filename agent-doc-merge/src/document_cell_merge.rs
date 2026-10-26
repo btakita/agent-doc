@@ -284,9 +284,10 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
     let mut inner: Vec<String> = Vec::new();
     let mut injected = false;
     for line in body.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        let content = line.trim_end_matches(['\n', '\r']);
+        let trimmed = content.trim();
         if !inside_exchange {
-            if open_marker_name(trimmed).as_deref() == Some(EXCHANGE_COMPONENT) {
+            if open_marker_name(content).as_deref() == Some(EXCHANGE_COMPONENT) {
                 inside_exchange = true;
             }
             out.push_str(line);
@@ -667,7 +668,14 @@ fn find_item<'a>(comp: Option<&'a Component>, id: &str) -> Option<&'a Item> {
     comp?.items.iter().find(|i| i.id == id)
 }
 
+/// Look up a component by its raw source tag name or its overlay name.
+///
+/// The body scan matches raw open/close tags (`agent:run`), while the overlay
+/// projects the runnable spellings to `queue`. Comparing the raw name directly
+/// never found an `agent:run` component, so its whole body was dropped from the
+/// merged document (GH #374).
 fn find_comp<'a>(comps: &'a [Component], name: &str) -> Option<&'a Component> {
+    let name = agent_doc_markdown_ast::overlay::projected_component_name(name);
     comps.iter().find(|c| c.name == name)
 }
 
@@ -1142,9 +1150,10 @@ fn component_inner_lines(name: &str, source: &str) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut inside = false;
     for line in source.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\n', '\r']).trim();
+        let content = line.trim_end_matches(['\n', '\r']);
+        let trimmed = content.trim();
         if !inside {
-            if open_marker_name(trimmed).as_deref() == Some(name) {
+            if open_marker_name(content).as_deref() == Some(name) {
                 inside = true;
             }
             continue;
@@ -1165,18 +1174,16 @@ fn record(outcomes: &mut Vec<NodeOutcome>, comp: &str, id: &str, kind: OutcomeKi
     });
 }
 
-/// Recognize an `<!-- agent:name attrs -->` open marker line → name.
-/// Mirrors [`agent_doc_markdown_ast::overlay`] marker grammar without depending on its byte spans
-/// (the overlay's `Component::end_byte` is only reliable for the `agent:/name`
-/// close spelling, so this merge does its own line scan).
-fn open_marker_name(trimmed: &str) -> Option<String> {
-    let inner = trimmed.strip_prefix("<!--")?.strip_suffix("-->")?.trim();
-    let rest = inner.strip_prefix("agent:")?;
-    if rest.starts_with('/') {
-        return None; // close marker
-    }
-    let name = rest.split_whitespace().next()?;
-    (!name.is_empty()).then(|| name.to_string())
+/// Recognize an `<!-- agent:name attrs -->` open marker line → raw name.
+///
+/// Delegates to [`agent_doc_markdown_ast::overlay::parse_open_marker_line`], so a
+/// heading-anchored opener (`## Run <!-- agent:run -->`) opens a component here
+/// exactly when the overlay and element parser accept it (GH #374). The merge
+/// still does its own line scan for the body (the overlay's `Component::end_byte`
+/// is only reliable for the `agent:/name` close spelling); only the opener
+/// grammar is shared. `line` is the source line without its terminator.
+fn open_marker_name(line: &str) -> Option<String> {
+    agent_doc_markdown_ast::overlay::parse_open_marker_line(line).map(|(name, _)| name)
 }
 
 /// Recognize a close marker line in either spelling (`<!-- /agent:name -->` or
@@ -1320,8 +1327,9 @@ fn merge_components_into_body(
                     // the merge silently lose a free-text queue head, trip the
                     // anti-data-loss gate, and decline forever (the persistent
                     // `live_prompt_drift` churn).
-                    let merged =
-                        merge_component_items(name, base_comp, ours_comp, tc, outcomes, advisories);
+                    let merged = merge_component_items(
+                        &tc.name, base_comp, ours_comp, tc, outcomes, advisories,
+                    );
                     out.push_str(&merge_nonexchange_inner(&component_inner, &merged));
                 }
                 component_inner.clear();
@@ -1335,7 +1343,7 @@ fn merge_components_into_body(
         }
 
         // Not inside a component.
-        if let Some(name) = open_marker_name(trimmed) {
+        if let Some(name) = open_marker_name(content.trim_end_matches('\r')) {
             out.push_str(line); // open marker line, verbatim
             open = Some(name);
             continue;
@@ -1365,7 +1373,7 @@ fn merge_components_into_body(
             out.push_str(&merged_inner);
         } else if let Some(tc) = find_comp(theirs_comps, &name) {
             let merged =
-                merge_component_items(&name, base_comp, ours_comp, tc, outcomes, advisories);
+                merge_component_items(&tc.name, base_comp, ours_comp, tc, outcomes, advisories);
             if !out.ends_with('\n') && !out.is_empty() {
                 out.push('\n');
             }
@@ -1448,6 +1456,40 @@ mod tests {
             .find(|c| c.name == comp)
             .map(|c| c.items.into_iter().map(|i| i.id).collect())
             .unwrap_or_default()
+    }
+
+    /// GH #374: the runnable component merges by node identity whatever its
+    /// spelling or anchor. The body scan matched the raw tag name (`run`)
+    /// against overlay components already projected to `queue`, so an
+    /// `agent:run` merge emitted an EMPTY component (every item dropped); and a
+    /// heading-anchored opener was not recognized at all, so the agent's strike
+    /// was silently replaced by the operator copy.
+    #[test]
+    fn runnable_component_merges_identically_for_every_spelling_and_anchor() {
+        for (open, close) in [
+            ("<!-- agent:queue -->", "<!-- /agent:queue -->"),
+            ("<!-- agent:run -->", "<!-- /agent:run -->"),
+            ("## Run <!-- agent:run priority -->", "<!-- /agent:run -->"),
+            ("## Queue <!-- agent:queue -->", "<!-- /agent:queue -->"),
+        ] {
+            let doc = |items: &str| format!("# T\n\n{open}\n{items}{close}\n");
+            let base = doc("- do [#a] task\n");
+            let ours = doc("- ~~do [#a] task~~\n");
+            let theirs = doc("- do [#a] task\n- do [#b] next\n");
+
+            let m = document_cell_merge(&base, &ours, &theirs);
+
+            assert_eq!(
+                m.merged_doc,
+                doc("- ~~do [#a] task~~\n- do [#b] next\n"),
+                "{open}"
+            );
+            assert!(
+                !m.outcomes.is_empty() && m.outcomes.iter().all(|o| o.component == "queue"),
+                "{open}: {:?}",
+                m.outcomes
+            );
+        }
     }
 
     // ----- transition table: one test per row ------------------------------

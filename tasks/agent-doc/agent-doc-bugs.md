@@ -331,7 +331,12 @@ Verification:
 Confidence is high in the root cause and notification fix; end-to-end plugin confirmation awaits the repository’s pre-existing test/build conflicts being cleared. No external escalation was required. The two code files remain scoped working-tree changes because the `src/agent-doc` index already contains unrelated unresolved merge conflicts, so a safe isolated commit is not possible from this checkout.
 
 Session note: the exchange is large (265 lines across 17 response sections); the active auto-clear queue will reset context after this closeout.
-<!-- agent:boundary:7cc81a36 -->
+> **Chat prompt (#chatprompt:93f05b0003ff):** Are subagents runningU?
+
+### Re: subagent status — gpt-5 · 2026-10-25T21:38-04:00
+
+No. The live roster contains only the primary `/root` agent; no subagents are running.
+<!-- agent:boundary:b6886298 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -435,7 +440,6 @@ force-write the file, and do not delete the queue items.                        
 <!-- agent:loop id=issues interval=1h priority -->
 - ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
 - ☑️ [#subagent:release_publish_patch#3] release + publish
-- ~~Run Agent Doc issue: Sync failed: {"applied":false,"reason":"superseded_by_newer_layout_state","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":9,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
 <!-- /agent:loop -->
 

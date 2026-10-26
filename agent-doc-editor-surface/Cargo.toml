@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-editor-surface"
-version = "0.35.551"
+version = "0.35.552"
 edition = "2024"
 description = "Pure editor-surface observation and tmux-intent derivation for agent-doc"
 license = "Apache-2.0"
@@ -11,9 +11,9 @@ publish = false
 name = "agent_doc_editor_surface"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.551" }
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.551" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.551" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.552" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.552" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.552" }
 lazily = { version = "0.61.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 

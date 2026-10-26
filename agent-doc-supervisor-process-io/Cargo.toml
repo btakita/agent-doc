@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-supervisor-process-io"
-version = "0.35.551"
+version = "0.35.552"
 edition = "2024"
 description = "Supervisor process observer adapters for agent-doc"
 license = "Apache-2.0"
@@ -11,20 +11,20 @@ publish = false
 name = "agent_doc_supervisor_process_io"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.551" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.551" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.551" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.551" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.551" }
-agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.551" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.551" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.551" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.551" }
-agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.551" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.551" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.552" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.552" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.552" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.552" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.552" }
+agent-doc-model-tier = { path = "../agent-doc-model-tier", version = "0.35.552" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.552" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.552" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.552" }
+agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.552" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.552" }
 anyhow = "1"
 libc = "0.2"
 
 [dev-dependencies]
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.551" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.552" }
 tempfile = "3"

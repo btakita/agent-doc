@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-syntax"
-version = "0.35.551"
+version = "0.35.552"
 edition = "2024"
 description = "Pure editor visual syntax tokenization for agent-doc documents"
 license = "Apache-2.0"
@@ -11,5 +11,5 @@ publish = false
 name = "agent_doc_syntax"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.551" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.552" }
 serde = { version = "1", features = ["derive"] }

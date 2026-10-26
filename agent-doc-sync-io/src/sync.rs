@@ -2224,6 +2224,46 @@ fn normalize_stash_window_name(tmux: &Tmux, window_id: &str) {
     let _ = agent_doc_tmux_io::rename_window(tmux, window_id, "stash");
 }
 
+/// Give displaced open-cycle owners a stable hidden role before tmux can
+/// auto-rename their new window from the foreground `agent-doc` process.
+/// Otherwise the post-sync doctor sees a false duplicate target and joins the
+/// protected pane straight back into the exact-visible editor projection.
+fn pin_displaced_open_cycle_windows_as_stash(
+    tmux: &Tmux,
+    target_window: Option<&str>,
+    pane_ids: &HashSet<String>,
+) -> Result<()> {
+    let target_window_id = target_window
+        .and_then(|target| agent_doc_tmux_io::target_window_id(tmux, target));
+    let mut pinned_windows = HashSet::new();
+    for pane_id in pane_ids {
+        let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
+            continue;
+        };
+        if target_window_id.as_deref() == Some(window_id.as_str())
+            || !pinned_windows.insert(window_id.clone())
+        {
+            continue;
+        }
+        for option in ["automatic-rename", "allow-rename"] {
+            tmux.raw_cmd(&["set-window-option", "-t", &window_id, option, "off"])
+                .with_context(|| {
+                    format!(
+                        "failed to pin displaced open-cycle window {window_id} option {option}"
+                    )
+                })?;
+        }
+        agent_doc_tmux_io::rename_window(tmux, &window_id, "stash").with_context(|| {
+            format!("failed to classify displaced open-cycle window {window_id} as stash")
+        })?;
+        sync_log(&format!(
+            "reconcile_open_cycle_window_stashed window={} reason=protected_owner_displaced",
+            window_id
+        ));
+    }
+    Ok(())
+}
+
 fn sync_log(msg: &str) {
     crate::append_sync_log(msg);
 }
@@ -5644,6 +5684,8 @@ fn run_with_options_internal_at_root(
     // layout from BEFORE the router ran.
     agent_doc_tmux_io::observation_cache::observe_external_mutation();
     let result = result?;
+    pin_displaced_open_cycle_windows_as_stash(tmux, window, &logged_open_cycle_panes.borrow())?;
+    agent_doc_tmux_io::observation_cache::observe_external_mutation();
     enforce_synced_pane_order(
         tmux,
         &sync_project_root,
@@ -13297,6 +13339,13 @@ mod tests {
         assert!(
             !ordered.contains(&pane_a),
             "open-cycle extra pane should be stashed while other documents sync"
+        );
+        let pane_a_window = iso.pane_window(&pane_a).unwrap();
+        assert!(
+            window_name_for_window_id(&iso, &pane_a_window)
+                .as_deref()
+                .is_some_and(is_stash_window_name),
+            "post-sync doctor should classify the displaced open-cycle pane as stash"
         );
         assert!(
             ordered.contains(&pane_c),

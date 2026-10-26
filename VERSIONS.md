@@ -2,6 +2,24 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.552
+
+- **Queue and tracked-work lifecycle state now converges through coordinator closeout.** Reported handoffs become
+  drainable `☑️` work, routed prompts stay in `agent:run`, and Todo backlinks support many-to-many completion
+  across backlog, queue, icebox, and Done while preserving genuinely active and lost states.
+- **Controller, tmux, and Remote Dev recovery use durable document-root evidence.** Project auto-sync survives
+  controller restart, unproven layout panes recover without guessing, and Remote Dev snapshots route through each
+  session document root with explicit connected-but-not-accepted diagnostics. Full tmux sync also pins a displaced
+  open-cycle owner in `stash` before automatic window renaming can make the doctor undo the requested projection.
+- **JetBrains Marketplace builds no longer link private IntelliJ APIs.** Classic, 2026.2, and 2026.3 packages use
+  public or erased capability boundaries, fail closed for unsupported one-sided selection, and enforce zero
+  internal or override-only Plugin Verifier findings.
+- **Formal and integration coverage follows the safer runtime contracts.** The obsolete private fallback binding is
+  retired, reported closeout timing is deterministic, and conformance/TLA coverage protects the new lifecycle,
+  routing, and editor-recovery behavior.
+- **Local editor packages advance with these fixes.** JetBrains classic, 2026.2, and 2026.3 package generations are
+  0.2.825, 0.2.826, and 0.2.827 respectively; modular IDEs still require a restart to load the replaced plugin.
+
 ## 0.35.551
 
 - **Reported queue work now converges to the visible document without overwriting concurrent edits.** Completion

@@ -1,9 +1,9 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: ba846c4c-2e01-4e12-9539-096faec207ee
+  claude: ef7e9a9a-cca8-4166-a012-fd43b3cb483b
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -442,6 +442,23 @@ Dispatched `do [#layoutunprovenliveverify]` to `subagent:layout_liveverify` as g
 The exact `release + publish` instruction is restored immediately after that live-verification head. Its durable claim points to an old v0.35.551 report, so that historical handback is not fresh completion evidence for this request. The coordinator will run a fresh release only after the current layout fix is integrated and live-verified.
 
 The exchange is large, but the active queue remains in progress, so I did not compact it.
+
+### Re: release + publish ⟦effect:1⟧ / ⟦effect:2⟧ — opus-5 · 2026-10-26T08:31-04:00
+
+> **Queue prompt:** release + publish ⟦effect:1⟧
+
+I closed the `⟦effect:1⟧` row without a new release. Its ☑️ marker came from `subagent:release_publish_patch#3`, which reported about 52 hours ago. That report is the old v0.35.551 release handback, not new work. The newer release is already out: `v0.35.552` is the Latest GitHub release, with 24 assets, and PyPI serves 0.35.552. The installed CLI is also 0.35.552.
+
+I held the fresh `release + publish ⟦effect:2⟧` and did not dispatch it to a subagent, for two reasons:
+
+- **Subagents cannot release.** The coordinator rules forbid a subagent from running a release, so a dispatched worker could not do this item. The coordinator has to run the release.
+- **It should wait for the live-verify.** `do [#layoutunprovenliveverify]` is still running as `subagent:layout_liveverify#2`, with about 1h50m left on its claim. Its code fix `cb2f9068e3` already shipped in v0.35.552. Only one commit has landed since that tag: `42bd3810a8`, the fix that stops release promotions from evicting each other. If I released now, the release would ship almost nothing new. Its live tmux suite would also run alongside the worker's live tmux layout check. Waiting means that if the live-verify finds a new defect, its fix goes into the same release. This matches the plan in the previous closeout.
+
+Once `layout_liveverify#2` reports back, the coordinator should integrate its result and then run `⟦effect:2⟧` as one release.
+
+I also found a defect. When agent-doc added the ⟦effect⟧ annotations to the two identical `release + publish` rows, the stale `release_publish_patch#3` claim moved from its original row onto the freshly restored one. The original row became 📥. That is why the restored request looked complete. I filed it as `#claimrowmigrate`, with a matching check in the todo list.
+
+The other ☑️ rows in `Queue: Main` are completed handbacks that shipped in v0.35.552, as the 03:27 closeout recorded. They are not unfinished work. The exchange is now 400 lines, but the queue is still active, so I did not compact it.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -451,7 +468,7 @@ The exchange is large, but the active queue remains in progress, so I did not co
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
-- release + publish
+- ☑️ [#subagent:release_publish_patch#3] release + publish ⟦effect:1⟧
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -543,7 +560,7 @@ force-write the file, and do not delete the queue items.                        
 ---
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
-- ☑️ [#subagent:release_publish_patch#3] release + publish
+- 📥 release + publish ⟦effect:2⟧
 - ~~There is still only 1 tmux pane with 2 agent-doc documents open in the editor. Sync still fails. How can we ensure this issue won't happen again?~~
 - ~~Add a deterministic controller/SimWorld regression and routing-spec clause for cross-root Sync Tmux Layout with two editor-visible documents where the second has a ready actor bound to a dead or ownership-unproven pane; assert ProvisionForLayout replaces the stale binding and converges to two panes while ObserveOnly never focuses/reuses the unproven pane.~~
 - ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
@@ -558,6 +575,7 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:jetbrains_submission_feedback#1] Read the feedback from the JetBrains agent-doc plugin submission. Fix any issues.
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
+- do [#claimrowmigrate]
 <!-- /agent:run -->
 
 ## Run: Issues
@@ -576,10 +594,12 @@ force-write the file, and do not delete the queue items.                        
 - [x] [#helpregisterjetbrains] Complete [#helpregisterjetbrains]: create the JetBrains Marketplace vendor/listing with a hidden bootstrap upload, create a permanent token, and add it to btakita/agent-doc as JETBRAINS_MARKETPLACE_TOKEN. (source: agent:review [#helpregisterjetbrains])
 - [x] [#hj2r] Restart IntelliJ IDEA 2026.2, then verify Agent Doc formatting and its Tools/context-menu commands are available.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
+- [ ] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
 <!-- /agent:todo -->
 
 ## Backlog
 <!-- agent:backlog priority queue -->
+- [ ] [#claimrowmigrate] [agent-doc] On 2026-10-26, when the two identical `release + publish` queue rows were given ⟦effect:1⟧/⟦effect:2⟧ annotations, the 52h-old reported claim `subagent:release_publish_patch#3` (the v0.35.551 release handback) moved from its original row onto the freshly restored row, and the original row became 📥. A reported claim must stay bound to the row identity it was issued for; an annotation edit or text-identical sibling must never inherit it. Add a regression for duplicate-text queue rows plus an effect annotation edit. (todos: [#claimrowmigrate-check])
 - [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] ☑️ [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->

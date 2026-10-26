@@ -1,6 +1,5 @@
 package com.github.btakita.agentdoc.split.backend
 
-import com.intellij.openapi.client.ClientType
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -30,38 +29,17 @@ class BackendGuestSelectionFallbackResumeTest {
     }
 
     @Test
-    fun fallbackResumesTheProjectionBeforeForwardingASelection() {
-        val delivery =
-            source()
-                .substringAfter("ApplicationManager.getApplication().invokeLater {")
-                .substringBefore("FileEditorManagerEvent(")
-        val fence = delivery.indexOf("ingress.layoutAuthorityActive.value")
-        val resume = delivery.indexOf("listener.resumeControllerProjection()")
-        val forward = delivery.indexOf("listener.selectionChanged(")
-        assertTrue(fence >= 0 && resume >= 0 && forward >= 0, delivery)
-        assertTrue(
-            fence < resume,
-            "resume only after the effect-time fence proves no frontend snapshot is authoritative",
-        )
-        assertTrue(resume < forward, "the forwarded selection must publish as a live frame")
-    }
-
-    @Test
-    fun remoteDevControllerSelectionCarriesFocusEvidence() {
+    fun oneSidedInstallDoesNotLinkPrivateClientSessionApis() {
         val source = source()
-        assertTrue(
-            source.contains(
-                "remoteControllerSelectionFocusEvidence =\n" +
-                    "                                        BackendRemoteSessionGate.selectionProvesFocus(session.type)",
-            ),
-            source,
-        )
+        assertTrue(source.contains("Marketplace-compatible split frontend is required"), source)
+        assertTrue(!source.contains("ClientFileEditorManager"), source)
+        assertTrue(!source.contains("RemoteClientSessionListener"), source)
     }
 
     @Test
     fun missingFrontendDiagnosticNamesTheWorkingTwoSidedInstallRemedy() {
         assertEquals(5_000L, FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS)
-        val diagnostic = frontendAuthorityUnavailableDiagnostic("client-1", ClientType.CONTROLLER)
+        val diagnostic = frontendAuthorityUnavailableDiagnostic("client-1", "CONTROLLER")
         assertTrue(diagnostic.contains("frontend layout publisher unavailable"), diagnostic)
         assertTrue(diagnostic.contains("readiness=blocked"), diagnostic)
         assertTrue(
@@ -69,7 +47,7 @@ class BackendGuestSelectionFallbackResumeTest {
             diagnostic,
         )
         assertTrue(diagnostic.contains("geometry_reason=flat_evidence_has_no_column_geometry"), diagnostic)
-        assertTrue(diagnostic.contains("structural_routing=blocked fallback=focus_only"), diagnostic)
+        assertTrue(diagnostic.contains("structural_routing=blocked fallback=unavailable"), diagnostic)
         assertTrue(diagnostic.contains("JetBrains Client/Gateway"), diagnostic)
         assertTrue(diagnostic.contains("Remote Dev backend"), diagnostic)
         assertTrue(diagnostic.contains("verify both sides report that exact plugin version"), diagnostic)
@@ -87,7 +65,7 @@ class BackendGuestSelectionFallbackResumeTest {
     fun connectedFrontendWithoutAcceptedPublicationIsExplicitlyBlocked() {
         val diagnostic = frontendAuthorityUnavailableDiagnostic(
             "client-1",
-            ClientType.CONTROLLER,
+            "CONTROLLER",
             FRONTEND_AUTHORITY_CONNECTED_WITHOUT_PUBLICATION,
         )
 
@@ -96,6 +74,6 @@ class BackendGuestSelectionFallbackResumeTest {
             diagnostic.contains("readiness_reason=frontend_connected_without_accepted_publication"),
             diagnostic,
         )
-        assertTrue(diagnostic.contains("structural_routing=blocked fallback=focus_only"), diagnostic)
+        assertTrue(diagnostic.contains("structural_routing=blocked fallback=unavailable"), diagnostic)
     }
 }

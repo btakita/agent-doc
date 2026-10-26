@@ -1,9 +1,6 @@
 package com.github.btakita.agentdoc;
 
-import com.intellij.ide.plugins.DynamicPlugins;
 import com.intellij.ide.plugins.IdeaPluginDescriptor;
-import com.intellij.ide.plugins.IdeaPluginDescriptorImpl;
-import com.intellij.ide.plugins.PluginInstaller;
 import com.intellij.ide.plugins.PluginManagerCore;
 import com.intellij.openapi.application.ApplicationInfo;
 import com.intellij.openapi.application.ApplicationManager;
@@ -39,8 +36,8 @@ public final class JetBrainsPluginUpgradeAction {
     public static String run(String archiveValue, String pluginsDirValue, String expectedVersion) {
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
-        AtomicReference<IdeaPluginDescriptorImpl> replacement = new AtomicReference<>();
-        AtomicReference<IdeaPluginDescriptorImpl> released = new AtomicReference<>();
+        AtomicReference<IdeaPluginDescriptor> replacement = new AtomicReference<>();
+        AtomicReference<IdeaPluginDescriptor> released = new AtomicReference<>();
         ApplicationManager.getApplication().invokeAndWait(() -> {
             try {
                 result.set(runOnEdt(archiveValue, pluginsDirValue, expectedVersion, replacement, released));
@@ -55,7 +52,7 @@ public final class JetBrainsPluginUpgradeAction {
             // transport and every write to a document this IDE holds deferred until a restart.
             // Rebuild it from the still-live generation before reporting the failure. This runs
             // here, off the EDT, because the rebuild waits for replica receipts.
-            IdeaPluginDescriptorImpl outgoing = released.get();
+            IdeaPluginDescriptor outgoing = released.get();
             String reason = describeFailure(failure.get()) + recoverAbortedUnload(
                 outgoing != null,
                 () -> isLoaded(outgoing),
@@ -75,7 +72,7 @@ public final class JetBrainsPluginUpgradeAction {
                 );
             }
         }
-        IdeaPluginDescriptorImpl loaded = replacement.get();
+        IdeaPluginDescriptor loaded = replacement.get();
         if (loaded == null) {
             return result.get();
         }
@@ -116,37 +113,40 @@ public final class JetBrainsPluginUpgradeAction {
         String archiveValue,
         String pluginsDirValue,
         String expectedVersion,
-        AtomicReference<IdeaPluginDescriptorImpl> replacement,
-        AtomicReference<IdeaPluginDescriptorImpl> released
+        AtomicReference<IdeaPluginDescriptor> replacement,
+        AtomicReference<IdeaPluginDescriptor> released
     ) {
         Path archive = Path.of(archiveValue).toAbsolutePath().normalize();
         Path pluginsDir = Path.of(pluginsDirValue).toAbsolutePath().normalize();
 
-        IdeaPluginDescriptor descriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        if (!(descriptor instanceof IdeaPluginDescriptorImpl current)) {
+        IdeaPluginDescriptor descriptor = pluginDescriptor(PluginId.getId(PLUGIN_ID));
+        if (descriptor == null) {
             // `#jbdynamicfalsereport`: name the plugins directory this IDE loads from, so the
             // installer can tell "this live IDE owns the target and runs no agent-doc
             // generation" (a fresh install that only a restart loads) from an unrelated IDE.
             return "skip:plugin-not-loaded" + idePluginsPathField();
         }
+        IdeaPluginDescriptor current = descriptor;
         Path expectedRoot = pluginsDir.resolve("agent-doc-jetbrains").toAbsolutePath().normalize();
         if (!sameInstallRoot(current.getPluginPath(), expectedRoot)) {
             return "skip:different-plugin-root:" + current.getPluginPath();
         }
 
         String platformBlocker = dynamicUpgradeBlockerReason(
-            asyncPostReconfigurationClassloaderAwaitIsPresent(DynamicPlugins.class.getClassLoader())
+            asyncPostReconfigurationClassloaderAwaitIsPresent(descriptor.getPluginClassLoader())
         );
         if (platformBlocker != null) {
             throw new IllegalStateException(platformBlocker);
         }
 
+        Class<?> dynamicPlugins = platformClass("com.intellij.ide.plugins.DynamicPlugins");
+        Object dynamicPluginsInstance = singletonInstance(dynamicPlugins);
         if (isLoaded(current)) {
             unloadOutgoingGeneration(
                 () -> invokeDescriptorMethod(
-                    DynamicPlugins.class, DynamicPlugins.INSTANCE, "checkCanUnloadWithoutRestart", current
+                    dynamicPlugins, dynamicPluginsInstance, "checkCanUnloadWithoutRestart", current
                 ),
-                () -> resolveUpdateUnload(DynamicPlugins.class, DynamicPlugins.INSTANCE, current),
+                () -> resolveUpdateUnload(dynamicPlugins, dynamicPluginsInstance, current),
                 () -> {
                     released.set(current);
                     return cleanupOutgoingGeneration(current);
@@ -154,28 +154,28 @@ public final class JetBrainsPluginUpgradeAction {
             );
         }
 
-        IdeaPluginDescriptor residualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        if (residualDescriptor instanceof IdeaPluginDescriptorImpl residual && isLoaded(residual)) {
+        IdeaPluginDescriptor residualDescriptor = pluginDescriptor(PluginId.getId(PLUGIN_ID));
+        if (residualDescriptor != null && isLoaded(residualDescriptor)) {
             throw new IllegalStateException(
                 "JetBrains retained the current plugin generation after update unload: "
-                    + residual.getVersion()
+                    + residualDescriptor.getVersion()
             );
         }
 
-        boolean loaded = PluginInstaller.installAndLoadDynamicPlugin(archive, current);
-        IdeaPluginDescriptor actualDescriptor = PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID));
-        if (!(actualDescriptor instanceof IdeaPluginDescriptorImpl actual)
+        boolean loaded = installAndLoadDynamicPlugin(archive, current);
+        IdeaPluginDescriptor actualDescriptor = pluginDescriptor(PluginId.getId(PLUGIN_ID));
+        if (actualDescriptor == null
             || !loaded
-            || actual == current
-            || actual.getPluginClassLoader() == current.getPluginClassLoader()
-            || !expectedVersion.equals(actual.getVersion())) {
+            || actualDescriptor == current
+            || actualDescriptor.getPluginClassLoader() == current.getPluginClassLoader()
+            || !expectedVersion.equals(actualDescriptor.getVersion())) {
             String actualVersion = actualDescriptor == null ? "missing" : actualDescriptor.getVersion();
             throw new IllegalStateException(
                 "dynamic install returned " + loaded + "; expected a fresh " + expectedVersion
                     + " generation, loaded " + actualVersion
             );
         }
-        replacement.set(actual);
+        replacement.set(actualDescriptor);
         return "ok:" + expectedVersion;
     }
 
@@ -621,7 +621,7 @@ public final class JetBrainsPluginUpgradeAction {
      * method is public bytecode with a module suffix. Failure is closed because loading a
      * replacement beside live old-generation DocumentListeners creates a CRDT echo loop.
      */
-    private static int cleanupOutgoingGeneration(IdeaPluginDescriptorImpl descriptor) {
+    private static int cleanupOutgoingGeneration(IdeaPluginDescriptor descriptor) {
         try {
             ClassLoader loader = descriptor.getPluginClassLoader();
             Class<?> lifecycle = Class.forName(LIFECYCLE_CLASS, true, loader);
@@ -680,7 +680,7 @@ public final class JetBrainsPluginUpgradeAction {
      * after the replacement had already landed irreversibly, and the retry then correctly reported
      * the package byte-identical with no restart required.
      */
-    private static String reattachOpenDocuments(IdeaPluginDescriptorImpl descriptor) {
+    private static String reattachOpenDocuments(IdeaPluginDescriptor descriptor) {
         try {
             Class<?> lifecycle = Class.forName(
                 LIFECYCLE_CLASS,
@@ -1060,14 +1060,59 @@ public final class JetBrainsPluginUpgradeAction {
         return actual.toAbsolutePath().normalize().equals(expected.toAbsolutePath().normalize());
     }
 
-    private static boolean isLoaded(IdeaPluginDescriptorImpl descriptor) {
+    private static boolean isLoaded(IdeaPluginDescriptor descriptor) {
         try {
             Method method = PluginManagerCore.class.getMethod("isLoaded", PluginDescriptor.class);
             return (Boolean) method.invoke(null, descriptor);
         } catch (ReflectiveOperationException unavailableOnOlderPlatform) {
-            return PluginManagerCore.getLoadedPlugins().stream()
-                .anyMatch(loaded -> loaded.getPluginId().equals(descriptor.getPluginId()));
+            return pluginDescriptor(descriptor.getPluginId()) == descriptor;
         }
+    }
+
+    private static IdeaPluginDescriptor pluginDescriptor(PluginId pluginId) {
+        try {
+            Method method = PluginManagerCore.class.getMethod("getPlugin", PluginId.class);
+            return (IdeaPluginDescriptor) method.invoke(null, pluginId);
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException(UPGRADER_FAILED + ": plugin descriptor lookup failed", failure);
+        }
+    }
+
+    private static Class<?> platformClass(String name) {
+        try {
+            return Class.forName(name, true, JetBrainsPluginUpgradeAction.class.getClassLoader());
+        } catch (ClassNotFoundException failure) {
+            throw new IllegalStateException(UPGRADER_FAILED + ": missing " + name, failure);
+        }
+    }
+
+    private static Object singletonInstance(Class<?> owner) {
+        try {
+            return owner.getField("INSTANCE").get(null);
+        } catch (ReflectiveOperationException failure) {
+            throw new IllegalStateException(UPGRADER_FAILED + ": missing " + owner.getName() + ".INSTANCE", failure);
+        }
+    }
+
+    private static boolean installAndLoadDynamicPlugin(Path archive, IdeaPluginDescriptor current) {
+        Class<?> installer = platformClass("com.intellij.ide.plugins.PluginInstaller");
+        try {
+            for (Method candidate : installer.getMethods()) {
+                Class<?>[] parameters = candidate.getParameterTypes();
+                if (candidate.getName().equals("installAndLoadDynamicPlugin")
+                    && Modifier.isStatic(candidate.getModifiers())
+                    && parameters.length == 2
+                    && parameters[0].isInstance(archive)
+                    && parameters[1].isInstance(current)) {
+                    return Boolean.TRUE.equals(candidate.invoke(null, archive, current));
+                }
+            }
+        } catch (ReflectiveOperationException failure) {
+            Throwable cause = failure instanceof InvocationTargetException invocation
+                && invocation.getCause() != null ? invocation.getCause() : failure;
+            throw new IllegalStateException(UPGRADER_FAILED + ": dynamic install failed: " + singleLine(cause), cause);
+        }
+        throw new IllegalStateException(UPGRADER_FAILED + ": dynamic install API is unavailable");
     }
 
 }

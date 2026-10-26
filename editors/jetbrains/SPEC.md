@@ -718,27 +718,16 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   positive vector from a geometry-capable frontend may change structure (GH #250, GH #253,
   GH #343).
 - In the exact-262/263 modular package, an accepted frontend surface snapshot is the
-  authoritative Remote Dev selection/layout source. If no frontend generation has delivered an
-  accepted snapshot (including a one-sided backend install), the backend subscribes to each remote
-  client session's `ClientFileEditorManager.getSelectedEditorWithProviderFlow()` and routes those
-  selection edges through the same `EditorTabSyncListener`. "Remote" is `ClientType.isRemote`: a
-  JetBrains Remote Dev client session is `CONTROLLER` and a Code With Me participant is `GUEST`, so
-  the fallback must admit both and exclude only the local and frontend-process sessions; a
-  guest-only filter never observed a Remote Dev client (GH #262). Existing sessions and
-  `RemoteClientSessionListener.projectSessionInitialized` pass through the same pure gate
-  (`BackendRemoteSessionGate`), at most one subscription per client id. Install logs one
-  `[layout-sync] backend selection fallback installed` line naming the observed sessions
-  (`clientId:type`) or `observing=none`, plus the skipped ones, so a filtered-out install is
-  distinguishable from a fallback that never installed. The fallback is disabled reactively as soon as frontend
-  authority appears and resumes when that authority retires; it never races the pane-tagged source.
+  authoritative Remote Dev selection/layout source. A one-sided backend install has no supported
+  IntelliJ API for observing client-scoped editor selection, so it fails closed with the explicit
+  two-sided-install remedy instead of linking Marketplace-prohibited client-session internals.
   A connected remote frontend without an accepted controller publication remains the pane-layout
   authority fence (the backend never guesses geometry), but exposes readiness as blocked with
   `frontend_connected_without_accepted_publication`. The backend routes the complete snapshot to
   the controller root resolved from every classified session-document path, never to an unrelated
   IDE `Project.basePath`; delivery failure therefore names a real controller boundary rather than
-  silently disabling both the frontend publication and the fallback.
-  This preserves main-layout tab switching, but cannot invent detached-window identities or
-  frontend presentation capability. An empty backend `EditorWindow` collection in this topology is
+  silently disabling frontend publication.
+  An empty backend `EditorWindow` collection in this topology is
   unknown liveness evidence, not an authoritative empty surface set: publishing
   `surface-unavailable` must not immediately retire that endpoint (GH #260).
 - An exact `(client, surface)` `editor_surface_forget` is terminal for the plugin's
@@ -766,11 +755,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `EditorTabSyncListener` passes `projectionLive` (not closed, and not between
   `retireControllerProjection` and `resumeControllerProjection`) for both the surface and focus
   lanes. If a handoff retires the projection while the re-send is in flight, the transport retires
-  the re-registered endpoint at its new generation. The Remote Dev backend selection fallback calls
-  `resumeControllerProjection()` after its effect-time frontend fence and before forwarding a
-  selection, so a fallback resuming on a frame the frontend handoff retired re-registers instead
-  of staying muted at the process generation (the model's `FallbackMute` wedge). A frame the
-  listener does not own keeps the fence.
+  the re-registered endpoint at its new generation. A frame the listener does not own keeps the
+  fence.
+- Marketplace artifacts must not statically link IntelliJ internal or override-only APIs. Gradle
+  treats both Plugin Verifier categories as hard failures for classic, exact-262, and exact-263
+  packages; artifact verification also rejects the private imports named by Marketplace review.
 - Every agent-document selection and visible-layout change reports one editor-surface observation containing the focused document, visible documents, open documents, and detected columns. Session-document classification reads the live editor buffer and requires agent-doc frontmatter; a plain Markdown plan is never a desired tmux target. When a non-session tab is selected, that split retains its last classified agent document and the event republishes spanning layout only. Layout, file-open, and IDE-activation observations set `preserve_focus`: they may reconcile pane membership but cannot derive `Focus`, update controller focus tracking, or attach a focus target to structural sync. This keeps a background project/root publication from overwriting a newer explicit focus projection in a mixed-root split surface. An agent-document `selectionChanged` event carries pane-focus authority only when its file is selected in JetBrains' active editor window; background-split selection remains a layout-only observation and omits the event file as preferred focus. The selection callback captures only this typed authority plus its event file and schedules projection; a later EDT pass snapshots immutable editor state, while project-root discovery, filesystem access, patch-watch registration, JSON construction, native transport, and controller delivery run on a serialized background executor. Native transport adds an ordered reload generation/cursor and publishes it to an existing controller. The controller's process-scoped reactive graph derives idle or layout reconciliation and owns the tmux effect. One spanning editor surface has exactly one active controller-root subscription. Candidate roots are recovered from all open session documents on every publication; before admitting the replacement observation, the listener requests same-family retirement for incompatible roots. The controller stops every retained generation of the requester's own client family no newer than the requester, so a prior JVM cannot contract the tmux surface while the replacement controller is still reconciling, while a delayed old-JVM retirement cannot stop the replacement. A family names one IDE installation, not the JetBrains brand: the surface lane is `jetbrains@<productCode>.<config-dir hash>-pid:<pid>` (the IntelliJ Platform admits one running instance per config directory), so a restart of the same IDE retires its predecessor while a concurrently running second IDE on the same project (IntelliJ IDEA and Rider, or a stable and an EAP install) keeps its own subscription when the other IDE retires a root on a cross-root focus move or shutdown (`#idearidereditors`). A legacy unscoped `jetbrains-pid:` observation from a pre-`#idearidereditors` plugin is retired by any scoped family on the same lane. A failed pre-publication forget stays tracked and is retried after publication and on the next observation. Active selection and component-focus also publish one generation-fenced `focus_only` surface Source to the focused agent document's own controller root under a distinct `jetbrains-focus@<installation>-pid:<pid>` family. The controller graph derives `Focus` and must never infer structural `Sync` from that deliberately narrow payload. When its exact receipt reports a stashed, dead, reaped, missing, or non-focusable owner, the adapter generation-fences the receipt and republishes the complete spanning surface as a forced focus-authoritative structural edge; only that layout graph may restore the owner and reconcile pane cardinality. Component-focus also republishes the spanning surface directly. This separate retained handoff is required when one visible editor surface spans a superproject document and a submodule document. The plugin never chooses a pane or tmux window, and a missing-owner outcome installs no reverse-focus suppression lease.
 - A manual Sync Tmux Layout or Load Tmux Window surface-reference fallback reuses the first pass's
   focused file and visible-document request. It captures only layout evidence on the EDT and sends

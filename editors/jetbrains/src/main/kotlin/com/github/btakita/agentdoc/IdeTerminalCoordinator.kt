@@ -5,10 +5,8 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
-import com.intellij.ide.plugins.PluginManagerCore
 import java.awt.datatransfer.StringSelection
 
 internal data class IdeTerminalEnsureOutcome(
@@ -100,7 +98,7 @@ internal object IdeTerminalCoordinator {
             ApplicationManager.getApplication().invokeLater {
                 if (project.isDisposed) return@invokeLater
                 val terminalAvailable =
-                    PluginManagerCore.getPlugin(PluginId.getId(TERMINAL_PLUGIN_ID))?.isEnabled == true
+                    MarketplacePlatformBridge.pluginEnabled(TERMINAL_PLUGIN_ID)
                 if (!terminalAvailable) {
                     notifyManualAttach(project, outcome.attachCommand, "JetBrains Terminal plugin is unavailable")
                     onReady()

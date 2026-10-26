@@ -19,7 +19,6 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationInfo
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.fileEditor.impl.EditorWindow
-import com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -326,14 +325,16 @@ internal class Exact262DetachedPresentationAdapter private constructor(
         val original = requireNotNull(LocalFileSystem.getInstance().findFileByPath(document)) {
             "terminal document is unavailable"
         }
-        val tab = terminalTabs.createTabBuilder()
+        val tabBuilder = terminalTabs.createTabBuilder()
             .workingDirectory(project.basePath)
             .shellCommand(terminalCommand(viewSession))
             .tabName("Agent Doc isolated view")
             .requestFocus(true)
             .deferSessionStartUntilUiShown(true)
-            .shouldAddToToolWindow(false)
-            .createTab()
+        tabBuilder.javaClass.methods.firstOrNull {
+            it.name == "shouldAddToToolWindow" && it.parameterCount == 1
+        }?.invoke(tabBuilder, false)
+        val tab = tabBuilder.createTab()
         val replacement = terminalVirtualFile(tab)
         SurfacePresentationFiles.register(replacement, document)
         try {
@@ -360,11 +361,7 @@ internal class Exact262DetachedPresentationAdapter private constructor(
         terminalTab: TerminalToolWindowTab?,
     ) {
         restore(key)
-        manager.openFile(
-            replacement,
-            window,
-            FileEditorOpenOptions().withRequestFocus(true),
-        )
+        openFile(replacement, window, requestFocus = true)
         check(window.fileList.any { it === replacement }) { "replacement did not open in exact editor window" }
         manager.closeFile(original, window)
         mounted[key] = MountedPresentation(
@@ -382,11 +379,7 @@ internal class Exact262DetachedPresentationAdapter private constructor(
     private fun restore(key: SurfaceIncarnation) {
         val prior = mounted.remove(key) ?: return
         if (!prior.window.isDisposed) {
-            manager.openFile(
-                prior.original,
-                prior.window,
-                FileEditorOpenOptions().withRequestFocus(false),
-            )
+            openFile(prior.original, prior.window, requestFocus = false)
             manager.closeFile(prior.replacement, prior.window)
         }
         SurfacePresentationFiles.unregister(prior.replacement)
@@ -396,6 +389,20 @@ internal class Exact262DetachedPresentationAdapter private constructor(
     override fun dispose() {
         check(SwingUtilities.isEventDispatchThread()) { "detached presentation disposal must run on EDT" }
         mounted.keys.toList().forEach(::restore)
+    }
+
+    private fun openFile(file: VirtualFile, window: EditorWindow, requestFocus: Boolean) {
+        val optionsClass = Class.forName("com.intellij.openapi.fileEditor.impl.FileEditorOpenOptions")
+        var options = optionsClass.getConstructor().newInstance()
+        options = optionsClass.getMethod("withRequestFocus", Boolean::class.javaPrimitiveType)
+            .invoke(options, requestFocus)
+        val method = manager.javaClass.methods.firstOrNull {
+            it.name == "openFile" && it.parameterCount == 3 &&
+                it.parameterTypes[0].isInstance(file) &&
+                it.parameterTypes[1].isInstance(window) &&
+                it.parameterTypes[2].isInstance(options)
+        } ?: error("exact-window open API is unavailable")
+        method.invoke(manager, file, window, options)
     }
 
     private fun FrontendSurfacePresentation.receipt(

@@ -1,9 +1,6 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.codeInsight.daemon.impl.EditorTracker
-import com.intellij.openapi.client.ClientKind
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.fileEditor.ClientFileEditorManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
@@ -31,8 +28,8 @@ internal object EditorOpenFileSurface {
 
         FileEditorManager.getInstance(project).openFiles.forEach(::retain)
         try {
-            project.getServices(ClientFileEditorManager::class.java, ClientKind.REMOTE)
-                .forEach { manager -> manager.getAllFiles().forEach(::retain) }
+            MarketplacePlatformBridge.remoteFileEditorManagers(project)
+                .forEach { manager -> MarketplacePlatformBridge.allFiles(manager).forEach(::retain) }
         } catch (error: Throwable) {
             log.warn("[editor-surface] remote open-file snapshot unavailable", error)
         }
@@ -46,7 +43,7 @@ internal object EditorOpenFileSurface {
         snapshot(project).firstOrNull { it.path == filePath }
 
     fun activeEditors(project: Project): Set<Editor> = try {
-        EditorTracker.getInstance(project).activeEditors.toSet()
+        MarketplacePlatformBridge.activeEditors(project)
     } catch (error: Throwable) {
         log.warn("[editor-surface] active-editor snapshot unavailable", error)
         emptySet()

@@ -303,8 +303,7 @@ internal object RunAgentDocAttemptLedger {
     // #stale-plugin-detect: prefer the IntelliJ plugin descriptor (patched
     // plugin.xml <version>) so the reported version is real, not "unknown".
     private fun pluginVersion(): String =
-        com.intellij.ide.plugins.PluginManager
-            .getPluginByClass(RunAgentDocAttemptLedger::class.java)?.version
+        MarketplacePlatformBridge.pluginVersion("com.github.btakita.agent-doc")
             ?: RunAgentDocAttemptLedger::class.java.`package`?.implementationVersion
             ?: "unknown"
 

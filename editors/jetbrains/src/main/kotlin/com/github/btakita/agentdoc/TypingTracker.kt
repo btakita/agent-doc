@@ -242,7 +242,7 @@ internal val EDITOR_CAPABILITIES = buildList {
 // plugin.xml <version>) is the reliable source; the jar-manifest read is a
 // fallback for contexts where the descriptor is unavailable.
 internal fun pluginVersion(): String =
-    com.intellij.ide.plugins.PluginManager.getPluginByClass(TypingTracker::class.java)?.version
+    MarketplacePlatformBridge.pluginVersion("com.github.btakita.agent-doc")
         ?: TypingTracker::class.java.`package`?.implementationVersion
         ?: "unknown"
 

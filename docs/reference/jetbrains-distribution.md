@@ -121,11 +121,10 @@ inconsistent pair and disables the pair before Agent Doc's RPC can establish a
 lease; an Agent Doc timeout or compatibility fallback cannot override that
 platform fence. A missing, inactive, or mismatched peer is a one-sided install:
 detached-view and frontend presentation effects remain unavailable. While no
-accepted frontend snapshot exists, the backend observes the guest editor-manager
-selection flow so ordinary main-layout tab changes still reach the controller;
-accepted frontend authority suppresses that limited fallback. This degradation
-does not fabricate detached-window identities and is not a reason to widen
-either update's range.
+accepted frontend snapshot exists, selection and layout publication remain
+blocked: JetBrains exposes the client-session editor flow only through a private
+API that Marketplace plugins may not link. This degradation does not fabricate
+detached-window identities and is not a reason to widen either update's range.
 For a Remote Dev `CONTROLLER` session, the delivered selection is also positive
 focus evidence: the backend must not require a Swing active window that exists
 only in the thin client. Focus-projection gates and task failures are logged at
@@ -136,8 +135,7 @@ authenticated same-generation surface publication is classified
 `readiness=blocked` with
 `readiness_reason=frontend_authority_absent_or_generation_mismatched` and
 `geometry_reason=flat_evidence_has_no_column_geometry`. Structural routing stays
-blocked and preserves the existing tmux layout; the fallback is focus-only for
-an already-live document. A retry cannot load an absent or incompatible client
+blocked and preserves the existing tmux layout. A retry cannot load an absent or incompatible client
 module, and flat evidence cannot safely reconstruct editor columns. Verify that
 both peers report the exact same plugin version, restart both, and retry only
 after the two-sided install is ready. Marketplace hosting is the automatic way

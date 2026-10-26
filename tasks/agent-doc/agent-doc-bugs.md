@@ -166,6 +166,19 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 - The worker's earlier failed runs came from its own changes (clippy, and a TLA conformance name). It never reran a flaky test to get a pass.
 
 **Dispatched:** the `lazily.md` stale-cell repair row → `subagent:lazilyrepair` (🚧). It polls until the `lazily.md` session is idle, for up to 45 minutes. Then it runs the dry run and `--apply`, checks that only completion cells changed, and commits. If the other session never goes idle, it changes nothing.
+
+### Re: lazily.md stale-cell repair — opus-5 · 2026-10-26T19:57-04:00
+
+> **Queue prompt:** When the tasks/software/lazily.md session is idle, run `agent-doc queue repair-stale-completion tasks/software/lazily.md --apply` (dry run: 14 stale completion cells; skipped 2026-10-26 because that session was busy) and commit it
+
+**Not run. Nothing changed.** `subagent:lazilyrepair` polled for 45 minutes (19:15 to 19:57) and the `lazily.md` session never went idle:
+
+- **Pane %7:** `alive-busy` until 19:45, then `alive-unobservable` with `prompt_ready=unknown`. It is still that way now, with agent-doc still running in the pane.
+- **The file:** `tasks/software/lazily.md` was last committed 21 hours ago and has uncommitted edits. Those are most likely your unsent edits waiting for that session's next turn. agent-doc refuses to commit a repair around unanswered edits, and that's correct, so running `--apply` now would only leave the repair uncommitted next to them.
+
+**Moved to todo `#lazily-stale-cell-repair`** so the queue stops re-dispatching it. Run it after the next `lazily.md` cycle commits that document clean.
+
+**Worth a look:** pane %7 shows `owned_pane_ready_busy_conflict`. The actor and controller lease say `ready`, but the live pane says busy and is now unobservable. If no real turn is running there, `agent-doc session clear` from another pane is the documented recovery. I didn't run it, because it would interrupt a session I don't own.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -174,7 +187,7 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:autoupgrade#1] do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
-- 🚧 [#subagent:lazilyrepair#1] When the tasks/software/lazily.md session is idle, run `agent-doc queue repair-stale-completion tasks/software/lazily.md --apply` (dry run: 14 stale completion cells; skipped 2026-10-26 because that session was busy) and commit it
+- ~~When the tasks/software/lazily.md session is idle, run `agent-doc queue repair-stale-completion tasks/software/lazily.md --apply` (dry run: 14 stale completion cells; skipped 2026-10-26 because that session was busy) and commit it~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

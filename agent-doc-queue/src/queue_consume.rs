@@ -3382,6 +3382,41 @@ Old.
         }
     }
 
+    /// GH #374: `respond` derives queue node keys through the markdown-AST
+    /// overlay after `element::parse` + `QueueSet` already accepted the runnable
+    /// component. With `## Run <!-- agent:run ... -->` and
+    /// `## Loop <!-- agent:loop ... -->` heading-anchored openers the overlay
+    /// used to miss both components, so consumption failed with
+    /// "failed to derive queue node keys: component `queue` was not found".
+    #[test]
+    fn heading_anchored_run_and_loop_openers_consume_by_ast_node_key() {
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "## Run <!-- agent:run id=main priority subagents go -->\n",
+            "- answer the operator\n",
+            "- do [#tail]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Loop <!-- agent:loop id=poll interval=5m -->\n",
+            "- poll ci\n",
+            "<!-- /agent:loop -->\n",
+        );
+
+        let selected = queue_prompt_node_keys_for_count(content, 1)
+            .expect("heading-anchored run component resolves for consumption");
+        assert!(selected.ast_backed, "{selected:?}");
+        let consumed = consume_queue_nodes_by_key(content, &selected.keys).unwrap();
+
+        assert!(
+            consumed.contains(concat!(
+                "## Run <!-- agent:run id=main priority subagents go -->\n",
+                "- ~~answer the operator~~\n",
+                "- do [#tail]\n",
+            )),
+            "{consumed}"
+        );
+        assert!(consumed.contains("- poll ci\n"), "{consumed}");
+    }
+
     #[test]
     fn remove_queue_nodes_by_key_reaps_only_the_selected_item() {
         let content = concat!(

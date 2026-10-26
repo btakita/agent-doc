@@ -79,6 +79,19 @@ An opening marker may share a line with a matching ATX heading, for example
 `## Run <!-- agent:run priority subagents -->`. The heading text must match the
 exact source tag name case-insensitively; closing markers remain on their own
 line. Other prose welded before or after a marker remains structural corruption.
+One predicate owns this heading-anchor rule
+(`agent_doc_element::element::component_heading_prefix_matches_tag`), and
+every opener scanner calls it: the element parser, the structural-corruption
+gate, the markdown-AST overlay (`agent_doc_markdown_ast::overlay::parse_open_marker_line`)
+that `respond`, queue consumption, and node-keyed mutations resolve
+components through, and the document-cell merge body scan. A heading-anchored
+opener therefore exists for all of them or for none: `respond` must never
+report ``component `queue` was not found`` for a document whose
+`read --component`, `patch`, and `lint` accept that component (GH #374).
+Line scanners that match raw tag names and then look a component up in the
+overlay map the raw name through `overlay::projected_component_name` first
+(`run` and `loop` project to `queue`), so an `agent:run` component merges by
+node identity exactly like `agent:queue` instead of being dropped.
 
 `agent:run` is the canonical runnable-work component. The former
 `agent:queue` spelling remains a backward-compatible alias with identical queue

@@ -8,6 +8,7 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.553" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.553" }
 agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.553" }
 serde_json = "1"

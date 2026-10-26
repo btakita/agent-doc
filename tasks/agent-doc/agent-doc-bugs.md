@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -1206,6 +1206,42 @@ IntelliJ IDEA 2026.3 still runs the old plugin 0.2.835. Restart it to load 0.2.8
 My recommendation is **Keep restart-only + prompt** now, plus **Shrink the restart count** over time. The probe can leave your IDE half-unloaded and still would not cover Remote Dev, and the GH #339 shell is a multi-release project. Answer in the queue row or below this response.
 
 **Still waiting on you:** the claim left over from the deleted `release + publish` row (`subagent:release_publish_patch`) is still untouched, and the names for `queue repair-stale-completion` and `resolve-pane-document` are still open.
+
+### Re: do [#fixautoupgrade] — opus-5 · 2026-10-26T17:39-04:00
+
+> **Queue prompt:** do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
+
+> **Operator note:** I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
+
+**Deferred:** the fallback is integrated, and the auto-upgrade direction waits for your pick below. Short version: re-qualifying is a safe, cheap experiment but a weak bet. The GH #339 shell is the one most likely to give you real auto-upgrade. Shrink costs little in performance if it is done with deltas, not whole-document copies.
+
+**Fallback integrated and installed.** The restart prompt is on `main` as `03bc20a1d8`, with the plugin bumps in `c4518134ca`: JetBrains classic, 2026.2, and 2026.3 are 0.2.842, 0.2.844, and 0.2.843. `make check-fast` passed, the commits are pushed, and `make install` finished. Restart the IDE once more to load it. After that, any upgrade that needs a restart shows a sticky "Agent Doc Plugin Update" balloon with **Restart IDE**.
+
+**What Re-qualify on 263.7307.44 means.** The installer refuses a restart-free swap for the 2026.3 package because of one probe on 2026-10-19, on build 263.7031.23. In that probe, IntelliJ's own `DynamicPlugins.unloadPlugin` returned false: the module graph kept Agent Doc loaded. Your IDE is now 263.7307.44. Re-qualifying means attaching a small Java agent to your running IDE and asking it to unload Agent Doc, to see whether this build allows it.
+
+- **Safety:** low risk, but not zero. A failed unload can leave Agent Doc half-unloaded, with dead actions and no sync, until you restart. Your other IDE state is untouched. Run it at a moment when you can restart, so the worst case costs one restart, which you would need anyway.
+- **What a pass gets you:** less than it sounds. A pass means only that this build, with today's plugin, unloads cleanly. Only local IDEs benefit. Remote Dev keeps its frontend in a separate JetBrains Client process that this path cannot replace. It is also fragile: IntelliJ refuses an unload when anything still holds a reference to a plugin class, so any later plugin change can silently send it back to restart-only. And each new IDE build would need re-testing.
+
+**Re-qualify vs GH #339.** GH #339 is much more likely to deliver auto-upgrade that keeps working. Its stable shell plugin loads the real implementation in a classloader agent-doc controls. An upgrade then swaps that implementation without asking IntelliJ to unload a plugin, so it does not depend on IntelliJ's unload rules. Its activation receipts can cover the Remote Dev frontend too. The costs are several releases of work, and a restart whenever the shell itself changes, which should be rare. Re-qualifying takes minutes and tells you whether a local-only stopgap exists. It is not a substitute.
+
+**Performance of Shrink the restart count.** Each plugin call into the native library already pays fixed costs:
+
+- a hop to a native worker thread, since calls are refused on the UI thread
+- a JNA proxy call
+- converting Kotlin strings to UTF-8
+- usually a JSON result that Kotlin parses and frees
+
+That is tens of microseconds per call, plus time proportional to the bytes passed. Copying this 120 KB document across is roughly 0.1 ms, before JSON parsing. Whether that matters depends on the code being moved:
+
+- **`TerminalUtil`** (tmux and process orchestration): every call already spawns a subprocess, which takes milliseconds. Moving it costs nothing measurable.
+- **`PatchWatcher`**: low-frequency file events that already read whole files. Negligible.
+- **`CrdtReplicaManager`**: this one runs on every typing burst. Moved naively, it would pay a whole-document copy plus JSON per burst, which risks typing lag on large documents. Moving it is fine only if the native side keeps the replica behind a handle and the boundary carries only op deltas, in binary rather than JSON. The new edit-time marker check already runs per burst, but it passes only the before and after text of that burst.
+
+I have not measured this yet. If you choose Shrink, the first step is a per-keystroke latency benchmark on this document, before and after each move, with the move gated on no regression.
+
+**My recommendation:** keep the restart prompt as the fallback, which is done. Start the GH #339 shell as the real auto-upgrade path, and keep shrinking `TerminalUtil` and `PatchWatcher` behind the native library meanwhile. Run re-qualify only if you want a quick local-only stopgap and can restart right after. Tell me which of these to queue, and I will dispatch them.
+
+**Defect noticed:** preflight promoted this row into `agent:backlog` as `#fixautoupgrade` with its lifecycle markers copied into the backlog text (`☑️ … 🙋☑️ [#subagent:autoupgrade#1] …`). Markers belong to the row, not the work text.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -1213,9 +1249,9 @@ My recommendation is **Keep restart-only + prompt** now, plus **Shrink the resta
 -->
 
 ## Queue: Main <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
+- ☑️ [#subagent:autoupgrade#1] do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
 - ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells and report receipts left behind by strikes made before the completion-cell retirement fix, or made by hand in the editor, in this document and other session documents (found by the completion-cell retirement fix, 2026-10-26)
 - ☑️ [#subagent:noargskill#1] In the agent terminal, running the `agent-doc` skill (`/agent-doc` on Claude + Grok + Opencode and `agent-doc` in Codex) without any arguments should run agent-doc on the claimed file for the tmux pane.
-- ☑️ [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. 
 <!-- /agent:run -->
 
 ## Loop: Issues <!-- agent:loop id="issues" interval="1h" priority -->
@@ -1229,9 +1265,12 @@ My recommendation is **Keep restart-only + prompt** now, plus **Shrink the resta
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
 - [x] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
 - [x] [#autosync-restart-verify] Restart IntelliJ IDEA 2026.3 and Rider 2026.2 so JetBrains 0.2.832/0.2.831 load, then switch editor tabs: tmux should follow within about a second with no install or Run Agent Doc in between (idea.log shows `[layout-sync] selection file=`).
+- [ ] [#xj75] Choose the JetBrains restart-free upgrade direction in the [#subagent-operator-request-autoupgrade-263-path] packet in agent:exchange: keep restart-only + prompt, re-qualify on IU 263.7307.44, build the GH #339 shell, or shrink the restart count
+- [ ] [#subagent-operator-request-autoupgrade-263-path] Answer the blocking subagent question for tracked work jb262dynlauncherrecommen for queue item ‘Fix the auto-upgrade not working...the IDE needed to be restarted.’ in agent:exchange: The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). (choices: Keep restart-only + prompt, Re-qualify on 263.7307.44, Build the GH #339 architecture, Shrink the restart count) (source: agent:review [#jb262dynlauncherrecommen])
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] ☑️ [#fixautoupgrade] 🙋☑️ [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. [#subagent-operator-request-autoupgrade-263-path]: would **Shrink the restart count** have performance issues due to extra serialization?
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

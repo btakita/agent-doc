@@ -307,7 +307,31 @@ Actionable recovery and acceptance:
 5. If No such file or directory remains, the code fix is to route ControllerSurfaceSnapshotPublisher by each session document's workspace root instead of project.basePath, add the blocked delivery state, and cover the mismatched IDE-root case with a regression test.
 
 The Todo now carries those exact recovery steps and proof conditions.
-<!-- agent:boundary:bd80f254 -->
+> **Queue prompt:** Run Agent Doc issue: Sync failed: {"applied":false,"reason":"superseded_by_newer_layout_state","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":9,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}
+
+### Re: superseded layout sync notification — gpt-5 · 2026-10-25T21:22-04:00
+
+Fixed the JetBrains notification boundary. The controller behavior was correct: ops evidence shows the SDK layout request was overtaken by a newer manual layout request for `tasks/infra.md`. The stale completion returned `superseded_by_newer_layout_state`, but `SyncLayoutAction` treated every nonzero receipt as an actionable error and emitted the misleading “Sync failed” notification.
+
+The action now parses the typed JSON reason. A superseded stale completion is logged at info level without notifying the operator; genuine nonzero controller failures still use the existing error notification. Added a regression test covering the superseded receipt, an ordinary retry-pending receipt, and malformed diagnostic text.
+
+Changed paths:
+
+- `src/agent-doc/editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/SyncLayoutAction.kt`
+- `src/agent-doc/editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/SyncLayoutActionTest.kt`
+
+Verification:
+
+- `./gradlew compileKotlin` — passed.
+- `git diff --check -- <two changed paths>` — passed.
+- `./gradlew test --tests "*SyncLayoutActionTest"` — blocked before test execution by existing unrelated `CpRouteClientCommandPlaneTest.kt` unresolved `toByteArray` references.
+- `make check` — 1,524 tests passed before the existing `development_claude_skill_matches_the_bundle` stale-skill assertion stopped the suite.
+- Latest GitHub Actions `CI` run on `main` (`40078734298`) — passed.
+
+Confidence is high in the root cause and notification fix; end-to-end plugin confirmation awaits the repository’s pre-existing test/build conflicts being cleared. No external escalation was required. The two code files remain scoped working-tree changes because the `src/agent-doc` index already contains unrelated unresolved merge conflicts, so a safe isolated commit is not possible from this checkout.
+
+Session note: the exchange is large (265 lines across 17 response sections); the active auto-clear queue will reset context after this closeout.
+<!-- agent:boundary:7cc81a36 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -410,8 +434,9 @@ force-write the file, and do not delete the queue items.                        
 ## Run: Issues
 <!-- agent:loop id=issues interval=1h priority -->
 - ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
-- ❔ [#subagent:release_publish_patch#3] release + publish
-- ~~[#coder-remote-install-02805]: done: but still not syncing~~ — auto-struck: answered this cycle (#ftstrike)
+- ☑️ [#subagent:release_publish_patch#3] release + publish
+- ~~Run Agent Doc issue: Sync failed: {"applied":false,"reason":"superseded_by_newer_layout_state","columns":["/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":9,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[],"gated_documents":[]}~~ — auto-struck: answered this cycle (#ftstrike)
+- 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
 <!-- /agent:loop -->
 
 ## Todo

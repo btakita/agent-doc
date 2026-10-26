@@ -16644,18 +16644,55 @@ mod tests {
         )
         .unwrap();
 
-        let delivery =
-            project_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        // `#retainedsettlerace`: one settlement pass is a single non-blocking
+        // sample. The welded-close repair is applied through the CRDT authority
+        // without gating on its delivery receipt, but the later native-save step
+        // (`settle_projected_captured_response_through_authority`) samples
+        // `delivery_converged` exactly once and retains when the editor has not
+        // projected yet. Running the simulated editor concurrently with that
+        // pass made the outcome depend on whether its 5ms pull loop happened to
+        // be scheduled inside a ~20ms window: under check-fast load it was not,
+        // and the pass correctly retained while the test demanded a settle.
+        // Drive the two halves in a fixed order instead, which is also the
+        // production shape: the pass retains, the editor delivery event lands,
+        // and the reactive recovery re-drives the same settlement.
         assert!(
-            settle_retained_captured_projection_through_authority(
+            !settle_retained_captured_projection_through_authority(
                 &file,
                 captured_response,
                 "retained_capture_welded_queue_close_test",
             )
             .unwrap(),
-            "the historical welded target should repair through authority without force disk",
+            "the repair stays retained until the editor projects it",
         );
-        delivery.join().unwrap();
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_capture_welded_queue_close_repaired_authority",
+            )
+            .unwrap(),
+            valid,
+            "the welded close is repaired through CRDT authority in the first pass",
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            invalid,
+            "the repair must not force disk ahead of the editor projection",
+        );
+        assert!(pending_document_write(&file).is_some());
+
+        project_next_crdt_delivery(file.clone(), identity)
+            .join()
+            .unwrap();
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_welded_queue_close_after_projection_test",
+            )
+            .unwrap(),
+            "the historical welded target should settle once the editor projects the repair",
+        );
 
         assert_eq!(
             try_resolve_current_document_content(

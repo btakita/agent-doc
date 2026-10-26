@@ -1902,6 +1902,77 @@ fn write_review_resolve_with_open_todo_emits_todo_done_advisory() {
     );
 }
 
+/// `#trackedworktodobacklinks`: metadata survives done/archive. A Todo linked
+/// from several tracked items stays open until all resolve; one source may
+/// clear several Todos.
+#[test]
+fn tracked_work_backlinks_complete_all_todos_only_after_every_source_is_done() {
+    let (_tmp, doc) = setup_doc(concat!(
+        "- [ ] [#build] Build release (todos: [#approval])\n",
+        "- [ ] [#deploy] Deploy release (todos: [#approval] [#announce])",
+    ));
+    let write = |args: &[&str]| {
+        let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only"];
+        full.extend_from_slice(args);
+        agent_doc().args(&full).assert().success()
+    };
+
+    write(&[
+        "--todo-add", "id=approval Approve the release",
+        "--todo-add", "id=announce Announce the release",
+    ]);
+    let first = write(&["--done", "build"]);
+    let first_stderr = String::from_utf8_lossy(&first.get_output().stderr);
+    assert!(!first_stderr.contains("[todo] auto-done"), "{first_stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(component_body(&content, "todo").contains("- [ ] [#approval]"));
+    assert!(component_body(&content, "todo").contains("- [ ] [#announce]"));
+
+    let second = write(&["--done", "deploy"]);
+    let second_stderr = String::from_utf8_lossy(&second.get_output().stderr);
+    assert!(second_stderr.contains("[todo] auto-done: #approval"), "{second_stderr}");
+    assert!(second_stderr.contains("[todo] auto-done: #announce"), "{second_stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(component_body(&content, "todo").contains("- [x] [#approval]"));
+    assert!(component_body(&content, "todo").contains("- [x] [#announce]"));
+}
+
+/// `#trackedworktodobacklinks`: free-text queue heads cannot evade the
+/// backlink invariant. A head still held by the typing gate is explicitly
+/// reported until normal preflight can give it a stable backlog surrogate.
+#[test]
+fn free_text_queue_head_is_promoted_then_flagged_without_a_todo_backlink() {
+    let (_tmp, doc) = setup_doc("");
+    let content = fs::read_to_string(&doc).unwrap().replace(
+        "<!-- /agent:exchange -->",
+        "<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- Ship the release\n<!-- /agent:queue -->",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let output = agent_doc()
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "preflight failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_else(|err| {
+        panic!(
+            "preflight JSON ({err}): stdout={stdout} stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    let signals = parsed["todo_signals"].as_array().expect("todo_signals array");
+    assert!(signals.iter().any(|signal| {
+        signal["kind"] == "tracked_work_missing_todo_backlink"
+            && signal["ids"].as_array().is_some_and(Vec::is_empty)
+            && signal["action"].as_str().is_some_and(|action| action.contains("promote"))
+    }), "{stdout}");
+}
+
 /// `#todoids` end to end: a todo that reuses a review gate's id is the
 /// operator prompt for that gate.
 /// 1. `--todo-add` citing the open gate reuses its id; a second add for the
@@ -1973,11 +2044,13 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         .get("todo_signals")
         .and_then(|v| v.as_array())
         .unwrap_or_else(|| panic!("todo_signals missing: {stdout}"));
-    assert_eq!(signals.len(), 1, "{stdout}");
-    assert_eq!(signals[0]["kind"], "operator_done_review_open");
-    assert_eq!(signals[0]["todo"], "gatea");
+    let signal = signals
+        .iter()
+        .find(|signal| signal["kind"] == "operator_done_review_open")
+        .unwrap_or_else(|| panic!("operator_done_review_open missing: {stdout}"));
+    assert_eq!(signal["todo"], "gatea");
     assert!(
-        signals[0]["action"].as_str().unwrap().contains("--review-resolve gatea"),
+        signal["action"].as_str().unwrap().contains("--review-resolve gatea"),
         "{stdout}"
     );
     // A stale patch:todo (built before the check) carries gatea open; the
@@ -2108,11 +2181,13 @@ fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise()
         .get("todo_signals")
         .and_then(|v| v.as_array())
         .unwrap_or_else(|| panic!("todo_signals missing: {stdout}"));
-    assert_eq!(signals.len(), 1, "{stdout}");
-    assert_eq!(signals[0]["kind"], "operator_done_icebox_open");
-    assert_eq!(signals[0]["todo"], "coldwork");
+    let signal = signals
+        .iter()
+        .find(|signal| signal["kind"] == "operator_done_icebox_open")
+        .unwrap_or_else(|| panic!("operator_done_icebox_open missing: {stdout}"));
+    assert_eq!(signal["todo"], "coldwork");
     assert!(
-        signals[0]["action"].as_str().unwrap().contains("--done coldwork"),
+        signal["action"].as_str().unwrap().contains("--done coldwork"),
         "{stdout}"
     );
     assert!(

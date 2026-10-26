@@ -423,6 +423,28 @@ must therefore resolve the same tracked item.
 `--done` is the only tracked-work completion flag; generated plans and closeout
 guidance must not emit removed completion-alias spellings.
 
+**Tracked-work → Todo backlinks (`#trackedworktodobacklinks`).** Every open
+backlog/icebox item MUST resolve to at least one existing Todo. Source text may
+carry explicit many-to-many `(todos: [#todo-id] ...)` metadata
+when the relation cannot be resolved from same-id Todo layering or a canonical
+Todo `(source: ...)` locator. Id-backed queue heads inherit their source link;
+free-text heads acquire a stable source through normal backlog surrogate-id
+coining/mirroring. A direct id-backed Todo head is also valid. If promotion is
+held, the free-text head is explicitly flagged. `--done`
+and `--review-resolve` retain this metadata in done/archive text and check an
+open Todo only when every linked source is terminal. Checking a linked Todo
+while a source is open emits the normal operator-prerequisite signal so a gated
+source can be explicitly ungated; the backlink itself never mutates source
+lifecycle state. Plain `#id` citations do not create an edge.
+
+Preflight emits `tracked_work_missing_todo_backlink` for every open
+backlog/icebox item whose edge resolves to no actual Todo (including dangling
+`todos` ids), and for every unpromoted free-text or orphan-id queue head. For
+migration, legacy same-id Todo layering and canonical Todo-side source locators
+remain valid; existing missing rows are flagged rather than auto-created or
+rejected because their operator action cannot be inferred. Terminal legacy
+rows are not retroactively audited.
+
 `review_done_guard` is a frontmatter/project guard for review-then-done
 projects. Default `off` keeps direct backlog-to-done closeouts valid. `warn`
 prints a warning when `--done <id>` resolves an item outside `agent:review`;

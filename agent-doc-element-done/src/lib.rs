@@ -315,13 +315,15 @@ pub fn todo_link_index_in_content(
         } else if element::is_icebox_component(&component.name) {
             "icebox"
         } else if element::is_backlog_done_component(&component.name) {
-            for id in collect_done_item_own_ids(component.content(content)) {
+            for (id, text) in collect_done_item_texts(component.content(content)) {
+                index.mark_todo_backlinks_from_text(&id, &text);
                 index.mark_resolved(&id);
             }
             if let Some(archive) = component.attrs.get("archive")
                 && let Some(archived) = read_archive(archive)?
             {
-                for id in collect_done_item_own_ids(&archived) {
+                for (id, text) in collect_done_item_texts(&archived) {
+                    index.mark_todo_backlinks_from_text(&id, &text);
                     index.mark_resolved(&id);
                 }
             }
@@ -335,6 +337,7 @@ pub fn todo_link_index_in_content(
             if id.is_empty() {
                 continue;
             }
+            index.mark_todo_backlinks_from_text(&id, &item.text);
             if item.is_done() {
                 index.mark_resolved(&id);
             } else {
@@ -345,6 +348,7 @@ pub fn todo_link_index_in_content(
     for id in extra_resolved {
         index.mark_resolved(&backlog::normalize_pending_id(id));
     }
+    index.resolve_todo_backlinks_from_document(content)?;
     Ok(index)
 }
 
@@ -383,6 +387,37 @@ mod tests {
         let mut broken =
             |_: &str| -> anyhow::Result<Option<String>> { anyhow::bail!("permission denied") };
         assert!(todo_link_index_in_content(doc, &mut broken, &[]).is_err());
+    }
+
+    #[test]
+    fn todo_link_index_resolves_source_metadata_locators_and_done_archive_backlinks() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#build] Build it (todos: [#approval] [#announce])\n",
+            "- [ ] [#deploy] Deploy it\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:done archive=done.md -->\n",
+            "<!-- /agent:done -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#approval] Approve it\n",
+            "- [ ] [#announce] Announce it (source: agent:backlog [#deploy])\n",
+            "- [ ] [#archived-todo] Verify archive proof\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let mut archive = |_: &str| -> anyhow::Result<Option<String>> {
+            Ok(Some(
+                "- 2026-10-26 [#archived] Historical proof (todos: [#archived-todo])\n"
+                    .to_string(),
+            ))
+        };
+        let index = todo_link_index_in_content(doc, &mut archive, &[]).unwrap();
+
+        assert_eq!(index.todo_ids_for_tracked("build"),
+            vec!["announce".to_string(), "approval".to_string()]);
+        assert_eq!(index.todo_ids_for_tracked("deploy"), vec!["announce".to_string()]);
+        assert_eq!(index.todo_ids_for_tracked("archived"),
+            vec!["archived-todo".to_string()]);
+        assert!(index.is_resolved("archived"));
     }
 
     /// `#donemirrorbytext`: a new item that only shares an archived id is not a

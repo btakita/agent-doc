@@ -2461,6 +2461,41 @@ fn unresolved_prompt_count(value: &str) -> usize {
 mod tests {
     use super::*;
 
+    /// `#queuerowworkidentity` compatibility: the per-cell CRDT keys list
+    /// children through `list_item_key`, which already skips the owner
+    /// annotation and strips lifecycle markers. A claimed row, its
+    /// re-projections, and its struck copy keep ONE persisted cell key, and
+    /// that key is the one existing replicas hold (`queue:0:id:<id>` /
+    /// `queue:0:txt:<work text>`), so the overlay identity change needs no
+    /// replica migration.
+    #[test]
+    fn queuerowworkidentity_cell_keys_are_stable_across_claim_and_strike() {
+        let key = |row: &str| {
+            let doc = format!("<!-- agent:queue -->\n- {row}\n<!-- /agent:queue -->\n");
+            let occ = project_document(&doc)
+                .into_iter()
+                .find(|occ| occ.component == "queue")
+                .unwrap();
+            assert_eq!(occ.items.len(), 1, "{row:?}");
+            node_key_identity(&occ.items[0].0).to_string()
+        };
+        for row in [
+            "do [#foo]",
+            "☑️ [#subagent:x#1] do [#foo]",
+            "🔄 [#subagent:x#1] do [#foo]",
+            "~~do [#foo]~~",
+        ] {
+            assert_eq!(key(row), "queue:0:id:foo", "{row:?}");
+        }
+        for row in [
+            "fix the parser",
+            "☑️ [#subagent:x#1] fix the parser",
+            "~~fix the parser~~",
+        ] {
+            assert_eq!(key(row), "queue:0:txt:fix the parser", "{row:?}");
+        }
+    }
+
     const DOC: &str = "\
 ---
 agent_doc_format: template

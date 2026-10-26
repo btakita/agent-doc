@@ -295,7 +295,10 @@ fn inject_exchange_notes(body: String, notes: &[String]) -> String {
         offset += line.len();
         let content = line.trim_end_matches(['\n', '\r']);
         if !inside_exchange {
-            if markers.open_at(line_start, content).map(|(raw, _)| raw).as_deref()
+            if markers
+                .open_at(line_start, content)
+                .map(|(raw, _)| raw)
+                .as_deref()
                 == Some(EXCHANGE_COMPONENT)
             {
                 inside_exchange = true;
@@ -674,6 +677,39 @@ fn item_unchanged(a: &Item, b: &Item) -> bool {
         && a.kind == b.kind
 }
 
+/// Whether the operator's copy `t` leaves the base node `b` unchanged *as
+/// work* (`#queuerowworkidentity`): identical, or different only in the
+/// binary-owned attempt projection (lifecycle marker, owner annotation) while
+/// the work text and the strike/pin flags agree.
+///
+/// Lifecycle projections are written by the binary, never authored by the
+/// operator, so an editor copy that carries an older or newer marker than base
+/// is a stale or in-flight projection, not an operator edit. Counting it as one
+/// let it win over the agent's concurrent strike.
+fn operator_left_work_unchanged(t: &Item, b: &Item) -> bool {
+    item_unchanged(t, b)
+        || (t.work_text() == b.work_text()
+            && t.struck == b.struck
+            && t.pinned == b.pinned
+            && t.agent_pinned == b.agent_pinned)
+}
+
+/// Whether the operator's copy `t` is a stale attempt projection of the
+/// already-struck row `struck` (`#queuerowworkidentity`): `t` is unstruck,
+/// still carries a leading lifecycle/owner projection, and names the same work.
+///
+/// A strike is terminal (`#strikeisterminal`) and a struck row never carries an
+/// attempt projection, so the only writer of such a `t` is the binary's own
+/// pre-strike projection reaching the editor late. An operator who un-strikes
+/// a row removes the `~~` and produces the bare work text, which this does not
+/// match, so a real revive still wins.
+fn stale_projection_of_struck_row(t: &Item, struck: &Item) -> bool {
+    struck.struck
+        && !t.struck
+        && t.work_text() != t.text.as_str()
+        && t.work_text() == struck.work_text()
+}
+
 fn find_item<'a>(comp: Option<&'a Component>, id: &str) -> Option<&'a Item> {
     comp?.items.iter().find(|i| i.id == id)
 }
@@ -833,10 +869,17 @@ fn merge_component_items(
     outcomes: &mut Vec<NodeOutcome>,
     advisories: &mut Vec<MergeConflictAdvisory>,
 ) -> Vec<String> {
-    merge_component_item_slots(name, base_comp, ours_comp, theirs_comp, outcomes, advisories)
-        .into_iter()
-        .map(|(_, line)| line)
-        .collect()
+    merge_component_item_slots(
+        name,
+        base_comp,
+        ours_comp,
+        theirs_comp,
+        outcomes,
+        advisories,
+    )
+    .into_iter()
+    .map(|(_, line)| line)
+    .collect()
 }
 
 /// [`merge_component_items`] with each merged line tagged by the index of the
@@ -860,9 +903,23 @@ fn merge_component_item_slots(
         let o_item = find_item(ours_comp, id);
 
         let operator_changed = match b_item {
-            Some(b) => !item_unchanged(t_item, b),
+            Some(b) => !operator_left_work_unchanged(t_item, b),
             None => true, // operator-added
         };
+
+        // `#queuerowworkidentity`: a stale editor copy of a struck row (it
+        // still carries the attempt's lifecycle marker / owner annotation)
+        // never resurrects it. The agent's struck copy stands; when the agent
+        // already dropped the struck row, the drop stands.
+        if let Some(o) = o_item.filter(|o| stale_projection_of_struck_row(t_item, o)) {
+            lines.push((Some(t_index), item_line(o)));
+            record(outcomes, name, id, OutcomeKind::AppliedAgentEdit);
+            continue;
+        }
+        if o_item.is_none() && b_item.is_some_and(|b| stale_projection_of_struck_row(t_item, b)) {
+            record(outcomes, name, id, OutcomeKind::AppliedAgentEdit);
+            continue;
+        }
 
         match (b_item, o_item) {
             // Present in base.
@@ -1279,7 +1336,11 @@ fn component_inner_lines(name: &str, source: &str) -> Vec<String> {
         offset += line.len();
         let content = line.trim_end_matches(['\n', '\r']);
         if !inside {
-            if markers.open_at(line_start, content).map(|(raw, _)| raw).as_deref() == Some(name)
+            if markers
+                .open_at(line_start, content)
+                .map(|(raw, _)| raw)
+                .as_deref()
+                == Some(name)
             {
                 inside = true;
             }
@@ -1338,7 +1399,13 @@ fn merge_nonexchange_inner(
         .iter()
         .enumerate()
         .filter(|(_, item)| item.start_byte >= inner_start && item.end_byte <= inner_end)
-        .map(|(index, item)| (index, item.start_byte - inner_start, item.end_byte - inner_start))
+        .map(|(index, item)| {
+            (
+                index,
+                item.start_byte - inner_start,
+                item.end_byte - inner_start,
+            )
+        })
         .collect();
     spans.sort_by_key(|&(_, start, _)| start);
     let push_line = |out: &mut String, line: &str| {
@@ -1898,6 +1965,190 @@ mod tests {
             outcome_for(&m, "a").unwrap().kind,
             OutcomeKind::AppliedAgentEdit,
             "the strike is an applied agent flag-edit"
+        );
+    }
+
+    /// `#queuerowworkidentity`: the visible rows of the merged queue.
+    fn queue_rows(doc: &str) -> Vec<String> {
+        components(doc)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .map(|c| c.items.into_iter().map(|i| i.raw).collect())
+            .unwrap_or_default()
+    }
+
+    /// `#queuerowworkidentity`: a claimed row and its struck copy are ONE
+    /// node, so the agent's strike replaces the claimed row in place instead
+    /// of being appended beside it as an unrelated add.
+    #[test]
+    fn queuerowworkidentity_claimed_row_and_struck_copy_are_one_node() {
+        for (claimed, struck) in [
+            ("☑️ [#subagent:x#1] do [#foo]", "~~do [#foo]~~"),
+            ("☑️ [#subagent:x#1] fix the parser", "~~fix the parser~~"),
+            ("🙋☑️ [#subagent:x#1] do [#foo]", "~~do [#foo]~~"),
+            ("☑️ ⟦subagent:x#1⟧ do [#foo]", "~~do [#foo]~~"),
+        ] {
+            let base = q(&format!("- {claimed}\n- do [#bar]\n"));
+            let ours = q(&format!("- {struck}\n- do [#bar]\n"));
+            let theirs = base.clone();
+            let m = document_cell_merge(&base, &ours, &theirs);
+            assert_eq!(
+                queue_rows(&m.merged_doc),
+                vec![struck.to_string(), "do [#bar]".to_string()],
+                "{claimed:?}:\n{}",
+                m.merged_doc
+            );
+            assert!(m.conflict_advisories.is_empty(), "{claimed:?}");
+            let outcomes: Vec<_> = m
+                .outcomes
+                .iter()
+                .filter(|o| o.component == "queue")
+                .map(|o| o.kind.clone())
+                .collect();
+            assert_eq!(
+                outcomes,
+                vec![OutcomeKind::AppliedAgentEdit, OutcomeKind::Keep],
+                "one node, edited in place: {claimed:?}"
+            );
+        }
+    }
+
+    /// `#queuerowworkidentity`: an editor copy that still carries an attempt
+    /// projection (any lifecycle marker, the owner annotation) never brings a
+    /// struck row back, whatever the base held.
+    #[test]
+    fn queuerowworkidentity_stale_editor_marker_never_resurrects_a_struck_row() {
+        let struck = "~~do [#foo]~~";
+        for stale in [
+            "🔄 [#subagent:x#1] do [#foo]",
+            "📥 [#subagent:x#1] do [#foo]",
+            "☑️ [#subagent:x#2] do [#foo]",
+            "❔ do [#foo]",
+        ] {
+            // Base = the claimed projection the agent struck; the editor moved
+            // to another marker meanwhile.
+            for base_row in ["☑️ [#subagent:x#1] do [#foo]", struck] {
+                let base = q(&format!("- {base_row}\n"));
+                let ours = q(&format!("- {struck}\n"));
+                let theirs = q(&format!("- {stale}\n"));
+                let m = document_cell_merge(&base, &ours, &theirs);
+                assert_eq!(
+                    queue_rows(&m.merged_doc),
+                    vec![struck.to_string()],
+                    "stale {stale:?} over base {base_row:?}:\n{}",
+                    m.merged_doc
+                );
+            }
+            // The agent already dropped the struck row: the drop stands.
+            let m = document_cell_merge(
+                &q(&format!("- {struck}\n")),
+                &q(""),
+                &q(&format!("- {stale}\n")),
+            );
+            assert!(
+                queue_rows(&m.merged_doc).is_empty(),
+                "stale {stale:?} after the drop:\n{}",
+                m.merged_doc
+            );
+        }
+        // Free-text work: the struck copy carries no id, only its work text.
+        let m = document_cell_merge(
+            &q("- ~~fix the parser~~\n"),
+            &q("- ~~fix the parser~~\n"),
+            &q("- 🔄 [#subagent:x#1] fix the parser\n"),
+        );
+        assert_eq!(queue_rows(&m.merged_doc), vec!["~~fix the parser~~"]);
+    }
+
+    /// `#queuerowworkidentity`: a marker-only difference between the editor
+    /// and base is a projection, not an operator edit, so it neither revives a
+    /// row the agent removed nor overrides the agent's newer projection.
+    #[test]
+    fn queuerowworkidentity_marker_only_editor_difference_is_not_an_operator_edit() {
+        let base = q("- ☑️ [#subagent:x#1] do [#foo]\n- do [#bar]\n");
+        let theirs = q("- 🔄 [#subagent:x#1] do [#foo]\n- do [#bar]\n");
+        // The agent removed the row (consumed without a strike).
+        let m = document_cell_merge(&base, &q("- do [#bar]\n"), &theirs);
+        assert_eq!(
+            queue_rows(&m.merged_doc),
+            vec!["do [#bar]"],
+            "{}",
+            m.merged_doc
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
+        // The agent re-projected the attempt: its projection stands.
+        let ours = q("- 📥 [#subagent:x#1] do [#foo]\n- do [#bar]\n");
+        let m = document_cell_merge(&base, &ours, &theirs);
+        assert_eq!(
+            queue_rows(&m.merged_doc),
+            vec!["📥 [#subagent:x#1] do [#foo]", "do [#bar]"]
+        );
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
+        );
+    }
+
+    /// `#queuerowworkidentity`: only a projection-carrying copy is stale. An
+    /// operator who un-strikes the row (bare work text) still revives it, and
+    /// an operator edit of the work still wins.
+    #[test]
+    fn queuerowworkidentity_operator_unstrike_and_work_edit_still_win() {
+        let base = q("- ~~do [#foo]~~\n");
+        let m = document_cell_merge(&base, &base, &q("- do [#foo]\n"));
+        assert_eq!(queue_rows(&m.merged_doc), vec!["do [#foo]"]);
+        assert_eq!(
+            outcome_for(&m, "foo").unwrap().kind,
+            OutcomeKind::AppliedOperatorEdit
+        );
+
+        let base = q("- ☑️ [#subagent:x#1] do [#foo]\n");
+        let m = document_cell_merge(
+            &base,
+            &q("- ~~do [#foo]~~\n"),
+            &q("- ☑️ [#subagent:x#1] do [#foo] and also bar\n"),
+        );
+        assert_eq!(
+            queue_rows(&m.merged_doc),
+            vec!["☑️ [#subagent:x#1] do [#foo] and also bar"]
+        );
+        assert_eq!(
+            outcome_for(&m, "foo").unwrap().kind,
+            OutcomeKind::OperatorWonConflict
+        );
+    }
+
+    /// `#queuerowworkidentity` compatibility: the base snapshot was written
+    /// while the row was claimed, i.e. by a binary that keyed it by the owner
+    /// tag (`subagent:x#1`). Keys are recomputed from text on every side of
+    /// every merge, so that base pairs with the agent's struck copy and with
+    /// the operator's concurrent add without splitting or duplicating a node.
+    #[test]
+    fn queuerowworkidentity_base_written_under_owner_tag_keys_merges_cleanly() {
+        let base = q("- 🔄 [#subagent:x#1] do [#foo]\n- ☑️ [#subagent:y#3] fix the parser\n");
+        let ours = q("- ~~do [#foo]~~\n- ~~fix the parser~~\n");
+        let theirs =
+            q("- 📥 [#subagent:x#1] do [#foo]\n- ☑️ [#subagent:y#3] fix the parser\n- do [#new]\n");
+        let m = document_cell_merge(&base, &ours, &theirs);
+        assert_eq!(
+            queue_rows(&m.merged_doc),
+            vec!["~~do [#foo]~~", "~~fix the parser~~", "do [#new]"],
+            "{}",
+            m.merged_doc
+        );
+        let ids = reparses_to_ids(&m.merged_doc, "queue");
+        assert_eq!(ids.len(), 3, "{ids:?}");
+        assert_eq!(&ids[0], "foo");
+        assert_eq!(&ids[2], "new");
+        assert!(
+            m.conflict_advisories.is_empty(),
+            "{:?}",
+            m.conflict_advisories
         );
     }
 

@@ -283,6 +283,36 @@ mod tests {
         assert_eq!(events[0].after.as_deref(), Some("- ~~do [#alpha]~~\n"));
     }
 
+    /// `#queuerowworkidentity`: claim -> strike is one node's lifecycle, so the
+    /// event stream reports a strike of the stable work key, not a remove of an
+    /// owner-tag-keyed node plus an insert of a new one.
+    #[test]
+    fn diff_node_events_reports_claimed_row_strike_on_its_work_key() {
+        let claimed = "\
+<!-- agent:queue -->
+- ☑️ [#subagent:x#1] do [#alpha]
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let struck = "\
+<!-- agent:queue -->
+- ~~do [#alpha]~~
+- do [#beta]
+<!-- /agent:queue -->
+";
+        let events = diff_node_events(claimed, struck);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, DocumentNodeEventKind::Strike);
+        assert_eq!(events[0].node_key, "queue:0:alpha:0");
+        assert_eq!(events[0].item_id, "alpha");
+        assert!(events[0].explicit_item_id);
+
+        let events = diff_node_events(BEFORE, claimed);
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert_eq!(events[0].kind, DocumentNodeEventKind::Replace);
+        assert_eq!(events[0].node_key, "queue:0:alpha:0");
+    }
+
     #[test]
     fn diff_node_events_reports_reorder_without_text_matching() {
         let after = "\

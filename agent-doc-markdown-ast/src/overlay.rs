@@ -123,6 +123,20 @@ pub struct Item {
     pub surface: ItemSurface,
 }
 
+impl Item {
+    /// The row's work text: [`Item::text`] with its leading binary-owned
+    /// attempt projection (lifecycle markers, the `[#<owner>#<generation>]`
+    /// owner annotation, the `🙋` glyph) removed (`#queuerowworkidentity`).
+    ///
+    /// `id` is derived from this text, never from the projection, and the
+    /// document-cell merge compares it to tell an operator's edit of the work
+    /// from a projection-only difference (a stale editor copy carrying an
+    /// older or newer marker).
+    pub fn work_text(&self) -> &str {
+        agent_doc_element_queue::strip_attempt_projection_prefix(&self.text)
+    }
+}
+
 /// A parsed `<!-- agent:name attrs -->` … `<!-- /agent:name -->` component and
 /// its item nodes, in document order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -651,11 +665,23 @@ fn extract_bracket_id(text: &str) -> Option<String> {
     (!id.is_empty()).then(|| id.to_string())
 }
 
-fn item_id(kind: &ItemKind, text: &str) -> String {
-    if let Some(id) = extract_bracket_id(text) {
-        return id;
+/// A list item's node id and whether it came from an explicit `[#id]`
+/// (`#queuerowworkidentity`).
+///
+/// The id is derived from the row's *work* text, after
+/// [`agent_doc_element_queue::strip_attempt_projection_prefix`] removes the
+/// binary-owned attempt projection. Keying on the raw first `[#...]` token
+/// named a claimed `☑️ [#subagent:x#1] do [#foo]` row `subagent:x#1`, so it
+/// and its bare or struck `~~do [#foo]~~` copy were different nodes, and a
+/// stale editor copy carrying another marker survived a merge beside (or in
+/// place of) the struck row. A row with no projection prefix keys exactly as
+/// before: the remainder IS the text.
+fn work_item_id(text: &str) -> (String, bool) {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
+    match extract_bracket_id(work) {
+        Some(id) => (id, true),
+        None => (content_item_id(&classify(work), work), false),
     }
-    content_item_id(kind, text)
 }
 
 fn content_item_id(kind: &ItemKind, text: &str) -> String {
@@ -716,8 +742,7 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
 
     let kind = classify(body);
     let text = body.trim().to_string();
-    let explicit_id = extract_bracket_id(&text).is_some();
-    let id = item_id(&kind, &text);
+    let (id, explicit_id) = work_item_id(&text);
     Item {
         id,
         explicit_id,
@@ -747,13 +772,18 @@ fn parse_multiline_item(
     // A pasted log further down routinely quotes `do [#other]`; reading that as
     // this node's id made a free-text report an explicit-id node keyed after
     // unrelated tracked work.
-    let first_line = text
+    //
+    // `#queuerowworkidentity`: the id is the work's, not the attempt
+    // projection's, so a lifecycle marker or owner annotation leading the
+    // title never becomes the node key.
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(&text);
+    let first_line = work
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("");
     let leading_id = extract_bracket_id(first_line);
     let explicit_id = leading_id.is_some();
-    let id = leading_id.unwrap_or_else(|| content_item_id(&kind, &text));
+    let id = leading_id.unwrap_or_else(|| content_item_id(&classify(work), work));
     Item {
         id,
         explicit_id,
@@ -1058,9 +1088,7 @@ pub fn components(source: &str) -> Vec<Component> {
         {
             comp.items
                 .push(parse_item(item_content, line_start, offset));
-            if is_runnable_component(&comp.name)
-                && queue_item_accepts_continuation(item_content)
-            {
+            if is_runnable_component(&comp.name) && queue_item_accepts_continuation(item_content) {
                 // `item_content` is a suffix slice of `content`, which starts at
                 // `line_start`.
                 continuable_item = Some((
@@ -1234,7 +1262,12 @@ trailing residue
             let parsed = components(&doc);
             assert_eq!(parsed.len(), 1, "{name}");
             assert_eq!(parsed[0].name, "queue", "{name}");
-            assert!(parsed[0].attrs.split_whitespace().any(|attr| attr == "loop"));
+            assert!(
+                parsed[0]
+                    .attrs
+                    .split_whitespace()
+                    .any(|attr| attr == "loop")
+            );
             assert_eq!(parsed[0].items.len(), 1, "{name}");
             assert_eq!(parsed[0].items[0].text, "first\n  continuation", "{name}");
         }
@@ -1376,6 +1409,113 @@ trailing residue
         let gamma = &q.items[3];
         assert_eq!(gamma.kind, ItemKind::Reference);
         assert_eq!(gamma.id, "gamma");
+    }
+
+    /// `#queuerowworkidentity`: a row's node id is its work identity, never
+    /// the attempt projection's first `[#...]` token. A claimed row, every
+    /// lifecycle re-projection of it, and its bare or struck copy are one node.
+    #[test]
+    fn queuerowworkidentity_claimed_projected_and_struck_rows_share_one_id() {
+        let id_rows = [
+            "do [#foo]",
+            "~~do [#foo]~~",
+            "~~do [#foo]~~ — auto-struck: answered",
+            "☑️ [#subagent:x#1] do [#foo]",
+            "🔄 [#subagent:x#1] do [#foo]",
+            "📥 [#subagent:x#2] do [#foo]",
+            "❔ do [#foo]",
+            "🙋☑️ [#subagent:x#1] do [#foo]",
+            "☑️ ⟦subagent:x#1⟧ do [#foo]",
+            "🟡 ⟦owner=subagent:x;generation=4⟧ do [#foo]",
+            ":pushpin: ☑️ [#subagent:x#1] do [#foo]",
+        ];
+        for row in id_rows {
+            let item = parse_item(row, 0, row.len());
+            assert_eq!(item.id, "foo", "{row:?}");
+            assert!(item.explicit_id, "{row:?}");
+            assert_eq!(item.work_text(), "do [#foo]", "{row:?}");
+        }
+
+        let bare = parse_item("fix the parser", 0, 0);
+        for row in [
+            "~~fix the parser~~",
+            "☑️ [#subagent:x#1] fix the parser",
+            "🔄 [#subagent:x#1] fix the parser",
+            "📥 fix the parser",
+        ] {
+            let item = parse_item(row, 0, row.len());
+            assert_eq!(item.id, bare.id, "{row:?}");
+            // The owner tag is projection metadata, not a tracked-work id that
+            // could be offered as a `--done` target.
+            assert!(!item.explicit_id, "{row:?}");
+        }
+
+        // Text and surface flags are untouched: only the identity moved.
+        let claimed = parse_item("☑️ [#subagent:x#1] do [#foo]", 0, 0);
+        assert_eq!(claimed.text, "☑️ [#subagent:x#1] do [#foo]");
+        assert_eq!(claimed.kind, ItemKind::FreeText);
+    }
+
+    /// `#queuerowworkidentity` compatibility: every row WITHOUT a leading
+    /// attempt projection keys exactly as the pre-change overlay did (first
+    /// `[#...]` token, else a content hash of the full text), so documents,
+    /// node keys, and replicas built from such rows are unchanged. The
+    /// canonical operator-answer row keeps its request id.
+    #[test]
+    fn queuerowworkidentity_unprojected_rows_keep_their_previous_ids() {
+        fn previous_id(row: &str) -> String {
+            let item = parse_item(row, 0, row.len());
+            extract_bracket_id(&item.text)
+                .unwrap_or_else(|| content_item_id(&item.kind, &item.text))
+        }
+        for row in [
+            "do [#alpha]",
+            "re [#gamma]",
+            ":pushpin: do [#beta]",
+            "~~:pushpin: do [#beta]~~",
+            "[#bare]",
+            "do #hashonly",
+            "Free-text bug report about pins",
+            "fix [#inline] handling later",
+            "[ ] [#task] backlog task",
+            "🙋 [#subagent-operator-request-abc]: yes, ship it",
+            "🙋 [#legacy-request] old prefix form",
+        ] {
+            assert_eq!(
+                parse_item(row, 0, row.len()).id,
+                previous_id(row),
+                "{row:?}"
+            );
+        }
+        assert_eq!(
+            parse_item("🙋 [#subagent-operator-request-abc]: yes", 0, 0).id,
+            "subagent-operator-request-abc"
+        );
+    }
+
+    /// `#queuerowworkidentity`: multiline prompts key on their work too.
+    #[test]
+    fn queuerowworkidentity_multiline_prompt_ignores_leading_projection() {
+        let bare = parse_multiline_item("x", 0, 0, 0, "title\nbody".to_string(), false);
+        let claimed = parse_multiline_item(
+            "x",
+            0,
+            0,
+            0,
+            "☑️ [#subagent:x#1] title\nbody".to_string(),
+            false,
+        );
+        assert_eq!(claimed.id, bare.id);
+        assert!(!claimed.explicit_id);
+        let id_head = parse_multiline_item(
+            "x",
+            0,
+            0,
+            0,
+            "🔄 [#subagent:x#1] do [#foo]\nbody".to_string(),
+            false,
+        );
+        assert_eq!(id_head.id, "foo");
     }
 
     #[test]

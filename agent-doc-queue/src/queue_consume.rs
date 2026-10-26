@@ -12,6 +12,7 @@ use agent_doc_document::queue_projection::{
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
+use agent_doc_element_queue::struck_work_text;
 use agent_doc_markdown_ast::mutations::{MutationError, MutationNodePatch, MutationNodePatchOp};
 use anyhow::{Context, Result};
 
@@ -1198,7 +1199,7 @@ pub fn mark_first_matching_prompts_completed_by_texts(
                 .position(|target| queue_prompt_texts_match_for_consumption(&prompt.text, target))
         {
             let mut completed = prompt.clone();
-            completed.text = strip_in_progress_marker(&completed.text);
+            completed.text = struck_work_text(&completed.text).to_string();
             marked.push(remaining_targets.remove(pos));
             result.push(QueueEntry::Completed(completed));
             continue;
@@ -1231,7 +1232,7 @@ pub fn mark_entries_completed_by_done_ids(
                 if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
             {
                 let mut completed = prompt.clone();
-                completed.text = strip_in_progress_marker(&completed.text);
+                completed.text = struck_work_text(&completed.text).to_string();
                 marked_texts.push(completed.text.clone());
                 QueueEntry::Completed(completed)
             }
@@ -1490,7 +1491,7 @@ pub fn consume_queue_prompts_by_exact_spans(
         }
 
         let mut completed = prompt;
-        completed.text = strip_in_progress_marker(&completed.text);
+        completed.text = struck_work_text(&completed.text).to_string();
         replacements.push((
             (queue.open_end + range.start)..(queue.open_end + range.end),
             document_queue::render(&[QueueEntry::Completed(completed)]),
@@ -3426,9 +3427,10 @@ Old.
             mark_first_matching_prompts_completed_by_texts(&entries, &["deploy".to_string()])
                 .unwrap();
 
+        // The pin matches for identity, but a strike wraps only the work text.
         assert_eq!(
             document_queue::render(&updated),
-            "- ~~:pushpin: deploy~~\n- do [#tail]\n"
+            "- ~~deploy~~\n- do [#tail]\n"
         );
     }
 
@@ -3460,6 +3462,68 @@ Old.
                 "{marker}: {updated}"
             );
             assert!(updated.contains("- do [#tail]\n"), "{marker}: {updated}");
+        }
+    }
+
+    /// The bare structural `consume` op is the fallback the orphan
+    /// `queue consume --id` strike takes when `node_replace_ops_from_diff`
+    /// finds no op. It must strike only the work text: no lifecycle marker,
+    /// owner annotation, or pin inside the strike, on the first strike and on a
+    /// repeat.
+    #[test]
+    fn bare_structural_consume_strikes_only_the_work_text() {
+        let mut prefixes = vec![String::new(), "📌".to_string()];
+        for marker in agent_doc_document::queue_projection::LIFECYCLE_MARKERS {
+            prefixes.push(marker.to_string());
+            for annotation in [
+                "[#subagent:owner#1]",
+                "⟦subagent:owner#1⟧",
+                "⟦owner=subagent:owner;generation=1⟧",
+            ] {
+                prefixes.push(format!("{marker} {annotation}"));
+            }
+        }
+        for prefix in prefixes {
+            let row = format!("{prefix} do [#orphan]");
+            let content = format!(
+                "<!-- agent:queue -->\n- {}\n- do [#tail]\n<!-- /agent:queue -->\n",
+                row.trim()
+            );
+            let keys = agent_doc_markdown_ast::mutations::item_nodes(&content, "queue")
+                .unwrap()
+                .into_iter()
+                .filter(|node| node.item.raw.contains("#orphan"))
+                .map(|node| node.node_key)
+                .collect::<Vec<_>>();
+            assert_eq!(keys.len(), 1, "{prefix}");
+            let struck =
+                apply_structural_ops_to_content(&content, &queue_consume_node_ops(&keys)).unwrap();
+            assert_eq!(
+                struck,
+                "<!-- agent:queue -->\n- ~~do [#orphan]~~\n- do [#tail]\n<!-- /agent:queue -->\n",
+                "{prefix:?}"
+            );
+            let struck_keys = agent_doc_markdown_ast::mutations::item_nodes(&struck, "queue")
+                .unwrap()
+                .into_iter()
+                .filter(|node| node.item.struck)
+                .map(|node| node.node_key)
+                .collect::<Vec<_>>();
+            assert_eq!(struck_keys.len(), 1, "{prefix:?}: {struck}");
+            assert_eq!(
+                apply_structural_ops_to_content(&struck, &queue_consume_node_ops(&struck_keys))
+                    .unwrap(),
+                struck,
+                "{prefix:?}: a repeat strike is a no-op"
+            );
+            let body = struck
+                .strip_prefix("<!-- agent:queue -->\n")
+                .and_then(|rest| rest.strip_suffix("<!-- /agent:queue -->\n"))
+                .unwrap();
+            match &document_queue::parse(body).unwrap()[0] {
+                QueueEntry::Completed(prompt) => assert_eq!(prompt.text, "do [#orphan]"),
+                other => panic!("{prefix:?}: expected Completed, got {other:?}"),
+            }
         }
     }
 

@@ -42,7 +42,7 @@ use agent_doc_document::queue_projection::{
     AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKERS, prioritized_marker,
     strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
 };
-use agent_doc_element_queue::QueueItemLifecycle;
+use agent_doc_element_queue::{QueueItemLifecycle, struck_work_text};
 use agent_doc_markdown_ast::overlay::{queue_bare_fence_close, queue_fenced_title_block};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -4466,7 +4466,7 @@ pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> V
             && let QueueEntry::Prompt(prompt) = entry
         {
             let mut completed = prompt.clone();
-            completed.text = strip_in_progress_marker(&completed.text);
+            completed.text = struck_work_text(&completed.text).to_string();
             result.push(QueueEntry::Completed(completed));
             marked += 1;
             continue;
@@ -9150,6 +9150,83 @@ mod tests {
             render(&projected),
             format!("- 🟡 [#subagent:queue-state-fix#3] {prompt}\n")
         );
+    }
+
+    /// Strike rendering: the queue renderer's single-line strike over the exact
+    /// live row (agent-doc-bugs.md, 2026-10-26) reported as malformed. The body
+    /// quotes a row in single backticks while that row holds its own backtick
+    /// spans; the strike must still render as one GFM strikethrough span over
+    /// the whole body, and every struck-row reader must read it back as the
+    /// same completed prompt, idempotently.
+    #[test]
+    fn strikeformat_exact_row_renders_and_reads_back_as_one_strike() {
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+        const ROW: &str = "`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]";
+        // (top-level strike spans, max depth, text inside strike, text outside)
+        let split = |markdown: &str| {
+            let (mut depth, mut max_depth, mut spans) = (0usize, 0usize, 0usize);
+            let (mut inside, mut outside) = (String::new(), String::new());
+            for event in Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH) {
+                let text = match event {
+                    Event::Start(Tag::Strikethrough) => {
+                        spans += usize::from(depth == 0);
+                        depth += 1;
+                        max_depth = max_depth.max(depth);
+                        continue;
+                    }
+                    Event::End(TagEnd::Strikethrough) => {
+                        depth -= 1;
+                        continue;
+                    }
+                    Event::Start(Tag::CodeBlock(_)) => "<codeblock>".to_string(),
+                    Event::Text(t) | Event::Code(t) | Event::InlineHtml(t) => t.to_string(),
+                    Event::SoftBreak | Event::HardBreak => " ".to_string(),
+                    _ => continue,
+                };
+                if depth > 0 {
+                    inside.push_str(&text);
+                } else {
+                    outside.push_str(&text);
+                }
+            }
+            (spans, max_depth, inside, outside)
+        };
+        let (_, _, _, plain) = split(&format!("- {ROW}\n"));
+
+        let rendered = render(&[QueueEntry::Completed(QueuePrompt::new(ROW))]);
+        assert_eq!(rendered, format!("- ~~{ROW}~~\n"));
+        assert_eq!(split(&rendered), (1, 1, plain.clone(), String::new()));
+
+        let annotated = crate::queue_consume::annotate_struck_free_text_line(&rendered);
+        assert_eq!(
+            annotated,
+            format!("- ~~{ROW}~~ — auto-struck: answered this cycle (#ftstrike)\n")
+        );
+        assert_eq!(
+            crate::queue_consume::annotate_struck_free_text_line(&annotated),
+            annotated,
+            "the #ftstrike note is never appended twice"
+        );
+        assert_eq!(
+            split(&annotated),
+            (
+                1,
+                1,
+                plain,
+                " — auto-struck: answered this cycle (#ftstrike)".to_string()
+            )
+        );
+
+        for struck in [rendered.as_str(), annotated.as_str()] {
+            let entries = parse(struck).unwrap();
+            assert_eq!(entries.len(), 1, "{struck}");
+            match &entries[0] {
+                QueueEntry::Completed(prompt) => assert_eq!(prompt.text, ROW),
+                other => panic!("struck row must parse as Completed, got {other:?}"),
+            }
+            // Re-rendering a parsed struck row never double-strikes it.
+            assert_eq!(render(&entries), format!("- ~~{ROW}~~\n"));
+        }
     }
 }
 

@@ -258,7 +258,7 @@ fn render_multiline_item(marker: &str, text: &str) -> String {
 
 fn render_struck_item(item: &Item) -> String {
     match item.surface {
-        ItemSurface::ListItem => format!("~~{}~~", item.raw),
+        ItemSurface::ListItem => agent_doc_element_queue::render_struck_row_body(&item.raw),
         ItemSurface::MultilinePrompt => render_multiline_item("~~~done", &item.text),
     }
 }
@@ -907,7 +907,8 @@ mod tests {
 
         let updated = consume_nodes(DOC, "queue", &[alpha, second_beta]).unwrap();
 
-        assert!(updated.contains("- ~~:pushpin: do [#alpha]~~\n"));
+        // A strike wraps only the work text: the pin is projection, not work.
+        assert!(updated.contains("- ~~do [#alpha]~~\n"), "{updated}");
         assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
     }
 
@@ -1287,5 +1288,152 @@ operator note
             "unrelated document drift must be preserved:\n{updated}"
         );
         assert!(updated.contains("- ~~do [#beta]~~\n"));
+    }
+
+    /// Strike rendering: the exact live row (agent-doc-bugs.md, 2026-10-26) whose
+    /// strike the operator reported as malformed. Its body quotes a queue row in
+    /// single backticks while that quoted row holds its own backtick spans, so
+    /// the body's code spans pair as (1,2)(3,4)(5,6). That pairing is operator
+    /// content and is identical before and after the strike.
+    const STRIKEFORMAT_ROW: &str = "`- ⚠️ [#subagent:jb263_feed#1] Should we have the `-263.xml` in `jetbrains-263.xml`? I saw the selection in the list. I selected it. I still see Agent Doc in the Cannot Upgrade Plugins. ![img_7.png](img_7.png)` should have an actionable todo item. With the todo item id appended to the queue item for followup. [#jb263-feed-verify]";
+
+    /// Render markdown with GFM strikethrough (pulldown-cmark) and split its
+    /// visible text into what lies inside a strikethrough span and what lies
+    /// outside one. Returns `(top-level strike spans, max strike depth, inside,
+    /// outside)`. A code block start is recorded outside as `<codeblock>` so a
+    /// strike that opens a `~~~` fence is caught.
+    fn gfm_strike_split(markdown: &str) -> (usize, usize, String, String) {
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+        let (mut depth, mut max_depth, mut spans) = (0usize, 0usize, 0usize);
+        let (mut inside, mut outside) = (String::new(), String::new());
+        for event in Parser::new_ext(markdown, Options::ENABLE_STRIKETHROUGH) {
+            let text = match event {
+                Event::Start(Tag::Strikethrough) => {
+                    spans += usize::from(depth == 0);
+                    depth += 1;
+                    max_depth = max_depth.max(depth);
+                    continue;
+                }
+                Event::End(TagEnd::Strikethrough) => {
+                    depth -= 1;
+                    continue;
+                }
+                Event::Start(Tag::CodeBlock(_)) => {
+                    outside.push_str("<codeblock>");
+                    continue;
+                }
+                Event::Text(t) | Event::Code(t) | Event::InlineHtml(t) | Event::Html(t) => {
+                    t.to_string()
+                }
+                Event::SoftBreak | Event::HardBreak => " ".to_string(),
+                _ => continue,
+            };
+            if depth > 0 {
+                inside.push_str(&text);
+            } else {
+                outside.push_str(&text);
+            }
+        }
+        (spans, max_depth, inside, outside)
+    }
+
+    fn strikeformat_doc(row: &str) -> String {
+        format!(
+            "<!-- agent:run id=\"main\" priority go -->\n{row}\n- do [#beta]\n<!-- /agent:run -->\n"
+        )
+    }
+
+    fn struck_row_line(doc: &str) -> &str {
+        doc.lines()
+            .find(|line| line.starts_with("- ~~"))
+            .expect("struck row present")
+    }
+
+    /// Assert that `struck_line` renders as exactly one GFM strikethrough span
+    /// whose visible text is exactly the visible text of the unstruck `body`,
+    /// with only `expected_outside` visible outside it.
+    fn assert_one_struck_span(struck_line: &str, body: &str, expected_outside: &str) {
+        let (_, _, _, plain) = gfm_strike_split(&format!("- {body}\n"));
+        let (spans, max_depth, inside, outside) = gfm_strike_split(&format!("{struck_line}\n"));
+        assert_eq!(spans, 1, "exactly one strike span: {struck_line}");
+        assert_eq!(max_depth, 1, "no nested strike: {struck_line}");
+        assert_eq!(
+            inside, plain,
+            "the strike covers the whole body: {struck_line}"
+        );
+        assert_eq!(
+            outside, expected_outside,
+            "nothing else is unstruck: {struck_line}"
+        );
+    }
+
+    #[test]
+    fn strikeformat_exact_row_renders_as_one_gfm_strike_span() {
+        let doc = strikeformat_doc(&format!("- {STRIKEFORMAT_ROW}"));
+        let nodes = item_nodes(&doc, "queue").unwrap();
+        let row = nodes
+            .iter()
+            .find(|n| n.item.text.contains("jb263_feed"))
+            .unwrap();
+        assert!(!row.item.struck);
+
+        let struck = consume_node(&doc, "queue", &row.node_key).unwrap();
+        let line = struck_row_line(&struck);
+        assert_eq!(line, format!("- ~~{STRIKEFORMAT_ROW}~~"), "{struck}");
+        assert_one_struck_span(line, STRIKEFORMAT_ROW, "");
+
+        // Every struck-row reader recognizes it, idempotently.
+        let struck_nodes = item_nodes(&struck, "queue").unwrap();
+        let struck_row = struck_nodes
+            .iter()
+            .find(|n| n.item.text.contains("jb263_feed"))
+            .unwrap();
+        assert!(struck_row.item.struck);
+        assert_eq!(struck_row.item.text, STRIKEFORMAT_ROW);
+        assert_eq!(
+            consume_node(&struck, "queue", &struck_row.node_key).unwrap(),
+            struck,
+            "re-striking a struck row is a no-op (never double-struck)"
+        );
+
+        // The `#ftstrike` annotated shape stays one span over the body only.
+        let annotated = format!(
+            "- ~~{STRIKEFORMAT_ROW}~~{}answered this cycle (#ftstrike)",
+            crate::overlay::STRUCK_ANNOTATION_SEPARATOR
+        );
+        assert_one_struck_span(
+            &annotated,
+            STRIKEFORMAT_ROW,
+            &format!(
+                "{}answered this cycle (#ftstrike)",
+                crate::overlay::STRUCK_ANNOTATION_SEPARATOR
+            ),
+        );
+        let annotated_doc = strikeformat_doc(&annotated);
+        let annotated_nodes = item_nodes(&annotated_doc, "queue").unwrap();
+        assert!(annotated_nodes[0].item.struck);
+        assert_eq!(annotated_nodes[0].item.text, STRIKEFORMAT_ROW);
+    }
+
+    #[test]
+    fn strikeformat_inline_code_link_and_image_bodies_render_as_one_strike_span() {
+        for body in [
+            STRIKEFORMAT_ROW,
+            "`leading code` then prose",
+            "prose then trailing code `x`",
+            "unbalanced `backtick here",
+            "code `span with ~~ inside` stays struck",
+            "``double `tick` span`` and `single`",
+            "![img_8.png](img_8.png) and [a link](https://example.com)",
+            "*unclosed emphasis and `code`",
+        ] {
+            let doc = strikeformat_doc(&format!("- {body}"));
+            let key = item_nodes(&doc, "queue").unwrap()[0].node_key.clone();
+            let struck = consume_node(&doc, "queue", &key).unwrap();
+            assert_one_struck_span(struck_row_line(&struck), body, "");
+            let struck_nodes = item_nodes(&struck, "queue").unwrap();
+            assert!(struck_nodes[0].item.struck, "{body}");
+            assert_eq!(struck_nodes[0].item.text, body);
+        }
     }
 }

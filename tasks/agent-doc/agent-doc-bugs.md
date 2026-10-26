@@ -25,11 +25,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 29 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 31 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `5fe17385b5` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373 (zero-column route), and GH #374 (heading-anchored `agent:run` respond + merge); all three issues are closed and installed locally.
+Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `fc9c0be086` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373, GH #374, and the cross-queue claim-marker projection fix; all are installed locally and the three issues are closed.
 <!-- /status:sync -->
 <!-- /agent:status -->
  
@@ -552,6 +552,76 @@ The worker's follow-up is in progress as `subagent:mergepairbyid`. The merge sti
 The duplicate `jb263-feed-verify` row is your own second copy. Both rows correctly show one claim.
 
 JetBrains is still reporting plugin 0.2.827. Restart the IDE to load 0.2.828, 0.2.829, and 0.2.830.
+
+### Re: Subagent completed: `subagent:mergepairbyid` returned work for queue item “document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence” — agent-doc
+<!-- agent-doc-subagent-response sha256=50fe64eb61300fef1223afbab8825a261ee234aeaac850ae9663603c5e5c01c9 -->
+> **Subagent response:**
+>
+> The merge now pairs each component by its `id=` (or by order of appearance when there is no id) instead of taking the first component with the same name. The fix is committed and pushed. All requested tests and `make check-fast` pass.
+>
+> Branch: `fix/merge-pair-components-by-id`, built on `origin/fix/gh374-sameline-run-respond` (`e2ee3bad84`), pushed to origin. Commit: `03eb75ff88efb337e205623578862fa0722f3c0c`. Worktree: `/home/brian/work/btakita/agent-doc-wt/mergepairbyid`. Files changed: `agent-doc-merge/src/document_cell_merge.rs` and `specs/02-document-format.md`. No `make install`, release build or version bump.
+>
+> How pairing works now: a component is matched across base, agent and operator by its name (with `run`/`loop` counted as `queue`), its id, and its position among same-named components on that side. The explicit `id=` value counts as the id; a bare `id`, an empty value or `true` counts as no id. A single queue with no id is treated as `default`, the same id the queue code already uses, so `<!-- agent:run -->` and `<!-- agent:run id=default -->` pair. A component is never merged with a same-named one that has a different id; an unmatched component is handled on its own side (the operator's keeps its items, the agent's is carried over and appended). Each operator marker is tied to the exact component that starts on that line, so the rebuild never looks a component up by name again; if the parser doesn't recognize the component at a marker, the operator's lines are kept as they are (before, those lines were dropped). The agent's new response turns are read from the matched exchange component. The pairing rule is a new paragraph in `specs/02-document-format.md`, right after the #374 `projected_component_name` text.
+>
+> New regression tests (all 5 fail on the old code and pass with the fix): two_runnable_components_merge_their_items_independently; id_keyed_components_pair_across_an_operator_reorder; components_with_different_ids_never_pair; lone_unkeyed_queue_pairs_with_id_default; repeated_unkeyed_components_pair_by_occurrence.
+>
+> Test results: `cargo test -p agent-doc-merge -p agent-doc-markdown-ast -p agent-doc-queue` exit 0 (920, 415 and 66 tests, 0 failures). `make check-fast` exit 0: nextest 11520 tests run, 11520 passed, 177 skipped; "No blocking issues found". `cargo clippy -p agent-doc-merge --all-targets -- -D warnings` exit 0.
+>
+> Open decisions: an agent component the operator has no match for is appended at the end of the document, which now also applies to an id'd queue the operator deleted (kept consistent, not changed). Outcomes and conflict notes still label nodes only as component `queue`, with no queue id, because adding it would change the public `NodeOutcome` struct. No follow-up queue items.
+<!-- agent-doc-subagent-completion key=c4a225158fe099940846764cc30a441c50cdd99aed4deebb27eb0a28dad767d1 -->
+
+### Re: Subagent completed: `subagent:retainedgateflake` returned work for queue item “fix nondeterministic project_controller::tests::retained_transition_adapter_does_not_hold_the_reactive_context - the shared blocking_effect_gate::RETAINED_TRANSITION counter is incremented by concurrent tests (passes in isolation, fails under the parallel crate suite)” — agent-doc
+<!-- agent-doc-subagent-response sha256=e9953ad388fb7a0c2d8d970740571f06b8163486a44fbbf4bdc29a2b9f5b99ca -->
+> **Subagent response:**
+>
+> The flaky test is fixed, and the cause matched the suspicion: two tests shared one process-wide gate. The fix is committed and pushed on its own branch. Before the fix, 3 of 15 full `cargo test -p agent-doc-controller-io` runs failed on this test; after it, 0 of 15 failed.
+>
+> Branch: `fix/retained-transition-gate-flake`, pushed to origin. Commit: `30783f0402`. Worktree: `/home/brian/work/btakita/agent-doc-wt/retainedgateflake`.
+>
+> Root cause: `blocking_effect_gate::RETAINED_TRANSITION` was one open flag plus entered/passed counters for the whole test binary. Two tests use its fixture: this one and `canonicalization_retirement_fences_a_queued_stale_retained_projection`. Each calls `close()`, which resets the counters, and `open()`, which releases any waiting adapter, so either test could release or recount the other's adapter mid-assertion. Both directions happened: the target test failed its `passed()==0` check, and in another run the sibling failed with `CP relay write refused ... recovery=retry_crdt_merge` because the target test's `open()` let the sibling's stale queued write apply before retirement.
+>
+> Fix: each of the three test gates now only blocks for the one document a test closed it for. The retained-transition and document-effect gates are keyed by `document_hash`, and the strike gate by canonical path. `Gate::close(key)` returns a handle owned by that test, and its counters only see that document's adapter. Dropping the handle opens and releases the gate, and closing a key that is already closed panics. An adapter for a document no test closed passes straight through. No retries, serial marking or timeout changes.
+>
+> Tests: new `blocking_effect_gate::a_gate_key_is_isolated_from_every_other_tests_key`; the strike test now also asserts `wait_entered() >= 1`. Spec: the `#remainingwallclock` paragraph in `specs/12-deterministic-simulation.md` now requires each gate to belong to the test that closed it and be keyed by that test's document.
+>
+> Results: full crate suite, 15 runs: before 3 failed on this test, after 0 failed (826 passed each run). The two gate-sharing tests together, 200 runs before: 0 failed. Tests matching `retained` at 32 threads, 60 runs: 0 failed before and after. Gate tests including the new one: all 5 passed. `make check-fast`: exit 0, nextest 4189 run, 4189 passed, 153 skipped. One run in the before set failed on `singleton_launch_claim_rejects_concurrent_holder` instead (unrelated). Neither stress loop reproduced the race even before the fix, so the proof rests on the full-suite counts. One batch of 10 before-runs was discarded because a copied test binary made two `process::tests` discovery tests fail every run.
+>
+> Files changed: agent-doc-controller-io/src/project_controller.rs; specs/12-deterministic-simulation.md. No `make install`. No follow-up queue items.
+<!-- agent-doc-subagent-completion key=e727477b8ae6c2038b453576dfdaac7a624edd71692bbc5b27f4ef54349c07bd -->
+### Re: merge pairing, queue mirror sync, gate flake integrated — opus-5 · 2026-10-26T10:29-04:00
+
+> **Queue prompt:** document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
+
+The fix is integrated as `d8eb3ac0ba` and installed. The document-cell merge now pairs each component by name, `id=`, and position among same-named components. `run` and `loop` count as `queue`, and a lone component without an id pairs with `id=default`. Components with different ids are never merged. Each operator marker is tied to the exact component that starts on its line, so lines from a component the parser doesn't recognize are now kept instead of dropped.
+
+The 5 new regressions fail on the old code and pass with the fix. One of them uses this document's own shape: `agent:run id="main"` and `agent:loop id=issues` both holding `#a`. After the rebase, 1,405 merge, markdown-ast, and queue tests passed, and `make check-fast` passed.
+
+The worker left two behaviors for you to decide:
+
+- **Deleted components come back:** an agent component with no operator match is still appended at the end of the document. With id pairing, that now also brings back an id'd queue the operator deleted.
+- **Outcome labels:** merge outcome labels still name only `queue`, without the queue id.
+
+> **Queue prompt:** fix nondeterministic project_controller::tests::retained_transition_adapter_does_not_hold_the_reactive_context — the shared blocking_effect_gate::RETAINED_TRANSITION counter is incremented by concurrent tests (passes in isolation, fails under the parallel crate suite)
+
+The fix is integrated as `d14f33a01e`; it changes test code only. The cause was the suspected one. Two tests shared one process-global gate, and each test's `close()` and `open()` reset or released the other test's adapter.
+
+Each test gate is now keyed by its own fixture's document, through a per-test handle that opens when dropped. Before the fix, 3 of 15 full crate runs failed. After it, 0 of 15 failed. After the rebase, the full controller crate passed: 826 passed, 0 failed.
+
+The first push got a GitHub 500 and went through on the second attempt. A different flake seen once during the baseline, `singleton_launch_claim_rejects_concurrent_holder`, is queued as a follow-up and running as `subagent:singletonflake`.
+
+**Queue mirror sync** is integrated as `fc9c0be086` and installed. The Issues queue now shows `⚠️ #2`, `🔄 release + publish`, and `📥` on the onboarding row. Two causes:
+
+- **Frozen markers:** claims are keyed across the whole document, but every projection path painted only the selected queue. All queues are now projected from the same ledgers. A struck row in a loop is never reopened by another queue's claim.
+- **Vanished row:** the `do [#claimrowmigrate]` row was removed by the binary at 13:09:26Z. `queue_prompt_done_id` read `subagent` from the owner marker, and the tombstone pass then dropped the live row. The id is now read after stripping lifecycle markers and the owner annotation. That work was already integrated, so its leftover reported claim is harmless.
+
+The worker noted two remaining gaps:
+
+- Marker changes in queues other than the selected one are not copied into the snapshot baseline.
+- Claim edit-following still reads only the selected queue's heads.
+
+**`#layoutunprovenliveverify` moved to review.** Its code, `cb2f9068e3`, has shipped since v0.35.552. The remaining step is a live check in your IDE, which a subagent cannot do without driving your live tmux layout. The previous worker's claim timed out. Your check is now the `#layoutliveverify-check` todo.
+
+Next: the `release + publish` you queued after these items.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -560,7 +630,7 @@ JetBrains is still reporting plugin 0.2.827. Restart the IDE to load 0.2.828, 0.
 
 ## Queue: Main
 <!-- agent:run id="main" subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
+- ~~do [#layoutunprovenliveverify]~~
 - ☑️ [#subagent:gh372#1] #gh-fix https://github.com/btakita/agent-doc/issues/372: When we had the "guessing" architecture between the frontend + the backend, the ends were able to communicate...but had the persistent swapped tmux pane issue. Now the frontend + the backend don't communicate and I cannot Run Agent Doc or Sync Tmux Panes and tmux pane auto-sync is not working. Can we bring back the "good parts" of the architecture that used "guessing" but without the "guessing"? Or is this some state propagation issue, race condition, wait/timeout needed, or state that we are not accounting for?
 - ☑️ [#subagent:grok_queue_ui#1] In sdk-demo.md using Grok, the queue item was finished but the UI did not update. `- 📥 When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.`
 - ☑️ [#subagent:lazily_block_reason#1] On lazily.md, `- ⚠️ [#subagent:corecireachaudit2#2] do [#lzcorecireachaudit]` is blocked and I can't find a reason why.
@@ -649,10 +719,8 @@ After the tab shows the marker on its own line, ask again and I will run session
 force-write the file, and do not delete the queue items.                                                         █
 ```
 ---
----
 ☑️ [#subagent:sdk_demo_route_recovery#1] Run Agent Doc on sdk-demo.md: [route] explicit send for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md is blocked: 1 pending steering item(s) remain durable, but no live owning turn was proven and no second trigger was injected. The idle supervisor re-evaluates stale-empty-preflight recovery on a bounded cadence; no second send is required. Otherwise follow the named recovery (blocker: closeout recovery blocked [open_cycle]: missing proof: open cycle must finish, be replayed, or be explicitly queued behind; recommended: captured response baseline no longer matches current document for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md. If an editor has this document open, reattach it so the authority re-bootstraps from the editor's text: `agent-doc admin reload-lib` (or reopen the document tab); do not run `reset --from-current` while the editor shows text the authority lacks, because it saves the authority over the editor. With no editor attached, rebuild the cold recovery projection without clearing session state: `agent-doc reset --from-current --preserve-session /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`; resume durable checkpoint cycle=cycle-1792824204227 phase=write_applied capture_id=cycle-1792824204227; the canonical write is already applied; retained commit recovery owns the terminal boundary; do not resubmit finalize or write for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md). steering_delivered=0 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=run_recovery_command recovery_command=agent-doc admin reload-lib
 ---
-- ~~release + publish ⟦effect:2⟧~~
 - ☑️ [#subagent:loop_routing#1] The agent:loop is getting items sent to it, but the items should have been sent into `agent:run`.
 - ☑️ [#subagent:queue_completion_audit#1] The queue is full of items with ☑️. Are there complete? Why are they not struck?
 - ☑️ [#subagent:auto_sync_project#1] tmux pane auto-sync not working in this agent-doc project instance
@@ -665,19 +733,18 @@ force-write the file, and do not delete the queue items.                        
 - ☑️ [#subagent:sdk_demo_queue_sync#1] The queue items in sdk-demo.md are out of sync. Will the agent-doc causes be fixed in the next version? If not, fix agent-doc causes.
 - ☑️ [#subagent:release_promotion_concurrency#1] do [#release-promotion-concurrency]
 - ☑️ [#subagent:jb263_feed_verify#1] do [#jb263-feed-verify]
-- ☑️ [#subagent:gh373#1] #gh-fix https://github.com/btakita/agent-doc/issues/373
-- 🚧 [#subagent:retainedgateflake#1] fix nondeterministic project_controller::tests::retained_transition_adapter_does_not_hold_the_reactive_context — the shared blocking_effect_gate::RETAINED_TRANSITION counter is incremented by concurrent tests (passes in isolation, fails under the parallel crate suite)
-- ☑️ [#subagent:gh374#1] #gh-fix https://github.com/btakita/agent-doc/issues/374
-- 🚧 [#subagent:mergepairbyid#1] document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/375~~
+- ☑️ [#subagent:retainedgateflake#1] fix nondeterministic project_controller::tests::retained_transition_adapter_does_not_hold_the_reactive_context — the shared blocking_effect_gate::RETAINED_TRANSITION counter is incremented by concurrent tests (passes in isolation, fails under the parallel crate suite)
+- 🟡 [#subagent:singletonflake#1] fix nondeterministic agent-doc-controller-io process::tests singleton_launch_claim_rejects_concurrent_holder — failed once in 15 full parallel crate runs during the retained-gate flake baseline (2026-10-26); find the shared state or timing it depends on
+- ☑️ [#subagent:mergepairbyid#1] document_cell_merge pairs components by name only; multi-queue (`id=`) documents should pair by id/occurrence
+- 🔄 release + publish
 <!-- /agent:run -->
 
-##~ Run: Issues
+## Run: Issues
 <!-- agent:loop id=issues interval=1h priority -->
-- 🚧 [#subagent:layout_liveverify#1] do [#layoutunprovenliveverify]
+- ⚠️ [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]
 - ☑️ [#subagent:grokqueuesubagents_closeout#1] do [#grokqueuesubagents]
-- ☑️ [#subagent:release_publish_patch#3] release + publish
-- 🚧 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
+- 🔄 release + publish
+- 📥 We need to work on making agent-doc easy to onboard. Sanat, a coworker is confused about how to get started.
 <!-- /agent:loop -->
 
 ## Todo
@@ -687,16 +754,17 @@ force-write the file, and do not delete the queue items.                        
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
 - [x] [#claimrowmigrate] After #claimrowmigrate ships, confirm a duplicated queue row keeps its own claim marker when agent-doc adds ⟦effect:N⟧ annotations. (source: agent:backlog [#claimrowmigrate])
+- [ ] [#layoutunprovenliveverify] In the IDE, open the cross-root sdk-demo.md and agent-doc-bugs.md together, run Sync Tmux Layout, and confirm it recreates the stale sdk-demo pane and converges to two panes without focusing an ownership-unproven pane; restart the IDE first so JetBrains 0.2.828+ is loaded. (source: agent:review [#layoutunprovenliveverify])
 <!-- /agent:todo -->
 
 ## Backlog
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [ ] ☑️ [#grokqueuesubagents] [agent-doc] On 2026-10-24, src/haiven-dev/tasks/sdk/sdk-demo.md had an agent:queue marker with attributes priority, subagents, and go, but agent-doc plan returned dispatch_mode manual, dispatch_candidate false, and no queue_subagent_dispatch list. The Grok coordinator drained the claim-button queue head inline instead of claiming and spawning subagents, and the operator had to say the queue items should run in subagents. Fix plan and preflight so a subagents queue dispatches queue_subagent_dispatch (claim and spawn) instead of an inline drain.
 <!-- /agent:backlog -->
 
 ## Review
 <!-- agent:review -->
+- [/] ⚠️ [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
 - [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.

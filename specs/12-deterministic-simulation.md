@@ -127,6 +127,20 @@ other's memberships, failing plain `cargo test` while `--test-threads=1` and
 nextest passed. Plain parallel `cargo test -p agent-doc-crdt-relay-io`,
 `--test-threads=1`, and nextest must all pass.
 
+The same rule binds every crate whose tests drive those registries in one
+process, including `agent-doc-controller-io`. The
+reliable-sync liveness plane's `alive` register is keyed by editor pid, and
+`register_replica_for_file` refuses admission when the document's only open
+pid is dead. Tests that exercise editor exit correctly record `Alive{false}`
+for their pid, and the durable journal they write keeps that death fact
+foldable into the global plane by any later journal refresh. A test that needs
+a live editor and claims `std::process::id()` is therefore refused whenever a
+sibling marked the test binary's pid dead, and a test that reaps that pid
+retires every sibling's `jetbrains-<own pid>-*` membership. A controller-io
+test that registers an editor replica and records or depends on that editor's
+liveness owns a per-test child process for the pid, kills and reaps it to model
+the exit, and never reuses the test binary's pid.
+
 Current deterministic budgets:
 
 - Fast corpus: seeds `0..512`, `24` commands per seed, CPU-time budget `3s`,

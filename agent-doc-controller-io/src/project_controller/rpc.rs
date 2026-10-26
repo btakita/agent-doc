@@ -62442,7 +62442,37 @@ body
         )
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let editor_pid = u64::from(std::process::id());
+        // `#relayhubtestisolation`: the editor is a child process this test
+        // owns, never the test binary's own pid. The liveness plane and the
+        // relay identity registry are process-global, and the editor pid is
+        // their cross-document key: sibling tests correctly record
+        // `Alive{false}` for `std::process::id()` (their durable journals keep
+        // that death fact foldable by any later journal refresh), and a dead
+        // pid makes `register_replica_for_file` refuse admission. That failed
+        // this test 6 of 60 full parallel crate runs with "a live editor
+        // registers a replica". In the other direction, reaping the test
+        // binary's pid retired every sibling's `jetbrains-<own pid>-*`
+        // membership. A live child gives this test a pid no other test shares
+        // that `process_pid_is_live` still reports alive, so neither the exit
+        // watcher nor dead-member pruning can retire it early.
+        struct OwnedEditorProcess(std::process::Child);
+        impl Drop for OwnedEditorProcess {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let mut editor = OwnedEditorProcess(
+            std::process::Command::new("sleep")
+                .arg("3600")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn this test's own editor process"),
+        );
+        let editor_pid = u64::from(editor.0.id());
+        assert_ne!(editor_pid, u64::from(std::process::id()));
         let file_str = file.display().to_string();
         let document_hash = agent_doc_hash::document_id_for_path(&file);
         agent_doc_reliable_sync_io::global_liveness_plane()
@@ -62462,6 +62492,11 @@ body
             "the editor is attached before it exits"
         );
 
+        // The editor really exits before the controller records it. It is
+        // reaped only on drop, after the plane reset below: until then the
+        // zombie keeps its pid reserved, so the death fact cannot land on a
+        // sibling's recycled pid.
+        editor.0.kill().expect("stop this test's editor process");
         record_reliable_sync_editor_exit(&bootstrap.project_root, editor_pid);
 
         assert_eq!(

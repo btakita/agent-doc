@@ -794,3 +794,30 @@ returned by the queue parser; that range alone becomes a canonical `~~~done`
 item, and later queue bytes are preserved. A malformed or unknown surface that
 has neither an exact parser range nor an AST node key fails closed before
 mutation.
+
+**Single-line strike rendering.** Every single-line strike renders through
+one formatter, `agent_doc_element_queue::render_struck_row_body`, as
+`- ~~work~~`. This covers the Markdown-AST node-keyed consume
+(`mutations::consume_nodes`, the structural `strike`/`consume` op that editors
+apply through the native library), the bare-consume fallback of the orphan
+`queue consume --id` strike, and the queue-entry strike paths that build a
+completed entry. `work` is the row's trimmed text without its attempt
+projection prefix (`strip_attempt_projection_prefix`): lifecycle markers
+(`☑️`, `🔄`, `📥`, …), pins, exact-attempt owner annotations
+(`[#subagent:x#1]`, legacy `⟦…⟧`), and the bare `🙋` glyph never land inside
+a strike. A row that is only projection keeps its trimmed text. The closeout
+`#ftstrike` note may follow *outside* the wrapper (`- ~~work~~ — auto-struck:
+…`). Past the projection prefix, `work` is kept byte for byte: the strike
+never escapes, re-pairs, or rewrites backticks, links, or images inside it.
+Under GFM (cmark-gfm, markdown-it in VS Code, the `intellij-markdown` parser
+in JetBrains, `pulldown-cmark`) that wrapper is exactly one strikethrough span
+over the whole work text, including work text with inline code at either
+edge, unbalanced backticks, `~~` inside a code span, links, and images. Code spans pair *inside* the strike and cannot move its
+delimiters. Readers return `work` as the item text. Striking a struck row again
+is a no-op, and the `#ftstrike` note is never added twice. A struck row whose
+code spans look wrong is showing its own operator text. For example, a row that
+quotes another row in single backticks, where the quoted row holds its own
+backtick spans, pairs its backticks the same way before and after the strike.
+Quote such text with a longer backtick run (```` `` … `` ````) instead. Known
+gap: work text that begins or ends with `~`, or ends with `\`, does not render
+as a strike (a leading `~` turns `~~~…` into a fenced code block).

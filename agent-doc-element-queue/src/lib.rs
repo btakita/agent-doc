@@ -450,6 +450,27 @@ pub fn strip_attempt_projection_prefix(text: &str) -> &str {
     t
 }
 
+/// The work text a strike keeps: `text` (trimmed) without its leading attempt
+/// projection prefix ([`strip_attempt_projection_prefix`]): lifecycle and pin
+/// markers, exact-attempt owner annotations, and the bare `🙋` glyph. A struck
+/// row is completed work, so none of that projection survives inside the
+/// strike. A row that is nothing but projection keeps its trimmed text, so a
+/// strike never wraps an empty body.
+pub fn struck_work_text(text: &str) -> &str {
+    let work = strip_attempt_projection_prefix(text).trim();
+    if work.is_empty() { text.trim() } else { work }
+}
+
+/// The one single-line strike formatter: `~~<work text>~~` for a queue row
+/// body (without its `- ` list marker). Every single-line strike path renders
+/// through this, so a strike drops the lifecycle marker and owner annotation
+/// and wraps only the work text, byte for byte. Under GFM the result is one
+/// strikethrough span over the whole work text, including inline code,
+/// links, and images inside it.
+pub fn render_struck_row_body(text: &str) -> String {
+    format!("~~{}~~", struck_work_text(text))
+}
+
 /// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`☑️`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.

@@ -5242,6 +5242,37 @@ mod core_tests {
             .unwrap();
         assert_eq!(snap, result, "detached disk strike must update snapshot");
     }
+
+    /// The orphan `queue consume --id` strike of a claimed row with no
+    /// completion cell to retire strikes only the work text: the lifecycle
+    /// marker and exact-attempt owner annotation never land inside the strike.
+    #[test]
+    fn orphan_id_strike_of_claimed_row_strikes_only_the_work_text() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"main\" priority go -->\n",
+            "- ☑️ [#subagent:owner#1] do [#orphanclaimed]\n",
+            "- do [#tail]\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        assert!(strike_orphan_id_backed_queue_head(&doc, "orphanclaimed").unwrap());
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~do [#orphanclaimed]~~\n- do [#tail]\n"),
+            "the strike wraps only the work text:\n{result}"
+        );
+        assert!(
+            !result.contains("~~☑️") && !result.contains("subagent:owner"),
+            "no lifecycle marker or owner annotation survives the strike:\n{result}"
+        );
+    }
     #[test]
     fn strike_orphan_id_backed_queue_head_refuses_open_backlog_item() {
         // The escape hatch must NOT desync live work: an id still naming an OPEN

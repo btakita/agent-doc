@@ -145,12 +145,26 @@ pub fn selected_queue_head_node_key(content: &str, head_text: &str) -> Option<St
 /// mutation without passing through the direct queue-consumption proof path.
 /// The durable node key survives the strike, so orchestration can record the
 /// same terminal lifecycle fact before later maintenance considers selections.
+///
+/// GH #378: the controller derives this on every `commit_document`, so a
+/// document with no runnable component (`agent:queue`/`agent:run`/
+/// `agent:loop`, heading-anchored or standalone, as the overlay resolves them)
+/// projects no completions instead of failing the commit with
+/// ``component `queue` was not found``. Every other parse failure still fails.
 pub fn completed_queue_head_projections(
     content: &str,
 ) -> Result<Vec<CompletedQueueHeadProjection>> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue").map_err(|err| {
-        anyhow::anyhow!("queue completion projection: failed to parse queue nodes: {err}")
-    })?;
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes(content, "queue") {
+        Ok(nodes) => nodes,
+        Err(agent_doc_markdown_ast::mutations::MutationError::ComponentNotFound(_)) => {
+            return Ok(Vec::new());
+        }
+        Err(err) => {
+            return Err(anyhow::anyhow!(
+                "queue completion projection: failed to parse queue nodes: {err}"
+            ));
+        }
+    };
     Ok(nodes
         .into_iter()
         .filter(|node| node.item.struck)
@@ -454,6 +468,55 @@ first
                 backlog_id: Some("completed-work".to_string()),
             }]
         );
+    }
+
+    /// GH #378: the controller `commit_document` path projects completed queue
+    /// heads from a document whose runnable component is a heading-anchored
+    /// `## Run <!-- agent:run ... -->` and that has no `agent:queue` line at
+    /// all. The projection resolves that opener through the overlay's shared
+    /// heading-anchor rule (GH #374) instead of failing with
+    /// ``component `queue` was not found``.
+    #[test]
+    fn completed_projection_resolves_heading_anchored_run() {
+        let content = "\
+## Run <!-- agent:run priority subagents clear -->
+- ~~☑️ do [#completed-work]~~
+- do [#ready-work]
+<!-- /agent:run -->
+
+## Backlog <!-- agent:backlog priority queue -->
+<!-- /agent:backlog -->
+";
+
+        let completed = completed_queue_head_projections(content).unwrap();
+
+        assert_eq!(
+            completed
+                .iter()
+                .map(|row| row.backlog_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("completed-work")],
+            "the struck heading-anchored `agent:run` row must project: {completed:?}"
+        );
+        assert!(
+            queue_worklist_hash_for_document(content).is_some(),
+            "the worklist hash must find the heading-anchored `agent:run`"
+        );
+    }
+
+    /// GH #378: a document with no runnable component has no queue heads to
+    /// complete. The controller observes queue authority on every
+    /// `commit_document`, so a missing queue is an empty projection, never a
+    /// ``component `queue` was not found`` failure of the whole commit.
+    #[test]
+    fn completed_projection_is_empty_without_a_runnable_component() {
+        let content = "\
+## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#fresh] record the follow-up
+<!-- /agent:backlog -->
+";
+
+        assert_eq!(completed_queue_head_projections(content).unwrap(), vec![]);
     }
 
     #[test]

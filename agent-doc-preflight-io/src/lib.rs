@@ -7691,7 +7691,12 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         Ok(cs) => cs,
         Err(_) => return Ok(Vec::new()),
     };
-    let Some(queue_component) = components.iter().find(|c| c.name == "queue") else {
+    // GH #378: gate and diff against the component the mirror writes into (the
+    // first non-repeating `agent:run`), never the first `queue` component: a
+    // sibling `agent:loop` above the run carries no `go`, so reading it here
+    // silently dropped every same-cycle `--backlog-add` mirror.
+    let Some(queue_component) = agent_doc_queue::backlog_sync::mirror_queue_component(&components)
+    else {
         return Ok(Vec::new());
     };
     let queue_body = &content[queue_component.open_end..queue_component.close_start];
@@ -7824,9 +7829,7 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
         }
     };
     let updated_components = agent_doc_element::element::parse(&current_content)?;
-    let updated_queue = updated_components
-        .iter()
-        .find(|component| component.name == "queue")
+    let updated_queue = agent_doc_queue::backlog_sync::mirror_queue_component(&updated_components)
         .context("queue component disappeared during actionable backlog reconciliation")?;
     let synced = agent_doc_queue::document_queue::parse(
         &current_content[updated_queue.open_end..updated_queue.close_start],
@@ -7913,7 +7916,11 @@ pub fn sync_same_cycle_actionable_backlog_into_go_queue(
             }
         }
     };
-    adopt_edited_queue_head_into_snapshot(file, &persisted_content);
+    adopt_queue_region_into_snapshot(
+        file,
+        &persisted_content,
+        agent_doc_queue::backlog_sync::mirror_queue_component,
+    );
     eprintln!(
         "[write] queue: {} {} same-cycle actionable backlog id(s) into active go queue",
         placement.log_verb(),
@@ -8459,6 +8466,27 @@ pub(crate) fn persist_queue_maintenance_doc(
 
 /// Update the recovery baseline after the Lazily compare-and-swap succeeds.
 pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content: &str) {
+    adopt_queue_region_into_snapshot(file, current_content, |components| {
+        components.iter().find(|c| c.name == "queue")
+    });
+}
+
+/// Adopt one runnable component's region from `current_content` into the
+/// recovery baseline. `select` picks the same component in both images.
+///
+/// GH #378: the same-cycle backlog mirror writes into
+/// [`agent_doc_queue::backlog_sync::mirror_queue_component`] (the first
+/// non-repeating `agent:run`). Adopting the first `queue` component instead
+/// copied an untouched sibling `agent:loop` and left the baseline without the
+/// mirrored row, so the closeout committed the backlog add and dropped the
+/// queue half from HEAD.
+fn adopt_queue_region_into_snapshot(
+    file: &Path,
+    current_content: &str,
+    select: for<'a> fn(
+        &'a [agent_doc_element::element::Component],
+    ) -> Option<&'a agent_doc_element::element::Component>,
+) {
     let snap_now = match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(Some(s)) => s,
         Ok(None) => return,
@@ -8470,13 +8498,13 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
     let Ok(cur_comps) = agent_doc_element::element::parse(current_content) else {
         return;
     };
-    let Some(cur_q) = cur_comps.iter().find(|c| c.name == "queue") else {
+    let Some(cur_q) = select(&cur_comps) else {
         return;
     };
     let Ok(snap_comps) = agent_doc_element::element::parse(&snap_now) else {
         return;
     };
-    let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue") else {
+    let Some(snap_q) = select(&snap_comps) else {
         return;
     };
     let queue_region = &current_content[cur_q.open_start..cur_q.close_end];

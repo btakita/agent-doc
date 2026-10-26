@@ -2195,6 +2195,96 @@ fn reopened_pending_only_bare_tag_add_applied_twice_lands_exactly_once() {
     );
 }
 
+/// GH #378: `--backlog-add` with `--backlog-queue-placement` on a CRDT
+/// template document whose runnable component is a heading-anchored go
+/// `agent:run` with a heading that does not name the tag, beside a
+/// heading-anchored `agent:loop` above it and with no `agent:queue` line at
+/// all. The add lands in the backlog and mirrors into `agent:run` under both
+/// placements; the loop never receives the id.
+///
+/// Before the fix the same-cycle mirror read its go-mode gate and its
+/// pre/post id diff from the FIRST `queue` component, which is the loop: the
+/// loop carries no `go`, so the backlog row landed and the mirror silently
+/// did nothing (standalone openers fail the same way; the heading is not the
+/// cause).
+#[test]
+fn backlog_add_mirrors_into_heading_anchored_run_beside_a_loop() {
+    for placement in ["prepend", "append"] {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test-session\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: start\n---\n\n",
+            "<!-- agent:exchange -->\n❯ do [#head]\n<!-- agent:boundary:1234abcd -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Issues <!-- agent:loop id=issues interval=1h -->\n",
+            "- poll issues\n",
+            "<!-- /agent:loop -->\n\n",
+            "## Work items <!-- agent:run priority subagents clear go -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] current queue head\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        init_git_repo(tmp.path(), &doc);
+        agent_doc()
+            .current_dir(tmp.path())
+            .args(["preflight", doc.to_str().unwrap()])
+            .assert()
+            .success();
+        let baseline_content = fs::read_to_string(&doc).unwrap();
+        checkpoint_baseline(tmp.path(), &baseline_content);
+
+        agent_doc()
+            .current_dir(tmp.path())
+            .args([
+                "finalize",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                "--backlog-add",
+                "#followup record the follow-up",
+                "--backlog-queue-placement",
+                placement,
+            ])
+            .write_stdin(
+                "<!-- patch:exchange -->\n### Re: do [#head] — gpt-5\nFiled the follow-up.\n<!-- /patch:exchange -->\n",
+            )
+            .assert()
+            .success();
+
+        let head = head_blob(tmp.path());
+        assert!(
+            head.contains("- [ ] [#followup] record the follow-up"),
+            "{placement}: the backlog add must land:\n{head}"
+        );
+        let loop_start = head.find("## Issues <!-- agent:loop").unwrap();
+        let loop_end = head.find("<!-- /agent:loop -->").unwrap();
+        assert!(
+            !head[loop_start..loop_end].contains("followup"),
+            "{placement}: the loop must never receive a mirrored id:\n{head}"
+        );
+        let run_start = head
+            .find("## Work items <!-- agent:run")
+            .expect("the heading-anchored run opener survives");
+        let run_end = head.find("<!-- /agent:run -->").unwrap();
+        let run = &head[run_start..run_end];
+        assert_eq!(
+            run.matches("do [#followup]").count(),
+            1,
+            "{placement}: the mirrored id must land in `agent:run` exactly once:\n{head}"
+        );
+        let followup_at = run.find("do [#followup]").unwrap();
+        let head_at = run.find("do [#head]").unwrap();
+        match placement {
+            "prepend" => assert!(followup_at < head_at, "prepend: {run}"),
+            _ => assert!(followup_at > head_at, "append: {run}"),
+        }
+    }
+}
+
 /// The `#committedwedge` escape is scoped to tracked-work mutations: a bare
 /// empty-stdin replay with no mutations is still a no-op and still fails closed.
 #[test]

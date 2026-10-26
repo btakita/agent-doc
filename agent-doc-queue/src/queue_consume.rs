@@ -987,16 +987,29 @@ pub fn answered_free_text_head_node_keys_with_claims(
     )
 }
 
-fn loop_queue_node_prefixes(content: &str) -> Result<HashSet<String>> {
-    Ok(element::parse(content)?
+/// `queue:<n>:` node-key prefixes of every `loop` queue in `content`.
+///
+/// `#ftstrikeloopindex`: `<n>` must be counted in the SAME component list the
+/// node keys come from. [`agent_doc_markdown_ast::mutations::item_nodes_all`]
+/// numbers components over [`agent_doc_markdown_ast::overlay::components`],
+/// which counts an `agent:boundary:<id>` marker as a component, while
+/// [`element::parse`] does not. Indexing with `element::parse` shifted every
+/// component after the exchange boundary by one, so in a document holding a
+/// run queue followed by a loop queue the loop's prefix named the RUN queue:
+/// GH #361's loop exclusion then skipped every ordinary row, and no echoed
+/// head struck (agent-doc-bugs.md cycle-1793042953867, 2026-10-26).
+fn loop_queue_node_prefixes(content: &str) -> HashSet<String> {
+    agent_doc_markdown_ast::overlay::components(content)
         .into_iter()
         .enumerate()
         .filter(|(_, component)| {
             component.name == "queue"
-                && crate::queue_schedule::queue_retains_struck_heads(&component.attrs)
+                && crate::queue_schedule::queue_retains_struck_heads(&element::parse_attrs(
+                    &component.attrs,
+                ))
         })
         .map(|(component_index, _)| format!("queue:{component_index}:"))
-        .collect())
+        .collect()
 }
 
 /// [`answered_free_text_head_node_keys_with_claims`] plus the free-text heads
@@ -1048,7 +1061,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     // leave that standing program struck until a later due tick. Exclude every
     // loop component here. Its selected head is still struck by normal queue
     // consumption and restored from the pass roster when that pass completes.
-    let current_loop_queue_node_prefixes = loop_queue_node_prefixes(content)?;
+    let current_loop_queue_node_prefixes = loop_queue_node_prefixes(content);
     let is_loop_queue_node = |node_key: &str| {
         current_loop_queue_node_prefixes
             .iter()
@@ -1062,7 +1075,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     // now than in the baseline has already had its answer applied.
     let struck_counts = |doc: &str| -> std::collections::HashMap<String, usize> {
         let mut counts = std::collections::HashMap::new();
-        let loop_prefixes = loop_queue_node_prefixes(doc).unwrap_or_default();
+        let loop_prefixes = loop_queue_node_prefixes(doc);
         if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(doc, "queue") {
             for node in nodes.into_iter().filter(|node| {
                 node.item.struck
@@ -4459,6 +4472,84 @@ Old.
                 .is_none(),
             "#ftstrike must leave loop rows live for pass-owned consumption"
         );
+    }
+
+    /// `#ftstrikeloopindex` live shape (agent-doc-bugs.md cycle-1793042953867,
+    /// 2026-10-26): the exchange holds an `agent:boundary` marker, a run queue
+    /// follows, then a `loop` queue. Node keys number components over the
+    /// overlay (which counts the boundary), the loop exclusion numbered them
+    /// over `element::parse` (which does not), so the loop's prefix named the
+    /// run queue and no echoed row struck: seven claimed-and-reported `☑️`
+    /// rows and one unclaimed `📥` row all stayed live.
+    const LOOP_INDEX_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: earlier — opus\n\nEarlier answer.\n",
+        "<!-- agent:boundary:3ec64169 -->\n",
+        "<!-- /agent:exchange -->\n\n",
+        "## Queue: Main <!-- agent:run id=\"main\" subagents priority go -->\n",
+        "- ☑️ [#subagent:reportedend#1] end a Reported queue claim on every strike path, so a later identical row can never pick up ☑️ from the claim ledger\n",
+        "- ☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells left behind by strikes\n",
+        "- 🚧 [#subagent:doctorexit#1] `agent-doc doctor` exits 0 even when its outcome is blocked\n",
+        "- 📥 I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item\n",
+        "<!-- /agent:run -->\n\n",
+        "## Loop: Issues <!-- agent:loop id=\"issues\" interval=\"1h\" priority -->\n",
+        "- 📥 Watch the issue tracker for new issues and add them to the backlog\n",
+        "<!-- /agent:loop -->\n",
+    );
+
+    const LOOP_INDEX_RESPONSE: &str = concat!(
+        "### Re: integration batch — opus\n\n",
+        "> **Queue prompt:** end a Reported queue claim on every strike path, so a later identical row can never pick up ☑️ from the claim ledger\n\n",
+        "On main and installed.\n\n",
+        "> **Queue prompt:** one-time repair: retire stale subagent completion cells left behind by strikes\n\n",
+        "**Deferred:** the branch waits for your decision on the command name.\n\n",
+        "> **Queue prompt:** I deleted a queue item in docs.md and added some of the deleted queue item prompt into an existing queue item\n\n",
+        "Same cause and fix as the attach item; it re-attaches now.\n\n",
+        "> **Queue prompt:** Watch the issue tracker for new issues and add them to the backlog\n\n",
+        "No new issues this pass.\n",
+    );
+
+    #[test]
+    fn ftstrike_strikes_echoed_run_rows_beside_a_loop_queue_after_the_exchange_boundary() {
+        for claimed in [
+            Vec::new(),
+            vec![
+                "☑️ [#subagent:reportedend#1] end a Reported queue claim on every strike path, so a later identical row can never pick up ☑️ from the claim ledger".to_string(),
+                "☑️ [#subagent:cellrepair#1] one-time repair: retire stale subagent completion cells left behind by strikes".to_string(),
+            ],
+        ] {
+            let projected = project_answered_free_text_strike_with_claims(
+                LOOP_INDEX_DOC,
+                LOOP_INDEX_RESPONSE,
+                Some(LOOP_INDEX_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .expect("the echoed run-queue rows must strike (#claimstrike, #ftstrike)");
+            let target = &projected.target_content;
+            assert_eq!(projected.node_keys.len(), 2, "{:?}", projected.node_keys);
+            assert!(
+                target.contains("- ~~end a Reported queue claim on every strike path"),
+                "the echoed reported claimed row strikes:\n{target}"
+            );
+            assert!(
+                target.contains("- ~~I deleted a queue item in docs.md"),
+                "the echoed unclaimed row strikes:\n{target}"
+            );
+            assert!(
+                target.contains("- ☑️ [#subagent:cellrepair#1] one-time repair"),
+                "the **Deferred:** row stays live (#deferstrike):\n{target}"
+            );
+            assert!(
+                target.contains("- 🚧 [#subagent:doctorexit#1]"),
+                "the unechoed running row stays live:\n{target}"
+            );
+            assert!(
+                target.contains("- 📥 Watch the issue tracker for new issues"),
+                "GH #361: the loop row is never #ftstrike'd:\n{target}"
+            );
+        }
     }
 
     /// GH #364: preset-expansion evidence in ordinary response prose must not

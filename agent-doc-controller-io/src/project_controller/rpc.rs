@@ -31400,7 +31400,10 @@ impl ControllerStatePlaneSink for PaneLayoutDesiredStatePlaneSink {
             // applies it. Noting it there left a window where the lane's
             // projection was observable but the shared route still waited, and
             // a lane projector retrying a failed publication held every shared
-            // route for its full catch-up budget.
+            // route for its full catch-up budget. Dispatch itself runs in the
+            // shared context's Effect drain, which may be another thread's
+            // (`#laneplaneflake`), so publication returning does not imply
+            // this note has happened; a catch-up waits for it, bounded.
             runtime.note_pane_layout_plane_seen_in_other_lane(frame.plane_version);
         }
         self.projector(lane).project(frame);
@@ -44169,10 +44172,19 @@ mod tests {
             Some("jetbrains@RD.9f8e7d6c-pid:42"),
         );
         assert!(rider_frame.plane_version > idea_frame.plane_version);
-        // `#laneplaneflake`: counted as seen at dispatch, before either lane's
-        // projector thread runs, so this holds with no wait at all.
+        // `#laneplaneflake`: publishing only schedules the channel's
+        // projection Effect. When the IDEA lane's projector thread is draining
+        // this same context (publishing into its own lane graph), it runs the
+        // Rider frame's dispatch after `publish` has returned, so a zero wait
+        // failed ~1 in 1500 contended runs. The wait wakes on the dispatch-time
+        // note (`note_plane_seen` signals the graph's condvar), and the drain
+        // that holds the Effect runs it before releasing the drain, so the
+        // event is certain; the bound is a hang ceiling only. Dispatch-time
+        // noting and the deferred drain are pinned deterministically in
+        // `a_lane_frame_published_during_another_threads_drain_is_seen_at_its_dispatch`.
         assert!(
-            runtime.await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO),
+            runtime
+                .await_pane_layout_plane_seen(rider_frame.plane_version, Duration::from_secs(10)),
             "the shared lane's plane catch-up counts lane frames as seen"
         );
         wait_for(&idea, std::slice::from_ref(&idea_doc));
@@ -44208,6 +44220,112 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// `#laneplaneflake`: publishing a `pane_layout_desired` frame only
+    /// schedules the channel's projection Effect, and lazily runs a scheduled
+    /// Effect in whichever thread holds the context's Effect drain. While
+    /// another thread drains, an installation lane's frame is not dispatched
+    /// yet, so the shared lane has not seen it; it is noted seen when that
+    /// drain dispatches it, and a waiting catch-up wakes on the note. The
+    /// dispatch notes it synchronously, before the lane's projector runs.
+    #[test]
+    fn a_lane_frame_published_during_another_threads_drain_is_seen_at_its_dispatch() {
+        // A hang ceiling only: the interleaving is forced by the gate below.
+        const HANG_CEILING: Duration = Duration::from_secs(30);
+        struct DrainHoldingSink {
+            entered: std::sync::mpsc::Sender<()>,
+            release: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl ControllerStatePlaneSink for DrainHoldingSink {
+            fn project(&self, _frame: ControllerStatePlaneFrame) {
+                let _ = self.entered.send(());
+                let _ = self.release.lock().recv();
+            }
+        }
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            dir.path().join(".agent-doc/config.toml"),
+            "editor_navigation = \"per_installation\"\n",
+        )
+        .unwrap();
+        let rider_doc = dir.path().join("rider.md");
+        std::fs::write(
+            &rider_doc,
+            "---\nagent_doc_session: rider\nagent: codex\n---\n# rider\n",
+        )
+        .unwrap();
+        let rider_doc = rider_doc.canonicalize().unwrap().display().to_string();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+
+        // Another thread enters the shared context's Effect drain and stays
+        // in it, as a lane projector does while it publishes into its lane
+        // graph.
+        let hold_channel = "test/hold-effect-drain";
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        runtime.install_state_plane_sink(
+            hold_channel,
+            Arc::new(DrainHoldingSink {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+            }),
+        );
+        let holder_runtime = Arc::clone(&runtime);
+        let holder = std::thread::spawn(move || {
+            holder_runtime
+                .publish_state_plane_frame(
+                    hold_channel.to_string(),
+                    "drain-holder".to_string(),
+                    r#"{"Snapshot":{"epoch":1}}"#.to_string(),
+                    1,
+                    None,
+                )
+                .unwrap();
+        });
+        entered_rx
+            .recv_timeout(HANG_CEILING)
+            .expect("the holder's projection Effect reached its sink");
+
+        let (rider_frame, duplicate) = runtime
+            .publish_state_plane_frame(
+                PANE_LAYOUT_DESIRED_STATE_CHANNEL.to_string(),
+                "jetbrains-test".to_string(),
+                pane_layout_desired_frame_message(
+                    std::slice::from_ref(&rider_doc),
+                    Some("jetbrains@RD.9f8e7d6c-pid:42"),
+                ),
+                1,
+                None,
+            )
+            .unwrap();
+        assert!(!duplicate);
+        assert!(
+            !runtime.await_pane_layout_plane_seen(rider_frame.plane_version, Duration::ZERO),
+            "publication returned with its dispatch still queued behind the other thread's drain"
+        );
+
+        release_tx.send(()).unwrap();
+        assert!(
+            runtime.await_pane_layout_plane_seen(rider_frame.plane_version, HANG_CEILING),
+            "the held drain dispatches the lane frame and the catch-up wakes on its note"
+        );
+        holder.join().unwrap();
+
+        // The dispatch itself notes the frame, before the lane's projector
+        // thread (spawned by this dispatch) can have applied it.
+        let later = ControllerStatePlaneFrame {
+            epoch: 2,
+            plane_version: rider_frame.plane_version + 1,
+            ..rider_frame
+        };
+        PaneLayoutDesiredStatePlaneSink::new(&runtime).project(later.clone());
+        assert!(
+            runtime.await_pane_layout_plane_seen(later.plane_version, Duration::ZERO),
+            "a lane frame is seen for the shared lane from its dispatch"
+        );
     }
 
     fn pane_layout_statuses_from_frames(

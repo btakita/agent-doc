@@ -349,6 +349,11 @@ loses desktop focus.
   IDE's own lane. A lane frame counts as seen for the shared lane's route plane catch-up from
   the moment it is dispatched to its lane, before (and regardless of whether) the lane's
   projector applies it, so a shared-lane route never waits on another lane's projector.
+  Publication returning is not dispatch: the state plane only schedules the channel's
+  projection Effect, which runs in whichever thread holds the controller context's Effect
+  drain (often a lane projector publishing into its own lane graph), so the route's catch-up
+  is a bounded wait woken by the dispatch-time note, never a zero-time check
+  (`#laneplaneflake`).
 - The `sync_tmux_layout` controller command is lane-routed (P6): its invocation may carry the
   requesting editor surface's `client_id` (FFI `agent_doc_sync_tmux_layout_for_client_json`; the
   command-plane payload `agent-doc.sync_tmux_layout.v1` carries the same optional field, omitted

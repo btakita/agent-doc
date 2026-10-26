@@ -578,6 +578,7 @@ object TerminalUtil {
                         columnOrder = routeLayout.columnOrder,
                         layoutMode = routeLayout.layoutMode,
                         surfaceReference = routeLayout.surfaceReference,
+                        layoutAuthority = routeLayout.layoutAuthority,
                     )
                     val output = routeResult.output
                     val exitCode = routeResult.exitCode
@@ -759,6 +760,12 @@ object TerminalUtil {
         val layoutMode: String?,
         val surfaceReference: SurfaceLayoutReference?,
         val stage: String,
+        /**
+         * GH #376: `frontend_measured` when this backend's surface deferred to the JetBrains
+         * Client's measured layout, so the controller takes (or awaits) that forward instead of
+         * the snapshot fallback's empty columns.
+         */
+        val layoutAuthority: String? = null,
     ) {
         val diagnosticArgs: List<String>
             get() =
@@ -766,9 +773,21 @@ object TerminalUtil {
                     ?.let { listOf("--surface-reference", "${it.surfaceId}@${it.minSequence}") }
                     ?: layoutArgs
 
+        /**
+         * GH #376: while the JetBrains Client's measured geometry owns this Remote Dev layout
+         * (GH #320 option B), the backend's own surface defers and this fallback can name no
+         * document. The route then names that authority so the controller takes the measured
+         * forward, or awaits it within the route's own budget, instead of failing first.
+         */
+        fun withMeasuredLayoutAuthority(active: Boolean): RouteLayoutRequest =
+            if (active) copy(layoutAuthority = LAYOUT_AUTHORITY_FRONTEND_MEASURED) else this
+
         companion object {
             const val STAGE_SURFACE_REFERENCE = "route_layout_surface_reference"
             const val STAGE_SNAPSHOT_FALLBACK = "route_layout_snapshot_fallback"
+
+            /** Wire value of [layoutAuthority]; Rust `ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED`. */
+            const val LAYOUT_AUTHORITY_FRONTEND_MEASURED = "frontend_measured"
 
             fun bySurfaceReference(reference: SurfaceLayoutReference): RouteLayoutRequest =
                 RouteLayoutRequest(
@@ -841,8 +860,12 @@ object TerminalUtil {
                         }
                     }
             }
-        LOG.warn("[route] surface reference unavailable reason=$reason; sending the --col snapshot")
-        return editorSnapshotRouteLayout(project, cwd)
+        val measuredAuthority = RemoteClientLayoutAuthority.isActive(project)
+        LOG.warn(
+            "[route] surface reference unavailable reason=$reason; sending the --col snapshot" +
+                if (measuredAuthority) " layout_authority=${RouteLayoutRequest.LAYOUT_AUTHORITY_FRONTEND_MEASURED}" else "",
+        )
+        return editorSnapshotRouteLayout(project, cwd).withMeasuredLayoutAuthority(measuredAuthority)
     }
 
     /** What the `--col` snapshot fallback reads from the editor on the EDT. */

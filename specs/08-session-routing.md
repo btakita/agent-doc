@@ -283,6 +283,35 @@ single-file route: focus-only dispatch into an existing live pane, otherwise
 the frontend-readiness refusal with its remedy. It never fails with the bare
 `editor route requires the exact visible layout before dispatch`, which stays
 the refusal of an `exact` route that carries no column.
+
+**Frontend-measured zero-column route (GH #376):** on a modular Remote Dev
+backend whose layout the JetBrains Client measures (GH #320 option B), the
+backend's own surface defers (`surface_capture_deferred
+reason=frontend_measured_layout_authority`), so Run Agent Doc's `--col`
+fallback names no document. The measured columns are a separate observation
+on the same installation's `jetbrains-rd@<installation>` forward, and may land
+after the route (the report measured `columns=2` about one second after the
+route had failed). Before the GH #373 fallback, a route whose `--col`
+arguments name no document is answered from that measurement: the newest
+live forward of the route client's installation whose split is known, ordered
+`editor`, and shows the routed document gives the route's columns, order, and
+mode exactly as a surface reference does (`controller_editor_route_measured_layout_resolved
+client=... surface=... sequence=N waited_ms=N layout_mode=... column_order=editor`).
+A forward that does not show the routed document predates the route and is
+not used; another installation's forward never answers. When none is retained
+and the route names `layout_authority = "frontend_measured"` (the plugin sends
+it while `RemoteClientLayoutAuthority` is active), the controller awaits that
+forward (`controller_editor_route_measured_layout_awaiting`), woken by the
+accepted observation itself and bounded by the route's own `--wait-for-ready`
+budget, which GH #110 already spends on layout first. It does not wait when the
+routed document already has a live pane
+(`controller_editor_route_measured_layout_not_awaited
+reason=routed_document_has_live_pane`): the GH #347 focus-only path answers
+that route, and the forward orders the layout through its own `Sync`. A route
+that gets no measurement within its budget logs
+`controller_editor_route_measured_layout_unavailable action=undetected_fallback`
+and takes the GH #373 path unchanged. No layout is guessed, and an editor
+without the field never waits.
 `controller_editor_route_layout_mode` logs the mode, whether it was explicit,
 the merge (`exact`, `seeded`, `focus_only`, `replaced:N`, `added:N+replaced:M`,
 `dropped:N+replaced:M`) and the route, retained

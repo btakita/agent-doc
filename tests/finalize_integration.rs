@@ -5391,6 +5391,11 @@ fn respond_does_not_supersede_a_session_check_refusal_that_survives_its_commit()
 #[test]
 fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     let (tmp, doc) = setup_session_stream_doc();
+    // The test crosses two real CLI closeouts while nextest is running the
+    // rest of the suite. Keep every in-process and subprocess claim decision
+    // on one logical instant so scheduler load cannot age either attempt into
+    // a different lifecycle branch mid-scenario (`#finalgrace`).
+    let (claim_clock, _claim_clock) = pin_claim_clock();
     let setup = "Setup head claimed for a worker.";
     let question = "Does the page status enum have an archived value? What are the values?";
     let original = fs::read_to_string(&doc).unwrap().replace(
@@ -5419,7 +5424,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         setup_claim.generation,
     )
     .unwrap();
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
         .write_stdin(
@@ -5438,7 +5443,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         &format!("- {setup}\n- {question}\n<!-- /agent:queue -->"),
     );
     fs::write(&doc, &current).unwrap();
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
             "queue",
@@ -5460,7 +5465,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         )),
         "a fresh claim projects dispatching beside a worker-bound row:\n{dispatching_projection}"
     );
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
             "queue",
@@ -5486,7 +5491,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         )),
         "start advances only its own generation to worker-bound:\n{claimed_projection}"
     );
-    let released = agent_doc()
+    let released = agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
             "queue",
@@ -5541,7 +5546,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     );
     assert!(receipt.attests_exact_attempt());
 
-    agent_doc()
+    agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
         .write_stdin(format!(

@@ -333,6 +333,26 @@ Each invariant reports one typed outcome: `ok`, `recoverable`, `operator`, or
 sources are `blocked` with the command needed to gather the evidence; detected
 safe repairs are `recoverable`.
 
+The process exit status reports the overall outcome (the most severe invariant
+outcome) so scripts and CI can act on it without parsing the report:
+
+| Exit | Outcome | Meaning |
+|------|---------|---------|
+| 0 | `ok` | every invariant holds |
+| 3 | `recoverable` | a catalog-safe repair command exists (`repair:` lines, `agent-doc autofix <FILE> --apply`) |
+| 4 | `operator` | a person must act on the printed `operator:` steps |
+| 5 | `blocked` | required evidence is missing; gather it with the printed command |
+| 1 | — | the doctor itself failed (unreadable document, bad `--preflight-json`); no report |
+
+The statuses rank with severity and avoid `1` (a doctor failure) and `2` (CLI
+usage errors), so a diagnosis is never mistaken for a crash. The full report
+(text, or JSON with `--json`) is printed on stdout for every outcome, and a
+non-`ok` outcome adds no `Error:` line or dogfood fix prompt: the command ran
+correctly and found the workflow unhealthy. The mapping lives once in
+`WorkflowDoctorOutcome::exit_code` (`agent-doc-workflow`); the CLI entry point
+recognizes the completed diagnosis by `workflow_doctor_exit_status`
+(`agent-doc-workflow-io`).
+
 Every invariant must be well-defined for a brand-new session document: after
 `agent-doc init`, a document with no `agent:queue` component, no snapshot, no
 cycle state, and no registered controller actor reports `outcome=ok`, not

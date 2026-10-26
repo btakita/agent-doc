@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use agent_doc_workflow::doctor::{
     ActorDoctorFacts, CycleStateDoctorFacts, DocumentDoctorFacts, EditorDoctorFacts,
     GitDoctorFacts, OpsLogDoctorFacts, PreflightDoctorFacts, SessionCheckDoctorFacts,
-    WorkflowDoctorFacts, WorkflowDoctorReport, document_doctor_facts_from_content,
-    evaluate_catalog, format_text_report, ops_log_facts_from_content,
+    WorkflowDoctorFacts, WorkflowDoctorOutcome, WorkflowDoctorReport,
+    document_doctor_facts_from_content, evaluate_catalog, format_text_report,
+    ops_log_facts_from_content,
 };
 use agent_doc_workflow::doctor_json::{project_preflight_facts, project_session_check_facts};
 use agent_doc_workflow::invariants::workflow_invariant_catalog;
@@ -81,6 +82,40 @@ impl WorkflowDoctorEffects for NoopWorkflowDoctorEffects {
     }
 }
 
+/// A completed diagnosis whose overall outcome is not `ok`.
+///
+/// It travels as the command's error only so the CLI entry point can turn it
+/// into the outcome's exit status after the report is printed. It is not a
+/// failure of the doctor: the entry point must not add an `Error:` report or a
+/// dogfood fix prompt for it ([`workflow_doctor_exit_status`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorkflowDoctorUnhealthy {
+    pub outcome: WorkflowDoctorOutcome,
+}
+
+impl std::fmt::Display for WorkflowDoctorUnhealthy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "workflow doctor outcome={} (exit {})",
+            self.outcome.as_str(),
+            self.outcome.exit_code()
+        )
+    }
+}
+
+impl std::error::Error for WorkflowDoctorUnhealthy {}
+
+/// The exit status a [`run`] error carries when it is a completed, non-`ok`
+/// diagnosis; `None` for a real failure (which exits `1`).
+pub fn workflow_doctor_exit_status(err: &anyhow::Error) -> Option<u8> {
+    err.downcast_ref::<WorkflowDoctorUnhealthy>()
+        .map(|unhealthy| unhealthy.outcome.exit_code())
+}
+
+/// Print the report, then report its outcome as the result: `Ok(())` only for
+/// an overall `ok` outcome, otherwise a [`WorkflowDoctorUnhealthy`] error whose
+/// exit status is [`WorkflowDoctorOutcome::exit_code`].
 pub fn run(
     file: &Path,
     options: WorkflowDoctorOptions,
@@ -92,7 +127,14 @@ pub fn run(
     } else {
         print!("{}", format_text_report(&report));
     }
-    Ok(())
+    outcome_result(report.outcome)
+}
+
+fn outcome_result(outcome: WorkflowDoctorOutcome) -> Result<()> {
+    match outcome {
+        WorkflowDoctorOutcome::Ok => Ok(()),
+        outcome => Err(WorkflowDoctorUnhealthy { outcome }.into()),
+    }
 }
 
 pub fn diagnose(
@@ -356,13 +398,35 @@ fn read_json(path: &Path) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_workflow::doctor::WorkflowDoctorOutcome;
     use agent_doc_workflow::invariants::WorkflowInvariantId;
 
     /// Live effects for a healthy, freshly initialized project: session-check is
     /// ok, the controller answers with no actor for the document, and the editor
     /// projection is converged.
     struct FreshProjectEffects;
+
+    /// [`FreshProjectEffects`] whose live editor authority is ahead of disk,
+    /// which `editor_convergence` reports `recoverable`.
+    struct DivergedEditorEffects;
+
+    impl WorkflowDoctorEffects for DivergedEditorEffects {
+        fn inspect_session_check(&mut self, file: &Path) -> Result<Option<LiveSessionCheckFacts>> {
+            FreshProjectEffects.inspect_session_check(file)
+        }
+
+        fn inspect_actor(&mut self, project_root: &Path, file: &Path) -> Result<ActorDoctorFacts> {
+            FreshProjectEffects.inspect_actor(project_root, file)
+        }
+
+        fn lazily_current_diverges(
+            &mut self,
+            _file: &Path,
+            _disk_content: &str,
+            _project_root: &Path,
+        ) -> Result<Option<bool>> {
+            Ok(Some(true))
+        }
+    }
 
     impl WorkflowDoctorEffects for FreshProjectEffects {
         fn inspect_session_check(&mut self, _file: &Path) -> Result<Option<LiveSessionCheckFacts>> {
@@ -460,5 +524,91 @@ mod tests {
             .unwrap();
         assert_eq!(queue.outcome, WorkflowDoctorOutcome::Blocked, "{queue:?}");
         assert_eq!(report.outcome, WorkflowDoctorOutcome::Blocked);
+    }
+
+    const FRESH_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session: Untitled Session\n\n## User\n\n";
+    const QUEUED_DOCUMENT: &str = "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n";
+
+    /// `run` resolves to the exit status the CLI returns.
+    fn run_exit_status(file: &Path, effects: &mut impl WorkflowDoctorEffects) -> u8 {
+        let options = WorkflowDoctorOptions {
+            json: true,
+            ..WorkflowDoctorOptions::default()
+        };
+        match run(file, options, effects) {
+            Ok(()) => 0,
+            Err(err) => workflow_doctor_exit_status(&err)
+                .unwrap_or_else(|| panic!("a completed diagnosis is not a failure: {err:#}")),
+        }
+    }
+
+    #[test]
+    fn run_exits_zero_for_a_healthy_document() {
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        assert_eq!(run_exit_status(&file, &mut FreshProjectEffects), 0);
+    }
+
+    #[test]
+    fn run_exits_recoverable_status_when_a_safe_repair_exists() {
+        let (_dir, file) = fresh_project(FRESH_DOCUMENT);
+        let report = diagnose(
+            &file,
+            &WorkflowDoctorOptions::default(),
+            &mut DivergedEditorEffects,
+        )
+        .unwrap();
+        assert_eq!(
+            report.outcome,
+            WorkflowDoctorOutcome::Recoverable,
+            "{report:?}"
+        );
+        assert_eq!(
+            run_exit_status(&file, &mut DivergedEditorEffects),
+            agent_doc_workflow::doctor::WORKFLOW_DOCTOR_EXIT_RECOVERABLE
+        );
+    }
+
+    #[test]
+    fn run_exits_operator_status_when_a_person_must_act() {
+        let (dir, file) = fresh_project(FRESH_DOCUMENT);
+        let logs = dir.path().join(".agent-doc/logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("ops.log"), "File Cache Conflict\n").unwrap();
+        let report = diagnose(
+            &file,
+            &WorkflowDoctorOptions::default(),
+            &mut FreshProjectEffects,
+        )
+        .unwrap();
+        assert_eq!(
+            report.outcome,
+            WorkflowDoctorOutcome::Operator,
+            "{report:?}"
+        );
+        assert_eq!(
+            run_exit_status(&file, &mut FreshProjectEffects),
+            agent_doc_workflow::doctor::WORKFLOW_DOCTOR_EXIT_OPERATOR
+        );
+    }
+
+    #[test]
+    fn run_exits_blocked_status_when_evidence_is_missing() {
+        let (_dir, file) = fresh_project(QUEUED_DOCUMENT);
+        assert_eq!(
+            run_exit_status(&file, &mut FreshProjectEffects),
+            agent_doc_workflow::doctor::WORKFLOW_DOCTOR_EXIT_BLOCKED
+        );
+    }
+
+    #[test]
+    fn a_doctor_that_failed_to_run_carries_no_outcome_status() {
+        let (dir, _file) = fresh_project(FRESH_DOCUMENT);
+        let err = run(
+            &dir.path().join("missing.md"),
+            WorkflowDoctorOptions::default(),
+            &mut FreshProjectEffects,
+        )
+        .unwrap_err();
+        assert_eq!(workflow_doctor_exit_status(&err), None, "{err:#}");
     }
 }

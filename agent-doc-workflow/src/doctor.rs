@@ -15,6 +15,18 @@ use crate::invariants::{
 
 pub const WORKFLOW_DOCTOR_SCHEMA_VERSION: u8 = 2;
 
+/// `agent-doc doctor` process exit status for an overall `ok` outcome.
+pub const WORKFLOW_DOCTOR_EXIT_OK: u8 = 0;
+/// Exit status for an overall `recoverable` outcome: a catalog-safe repair
+/// command exists (`agent-doc autofix <FILE> --apply` or the printed `repair:`).
+pub const WORKFLOW_DOCTOR_EXIT_RECOVERABLE: u8 = 3;
+/// Exit status for an overall `operator` outcome: a person must act on the
+/// printed `operator:` steps.
+pub const WORKFLOW_DOCTOR_EXIT_OPERATOR: u8 = 4;
+/// Exit status for an overall `blocked` outcome: required evidence is missing,
+/// so the doctor cannot prove the workflow healthy.
+pub const WORKFLOW_DOCTOR_EXIT_BLOCKED: u8 = 5;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowDoctorOutcome {
@@ -31,6 +43,22 @@ impl WorkflowDoctorOutcome {
             Self::Recoverable => 1,
             Self::Operator => 2,
             Self::Blocked => 3,
+        }
+    }
+
+    /// Process exit status that reports this outcome (`agent-doc doctor`).
+    ///
+    /// Each non-`ok` outcome has its own status, ordered by severity, so a
+    /// script or CI job can branch on it without parsing the report. The
+    /// statuses avoid `1` (a doctor that failed to run: unreadable file, bad
+    /// `--preflight-json`) and `2` (clap usage errors), so a diagnosis is never
+    /// confused with a crash.
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Self::Ok => WORKFLOW_DOCTOR_EXIT_OK,
+            Self::Recoverable => WORKFLOW_DOCTOR_EXIT_RECOVERABLE,
+            Self::Operator => WORKFLOW_DOCTOR_EXIT_OPERATOR,
+            Self::Blocked => WORKFLOW_DOCTOR_EXIT_BLOCKED,
         }
     }
 
@@ -1136,6 +1164,29 @@ mod tests {
         assert!(facts.present);
         assert_eq!(facts.scanned_lines, 3);
         assert_eq!(facts.markers, vec!["editor_convergence_failure"]);
+    }
+
+    #[test]
+    fn exit_code_is_zero_only_for_ok_and_distinct_per_outcome() {
+        let outcomes = [
+            WorkflowDoctorOutcome::Ok,
+            WorkflowDoctorOutcome::Recoverable,
+            WorkflowDoctorOutcome::Operator,
+            WorkflowDoctorOutcome::Blocked,
+        ];
+        assert_eq!(WorkflowDoctorOutcome::Ok.exit_code(), 0);
+        let codes: Vec<u8> = outcomes.iter().map(|outcome| outcome.exit_code()).collect();
+        assert_eq!(codes, vec![0, 3, 4, 5]);
+        for outcome in &outcomes[1..] {
+            let code = outcome.exit_code();
+            // 1 = the doctor itself failed, 2 = clap usage error, 75 = deferred write.
+            assert!(!matches!(code, 0 | 1 | 2 | 75), "{outcome:?} -> {code}");
+        }
+        // Severity order is preserved, so `code >= RECOVERABLE` means "not ok".
+        for pair in outcomes.windows(2) {
+            assert!(pair[0].rank() < pair[1].rank());
+            assert!(pair[0].exit_code() < pair[1].exit_code());
+        }
     }
 
     #[test]

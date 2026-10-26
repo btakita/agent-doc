@@ -2200,6 +2200,65 @@ fn test_cli_help() {
         .stdout(predicate::str::contains("fix"));
 }
 
+/// `agent-doc doctor` exits with its outcome's status so
+/// scripts and CI can act on it. A document with a live queue and no preflight
+/// capture is `blocked` whatever the live inspections say, so it pins the
+/// binary's mapping end to end; the per-outcome statuses are unit-tested in
+/// `agent-doc-workflow` and `agent-doc-workflow-io`.
+#[test]
+fn test_cli_doctor_exit_status_reports_the_outcome() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let doc = root.join("plan.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: doctor-exit\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n",
+    )
+    .unwrap();
+    init_git_repo(root, &doc);
+
+    let blocked = agent_doc_cmd()
+        .current_dir(root)
+        .args(["doctor", doc.to_str().unwrap()])
+        .assert()
+        .code(5);
+    let output = blocked.get_output();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("outcome=blocked"), "{stdout}");
+    assert!(
+        stdout.contains("- queue_continuation outcome=blocked"),
+        "{stdout}"
+    );
+    assert!(
+        !stderr.contains("Error:"),
+        "a completed diagnosis is not a failure: {stderr}"
+    );
+
+    let json = agent_doc_cmd()
+        .current_dir(root)
+        .args(["doctor", doc.to_str().unwrap(), "--json"])
+        .assert()
+        .code(5);
+    let report: serde_json::Value = serde_json::from_slice(&json.get_output().stdout).unwrap();
+    assert_eq!(report["outcome"], "blocked");
+
+    // The doctor failing to run is exit 1, never an outcome status.
+    agent_doc_cmd()
+        .current_dir(root)
+        .args(["doctor", root.join("missing.md").to_str().unwrap()])
+        .assert()
+        .code(1);
+
+    agent_doc_cmd()
+        .args(["doctor", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("0 ok, 3 recoverable"))
+        .stdout(predicate::str::contains("4 operator"))
+        .stdout(predicate::str::contains("5 blocked"));
+}
+
 #[test]
 fn choice_checkpoint_rejects_an_unstructured_native_prompt_record() {
     let dir = tempfile::TempDir::new().unwrap();
@@ -13323,6 +13382,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
         "pub fn format_text_report",
         "pub fn ops_log_facts_from_content",
         "pub fn classify_ops_marker",
+        "pub fn exit_code(self) -> u8",
     ] {
         assert!(
             workflow_doctor.contains(required),

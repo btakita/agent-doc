@@ -29,6 +29,9 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Force creation of the application service whose Disposable boundary is plugin unload.
         ApplicationManager.getApplication().getService(PluginUnloadCleanupService::class.java)
+        // Prompt for the IDE restart an agent-doc install leaves pending (GH #299/#339): the
+        // modular packages cannot be swapped into a running IDE, and nothing else told the IDE.
+        PluginRestartRequiredNotifier.ensureStarted()
         // `lifecycle` is this initialization's own scope, not the project service itself, so a
         // dynamic-unload release can drop every listener below and a later projectOpened -- the
         // still-live generation's restore after an aborted upgrade (GH #94) -- rebuilds them.

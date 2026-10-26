@@ -19,6 +19,9 @@
         <notificationGroup id="Agent Doc"
                            displayType="TOOL_WINDOW"
                            isLogByDefault="true"/>
+        <notificationGroup id="Agent Doc Plugin Update"
+                           displayType="STICKY_BALLOON"
+                           isLogByDefault="true"/>
         <completion.contributor language="any"
                                 implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>
         <applicationService serviceImplementation="com.github.btakita.agentdoc.AgentDocColorSettings"/>

@@ -100,6 +100,14 @@ internal object MarketplacePlatformBridge {
         }.getOrNull()
     } == true
 
+    /** The directory the IDE loaded this plugin from (`<plugins>/agent-doc-jetbrains`). */
+    fun pluginPath(pluginId: String): java.nio.file.Path? = pluginDescriptor(pluginId)?.let { descriptor ->
+        runCatching {
+            descriptor.javaClass.methods.first { it.name == "getPluginPath" && it.parameterCount == 0 }
+                .invoke(descriptor) as? java.nio.file.Path
+        }.getOrNull()
+    }
+
     private fun pluginDescriptor(pluginId: String): Any? = runCatching {
         val manager = Class.forName("com.intellij.ide.plugins.PluginManagerCore")
         manager.getMethod("getPlugin", PluginId::class.java).invoke(null, PluginId.getId(pluginId))

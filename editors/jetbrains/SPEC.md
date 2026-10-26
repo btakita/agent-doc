@@ -215,6 +215,24 @@ the `#pluginactivationprobe` loaded-generation reading) match both versioned
 plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
 and never the unversioned module jars.
 
+Because nothing in that fallback reaches the running IDE, the plugin itself
+prompts for the restart. Each plugin generation polls, every 30 seconds, the
+versioned plugin jar in its own installed tree (`<plugin dir>/lib`) and the
+restart-required marker beside that tree
+(`.agent-doc-jetbrains-restart-required`). When the installed jar names any
+version other than the one this JVM loaded, or the marker's `staged_version=`
+names a newer one, and the same pending version is seen on two consecutive
+polls, it raises one sticky `Agent Doc Plugin Update` balloon per pending
+version. The balloon names the loaded and pending versions and the marker's
+first-line reason, and offers **Restart IDE** (`Application.restart()`) and
+**Later**. A marker alone never prompts: after the restart the loaded version
+matches the tree and a leftover marker is ignored. The poller is a
+`PluginGeneration` resource, so a classic restart-free upgrade cancels it with
+the old generation, and the two-poll rule keeps that swap's brief
+files-before-unload window from prompting. The prompt does not make the modular
+upgrade restart-free; it only replaces the operator having to notice the CLI
+warning or a later `plugin_bytes_superseded_advisory`.
+
 #### Why a plugin-owned child loader is not the remaining hot-upgrade boundary (GH #333/#339)
 
 The remaining Kotlin orchestration cannot be made replaceable merely by moving

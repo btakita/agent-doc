@@ -25,11 +25,11 @@ queue: go
 
 <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 30 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 29 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `5fe17385b5` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373 (zero-column route), and GH #374 (heading-anchored `agent:run` respond + merge). #373 and #375 are closed and installed locally; #374 is installing.
+Released and published agent-doc v0.35.553 from release commit `a0a525fb65`; tag `v0.35.553` is the stable latest release, PyPI serves 0.35.553, all six native archives promoted to their stable target channels, and Homebrew is bumped. Post-release `origin/main` is `5fe17385b5` (unreleased, ships in the next release): the `#claimrowmigrate` claim-row fix, the Marketplace retained-version fix, GH #375 (JetBrains 0.2.828/0.2.829/0.2.830), GH #373 (zero-column route), and GH #374 (heading-anchored `agent:run` respond + merge); all three issues are closed and installed locally.
 <!-- /status:sync -->
 <!-- /agent:status -->
  

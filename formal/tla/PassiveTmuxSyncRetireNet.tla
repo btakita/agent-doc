@@ -57,9 +57,12 @@ KNOBS (each fix has a wedge config; scripts/run_tla.sh asserts it MUST violate)
                        above the retired one and re-sends the same observation
                        (`CpRouteClient` + `EditorTabSyncListener.projectionLive`).
                        FALSE = the shipped plugin, which ignored the receipt.
-                       Wedge: PassiveTmuxSyncRetireNetFallbackMuteWedge (the Remote
-                       Dev sibling: a backend fallback resuming on a frame the
-                       frontend handoff retired, at the same process generation).
+                       Wedge: PassiveTmuxSyncRetireNetFallbackMuteWedge (the
+                       historical Remote Dev sibling: the former private-API
+                       backend fallback resumed a handoff-retired frame at the
+                       same process generation). Marketplace builds now fail
+                       closed without that fallback; the action remains a
+                       regression model for the listener liveness transition.
                        With the recovery ON, even the shipped bug self-heals
                        (PassiveTmuxSyncRetireNetSelfHeal must PASS).
   RetireRaisesFence    `forget_surface` / `forget` / `forget_client_family` retire
@@ -76,11 +79,11 @@ KNOBS (each fix has a wedge config; scripts/run_tla.sh asserts it MUST violate)
 
 ENVIRONMENT
 -----------
-  Handoff   an authenticated Remote Dev frontend takes authority
-            (`retireControllerProjection`): the frame is no longer live and
-            its endpoint is retired. Bounded by MaxHandoffs.
-  Fallback  the frontend goes away and the backend selection fallback resumes
-            on the same frame (`resumeControllerProjection` + `selectionChanged`).
+  Handoff   the historical private-API backend fallback yields authority to an
+            authenticated Remote Dev frontend (`retireControllerProjection`).
+            Marketplace builds no longer call this transition. Bounded by MaxHandoffs.
+  Fallback  regression-only inverse transition for the removed private-API
+            backend fallback (`resumeControllerProjection` + `selectionChanged`).
   EndFrame  the frame closes, the project closes, or its root is superseded
             (`retireClosedSurfaceEndpoints`, `shutdown`): retired for good.
   FrontendSync  while the frame is not live, another publisher (the frontend)
@@ -226,7 +229,7 @@ RefocusHandedOff ==
     /\ UNCHANGED ctlVars
     /\ UNCHANGED <<net, gen, delivered>>
 
-\* An authenticated frontend takes authority (`retireControllerProjection`).
+\* Historical private-API fallback handoff (`retireControllerProjection`).
 Handoff ==
     /\ live
     /\ ~ended
@@ -238,8 +241,8 @@ Handoff ==
     /\ UNCHANGED <<desired, seq, docAt, ended, cgen, offSwitches>>
     /\ UNCHANGED ctlVars
 
-\* The frontend is gone; the backend fallback resumes on the SAME frame at the
-\* SAME process generation (`resumeControllerProjection` + `selectionChanged`).
+\* Regression-only removed fallback: resume the SAME frame at the SAME process
+\* generation (`resumeControllerProjection` + `selectionChanged`).
 Fallback ==
     /\ ~live
     /\ ~ended

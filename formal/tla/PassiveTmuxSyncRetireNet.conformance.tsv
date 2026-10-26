@@ -49,8 +49,6 @@ plugin_call	RemoteClientLayoutForwarder.deliver->forgetRemoteClientSurface	Front
 plugin_call	RemoteClientLayoutForwarder.retireSurface->forgetRemoteClientSurface	FrontendSync	the frontend connection retired, or the backend project closed
 plugin_liveness	EditorTabSyncListener.retireControllerProjection:projectionRetired	Handoff	live' = FALSE
 plugin_liveness	EditorTabSyncListener.resumeControllerProjection:projectionRetired	Fallback	live' = TRUE
-plugin_liveness	BackendGuestSelectionFallback.install->retireControllerProjection	Handoff	Remote Dev frontend snapshot accepted
-plugin_liveness	BackendGuestSelectionFallback.install->resumeControllerProjection	Fallback	Remote Dev backend fallback forwards a selection again
 model_only	AdversaryStep	AdversaryStep	the NetChannel adversary: drop, duplicate, reconnect
 model_only	RefocusHandedOff	RefocusHandedOff	the operator switches tabs while another publisher owns the surface
 model_only	EditorRetireSuperseded	EditorRetireSuperseded	the v0.35.502/503 self-retirement, removed in 9ad4fdcd04; kept only as the RetireOnNewerReply wedge knob. A code site for it is a regression (EditorTabSyncListenerTest pins its absence)

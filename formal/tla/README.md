@@ -387,7 +387,7 @@ modules prove the transport around it.
 | `RecycleSettleDispatchNet` | settle-wait RPC, one request per connection | `Unreachable` (RSD-1: two lost round trips refused a pending recycle), `Ttl` (R9: TTL read as proof; fixed by `#netadv5`, abandonment needs the supervisor gone) |
 | `AgentDocCloseoutNet` | closeout owner claim and heartbeat | `OneShotClaim` (F4), `HeartbeatBreak` (F5a), `IgnoreLoss` (F5b), `Fence` (ADC-fence, not fixed: needs a commit fenced by owner id; `FencedTarget` is the passing target) |
 | `PassiveTmuxSyncNet` | editor focus/layout observation and its effect | `AdvanceFirst` (F14/F15: tracking advances before the effect; fixed by retaining the exact failed `SurfaceIntent` until a later observation applies it), `Reorder` (sequence fence) |
-| `PassiveTmuxSyncRetireNet` | editor-surface observation, `editor_surface_forget`, and the observation receipt | `WrongRetire` (v0.35.502/503 self-retirement of a live endpoint, the 02:54:03Z trace), `FallbackMute` (Remote Dev fallback on a handoff-retired frame), `ExactForget` (forget must raise the fence), `NoFence` (the retired fence stays). See below |
+| `PassiveTmuxSyncRetireNet` | editor-surface observation, `editor_surface_forget`, and the observation receipt | `WrongRetire` (v0.35.502/503 self-retirement of a live endpoint, the 02:54:03Z trace), `FallbackMute` (historical private-API Remote Dev fallback on a handoff-retired frame; no longer called by Marketplace builds), `ExactForget` (forget must raise the fence), `NoFence` (the retired fence stays). See below |
 | `LifecycleSequence` | lifecycle, heartbeat and queue-control level updates | `Reorder` (SIM-F1/SIM-F2: fixed by a monotonic send-stamp fence within each generation) |
 
 Each module also has a reach config that must be violated, so the happy path
@@ -410,8 +410,10 @@ The shipped code took an action the model did not contain.
 `PassiveTmuxSyncRetireNet` models one frame endpoint over `NetChannel`:
 `Obs(g, s)`, `Retire(g)` and typed receipts (`"ok"` / `"retired"`), the
 controller fence exactly as `SurfaceObservationRejection::classify` codes it,
-a per-process generation that only a re-registration changes, a frontend
-`Handoff` (the legitimate retire), the backend `Fallback`, and `EndFrame`.
+a per-process generation that only a re-registration changes, the historical
+private-API frontend `Handoff` / backend `Fallback` pair retained as a regression
+scenario, and `EndFrame`. Marketplace builds now fail closed when frontend
+authority is absent and do not call that pair.
 
 Properties: `LiveEndpointNeverMuted` (`(live /\ pendingIntent) ~> (~live \/
 acceptedSeq >= seq)`), the parent's `VisibleEventuallyMatchesEditor`,
@@ -425,7 +427,7 @@ drives tmux again) and `ControllerGenerationNeverAheadOfEditor`.
 | `...Safety` / `...DuplicateSafety` | fixed; reconnect / duplication, two handoffs | pass (invariants) |
 | `...SelfHeal` | `RetireOnNewerReply = TRUE` + re-registration | pass: recovery holds even with the bug's edge put back |
 | `...WrongRetireWedge` | `RetireOnNewerReply = TRUE`, no re-registration, no handoff | MUST violate: TLC finds the 02:54:03Z trace (refocus, refocus, superseded receipt retires, retire lands, next observation fenced, read as done) |
-| `...FallbackMuteWedge` | no re-registration, one handoff | MUST violate: the Remote Dev sibling |
+| `...FallbackMuteWedge` | no re-registration, one handoff | MUST violate: historical removed private-API Remote Dev fallback scenario |
 | `...ExactForgetWedge` | exact-generation forget + re-registration | MUST violate `NoRetiredResurrection` |
 | `...NoFenceWedge` | `RetiredFence = FALSE` | MUST violate `NoRetiredResurrection` |
 | `...Reach` | fixed | MUST violate `NeverReregisters` |

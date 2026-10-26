@@ -7,14 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-/**
- * `#surfaceretireformal`: the Remote Dev sibling of `#tmuxautosyncretired`. A frontend handoff
- * retires the backend listener's frames (`retireControllerProjection`); when the frontend goes away
- * the backend fallback resumes on the SAME frames at the SAME per-process connection generation,
- * which the controller fences forever unless the listener knows it is live again and re-registers
- * (model: `formal/tla/PassiveTmuxSyncRetireNet.tla`, action `Fallback`; wedge
- * `PassiveTmuxSyncRetireNetFallbackMuteWedge`).
- */
+/** Marketplace-safe one-sided-install behavior and its actionable diagnostics. */
 class BackendGuestSelectionFallbackResumeTest {
     private fun source(): String {
         val relative =

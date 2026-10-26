@@ -942,7 +942,7 @@ fn every_editor_surface_transition_in_the_code_is_a_named_action_of_the_model() 
         ),
         (
             "plugin_liveness",
-            "BackendGuestSelectionFallback.install->resumeControllerProjection",
+            "EditorTabSyncListener.resumeControllerProjection:projectionRetired",
         ),
     ] {
         assert!(

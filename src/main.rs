@@ -933,6 +933,7 @@ impl agent_doc_workflow_io::doctor::WorkflowDoctorEffects for CliWorkflowDoctorE
         )?;
         let mut facts = agent_doc_workflow::doctor::ActorDoctorFacts {
             inspection_available: true,
+            record_present: inspection.record.is_some(),
             state: None,
             generation: None,
             pane: None,

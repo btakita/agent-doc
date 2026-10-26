@@ -10,8 +10,9 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use agent_doc_workflow::doctor::{
-    ActorDoctorFacts, CycleStateDoctorFacts, EditorDoctorFacts, GitDoctorFacts, OpsLogDoctorFacts,
-    PreflightDoctorFacts, SessionCheckDoctorFacts, WorkflowDoctorFacts, WorkflowDoctorReport,
+    ActorDoctorFacts, CycleStateDoctorFacts, DocumentDoctorFacts, EditorDoctorFacts,
+    GitDoctorFacts, OpsLogDoctorFacts, PreflightDoctorFacts, SessionCheckDoctorFacts,
+    WorkflowDoctorFacts, WorkflowDoctorReport, document_doctor_facts_from_content,
     evaluate_catalog, format_text_report, ops_log_facts_from_content,
 };
 use agent_doc_workflow::doctor_json::{project_preflight_facts, project_session_check_facts};
@@ -123,6 +124,7 @@ fn gather_facts(
     let actor = read_actor_facts(effects, file, project_root.as_deref(), &mut warnings);
     let git = read_git_facts(file, &mut warnings);
     let editor = read_editor_facts(effects, file, project_root.as_deref(), &mut warnings);
+    let document = read_document_facts(file, &mut warnings);
     Ok((
         WorkflowDoctorFacts {
             project_root: project_root.map(|root| root.display().to_string()),
@@ -134,9 +136,20 @@ fn gather_facts(
             actor,
             git,
             editor,
+            document,
         },
         warnings,
     ))
+}
+
+fn read_document_facts(file: &Path, warnings: &mut Vec<String>) -> DocumentDoctorFacts {
+    match std::fs::read_to_string(file) {
+        Ok(content) => document_doctor_facts_from_content(&content),
+        Err(err) => {
+            warnings.push(format!("document queue inspection unavailable: {err}"));
+            DocumentDoctorFacts::default()
+        }
+    }
 }
 
 fn read_preflight_facts(path: Option<&Path>) -> Result<PreflightDoctorFacts> {
@@ -338,4 +351,114 @@ fn read_json(path: &Path) -> Result<Value> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     Ok(serde_json::from_str(&content)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_doc_workflow::doctor::WorkflowDoctorOutcome;
+    use agent_doc_workflow::invariants::WorkflowInvariantId;
+
+    /// Live effects for a healthy, freshly initialized project: session-check is
+    /// ok, the controller answers with no actor for the document, and the editor
+    /// projection is converged.
+    struct FreshProjectEffects;
+
+    impl WorkflowDoctorEffects for FreshProjectEffects {
+        fn inspect_session_check(&mut self, _file: &Path) -> Result<Option<LiveSessionCheckFacts>> {
+            Ok(Some(LiveSessionCheckFacts {
+                ok: Some(true),
+                status: Some("ok".to_string()),
+                message: Some("no open cycle".to_string()),
+                warnings: Vec::new(),
+            }))
+        }
+
+        fn inspect_actor(
+            &mut self,
+            _project_root: &Path,
+            _file: &Path,
+        ) -> Result<ActorDoctorFacts> {
+            Ok(ActorDoctorFacts {
+                inspection_available: true,
+                record_present: false,
+                controller_fresh: Some(true),
+                ..ActorDoctorFacts::default()
+            })
+        }
+
+        fn lazily_current_diverges(
+            &mut self,
+            _file: &Path,
+            _disk_content: &str,
+            _project_root: &Path,
+        ) -> Result<Option<bool>> {
+            Ok(Some(false))
+        }
+    }
+
+    fn fresh_project(document: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let file = root.join("plan.md");
+        std::fs::write(&file, document).unwrap();
+        (dir, file)
+    }
+
+    #[test]
+    fn diagnose_fresh_document_without_queue_is_healthy() {
+        // Onboarding regression: `agent-doc init` + a brand-new session document
+        // with no `agent:queue` used to report `outcome=blocked (queue_continuation)`.
+        let (_dir, file) = fresh_project(
+            "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session: Untitled Session\n\n## User\n\n",
+        );
+
+        let report = diagnose(
+            &file,
+            &WorkflowDoctorOptions::default(),
+            &mut FreshProjectEffects,
+        )
+        .unwrap();
+
+        assert_eq!(report.facts.document.queue_component_count, Some(0));
+        assert_eq!(
+            report.facts.git.snapshot_status.as_deref(),
+            Some("NoSnapshot")
+        );
+        assert!(!report.facts.cycle_state.present);
+        for result in &report.results {
+            assert_eq!(result.outcome, WorkflowDoctorOutcome::Ok, "{result:?}");
+        }
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Ok, "{report:?}");
+    }
+
+    #[test]
+    fn diagnose_document_with_live_queue_and_no_preflight_stays_blocked() {
+        let (_dir, file) = fresh_project(
+            "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n",
+        );
+
+        let report = diagnose(
+            &file,
+            &WorkflowDoctorOptions::default(),
+            &mut FreshProjectEffects,
+        )
+        .unwrap();
+
+        assert_eq!(report.facts.document.queue_component_count, Some(1));
+        let queue = report
+            .results
+            .iter()
+            .find(|result| result.id == WorkflowInvariantId::QueueContinuation)
+            .unwrap();
+        assert_eq!(queue.outcome, WorkflowDoctorOutcome::Blocked, "{queue:?}");
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Blocked);
+    }
 }

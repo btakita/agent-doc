@@ -66,6 +66,40 @@ pub struct WorkflowDoctorFacts {
     pub actor: ActorDoctorFacts,
     pub git: GitDoctorFacts,
     pub editor: EditorDoctorFacts,
+    /// Facts read from the session document itself. These let doctor prove that
+    /// a document has no queue (and therefore no continuation obligation)
+    /// without requiring a captured preflight JSON.
+    #[serde(default)]
+    pub document: DocumentDoctorFacts,
+}
+
+/// Facts projected from the session document content on disk.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DocumentDoctorFacts {
+    /// Number of `agent:queue` components in the document. `None` when the
+    /// document could not be read or its queue topology could not be parsed,
+    /// which is unknown evidence, never proof of an empty queue.
+    #[serde(default)]
+    pub queue_component_count: Option<usize>,
+}
+
+/// Project document facts from raw document content.
+///
+/// A parse failure (malformed component markers or an invalid queue graph) is
+/// reported as unknown rather than as "no queue", so it can never manufacture a
+/// healthy `queue_continuation` verdict.
+pub fn document_doctor_facts_from_content(content: &str) -> DocumentDoctorFacts {
+    let queue_component_count = agent_doc_queue::queue_graph::parse_document(content)
+        .ok()
+        .map(|(components, _)| {
+            components
+                .iter()
+                .filter(|component| component.name == "queue")
+                .count()
+        });
+    DocumentDoctorFacts {
+        queue_component_count,
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -114,6 +148,11 @@ pub struct OpsLogDoctorFacts {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActorDoctorFacts {
     pub inspection_available: bool,
+    /// The controller inspection returned an actor record for this document.
+    /// An available inspection with no record means no actor generation exists
+    /// yet, so nothing can be superseded.
+    #[serde(default)]
+    pub record_present: bool,
     pub state: Option<String>,
     pub generation: Option<u64>,
     pub pane: Option<String>,
@@ -286,6 +325,15 @@ fn evaluate_queue_continuation(
 ) -> WorkflowInvariantResult {
     let result = WorkflowInvariantResult::new(invariant);
     if !facts.preflight.json_provided {
+        // Fresh document: a document with no `agent:queue` component has no
+        // queue to continue, so the continuation obligation is vacuously met and
+        // no preflight capture is needed to prove it. Any queue component (even
+        // an empty one) still requires the preflight facts.
+        if facts.document.queue_component_count == Some(0) {
+            return result.ok(
+                "document has no agent:queue component; there is no queue continuation obligation",
+            );
+        }
         return result.blocked_missing(
             "preflight_json.queue_continuation_required",
             format!(
@@ -381,9 +429,24 @@ fn evaluate_closeout_commit(
             closeout_repair_commands(file, facts),
         );
     }
-    if facts.git.snapshot_status.as_deref().is_some_and(|status| {
-        status.contains("SnapshotDiffersFromHead") || status == "NoSnapshot" || status == "NoHead"
-    }) {
+    // Fresh document: no snapshot AND no cycle state means no cycle has ever
+    // run for this document, so there is no closeout to commit. Prescribing
+    // `agent-doc <FILE>` there would start the first session, not recover one.
+    // A missing snapshot beside existing cycle state is still recoverable.
+    let never_cycled =
+        facts.git.snapshot_status.as_deref() == Some("NoSnapshot") && !facts.cycle_state.present;
+    if never_cycled && facts.session_check.ok == Some(true) {
+        return result.ok(
+            "document has no snapshot and no cycle state: no cycle has run yet, so there is no closeout to commit",
+        );
+    }
+    if !never_cycled
+        && facts.git.snapshot_status.as_deref().is_some_and(|status| {
+            status.contains("SnapshotDiffersFromHead")
+                || status == "NoSnapshot"
+                || status == "NoHead"
+        })
+    {
         // `#doctorsccontra`: do NOT prescribe `session-check` here. `session-check`
         // reports `ok — commit_already_current` for a snapshot that is merely AHEAD
         // of HEAD (uncommitted queue/backlog maintenance or a committed-cycle
@@ -462,6 +525,13 @@ fn evaluate_generation_redirect(
     }
     if facts.actor.generation.is_some() {
         return result.ok("current actor generation is inspectable");
+    }
+    // Fresh document: the controller answered and has no actor for this
+    // document, so no generation exists that could be superseded.
+    if facts.actor.inspection_available && !facts.actor.record_present {
+        return result.ok(
+            "controller inspection found no actor registered for this document; no generation exists to be superseded",
+        );
     }
     result.blocked_missing(
         "actor_state.generation",
@@ -699,6 +769,200 @@ mod tests {
             queue
                 .missing_fact_sources
                 .contains(&"preflight_json.queue_continuation_required".to_string())
+        );
+    }
+
+    /// Facts gathered from a brand-new session document: no preflight capture,
+    /// no `agent:queue`, no snapshot, no cycle state, and a controller that
+    /// answers but has no actor registered for the document yet.
+    fn fresh_document_facts() -> WorkflowDoctorFacts {
+        WorkflowDoctorFacts {
+            document: document_doctor_facts_from_content(
+                "---\nagent_doc_session: fresh\nagent: claude\n---\n\n# Session: Untitled Session\n\n## User\n\n",
+            ),
+            session_check: SessionCheckDoctorFacts {
+                ok: Some(true),
+                status: Some("ok".to_string()),
+                ..SessionCheckDoctorFacts::default()
+            },
+            git: GitDoctorFacts {
+                snapshot_status: Some("NoSnapshot".to_string()),
+                ..GitDoctorFacts::default()
+            },
+            actor: ActorDoctorFacts {
+                inspection_available: true,
+                record_present: false,
+                controller_fresh: Some(true),
+                ..ActorDoctorFacts::default()
+            },
+            editor: EditorDoctorFacts {
+                lazily_current_diverges: Some(false),
+            },
+            ..WorkflowDoctorFacts::default()
+        }
+    }
+
+    #[test]
+    fn doctor_reports_fresh_document_without_queue_healthy() {
+        // The onboarding pass found `outcome=blocked
+        // (queue_continuation)` on a brand-new document. No queue means no
+        // continuation obligation, and every other check is well-defined too.
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            fresh_document_facts(),
+            Vec::new(),
+        );
+
+        for result in &report.results {
+            assert_eq!(
+                result.outcome,
+                WorkflowDoctorOutcome::Ok,
+                "fresh document check must be ok: {result:?}"
+            );
+        }
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Ok, "{report:?}");
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert!(queue.missing_fact_sources.is_empty(), "{queue:?}");
+        assert!(queue.repair_commands.is_empty(), "{queue:?}");
+        let closeout = invariant_result(&report, WorkflowInvariantId::CloseoutCommit);
+        assert!(
+            closeout.repair_commands.is_empty(),
+            "a never-cycled document has no closeout to recover: {closeout:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_still_blocks_queue_continuation_for_document_with_queue_and_no_preflight() {
+        let mut facts = fresh_document_facts();
+        facts.document = document_doctor_facts_from_content(
+            "# Session\n\n<!-- agent:queue -->\n- ship the fix\n<!-- /agent:queue -->\n",
+        );
+        assert_eq!(facts.document.queue_component_count, Some(1));
+
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert_eq!(queue.outcome, WorkflowDoctorOutcome::Blocked, "{queue:?}");
+        assert!(
+            queue
+                .missing_fact_sources
+                .contains(&"preflight_json.queue_continuation_required".to_string())
+        );
+        assert_eq!(report.outcome, WorkflowDoctorOutcome::Blocked);
+    }
+
+    #[test]
+    fn doctor_empty_queue_component_still_requires_preflight_facts() {
+        let mut facts = fresh_document_facts();
+        facts.document = document_doctor_facts_from_content(
+            "# Session\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n",
+        );
+        assert_eq!(facts.document.queue_component_count, Some(1));
+
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert_eq!(queue.outcome, WorkflowDoctorOutcome::Blocked, "{queue:?}");
+    }
+
+    #[test]
+    fn doctor_unparseable_queue_topology_is_unknown_not_absent() {
+        // Two queues without ids is an invalid queue graph: unknown evidence,
+        // never proof that the document has no queue.
+        let facts = document_doctor_facts_from_content(
+            "<!-- agent:queue -->\n- a\n<!-- /agent:queue -->\n\n<!-- agent:queue -->\n- b\n<!-- /agent:queue -->\n",
+        );
+        assert_eq!(facts.queue_component_count, None);
+
+        let mut doctor_facts = fresh_document_facts();
+        doctor_facts.document = facts;
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            doctor_facts,
+            Vec::new(),
+        );
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert_eq!(queue.outcome, WorkflowDoctorOutcome::Blocked, "{queue:?}");
+    }
+
+    #[test]
+    fn doctor_preflight_capture_outranks_document_queue_absence() {
+        let mut facts = fresh_document_facts();
+        facts.preflight.json_provided = true;
+        facts.preflight.queue_continuation_required = Some(false);
+        facts.preflight.queue_drainable_head_count = Some(2);
+
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let queue = invariant_result(&report, WorkflowInvariantId::QueueContinuation);
+        assert_eq!(
+            queue.outcome,
+            WorkflowDoctorOutcome::Recoverable,
+            "{queue:?}"
+        );
+    }
+
+    #[test]
+    fn doctor_missing_snapshot_beside_cycle_state_stays_recoverable() {
+        let mut facts = fresh_document_facts();
+        facts.cycle_state.present = true;
+        facts.cycle_state.open = Some(false);
+
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let closeout = invariant_result(&report, WorkflowInvariantId::CloseoutCommit);
+        assert_eq!(
+            closeout.outcome,
+            WorkflowDoctorOutcome::Recoverable,
+            "{closeout:?}"
+        );
+        assert_eq!(closeout.repair_commands, vec!["agent-doc plan.md"]);
+    }
+
+    #[test]
+    fn doctor_generation_redirect_blocks_without_actor_inspection() {
+        let mut facts = fresh_document_facts();
+        facts.actor = ActorDoctorFacts::default();
+
+        let report = evaluate_catalog(
+            Path::new("plan.md"),
+            workflow_invariant_catalog(),
+            facts,
+            Vec::new(),
+        );
+
+        let generation = invariant_result(&report, WorkflowInvariantId::GenerationRedirect);
+        assert_eq!(
+            generation.outcome,
+            WorkflowDoctorOutcome::Blocked,
+            "{generation:?}"
+        );
+        assert!(
+            generation
+                .missing_fact_sources
+                .contains(&"actor_state.generation".to_string())
         );
     }
 

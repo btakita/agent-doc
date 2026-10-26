@@ -22767,6 +22767,21 @@ fn hydrate_reliable_sync_liveness(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    // `#exitwatcherrootscope`: the deaths this root records are those of pids
+    // its own journal opened. The plane is process-global, so after the fold it
+    // can also hold open pids another root's controller hydrated or received,
+    // and recording their exit would write into this root's ledger under the
+    // other root's document hashes. The journal just loaded is this root's
+    // own record, so it scopes the set without a path lookup and still covers
+    // a durable open that carries no registration.
+    let journal_opened_pids = batches
+        .iter()
+        .flatten()
+        .filter_map(|op| match op {
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open { pid, .. } => Some(*pid),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let dead_open_pids = {
         let mut plane = controller_liveness_plane().lock();
         for batch in &batches {
@@ -22779,6 +22794,7 @@ fn hydrate_reliable_sync_liveness(
             .projection()
             .all_open_pids()
             .into_iter()
+            .filter(|pid| journal_opened_pids.contains(pid))
             .filter(|pid| {
                 u32::try_from(*pid)
                     .ok()
@@ -23585,17 +23601,26 @@ document_hash={} client_id={} identity={} removed={} live_editors_after={}",
     // left the crashed registration's peer ack pinning the retention floor.
     let affected_documents = {
         let mut plane = controller_liveness_plane().lock();
-        let affected_documents = plane.projection().documents_registered_by_pid(pid);
+        let affected_documents = plane.projection().registered_document_paths_by_pid(pid);
         plane.apply_local(&op);
         affected_documents
             .into_iter()
-            .map(|document_hash| {
+            .map(|(document_hash, path)| {
                 let registrations = plane.projection().live_registrations(&document_hash);
-                (document_hash, registrations)
+                (document_hash, path, registrations)
             })
             .collect::<Vec<_>>()
     };
-    for (document_hash, registrations) in affected_documents {
+    // `#exitwatcherrootscope`: retention rewrites this root's `state.db` rows
+    // for each document, so it runs only for documents under this root. The
+    // plane is process-global: an editor pid can hold documents another root's
+    // controller registered, and those rows live in that root's ledger. The
+    // ownership check touches the filesystem, so it runs after the plane lock
+    // is released.
+    let owned_documents = affected_documents.into_iter().filter(|(_, path, _)| {
+        crate::process_exit_watcher::document_path_belongs_to_root(path, project_root)
+    });
+    for (document_hash, _, registrations) in owned_documents {
         match retain_state_events_for_live_registrations(
             project_root,
             &document_hash,
@@ -61979,6 +62004,184 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    /// A `reliable_sync` request carrying one liveness frame of `ops`.
+    fn reliable_sync_ops_request(
+        document_hash: &str,
+        ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
+    ) -> ControllerRequest {
+        let frame = agent_doc_reliable_sync_io::liveness::encode_liveness_frame(ops)
+            .expect("encode liveness frame");
+        let envelope = agent_doc_reliable_sync_io::encode_envelope(document_hash, &frame)
+            .expect("encode envelope");
+        let mut request = empty_controller_request("reliable_sync");
+        request.generation = Some(1);
+        request.diagnostic_payload = Some(envelope.to_string());
+        request
+    }
+
+    /// An editor pid no OS can hand out: above Linux's `PID_MAX_LIMIT` (2^22)
+    /// and macOS's pid ceiling, yet a valid `pid_t`. `kill(pid, 0)` reports it
+    /// gone, so the exit-watcher tests own their dead editor outright instead
+    /// of borrowing one that a recycled pid could resurrect.
+    const NEVER_ALLOCATED_EDITOR_PID: u32 = 2_100_000_000;
+
+    /// The plane is process-global: drop a test's synthetic editor pid from the
+    /// open-and-alive set so no later reader in this binary sees it.
+    fn retire_test_editor_pid(pid: u64) {
+        controller_liveness_plane().lock().apply_local(
+            &agent_doc_reliable_sync_io::liveness::LivenessOp::Alive {
+                pid,
+                value: false,
+                stamp: lazily::WireStamp {
+                    wall_time: u64::MAX,
+                    logical: 0,
+                    peer: 0,
+                },
+            },
+        );
+    }
+
+    fn durable_liveness_sources(project_root: &Path) -> Vec<String> {
+        let database_path = agent_doc_sqlite::state_store::state_db_path(project_root);
+        agent_doc_sqlite::reliable_sync_inbox::load(&database_path)
+            .unwrap()
+            .liveness
+            .into_iter()
+            .map(|record| record.source_key)
+            .collect()
+    }
+
+    /// `#exitwatcherrootscope`: two in-process controllers share the
+    /// process-global liveness plane. A dead editor pid that controller A
+    /// registered for a document under A's root is A's to reap. Controller B's
+    /// exit-watcher tick must leave it alone and write nothing into B's root;
+    /// it used to record that exit into B's `state.db` under A's document hash.
+    ///
+    /// B ticks first, while the pid is still open-and-alive in the plane, so
+    /// B's restraint is observed against a live candidate. A then reaps it with
+    /// the same tick, which proves the pid was reapable all along.
+    #[test]
+    fn exit_watcher_tick_never_records_another_roots_dead_editor() {
+        use agent_doc_reliable_sync_io::liveness::{EditorRegistration, LivenessOp};
+        let _env = reliable_sync_env_lock();
+        let root_a = tempfile::tempdir().unwrap();
+        let root_b = tempfile::tempdir().unwrap();
+        for root in [root_a.path(), root_b.path()] {
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        }
+        let file = root_a.path().join("plan.md");
+        std::fs::write(&file, "# plan\n").unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let pid = NEVER_ALLOCATED_EDITOR_PID + 1;
+        let dead_pid = u64::from(pid);
+        handle_reliable_sync(
+            root_a.path(),
+            reliable_sync_ops_request(
+                &document_hash,
+                &[
+                    LivenessOp::Open {
+                        document_hash: document_hash.clone(),
+                        pid: dead_pid,
+                        tag: "exitwatcherrootscope-open".to_string(),
+                    },
+                    LivenessOp::Register(EditorRegistration {
+                        document_hash: document_hash.clone(),
+                        pid: dead_pid,
+                        path: file.to_string_lossy().into_owned(),
+                        editor_id: format!("jetbrains-{dead_pid}"),
+                        editor_kind: "jetbrains".to_string(),
+                        editor_version: "test".to_string(),
+                        capabilities: Vec::new(),
+                        timestamp_ms: 1,
+                    }),
+                ],
+            ),
+        )
+        .expect("controller A folds its editor's registration");
+        // Only this test's pid is dead to the ticks below, so neither tick
+        // touches another test's editors.
+        let is_live = |candidate: u32| candidate != pid;
+        let exit_source = format!("controller-alive:{dead_pid}");
+
+        let reaped_by_b =
+            crate::process_exit_watcher::reap_exited_editors_once(root_b.path(), is_live);
+        assert!(
+            reaped_by_b.is_empty(),
+            "controller B reaped another root's editor: {reaped_by_b:?}"
+        );
+        assert!(
+            !agent_doc_sqlite::state_store::state_db_path(root_b.path()).exists(),
+            "controller B must not write another root's editor exit into its own ledger"
+        );
+        assert!(
+            controller_liveness_plane()
+                .lock()
+                .projection()
+                .pid_alive(dead_pid),
+            "precondition for A's tick: B left the plane's view of the pid alone"
+        );
+
+        let reaped_by_a =
+            crate::process_exit_watcher::reap_exited_editors_once(root_a.path(), is_live);
+        assert_eq!(reaped_by_a, vec![pid], "controller A reaps its editor");
+        assert!(
+            durable_liveness_sources(root_a.path()).contains(&exit_source),
+            "controller A records its editor's exit in its own ledger"
+        );
+        assert!(
+            !controller_liveness_plane()
+                .lock()
+                .projection()
+                .pid_alive(dead_pid)
+        );
+        assert!(!agent_doc_sqlite::state_store::state_db_path(root_b.path()).exists());
+    }
+
+    /// `#exitwatcherrootscope`: controller startup records the deaths of the
+    /// dead editors its own journal opened, not every dead open pid the
+    /// process-global plane happens to hold.
+    #[test]
+    fn hydration_recovers_only_dead_editors_its_own_journal_opened() {
+        use agent_doc_reliable_sync_io::liveness::LivenessOp;
+        let _env = reliable_sync_env_lock();
+        let root = tempfile::tempdir().unwrap();
+        let own_pid = u64::from(NEVER_ALLOCATED_EDITOR_PID + 2);
+        let foreign_pid = u64::from(NEVER_ALLOCATED_EDITOR_PID + 3);
+        // Another root's dead editor, already in the plane.
+        controller_liveness_plane()
+            .lock()
+            .restore_liveness(&[LivenessOp::Open {
+                document_hash: "exitwatcherrootscope-foreign".to_string(),
+                pid: foreign_pid,
+                tag: "exitwatcherrootscope-foreign-open".to_string(),
+            }]);
+        // This root's journal opened its own editor, which died while the
+        // controller was down.
+        agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
+            &agent_doc_sqlite::state_store::state_db_path(root.path()),
+            "exitwatcherrootscope-own",
+            1,
+            &serde_json::to_string(&vec![LivenessOp::Open {
+                document_hash: "exitwatcherrootscope-own".to_string(),
+                pid: own_pid,
+                tag: "exitwatcherrootscope-own-open".to_string(),
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+
+        let recovered = hydrate_reliable_sync_liveness(root.path())
+            .unwrap()
+            .expect("first hydration of this root");
+        retire_test_editor_pid(own_pid);
+        retire_test_editor_pid(foreign_pid);
+        assert_eq!(
+            recovered,
+            vec![own_pid],
+            "startup must record only the deaths its own journal opened"
+        );
     }
 
     /// A valid wire frame can still be permanently inadmissible against the

@@ -50,9 +50,23 @@
 //! editor pid, into its own project root. Those writes recreate `.agent-doc` under a root
 //! its test is deleting, so `TempDir`'s removal fails with `ENOTEMPTY` and the root
 //! survives.
+//!
+//! ## The poller reaps only its own root's editors (`#exitwatcherrootscope`)
+//!
+//! Stopping finished pollers is not enough: two live in-process controllers still share
+//! the one process-global plane. Each reaped every dead pid in it and wrote the exit,
+//! with retention under the dead editor's document hashes, into its own root's
+//! `state.db`. One such write, from a controller reaping a sibling test's synthetic
+//! editor, deleted that test's `state.db-journal` and failed its commit with
+//! `SQLITE_IOERR_DELETE_NOENT`. A pid is now reaped only by the controller whose root is
+//! the nearest project root of one of the pid's registered document paths. A pid with
+//! no registration names no root, so no poller reaps it; controller hydration still
+//! records the deaths of pids its own journal opened. Production is unchanged: a
+//! production process serves one root, and editors always send `Register` with
+//! `Open`, so every editor pid the plane holds there is registered under that root.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
@@ -145,48 +159,124 @@ fn run_poll_loop(project_root: PathBuf, stopped: mpsc::Receiver<()>) {
             Err(RecvTimeoutError::Timeout) => {}
             Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
         }
-        // The poll candidates are the liveness plane's own open-and-alive set — the
-        // single authority. Because `editor_attach` only ever attaches pids it read
-        // out of this plane (`mark_editor_attach_open` seeds `attach()` *from*
-        // `open_pids().filter(pid_alive)`), the plane is always a superset of any
-        // private `watch()` tally. It also survives a controller recycle (durable
-        // hydration repopulates it) so a crashed editor whose terminal `Alive{false}`
-        // was never published is still polled for death. `pid_alive` presumes alive
-        // absent a death fact, so a stale ghost stays `pid_alive == true`, holding
-        // `live_editors >= 1` and wedging every disk-authority resolve until this poll
-        // reaps it (`#ghosteditorliveness`). Deriving from the plane instead of a
-        // private set is what deletes that drift class.
-        let candidates: HashSet<u32> = plane_open_alive_pids().into_iter().collect();
-        for pid in pids_to_reap(&candidates, process_is_live) {
-            // OS-observed exit → drive the reactive `alive` cell closed. Every
-            // document that pid owned recomputes to detached.
-            editor_attach().process_exited(pid);
-            // Sidecar-retirement Phase 3C: also write the reliable-sync
-            // `Alive{false}` so the shadow liveness plane cascades the same
-            // crash demote and the death fact is durably persisted (survives the
-            // next controller hydration). This also drops the pid from the plane's
-            // open-and-alive set, so the next tick no longer lists it as a candidate.
-            crate::project_controller::record_reliable_sync_editor_exit(&project_root, pid as u64);
-        }
+        reap_exited_editors_once(&project_root, process_is_live);
     }
 }
 
+/// One poll tick for the controller that owns `project_root`: reap every
+/// plane-open editor pid that OS liveness reports gone **and** that holds a
+/// registration for a document under `project_root` (`#exitwatcherrootscope`).
+///
+/// The poll candidates are the liveness plane's own open-and-alive set — the
+/// single authority. Because `editor_attach` only ever attaches pids it read
+/// out of this plane (`mark_editor_attach_open` seeds `attach()` *from*
+/// `open_pids().filter(pid_alive)`), the plane is always a superset of any
+/// private `watch()` tally. It also survives a controller recycle (durable
+/// hydration repopulates it) so a crashed editor whose terminal `Alive{false}`
+/// was never published is still polled for death. `pid_alive` presumes alive
+/// absent a death fact, so a stale ghost stays `pid_alive == true`, holding
+/// `live_editors >= 1` and wedging every disk-authority resolve until this poll
+/// reaps it (`#ghosteditorliveness`). Deriving from the plane instead of a
+/// private set is what deletes that drift class.
+///
+/// The plane is process-global, though, and the reap writes into this root's
+/// `state.db`. A test binary serves many in-process controllers against one
+/// plane, and each used to reap every other test's dead editor pid and write
+/// that exit, under the other test's document hash, into its own ledger. One
+/// such write deleted a sibling connection's `state.db-journal` and failed its
+/// commit with `SQLITE_IOERR_DELETE_NOENT`. So the candidates are narrowed by
+/// the registration path, the one liveness fact that names a root. A pid this
+/// root does not own is left alone; its own root's controller reaps it. A
+/// production process serves one root, and its editors register only that
+/// root's documents, so nothing it reaped before is skipped now.
+pub(crate) fn reap_exited_editors_once(
+    project_root: &Path,
+    is_live: impl Fn(u32) -> bool,
+) -> Vec<u32> {
+    let candidates = plane_open_alive_pid_paths();
+    let candidate_pids: HashSet<u32> = candidates.keys().copied().collect();
+    let dead = pids_to_reap(&candidate_pids, is_live);
+    let reaped = pids_owned_by_root(&dead, &candidates, |path| {
+        document_path_belongs_to_root(path, project_root)
+    });
+    for &pid in &reaped {
+        // OS-observed exit → drive the reactive `alive` cell closed. Every
+        // document that pid owned recomputes to detached.
+        editor_attach().process_exited(pid);
+        // Sidecar-retirement Phase 3C: also write the reliable-sync
+        // `Alive{false}` so the shadow liveness plane cascades the same
+        // crash demote and the death fact is durably persisted (survives the
+        // next controller hydration). This also drops the pid from the plane's
+        // open-and-alive set, so the next tick no longer lists it as a candidate.
+        crate::project_controller::record_reliable_sync_editor_exit(project_root, pid as u64);
+    }
+    reaped
+}
+
 /// Every pid the reliable-sync liveness plane still counts as open-and-alive,
-/// across all documents, narrowed to the `u32` OS-pid width. This is the plane's
-/// own view of "who might be a live editor" — the exact set whose staleness
-/// produces the `#ghosteditorliveness` wedge — and it is the watcher's **sole**
-/// source of poll candidates: there is no private `watch()`ed set to fall behind
-/// it. A plane `Pid` (u64) that does not fit `u32` cannot be a real OS pid; it is
-/// dropped rather than reaped (conservative: never demote what we cannot prove dead).
-fn plane_open_alive_pids() -> Vec<u32> {
+/// across all documents, narrowed to the `u32` OS-pid width, with the paths of
+/// the documents it holds registered. This is the plane's own view of "who
+/// might be a live editor" — the exact set whose staleness produces the
+/// `#ghosteditorliveness` wedge — and it is the watcher's **sole** source of
+/// poll candidates: there is no private `watch()`ed set to fall behind it. A
+/// plane `Pid` (u64) that does not fit `u32` cannot be a real OS pid; it is
+/// dropped rather than reaped (conservative: never demote what we cannot prove
+/// dead). The paths are copied out so the root-ownership check, which touches
+/// the filesystem, runs after the plane lock is released.
+fn plane_open_alive_pid_paths() -> BTreeMap<u32, Vec<String>> {
     let plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
     let projection = plane.projection();
     projection
         .all_open_pids()
         .into_iter()
         .filter(|pid| projection.pid_alive(*pid))
-        .filter_map(|pid| u32::try_from(pid).ok())
+        .filter_map(|pid| {
+            let os_pid = u32::try_from(pid).ok()?;
+            let paths = projection
+                .registered_document_paths_by_pid(pid)
+                .into_values()
+                .collect();
+            Some((os_pid, paths))
+        })
         .collect()
+}
+
+/// Pure ownership decision (`#exitwatcherrootscope`): of the `dead` pids, keep
+/// those holding at least one registered document whose path `owned` accepts.
+/// A pid with no registration names no root, so no controller claims it.
+fn pids_owned_by_root(
+    dead: &[u32],
+    paths_by_pid: &BTreeMap<u32, Vec<String>>,
+    owned: impl Fn(&str) -> bool,
+) -> Vec<u32> {
+    let mut owned_pids: Vec<u32> = dead
+        .iter()
+        .copied()
+        .filter(|pid| {
+            paths_by_pid
+                .get(pid)
+                .is_some_and(|paths| paths.iter().any(|path| owned(path)))
+        })
+        .collect();
+    owned_pids.sort_unstable();
+    owned_pids
+}
+
+/// Whether the document at `path` belongs to the project rooted at
+/// `project_root`: its nearest `.agent-doc` ancestor is that root
+/// (`#exitwatcherrootscope`). Nearest, not any: a nested project's documents
+/// belong to the nested root, matching how editors route a document to its
+/// controller. The comparison also accepts the two directories' canonical
+/// forms, so a symlinked spelling of either side still matches.
+pub(crate) fn document_path_belongs_to_root(path: &str, project_root: &Path) -> bool {
+    let Some(nearest) = agent_doc_project_root_io::project_root_containing(Path::new(path)) else {
+        return false;
+    };
+    nearest == project_root
+        || matches!(
+            (nearest.canonicalize(), project_root.canonicalize()),
+            (Ok(left), Ok(right)) if left == right
+        )
 }
 
 /// Pure reap decision: of `candidates`, which pids does OS liveness report as
@@ -277,6 +367,50 @@ mod tests {
         let candidates: HashSet<u32> = [1, 2, 3].into_iter().collect();
         let reaped = pids_to_reap(&candidates, |_| true);
         assert!(reaped.is_empty(), "no live pid is ever reaped: {reaped:?}");
+    }
+
+    /// `#exitwatcherrootscope`: a dead pid is claimed only by the root that
+    /// holds one of its registered documents; a pid with no registration names
+    /// no root and is claimed by none.
+    #[test]
+    fn pids_owned_by_root_claims_only_pids_registered_under_the_root() {
+        let paths_by_pid = BTreeMap::from([
+            (101, vec!["/root-a/plan.md".to_string()]),
+            (202, vec!["/root-b/plan.md".to_string()]),
+            (
+                303,
+                vec![
+                    "/root-b/notes.md".to_string(),
+                    "/root-a/notes.md".to_string(),
+                ],
+            ),
+            (404, Vec::new()),
+        ]);
+        let under_a = |path: &str| path.starts_with("/root-a/");
+        let owned = pids_owned_by_root(&[404, 303, 202, 101, 505], &paths_by_pid, under_a);
+        assert_eq!(owned, vec![101, 303]);
+    }
+
+    #[test]
+    fn document_path_belongs_only_to_its_nearest_root() {
+        let outer = tempfile::tempdir().unwrap();
+        let nested = outer.path().join("nested");
+        std::fs::create_dir_all(outer.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let outer_doc = outer.path().join("plan.md");
+        let nested_doc = nested.join("plan.md");
+        let outer_doc = outer_doc.to_str().unwrap();
+        let nested_doc = nested_doc.to_str().unwrap();
+        assert!(document_path_belongs_to_root(outer_doc, outer.path()));
+        assert!(!document_path_belongs_to_root(outer_doc, &nested));
+        assert!(document_path_belongs_to_root(nested_doc, &nested));
+        assert!(
+            !document_path_belongs_to_root(nested_doc, outer.path()),
+            "a nested project's document belongs to the nested root"
+        );
+        let stranger = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(stranger.path().join(".agent-doc")).unwrap();
+        assert!(!document_path_belongs_to_root(outer_doc, stranger.path()));
     }
 
     #[test]

@@ -601,6 +601,22 @@ impl LivenessProjection {
             .collect()
     }
 
+    /// [`Self::documents_registered_by_pid`] with each document's registered
+    /// path: `document_hash` → the path `pid`'s newest registration names.
+    ///
+    /// The path is the only liveness fact that ties a document to a project
+    /// root. A controller uses it to keep its exit reaping and its durable
+    /// exit writes inside its own root (`#exitwatcherrootscope`): the plane is
+    /// process-global, so it can hold documents another root's controller
+    /// registered.
+    pub fn registered_document_paths_by_pid(&self, pid: Pid) -> BTreeMap<String, String> {
+        self.registrations
+            .iter()
+            .filter(|((doc, registered_pid), _)| *registered_pid == pid && self.is_open(doc, pid))
+            .map(|((doc, _), registration)| (doc.clone(), registration.path.clone()))
+            .collect()
+    }
+
     /// Live/open registrations across the whole projection.
     pub fn all_live_registrations(&self) -> Vec<EditorRegistration> {
         self.open_docs()
@@ -1442,6 +1458,15 @@ mod tests {
         });
         assert!(p.all_live_registrations().iter().all(|r| r.pid != 100));
         assert_eq!(p.documents_registered_by_pid(100), held);
+        // `#exitwatcherrootscope`: the same held set, each with the path that
+        // ties it to a project root.
+        assert_eq!(
+            p.registered_document_paths_by_pid(100),
+            BTreeMap::from([
+                ("docA".to_string(), "/tmp/docA.md".to_string()),
+                ("docB".to_string(), "/tmp/docB.md".to_string()),
+            ])
+        );
     }
 
     // Conformance scenario `lww_alive_highest_stamp_wins`.

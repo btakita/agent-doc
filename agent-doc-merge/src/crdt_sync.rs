@@ -28,6 +28,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
 use std::cell::{Cell, RefCell};
 
+mod local_ops;
+use local_ops::{LocalJournal, VisibleElem, VisibleOrder};
+
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
 ///
@@ -70,6 +73,21 @@ pub struct ReplicaState {
     /// `TextCrdt::apply_delta`, which otherwise materializes the graph twice even
     /// when every operation is already known.
     last_applied_update: RefCell<Option<Vec<u8>>>,
+    /// The exact version vector paired with `cached_state_vector`. Local minting
+    /// only advances this replica's own counter, so it is maintained in place
+    /// instead of re-walking every element (`#replicadiffcost`).
+    cached_version_vector: RefCell<Option<TextVersionVector>>,
+    /// Visible elements in projection order, matching the CRDT graph WITHOUT
+    /// `pending_local_edits`. Lets a local edit mint its ops without lazily's
+    /// whole-tree `ordered_ids` projection. `None` after a remote mutation until
+    /// the next local edit rebuilds it.
+    visible_order: RefCell<Option<VisibleOrder>>,
+    /// Elements touched by local minting since an exact version-vector base, so
+    /// `diff` answers a caught-up peer without scanning the document.
+    local_journal: RefCell<Option<LocalJournal>>,
+    /// Set when a rebuilt visible order failed to spell the replica's projection.
+    /// The replica then keeps lazily's own edit and delta paths for its lifetime.
+    local_fast_path_refused: Cell<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -413,7 +431,8 @@ impl ReplicaState {
     /// peer).
     pub fn new(client_id: u64) -> Self {
         let text = TextCrdt::new(client_id);
-        let state_vector = serde_json::to_vec(&text.version_vector()).unwrap_or_default();
+        let version_vector = text.version_vector();
+        let state_vector = serde_json::to_vec(&version_vector).unwrap_or_default();
         Self {
             text: RefCell::new(text),
             cached_state_vector: RefCell::new(Some(state_vector)),
@@ -422,6 +441,10 @@ impl ReplicaState {
             cached_edit_anchor: Cell::new(Some((0, 0))),
             pending_local_edits: RefCell::new(Vec::new()),
             last_applied_update: RefCell::new(None),
+            local_journal: RefCell::new(Some(LocalJournal::new(version_vector.clone()))),
+            cached_version_vector: RefCell::new(Some(version_vector)),
+            visible_order: RefCell::new(Some(VisibleOrder::default())),
+            local_fast_path_refused: Cell::new(false),
         }
     }
 
@@ -429,7 +452,8 @@ impl ReplicaState {
     pub fn from_text(client_id: u64, text: &str) -> Self {
         let text_chars = text.chars().count();
         let crdt = TextCrdt::from_str(client_id, text);
-        let state_vector = serde_json::to_vec(&crdt.version_vector()).unwrap_or_default();
+        let version_vector = crdt.version_vector();
+        let state_vector = serde_json::to_vec(&version_vector).unwrap_or_default();
         Self {
             text: RefCell::new(crdt),
             cached_state_vector: RefCell::new(Some(state_vector)),
@@ -438,6 +462,11 @@ impl ReplicaState {
             cached_edit_anchor: Cell::new(Some((text_chars, text.len()))),
             pending_local_edits: RefCell::new(Vec::new()),
             last_applied_update: RefCell::new(None),
+            local_journal: RefCell::new(Some(LocalJournal::new(version_vector.clone()))),
+            cached_version_vector: RefCell::new(Some(version_vector)),
+            // Built from the graph by the first local edit.
+            visible_order: RefCell::new(None),
+            local_fast_path_refused: Cell::new(false),
         }
     }
 
@@ -490,6 +519,10 @@ impl ReplicaState {
         if edits.is_empty() {
             return;
         }
+        self.rebase_local_journal_if_oversized();
+        if self.mint_pending_local_edits(&edits) {
+            return;
+        }
         let mut text = self.text.borrow_mut();
         for edit in edits {
             if edit.delete_len > 0 {
@@ -499,7 +532,165 @@ impl ReplicaState {
                 text.insert_str(edit.offset, &edit.insert);
             }
         }
+        self.invalidate_local_indexes();
+    }
+
+    /// Forget every structure derived from the operation graph except the text
+    /// projection (whose owner decides separately). The next state vector
+    /// re-derives the version vector and restarts the journal there.
+    fn invalidate_local_indexes(&self) {
         *self.cached_state_vector.borrow_mut() = None;
+        *self.cached_version_vector.borrow_mut() = None;
+        *self.visible_order.borrow_mut() = None;
+        *self.local_journal.borrow_mut() = None;
+    }
+
+    /// Mint `edits` without lazily's whole-graph projection (`#replicadiffcost`).
+    ///
+    /// Produces exactly the operations `TextCrdt::delete_range` then
+    /// `TextCrdt::insert_str` would mint per edit, in the same order: one fresh
+    /// counter per tombstoned visible element, then a chain of fresh ids whose
+    /// first origin is the visible element before `offset`. They are applied in
+    /// one `apply_delta_unprojected`, which stores them verbatim and advances the
+    /// clock to the last minted counter. Returns `false`, touching nothing, when
+    /// no verified visible order is available; the caller then takes lazily's
+    /// own path.
+    fn mint_pending_local_edits(&self, edits: &[PendingLocalEdit]) -> bool {
+        let mut visible_slot = self.visible_order.borrow_mut();
+        let Some(visible) = visible_slot.as_mut() else {
+            return false;
+        };
+        // Size the batch first so a bad position falls back before any mutation.
+        let mut length = visible.len();
+        let mut minted = 0usize;
+        for edit in edits {
+            if edit.offset > length {
+                return false;
+            }
+            let deleted = edit.delete_len.min(length - edit.offset);
+            length -= deleted;
+            minted += deleted + edit.insert_chars;
+            length += edit.insert_chars;
+        }
+        let clock = self.text.borrow().clock();
+        let (peer, first_counter) = (clock.peer(), clock.counter());
+        let pairs = (1..=minted as u64)
+            .map(|step| (first_counter + step, peer))
+            .collect::<Vec<_>>();
+        let Ok(ids) = opids_from_pairs(&pairs) else {
+            return false;
+        };
+        let mut ids = ids.into_iter();
+        let mut ops = Vec::with_capacity(minted);
+        for edit in edits {
+            let deleted = edit.delete_len.min(visible.len() - edit.offset);
+            for elem in visible.remove_range(edit.offset, deleted) {
+                let tombstone = ids.next().expect("sized above");
+                ops.push(elem.into_op(Some(tombstone)));
+            }
+            if edit.insert_chars == 0 {
+                continue;
+            }
+            let mut origin = edit
+                .offset
+                .checked_sub(1)
+                .and_then(|index| visible.get(index))
+                .map(|elem| elem.id);
+            let mut run = Vec::with_capacity(edit.insert_chars);
+            for ch in edit.insert.chars() {
+                let id = ids.next().expect("sized above");
+                let elem = VisibleElem { id, origin, ch };
+                ops.push(elem.into_op(None));
+                run.push(elem);
+                origin = Some(id);
+            }
+            visible.insert_run(edit.offset, run);
+        }
+        drop(visible_slot);
+        self.text.borrow_mut().apply_delta_unprojected(&ops);
+        debug_assert_eq!(
+            self.text.borrow().clock().counter(),
+            first_counter + minted as u64
+        );
+        if minted == 0 {
+            return true;
+        }
+        let last_counter = first_counter + minted as u64;
+        {
+            let mut cached_vv = self.cached_version_vector.borrow_mut();
+            *self.cached_state_vector.borrow_mut() = cached_vv.as_mut().map(|vv| {
+                let slot = vv.entry(peer).or_insert(0);
+                *slot = (*slot).max(last_counter);
+                serde_json::to_vec(vv).unwrap_or_default()
+            });
+        }
+        let mut journal_slot = self.local_journal.borrow_mut();
+        if let Some(journal) = journal_slot.as_mut() {
+            for op in &ops {
+                journal.record(op);
+            }
+        }
+        true
+    }
+
+    /// Rebase an oversized journal at the replica's current exact frontier,
+    /// before the next batch is recorded, so the diff that follows a large
+    /// edit still answers from the journal.
+    fn rebase_local_journal_if_oversized(&self) {
+        let oversized = self
+            .local_journal
+            .borrow()
+            .as_ref()
+            .is_some_and(LocalJournal::needs_rebase);
+        if oversized {
+            *self.local_journal.borrow_mut() = self
+                .cached_version_vector
+                .borrow()
+                .clone()
+                .map(LocalJournal::new);
+        }
+    }
+
+    /// This replica's exact version vector, re-deriving it (and restarting the
+    /// journal from it) after a remote mutation or a lazily-path flush.
+    fn current_version_vector(&self) -> TextVersionVector {
+        self.flush_pending_local_edits();
+        if let Some(cached) = self.cached_version_vector.borrow().as_ref() {
+            return cached.clone();
+        }
+        let version_vector = self.text.borrow().version_vector();
+        *self.cached_version_vector.borrow_mut() = Some(version_vector.clone());
+        if !self.local_fast_path_refused.get() && self.local_journal.borrow().is_none() {
+            *self.local_journal.borrow_mut() = Some(LocalJournal::new(version_vector.clone()));
+        }
+        version_vector
+    }
+
+    /// Rebuild the visible order from the graph and prove it spells the cached
+    /// projection. Called only while no local edit is pending, so the graph and
+    /// the projection describe the same frontier.
+    fn ensure_visible_order(&self) {
+        if self.visible_order.borrow().is_some()
+            || self.local_fast_path_refused.get()
+            || !self.pending_local_edits.borrow().is_empty()
+        {
+            return;
+        }
+        let ops = self.text.borrow().delta_since(&TextVersionVector::new());
+        let order = VisibleOrder::from_ops(&ops);
+        let spells_projection = self
+            .cached_text
+            .borrow()
+            .as_deref()
+            .is_some_and(|projection| order.spells(projection));
+        if spells_projection {
+            *self.visible_order.borrow_mut() = Some(order);
+        } else {
+            // Never let a derived index decide where an edit lands when it
+            // disagrees with lazily's projection: keep lazily's path.
+            self.local_fast_path_refused.set(true);
+            *self.local_journal.borrow_mut() = None;
+        }
     }
 
     fn queue_local_edit(&self, edit: PendingLocalEdit) {
@@ -536,6 +727,7 @@ impl ReplicaState {
             return;
         }
         self.ensure_cached_text();
+        self.ensure_visible_order();
         let total_chars = self
             .cached_text_chars
             .get()
@@ -590,7 +782,7 @@ impl ReplicaState {
         if let Some(cached) = self.cached_state_vector.borrow().as_ref() {
             return cached.clone();
         }
-        let encoded = serde_json::to_vec(&self.text.borrow().version_vector()).unwrap_or_default();
+        let encoded = serde_json::to_vec(&self.current_version_vector()).unwrap_or_default();
         *self.cached_state_vector.borrow_mut() = Some(encoded.clone());
         encoded
     }
@@ -605,7 +797,7 @@ impl ReplicaState {
         self.flush_pending_local_edits();
         let retained: TextVersionVector =
             serde_json::from_slice(state_vector).context("decode version vector")?;
-        let current = self.text.borrow().version_vector();
+        let current = self.current_version_vector();
         Ok(retained.iter().all(|(peer, retained_counter)| {
             current.get(peer).copied().unwrap_or_default() >= *retained_counter
         }))
@@ -614,12 +806,27 @@ impl ReplicaState {
     /// The incremental update carrying exactly the ops `their_sv` is missing
     /// (`delta_since(their_vv)`) — a delta, never a whole-document snapshot. This is
     /// the sync reply a replica sends a peer that announced `their_sv`.
+    ///
+    /// A peer that has seen this replica's journal base is answered from the
+    /// journal of local mints (`#replicadiffcost`), which yields the same op set
+    /// as `delta_since` in time proportional to the edits since that peer's
+    /// frontier. Any other peer gets lazily's full `delta_since`.
     pub fn diff(&self, their_sv: &[u8]) -> Result<Vec<u8>> {
         self.flush_pending_local_edits();
         let their_vv: TextVersionVector =
             serde_json::from_slice(their_sv).context("decode version vector")?;
-        let delta = self.text.borrow().delta_since(&their_vv);
+        let delta = self.delta_since(&their_vv);
         encode_update_ops(&delta).context("encode delta")
+    }
+
+    fn delta_since(&self, their_vv: &TextVersionVector) -> Vec<TextOp> {
+        let peer = self.text.borrow().clock().peer();
+        let journaled = self
+            .local_journal
+            .borrow()
+            .as_ref()
+            .and_then(|journal| journal.delta_for(their_vv, peer));
+        journaled.unwrap_or_else(|| self.text.borrow().delta_since(their_vv))
     }
 
     /// Apply a remote update (a `TextOp` delta). **Idempotent** (re-applying a known
@@ -638,7 +845,7 @@ impl ReplicaState {
         }
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(&ops) {
-            *self.cached_state_vector.borrow_mut() = None;
+            self.invalidate_local_indexes();
             *self.cached_text.borrow_mut() = None;
             self.cached_text_chars.set(None);
             self.cached_edit_anchor.set(None);

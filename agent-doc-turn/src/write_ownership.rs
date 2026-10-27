@@ -699,6 +699,36 @@ pub fn retained_operator_text_conflict_remedy(file: &str) -> String {
     )
 }
 
+/// The state token every reader of a commit refused over a quarantined live
+/// editor replica names (`#inflighttypinghold` (3)). Mirrors the relay's
+/// `crdt_commit_barrier_refused_quarantined_replica` ops-log event.
+pub const QUARANTINED_REPLICA_COMMIT_STATE: &str =
+    "crdt_commit_barrier_refused_quarantined_replica";
+
+/// The one instruction for a commit the relay barrier refused because a live
+/// editor replica is quarantined (`#clobberfollowups`, named by
+/// `#inflighttypinghold`).
+///
+/// The editor holds operator text the canonical lacks: its updates arrived over
+/// a cut the canonical has since replaced. The edge that ends the state is the
+/// editor rolling forward onto canonical (its projection receipt releases the
+/// quarantine, keeping its text) or departing. Every recovery an agent reaches
+/// for publishes a cut without that text or perturbs the replica being awaited.
+pub fn quarantined_replica_commit_remedy(file: &str) -> String {
+    format!(
+        "A live editor replica of {file} is quarantined (state={QUARANTINED_REPLICA_COMMIT_STATE}): \
+         its updates hold operator text the canonical does not, typically typing that reached the \
+         relay after a write replaced the cut it was typed over. The operator's text is held by \
+         the editor and NOT lost, and nothing was committed. This is not a convergence wait: the \
+         quarantine releases only when that editor rolls forward onto the canonical projection \
+         (keeping its text) or departs. Do NOT force disk (it discards the operator's text), \
+         re-send the response, or run `agent-doc commit {file}` again until it releases; do not \
+         run `admin reload-lib` or `admin recycle` on your own. Run `agent-doc session-check \
+         {file}`: retry the same command once it reports the editor converged, and follow its \
+         remedy if it reports state={EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE} instead"
+    )
+}
+
 /// Terminal counterpart of [`editor_holds_unmerged_visible_text_remedy`].
 /// The editor answered the roll-forward request and proved waiting cannot help.
 pub fn editor_visible_roll_forward_refused_remedy(file: &str, refusal: &str) -> String {

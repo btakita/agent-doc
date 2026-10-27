@@ -26,7 +26,7 @@ use agent_doc_git_io::{
 use anyhow::{Context, Result};
 
 #[cfg(any(test, feature = "test-support"))]
-use agent_doc_crdt_relay_io::commit_barrier_for_file as test_support_commit_barrier_for_file;
+use agent_doc_crdt_relay_io::commit_barrier_verdict_for_file as test_support_commit_barrier_verdict_for_file;
 
 thread_local! {
     static FORCE_DISK_COMMIT_RESOLUTION: Cell<bool> = const { Cell::new(false) };
@@ -1027,26 +1027,27 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
 }
 
 impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLiveBufferGuardEffects {
-    fn commit_barrier_ready(&self, file: &Path) -> bool {
+    fn commit_barrier(&self, file: &Path) -> agent_doc_turn::commit_barrier::CommitBarrierVerdict {
+        use agent_doc_turn::commit_barrier::CommitBarrierVerdict;
         if force_disk_commit_resolution_enabled() {
-            return true;
+            return CommitBarrierVerdict::Ready;
         }
         if controller_commit_in_progress() {
             // The controller's `handle_commit_document_rpc` already flushed live
             // editor ops into the canonical before invoking this in-process commit,
             // so the barrier is satisfied — and re-asking the controller here would
             // deadlock (we ARE the controller, single request-locked).
-            return true;
+            return CommitBarrierVerdict::Ready;
         }
         if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
-            return true;
+            return CommitBarrierVerdict::Ready;
         }
         #[cfg(any(test, feature = "test-support"))]
         if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-            return test_support_commit_barrier_for_file(file);
+            return test_support_commit_barrier_verdict_for_file(file);
         }
-        match agent_doc_controller_io::project_controller::commit_barrier_via_controller_model_for_doc(file) {
-            Ok(ready) => ready,
+        match agent_doc_controller_io::project_controller::commit_barrier_verdict_via_controller_model_for_doc(file) {
+            Ok(verdict) => verdict,
             Err(err) => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -1055,7 +1056,7 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
                         file.display()
                     ),
                 );
-                false
+                CommitBarrierVerdict::CONVERGENCE_PENDING
             }
         }
     }
@@ -3774,7 +3775,9 @@ mod controller_commit_scope_tests {
             let prev = slot.replace(true);
             assert!(controller_commit_in_progress());
             assert!(
-                RuntimeLiveBufferGuardEffects.commit_barrier_ready(Path::new("/does/not/exist.md")),
+                RuntimeLiveBufferGuardEffects
+                    .commit_barrier(Path::new("/does/not/exist.md"))
+                    .is_ready(),
                 "barrier must be pre-converged inside the controller commit scope"
             );
             slot.set(prev);

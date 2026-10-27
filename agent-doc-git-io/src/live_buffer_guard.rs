@@ -1,3 +1,4 @@
+use agent_doc_turn::commit_barrier::{CommitBarrierRefusal, CommitBarrierVerdict};
 use agent_doc_turn::write_ownership::{RetainedWriteOwnership, retained_write_remedy};
 use anyhow::Result;
 use std::path::Path;
@@ -55,8 +56,39 @@ pub fn editor_holds_unmerged_visible_text_refusal(
     )
 }
 
+/// `#inflighttypinghold` (3): the refusal for a commit the relay barrier
+/// refused because a live editor replica is quarantined. It used to print
+/// [`crdt_relay_pending_refusal`], whose "wait for convergence" remedy is wrong
+/// here: the editor holds operator text the canonical lacks.
+pub fn quarantined_replica_refusal(file: &Path) -> String {
+    format!(
+        "editor is the current authority for {}, and the commit was refused because a live \
+         editor replica is quarantined; committing the canonical now would publish a cut \
+         without that editor's text. {}.",
+        file.display(),
+        agent_doc_turn::write_ownership::quarantined_replica_commit_remedy(
+            &file.display().to_string()
+        ),
+    )
+}
+
+/// The refusal for a commit the relay barrier refused, by its reason. Every
+/// CLI refusal site renders this one function, so a quarantined replica is
+/// named the same way wherever the commit was attempted.
+pub fn commit_barrier_refusal(
+    file: &Path,
+    refusal: CommitBarrierRefusal,
+    ownership: impl FnOnce() -> RetainedWriteOwnership,
+) -> String {
+    match refusal {
+        CommitBarrierRefusal::QuarantinedReplica => quarantined_replica_refusal(file),
+        CommitBarrierRefusal::ConvergencePending => crdt_relay_pending_refusal(file, ownership()),
+    }
+}
+
 pub trait LiveBufferGuardEffects {
-    fn commit_barrier_ready(&self, file: &Path) -> bool;
+    /// The relay commit barrier's verdict for `file`, with its refusal reason.
+    fn commit_barrier(&self, file: &Path) -> CommitBarrierVerdict;
     /// Whether the editor holding `file` keeps visible text the canonical
     /// lacks (the durable exhausted replica-rebuild record still describes the
     /// document). Implementors read
@@ -93,8 +125,8 @@ pub fn ensure_no_live_editor_buffer_ahead_of_disk(
     basis: &str,
     _staged_content: Option<&str>,
 ) -> Result<()> {
-    let commit_barrier_ready = effects.commit_barrier_ready(file);
-    let commit_allowed = match closeout_commit_allowed(commit_barrier_ready) {
+    let barrier = effects.commit_barrier(file);
+    let commit_allowed = match closeout_commit_allowed(barrier.is_ready()) {
         Ok(allowed) => allowed,
         Err(err) => {
             effects.log_op(
@@ -145,6 +177,19 @@ pub fn ensure_no_live_editor_buffer_ahead_of_disk(
         );
         return Ok(());
     }
+    if barrier.refusal() == Some(CommitBarrierRefusal::QuarantinedReplica) {
+        effects.log_op(
+            file,
+            &format!(
+                "commit_blocked_crdt_quarantined_replica file={} basis={} source=crdt_relay state={} (#inflighttypinghold)",
+                file.display(),
+                basis,
+                agent_doc_turn::write_ownership::QUARANTINED_REPLICA_COMMIT_STATE,
+            ),
+        );
+        effects.log_live_buffer_guard_blocked(file);
+        anyhow::bail!("{}", quarantined_replica_refusal(file));
+    }
     let ownership = effects.retained_write_ownership(file);
     effects.log_op(
         file,
@@ -171,6 +216,7 @@ mod tests {
 
     struct WedgedFinalizeSimWorld {
         barrier_ready: Cell<bool>,
+        barrier_refusal: Cell<CommitBarrierRefusal>,
         unmerged_visible_text: Cell<bool>,
         ownership: Cell<RetainedWriteOwnership>,
         commits: Cell<usize>,
@@ -181,6 +227,7 @@ mod tests {
         fn wedged() -> Self {
             Self {
                 barrier_ready: Cell::new(false),
+                barrier_refusal: Cell::new(CommitBarrierRefusal::ConvergencePending),
                 unmerged_visible_text: Cell::new(false),
                 // An open cycle owns the retained write: the historical shape
                 // this SimWorld was written for.
@@ -204,8 +251,12 @@ mod tests {
     }
 
     impl LiveBufferGuardEffects for WedgedFinalizeSimWorld {
-        fn commit_barrier_ready(&self, _file: &Path) -> bool {
-            self.barrier_ready.get()
+        fn commit_barrier(&self, _file: &Path) -> CommitBarrierVerdict {
+            if self.barrier_ready.get() {
+                CommitBarrierVerdict::Ready
+            } else {
+                CommitBarrierVerdict::Refused(self.barrier_refusal.get())
+            }
         }
 
         fn editor_holds_unmerged_visible_text(&self, _file: &Path) -> bool {
@@ -255,6 +306,60 @@ mod tests {
         world.unmerged_visible_text.set(false);
         world.direct_commit().unwrap();
         assert_eq!(world.commits.get(), 1);
+    }
+
+    /// `#inflighttypinghold` (3): a commit refused over a quarantined live
+    /// replica names the quarantine and its remedy, not the generic
+    /// convergence wait, and commits nothing.
+    #[test]
+    fn inflighttypinghold_commit_refused_over_a_quarantined_replica_names_the_quarantine() {
+        let world = WedgedFinalizeSimWorld::wedged();
+        world
+            .barrier_refusal
+            .set(CommitBarrierRefusal::QuarantinedReplica);
+        let err = world.direct_commit().unwrap_err().to_string();
+        assert_eq!(world.commits.get(), 0, "no commit may seal the canonical");
+        assert!(
+            err.contains("state=crdt_commit_barrier_refused_quarantined_replica")
+                && err.contains("replica is quarantined"),
+            "{err}"
+        );
+        assert!(
+            !err.contains("convergence is still pending"),
+            "the generic convergence wait is the wrong remedy here: {err}"
+        );
+        for forbidden in ["Do NOT force disk", "re-send the response"] {
+            assert!(
+                err.contains(forbidden),
+                "must rule out `{forbidden}`: {err}"
+            );
+        }
+        assert!(
+            world
+                .logs
+                .borrow()
+                .iter()
+                .any(|line| line.contains("commit_blocked_crdt_quarantined_replica")),
+            "{:?}",
+            world.logs.borrow()
+        );
+        // Every CLI site renders the same text through the one dispatcher.
+        assert_eq!(
+            commit_barrier_refusal(
+                Path::new("plan.md"),
+                CommitBarrierRefusal::QuarantinedReplica,
+                || unreachable!("a quarantine refusal never reads write ownership"),
+            ),
+            err
+        );
+
+        // The generic refusal keeps the convergence text.
+        world
+            .barrier_refusal
+            .set(CommitBarrierRefusal::ConvergencePending);
+        let err = world.direct_commit().unwrap_err().to_string();
+        assert!(err.contains("convergence is still pending"), "{err}");
+        assert_eq!(world.commits.get(), 0);
     }
 
     /// A fail-closed path that states only a fact is what makes an agent invent

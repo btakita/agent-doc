@@ -13,6 +13,7 @@ pub mod closeout_recovery;
 pub mod closeout_signal;
 pub mod codex_stop_continuation;
 pub mod coined_ids;
+pub mod commit_barrier;
 pub mod committed_text_integrity;
 pub mod cp_projection;
 pub mod cycle_policy;

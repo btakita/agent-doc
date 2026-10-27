@@ -56,6 +56,10 @@
   unmerged visible text; `realtime_doc_resolve` derives `diverged` from the
   quarantined live replicas; and `session-check` reports the operator-text
   refusal and the terminal roll-forward refusal with their remedies.
+  `#inflighttypinghold`: the direct CLI CP-write path holds for attested
+  in-flight typing too, both holds cover a mid-epoch burst (any prefix state
+  of the epoch), and a commit refused over a quarantined replica names the
+  quarantine (the barrier verdict crosses the controller RPC, `bool`-compatible).
 
 - Grok Build uses a native final-JSON backend and the existing managed
   supervisor lifecycle, with exact document-bound resume IDs and structural

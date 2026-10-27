@@ -2732,6 +2732,70 @@ pub fn for_each_editor_replay_state(
     true
 }
 
+/// Replay work [`editor_ops_in_flight_over_visible`] may spend on one
+/// observation, in bytes moved or hashed (`#inflighttypinghold`). The scan is
+/// quadratic in the pending suffix, and the controller re-derives it on every
+/// relay change, so it is bounded: past the budget the scan stops and reports
+/// no evidence, the direction that never holds a write. Shorter suffixes are
+/// tried first, so a budget-truncated scan still finds the newest burst.
+pub const EDITOR_OPS_IN_FLIGHT_SCAN_BUDGET_BYTES: usize = 256 * 1024 * 1024;
+
+/// Where the editor's attested op epoch stands relative to `visible`, the text
+/// the relay canonical holds right now (`#clobberfollowups`,
+/// `#inflighttypinghold`).
+///
+/// Returns `Some(k)` when `visible` is a prefix state of the epoch: the ops
+/// `ops[..k]` already reached the relay and `ops[k..]` are attested typing
+/// whose delta has not, i.e. replaying `ops[k..]` over `visible` reproduces the
+/// epoch's attested tip (`tip_hash`). A write over `visible` now would replace
+/// a cut that lacks that typing, which then arrives over the replaced text and
+/// is quarantined.
+///
+/// `k == 0` is the original `#clobberfollowups` shape (the epoch is based on
+/// exactly `visible`) and additionally requires `base_hash` to name `visible`.
+/// `k > 0` is the mid-epoch shape: an earlier burst of the same epoch already
+/// landed, so the visible text sits inside the epoch and its base is no
+/// longer visible. There the attested tip is the proof.
+///
+/// Never evidence (returns `None`): an epoch without lineage (`tip_hash`
+/// empty), no ops, a tip that IS the visible text (everything landed), or ops
+/// that do not replay from `visible` to the tip. Shorter pending suffixes are
+/// tried first; the in-flight burst is normally the newest one.
+pub fn editor_ops_in_flight_over_visible(
+    visible: &str,
+    base_hash: &str,
+    tip_hash: &str,
+    ops: &[EditorOp],
+    content_hash: impl Fn(&str) -> String,
+) -> Option<usize> {
+    if tip_hash.is_empty() || ops.is_empty() {
+        return None;
+    }
+    let visible_hash = content_hash(visible);
+    if tip_hash.eq_ignore_ascii_case(&visible_hash) {
+        return None;
+    }
+    let visible_is_base = base_hash.eq_ignore_ascii_case(&visible_hash);
+    let mut spent = 0usize;
+    for pending_from in (0..ops.len()).rev() {
+        if pending_from == 0 && !visible_is_base {
+            break;
+        }
+        let suffix = &ops[pending_from..];
+        spent = spent.saturating_add(visible.len().saturating_mul(suffix.len() + 1));
+        if spent > EDITOR_OPS_IN_FLIGHT_SCAN_BUDGET_BYTES {
+            return None;
+        }
+        let Some(replayed) = replay_editor_ops(visible, suffix) else {
+            continue;
+        };
+        if content_hash(&replayed).eq_ignore_ascii_case(tip_hash) {
+            return Some(pending_from);
+        }
+    }
+    None
+}
+
 /// Text the operator's own editor ops inserted and that still survives the
 /// later ops of the same burst, as contiguous runs in document order
 /// (`#retypestruck`).
@@ -2900,6 +2964,103 @@ fn apply_ops_lazily(t: &mut TextCrdt, ops: &[EditOp]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#inflighttypinghold`: the identity "hash" lets the tests name texts
+    /// directly; the rule only ever compares hashes for equality.
+    fn identity_hash(text: &str) -> String {
+        text.to_string()
+    }
+
+    /// `#inflighttypinghold`: one epoch, two bursts. The visible text is the
+    /// base (nothing landed), mid-epoch (the first burst landed), or the tip
+    /// (everything landed); only the first two hold, and each names where the
+    /// unlanded typing starts.
+    #[test]
+    fn inflighttypinghold_visible_prefix_state_of_the_epoch_is_held() {
+        let base = "# Doc\n\n- [ ] task\n";
+        let ops = vec![
+            EditorOp::Insert {
+                offset: base.len(),
+                text: "- [ ] first burst\n".to_string(),
+            },
+            EditorOp::Insert {
+                offset: base.len() + "- [ ] first burst\n".len(),
+                text: "- [ ] second".to_string(),
+            },
+            EditorOp::Insert {
+                offset: base.len() + "- [ ] first burst\n- [ ] second".len(),
+                text: " burst\n".to_string(),
+            },
+        ];
+        let after_first = replay_editor_ops(base, &ops[..1]).unwrap();
+        let tip = replay_editor_ops(base, &ops).unwrap();
+
+        // `#clobberfollowups` shape: the epoch is based on exactly the visible text.
+        assert_eq!(
+            editor_ops_in_flight_over_visible(base, base, &tip, &ops, identity_hash),
+            Some(0)
+        );
+        // Mid-epoch: the first burst landed, the second is in flight.
+        assert_eq!(
+            editor_ops_in_flight_over_visible(&after_first, base, &tip, &ops, identity_hash),
+            Some(1)
+        );
+        // Everything landed: nothing is in flight.
+        assert_eq!(
+            editor_ops_in_flight_over_visible(&tip, base, &tip, &ops, identity_hash),
+            None
+        );
+    }
+
+    /// `#inflighttypinghold`: what is never evidence. An epoch without lineage,
+    /// a tip the ops do not replay to from the visible text, a visible text that
+    /// is not a state of the epoch, and the base shape whose base hash names a
+    /// different text.
+    #[test]
+    fn inflighttypinghold_unattested_or_unreplayable_epochs_never_hold() {
+        let base = "alpha\n";
+        let ops = vec![
+            EditorOp::Insert {
+                offset: base.len(),
+                text: "beta\n".to_string(),
+            },
+            EditorOp::Insert {
+                offset: base.len() + "beta\n".len(),
+                text: "gamma\n".to_string(),
+            },
+        ];
+        let tip = replay_editor_ops(base, &ops).unwrap();
+        assert_eq!(
+            editor_ops_in_flight_over_visible(base, base, "", &ops, identity_hash),
+            None,
+            "an epoch without lineage is not evidence"
+        );
+        assert_eq!(
+            editor_ops_in_flight_over_visible(base, base, "some other tip", &ops, identity_hash),
+            None,
+            "ops that do not replay to the attested tip are not evidence"
+        );
+        assert_eq!(
+            editor_ops_in_flight_over_visible(
+                "unrelated agent text\n",
+                base,
+                &tip,
+                &ops,
+                identity_hash
+            ),
+            None,
+            "a visible text outside the epoch is not a prefix state"
+        );
+        assert_eq!(
+            editor_ops_in_flight_over_visible(base, "not the base", &tip, &ops, identity_hash),
+            None,
+            "the whole epoch pending requires the base hash to name the visible text"
+        );
+        assert_eq!(
+            editor_ops_in_flight_over_visible(base, base, &tip, &[], identity_hash),
+            None
+        );
+    }
 
     /// `#sessionactorspin`: run `job` on a helper thread and fail if it has not
     /// returned within `budget`. The budget is a hang detector, not a

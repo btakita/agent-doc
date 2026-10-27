@@ -8771,17 +8771,21 @@ fn operator_rearmed_queue_item_keys_from_projection(
     .unwrap_or_default()
 }
 
-/// `#clobberfollowups` (1): the editor's attested tip when its active
-/// op-capture epoch is based on exactly the visible cut and replays to a
-/// different text, i.e. operator typing the editor reported but whose delta
+/// `#clobberfollowups` (1), generalized by `#inflighttypinghold` (2): the
+/// editor's attested tip when the visible cut is a prefix state of its active
+/// op-capture epoch, i.e. operator typing the editor reported but whose delta
 /// the relay has not ingested.
 ///
-/// Only an epoch with lineage evidence counts (`tip_hash` non-empty), and only
-/// when replaying its ops over the visible text reproduces that tip, so a
-/// misaligned or stale ledger can never hold a retained write. Once the delta
-/// lands the visible cut moves off the epoch base and the hold releases; a
+/// The epoch may be based on exactly the visible cut (no burst landed yet) or
+/// sit past it (an earlier burst of the same epoch already landed, so the
+/// visible cut is mid-epoch); either way the ops past the visible cut must
+/// replay from it to the attested tip. Only an epoch with lineage evidence
+/// counts (`tip_hash` non-empty), and only when that replay reproduces the
+/// tip, so a misaligned or stale ledger can never hold a retained write. Once
+/// the delta lands the visible cut reaches the tip and the hold releases; a
 /// consumer clear or non-operator projection closes the epoch and releases it
-/// too.
+/// too. The rule is shared with the direct CLI CP-write path
+/// ([`agent_doc_merge::crdt::editor_ops_in_flight_over_visible`]).
 fn editor_ops_in_flight_over_visible_cut(
     projection: &agent_doc_state_backbone::DocumentStateProjection,
     delivery: &RetainedDeliveryObservation,
@@ -8791,20 +8795,18 @@ fn editor_ops_in_flight_over_visible_cut(
         || capture
             .tip_hash
             .eq_ignore_ascii_case(&delivery.content_hash)
-        || !capture
-            .base_hash
-            .eq_ignore_ascii_case(&delivery.content_hash)
     {
         return None;
     }
     let ops: Vec<agent_doc_merge::crdt::EditorOp> = serde_json::from_str(&capture.ops_json).ok()?;
-    if ops.is_empty() {
-        return None;
-    }
-    let operator_cut = agent_doc_merge::crdt::replay_editor_ops(delivery.content.as_ref(), &ops)?;
-    agent_doc_hash::content_hash(&operator_cut)
-        .eq_ignore_ascii_case(&capture.tip_hash)
-        .then(|| capture.tip_hash.clone())
+    agent_doc_merge::crdt::editor_ops_in_flight_over_visible(
+        delivery.content.as_ref(),
+        &capture.base_hash,
+        &capture.tip_hash,
+        &ops,
+        agent_doc_hash::content_hash,
+    )
+    .map(|_| capture.tip_hash.clone())
 }
 
 fn retained_transition_state(
@@ -8917,7 +8919,9 @@ fn retained_transition_state(
     // flight. The CP write landed first, so the burst arrived over a replaced
     // cut and was quarantined. Hold every projection of the retained target
     // until the attested typing reaches the relay; the rebase below then rolls
-    // forward onto it, or `OperatorTextWouldBeLost` refuses.
+    // forward onto it, or `OperatorTextWouldBeLost` refuses. `#inflighttypinghold`:
+    // that includes a burst typed after an earlier delta of the same epoch landed
+    // (the visible cut is then mid-epoch, not the epoch base).
     if let Some(editor_tip_hash) = editor_ops_in_flight_over_visible_cut(projection, delivery) {
         return RetainedTransitionState::AwaitingEditorOps {
             intent_id: intent.intent_id.clone(),
@@ -24752,6 +24756,93 @@ retained response body
             .tip_hash = String::new();
         let unheld = retained_transition_state(Some(&tipless), Some(&observe(canonical, 5)), 1);
         assert_eq!(retained_transition_state_tag(&unheld), "apply_target");
+    }
+
+    /// `#inflighttypinghold` (2): the hold used to fire only while the epoch was
+    /// based on exactly the visible cut. Once an earlier burst of the same epoch
+    /// landed, the visible cut sat mid-epoch and a later in-flight burst was not
+    /// held, so the retained target projected over a cut without it. The hold
+    /// now covers every prefix state of the epoch, then rolls forward onto both
+    /// bursts once the second delta lands.
+    #[test]
+    fn inflighttypinghold_retained_target_holds_a_mid_epoch_burst_then_rolls_forward() {
+        let mut projection = retained_resume_projection("doc-inflighttypinghold-mid-epoch");
+        let canonical = "---\nagent_doc_session: s1\n---\n\n# Doc\n\n<!-- agent:queue -->\n- do [#first] first request\n<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#t1] operator task\n<!-- /agent:todo -->\n";
+        let offset = canonical.find("operator task").unwrap() + "operator task".len();
+        let first_burst = " (first burst)";
+        let second_burst = " (second burst)";
+        // One epoch based on `canonical`, two bursts the editor attested in order.
+        let ops = vec![
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset,
+                text: first_burst.to_string(),
+            },
+            agent_doc_merge::crdt::EditorOp::Insert {
+                offset: offset + first_burst.len(),
+                text: second_burst.to_string(),
+            },
+        ];
+        let after_first = agent_doc_merge::crdt::replay_editor_ops(canonical, &ops[..1]).unwrap();
+        let operator_tip = agent_doc_merge::crdt::replay_editor_ops(canonical, &ops).unwrap();
+        // The tracked-work replay read the live canonical after the first burst
+        // landed and consumed the queue head from it.
+        let target = after_first.replace("- do [#first] first request\n", "");
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(after_first.clone());
+        intent.expected_hash = agent_doc_hash::content_hash(&after_first);
+        intent.target_content = target.clone();
+        intent.target_hash = agent_doc_hash::content_hash(&target);
+        projection.document.editor_op_capture =
+            Some(agent_doc_state_backbone::EditorOpCaptureProjection {
+                epoch: 1,
+                canonical_path: "/work/session.md".to_string(),
+                base_hash: agent_doc_hash::content_hash(canonical),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                updated_ms: 1,
+                tip_hash: agent_doc_hash::content_hash(&operator_tip),
+            });
+        let observe = |text: &str, version: u64| RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(text),
+            content_hash: agent_doc_hash::content_hash(text),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: version,
+        };
+
+        // The first burst landed; the second is attested but still in flight.
+        let held = retained_transition_state(Some(&projection), Some(&observe(&after_first, 6)), 1);
+        assert_eq!(retained_transition_state_tag(&held), "awaiting_editor_ops");
+        assert_eq!(retained_transition_effect_tag(&held), "none");
+
+        // The second delta lands: the target rolls forward onto both bursts.
+        let landed =
+            retained_transition_state(Some(&projection), Some(&observe(&operator_tip, 7)), 1);
+        let transition = landed
+            .transition_projection()
+            .expect("the retained target projects once every burst reached the relay");
+        assert_eq!(transition.base_content.as_ref(), operator_tip);
+        assert!(
+            transition.target_content.contains(first_burst)
+                && transition.target_content.contains(second_burst),
+            "the projected target dropped operator typing:\n{}",
+            transition.target_content
+        );
+        assert!(
+            !transition
+                .target_content
+                .contains("- do [#first] first request"),
+            "the projected target lost the replay's queue consumption:\n{}",
+            transition.target_content
+        );
+
+        // A mid-epoch cut the remaining ops do not replay from is not evidence.
+        let unrelated = after_first.replace("# Doc", "# Edited heading");
+        let unheld = retained_transition_state(Some(&projection), Some(&observe(&unrelated, 6)), 1);
+        assert_ne!(
+            retained_transition_state_tag(&unheld),
+            "awaiting_editor_ops"
+        );
     }
 
     #[test]

@@ -1227,6 +1227,11 @@ Cases, in microseconds per operation:
   1- and a 16-keystroke burst: `prepareLocalEditorEditsUtil`, one `apply_local`
   per splice, then the state vector and the incremental diff. Each step is also
   reported as `<case>.<step>`.
+- `keystroke.replica_flush_after_remote`: the 1-keystroke flush, each one the
+  first after a concurrent peer's one-character update. The update is applied
+  and projected the way `CrdtReplicaForwarder.applyRemoteUpdate` does it:
+  `apply_update`, then the state vector and the text. Only the flush is the case
+  figure. The remote apply is reported as its `.remote_apply` step.
 - `boundary.worker_hop`: the hand-off to a worker thread and back.
 - `boundary.derive_capabilities`: the smallest `agent_doc_editor_derive_json`
   round trip.
@@ -1242,7 +1247,8 @@ machine lands on every case. `p50_best` is the median of a case's fastest
 round; two runs of one build agree on it to within about 10%.
 `JETBRAINS_BENCH_BASELINE=<report.json>` compares this run with an earlier
 report. The run fails when the `p50_best` of `typing_report`, `replica_flush_1`,
-or `replica_flush_16` grows by more than max(5 us, 15%). Other cases, and the
+`replica_flush_16`, or `replica_flush_after_remote` grows by more than
+max(5 us, 15%). A baseline report that lacks a case does not gate it. Other cases, and the
 per-step breakdowns, are reported but not gated.
 
 The 2026-10-26 baseline (0.35.556, release-local, synthetic 127,583-byte
@@ -1278,6 +1284,25 @@ reference baseline (54,672 and 55,156 us for the two flush cases) passes the gat
 too. The diff and the state vector now cost the same at every document size.
 What still grows with the document is the Kotlin `prepare` step, which reads the
 whole shadow text: about 30 us at 125 KB and about 170 us at 500 KB.
+
+`#replicaremoteflush` folds remote updates into that index as they arrive, so the
+first local flush after a remote update no longer rebuilds it from the operation
+graph. Two interleaved runs per build against the unmodified build, on a loaded
+machine (synthetic 127,583-byte document, `p50_best`):
+
+| Case | Before | After |
+|------|--------|-------|
+| `replica_flush_after_remote` | 46,131 to 73,775 us | 166 to 172 us |
+| `replica_flush_after_remote.apply_local` | 45,951 to 73,531 us | 9.2 to 11.1 us |
+| `replica_flush_after_remote.diff` | 114 to 139 us | 82 to 89 us |
+| `replica_flush_after_remote.remote_apply` | 61,907 to 86,133 us | 63,766 to 71,024 us |
+| `replica_flush_1` | 57.7 to 64.1 us | 59.4 to 59.7 us |
+| `replica_flush_16` | 89.2 to 96.8 us | 91.4 to 97.4 us |
+| `typing_report` | 107.7 to 116.0 us | 107.9 to 108.1 us |
+
+The gate passes against the unmodified build. The remote apply did not change:
+the CRDT's own text projection dominates it, and the editor needs that text
+anyway. The fold and the order's spelling check are small beside it.
 
 The two `#jbshrinkrestarts` moves left every gated case within noise of that
 baseline (`typing_report` 106.1 -> 105.8 us, `replica_flush_1` 54,672 ->

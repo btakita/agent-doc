@@ -29,7 +29,7 @@ use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
 use std::cell::{Cell, RefCell};
 
 mod local_ops;
-use local_ops::{LocalJournal, VisibleElem, VisibleOrder};
+use local_ops::{LocalJournal, OrderElem, OrderIndex};
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
 /// the supervisor) in a multi-replica document session.
@@ -77,16 +77,17 @@ pub struct ReplicaState {
     /// only advances this replica's own counter, so it is maintained in place
     /// instead of re-walking every element (`#replicadiffcost`).
     cached_version_vector: RefCell<Option<TextVersionVector>>,
-    /// Visible elements in projection order, matching the CRDT graph WITHOUT
-    /// `pending_local_edits`. Lets a local edit mint its ops without lazily's
-    /// whole-tree `ordered_ids` projection. `None` after a remote mutation until
-    /// the next local edit rebuilds it.
-    visible_order: RefCell<Option<VisibleOrder>>,
-    /// Elements touched by local minting since an exact version-vector base, so
+    /// Every graph element in projection order, matching the CRDT graph
+    /// WITHOUT `pending_local_edits`. Lets a local edit mint its ops without
+    /// lazily's whole-tree `ordered_ids` projection. Remote updates are folded
+    /// in as they arrive (`#replicaremoteflush`); `None` only until the next
+    /// local edit rebuilds it after a lazily-path flush or a bulk update.
+    visible_order: RefCell<Option<OrderIndex>>,
+    /// Elements whose state changed since an exact version-vector base, so
     /// `diff` answers a caught-up peer without scanning the document.
     local_journal: RefCell<Option<LocalJournal>>,
-    /// Set when a rebuilt visible order failed to spell the replica's projection.
-    /// The replica then keeps lazily's own edit and delta paths for its lifetime.
+    /// Set when the order failed to spell the replica's projection. The replica
+    /// then keeps lazily's own edit and delta paths for its lifetime.
     local_fast_path_refused: Cell<bool>,
 }
 
@@ -443,7 +444,7 @@ impl ReplicaState {
             last_applied_update: RefCell::new(None),
             local_journal: RefCell::new(Some(LocalJournal::new(version_vector.clone()))),
             cached_version_vector: RefCell::new(Some(version_vector)),
-            visible_order: RefCell::new(Some(VisibleOrder::default())),
+            visible_order: RefCell::new(Some(OrderIndex::empty())),
             local_fast_path_refused: Cell::new(false),
         }
     }
@@ -512,6 +513,44 @@ impl ReplicaState {
         self.cached_edit_anchor
             .set(Some((projected_chars, projected.len())));
         *self.cached_text.borrow_mut() = Some(projected);
+        self.verify_folded_order();
+    }
+
+    /// Prove an order that remote folds changed still spells lazily's
+    /// projection, or refuse the fast path for this replica's lifetime. Runs
+    /// where the projection is materialized anyway, while no local edit is
+    /// pending (the graph and the projection then describe one frontier).
+    fn verify_folded_order(&self) {
+        if !self.pending_local_edits.borrow().is_empty() {
+            return;
+        }
+        let verdict = {
+            let order = self.visible_order.borrow();
+            let cached = self.cached_text.borrow();
+            match (order.as_ref(), cached.as_deref()) {
+                (Some(order), Some(projection)) if !order.is_verified() => {
+                    Some(order.spells(projection))
+                }
+                _ => None,
+            }
+        };
+        match verdict {
+            Some(true) => {
+                if let Some(order) = self.visible_order.borrow_mut().as_mut() {
+                    order.mark_verified();
+                }
+            }
+            Some(false) => self.refuse_local_fast_path(),
+            None => {}
+        }
+    }
+
+    /// Never let a derived index decide where an edit lands when it disagrees
+    /// with lazily's projection: keep lazily's paths, and re-derive the
+    /// frontier from the graph.
+    fn refuse_local_fast_path(&self) {
+        self.local_fast_path_refused.set(true);
+        self.invalidate_local_indexes();
     }
 
     fn flush_pending_local_edits(&self) {
@@ -557,7 +596,7 @@ impl ReplicaState {
     /// own path.
     fn mint_pending_local_edits(&self, edits: &[PendingLocalEdit]) -> bool {
         let mut visible_slot = self.visible_order.borrow_mut();
-        let Some(visible) = visible_slot.as_mut() else {
+        let Some(visible) = visible_slot.as_mut().filter(|order| order.is_verified()) else {
             return false;
         };
         // Size the batch first so a bad position falls back before any mutation.
@@ -584,27 +623,31 @@ impl ReplicaState {
         let mut ops = Vec::with_capacity(minted);
         for edit in edits {
             let deleted = edit.delete_len.min(visible.len() - edit.offset);
-            for elem in visible.remove_range(edit.offset, deleted) {
-                let tombstone = ids.next().expect("sized above");
-                ops.push(elem.into_op(Some(tombstone)));
-            }
+            ops.extend(
+                visible.delete_visible(edit.offset, deleted, || ids.next().expect("sized above")),
+            );
             if edit.insert_chars == 0 {
                 continue;
             }
             let mut origin = edit
                 .offset
                 .checked_sub(1)
-                .and_then(|index| visible.get(index))
+                .and_then(|index| visible.visible_at(index))
                 .map(|elem| elem.id);
             let mut run = Vec::with_capacity(edit.insert_chars);
             for ch in edit.insert.chars() {
                 let id = ids.next().expect("sized above");
-                let elem = VisibleElem { id, origin, ch };
-                ops.push(elem.into_op(None));
+                let elem = OrderElem {
+                    id,
+                    origin,
+                    ch,
+                    deleted: None,
+                };
+                ops.push(elem.to_op());
                 run.push(elem);
                 origin = Some(id);
             }
-            visible.insert_run(edit.offset, run);
+            visible.insert_local_run(edit.offset, run);
         }
         drop(visible_slot);
         self.text.borrow_mut().apply_delta_unprojected(&ops);
@@ -666,31 +709,19 @@ impl ReplicaState {
         version_vector
     }
 
-    /// Rebuild the visible order from the graph and prove it spells the cached
-    /// projection. Called only while no local edit is pending, so the graph and
-    /// the projection describe the same frontier.
+    /// Rebuild the order from the graph if it is missing, and prove it (or a
+    /// remotely folded one) spells the cached projection. Called only while no
+    /// local edit is pending, so the graph and the projection describe the
+    /// same frontier.
     fn ensure_visible_order(&self) {
-        if self.visible_order.borrow().is_some()
-            || self.local_fast_path_refused.get()
-            || !self.pending_local_edits.borrow().is_empty()
-        {
+        if self.local_fast_path_refused.get() || !self.pending_local_edits.borrow().is_empty() {
             return;
         }
-        let ops = self.text.borrow().delta_since(&TextVersionVector::new());
-        let order = VisibleOrder::from_ops(&ops);
-        let spells_projection = self
-            .cached_text
-            .borrow()
-            .as_deref()
-            .is_some_and(|projection| order.spells(projection));
-        if spells_projection {
-            *self.visible_order.borrow_mut() = Some(order);
-        } else {
-            // Never let a derived index decide where an edit lands when it
-            // disagrees with lazily's projection: keep lazily's path.
-            self.local_fast_path_refused.set(true);
-            *self.local_journal.borrow_mut() = None;
+        if self.visible_order.borrow().is_none() {
+            let ops = self.text.borrow().delta_since(&TextVersionVector::new());
+            *self.visible_order.borrow_mut() = Some(OrderIndex::from_ops(&ops));
         }
+        self.verify_folded_order();
     }
 
     fn queue_local_edit(&self, edit: PendingLocalEdit) {
@@ -845,13 +876,63 @@ impl ReplicaState {
         }
         self.flush_pending_local_edits();
         if self.text.borrow_mut().apply_delta_unprojected(&ops) {
-            self.invalidate_local_indexes();
+            self.fold_remote_ops(&ops);
             *self.cached_text.borrow_mut() = None;
             self.cached_text_chars.set(None);
             self.cached_edit_anchor.set(None);
         }
         *self.last_applied_update.borrow_mut() = Some(update.to_vec());
         Ok(())
+    }
+
+    /// Fold a remote batch lazily just stored into the order, the version
+    /// vector and the journal (`#replicaremoteflush`), so the next local flush
+    /// neither re-projects the graph nor re-walks it for a frontier. Without
+    /// an order, or for a batch the order declines, every derived structure is
+    /// dropped and re-derived from the graph as before.
+    ///
+    /// The version vector stays exact: it is the per-peer maximum over the
+    /// stored op ids, and the fold reports every element whose stored state it
+    /// changed. The one way a stored id disappears is a tombstone replaced by
+    /// a smaller concurrent delete; if that id may have been its peer's
+    /// maximum, the frontier is re-derived instead.
+    fn fold_remote_ops(&self, ops: &[TextOp]) {
+        let effect = self
+            .visible_order
+            .borrow_mut()
+            .as_mut()
+            .and_then(|order| order.integrate_remote(ops));
+        let Some(effect) = effect else {
+            self.invalidate_local_indexes();
+            return;
+        };
+        {
+            let mut cached_vv = self.cached_version_vector.borrow_mut();
+            let shrinks = cached_vv.as_ref().is_some_and(|vv| {
+                effect
+                    .replaced_deletes
+                    .iter()
+                    .any(|id| vv.get(&id.peer()).copied().unwrap_or(0) <= id.counter())
+            });
+            if shrinks {
+                *cached_vv = None;
+            }
+            *self.cached_state_vector.borrow_mut() = cached_vv.as_mut().map(|vv| {
+                for op in &effect.touched {
+                    for id in std::iter::once(op.id).chain(op.deleted) {
+                        let slot = vv.entry(id.peer()).or_insert(0);
+                        *slot = (*slot).max(id.counter());
+                    }
+                }
+                serde_json::to_vec(vv).unwrap_or_default()
+            });
+        }
+        if let Some(journal) = self.local_journal.borrow_mut().as_mut() {
+            for op in &effect.touched {
+                journal.record_remote(op);
+            }
+        }
+        self.rebase_local_journal_if_oversized();
     }
 
     /// Project a remote update against an isolated fork without mutating this
@@ -1117,9 +1198,12 @@ mod tests {
         let remote = ReplicaState::from_text(2, "remote");
         let update = remote.encode_state();
         replica.apply_update(&update).unwrap();
-        assert!(
-            replica.cached_state_vector.borrow().is_none(),
-            "a novel remote update must invalidate the cached frontier"
+        let derived = serde_json::to_vec(&replica.text.borrow().version_vector()).unwrap();
+        assert_ne!(derived, advanced);
+        assert_eq!(
+            replica.cached_state_vector.borrow().as_deref(),
+            Some(derived.as_slice()),
+            "a novel remote update advances the cached frontier to the exact one"
         );
         let merged = replica.state_vector();
         replica.apply_update(&update).unwrap();

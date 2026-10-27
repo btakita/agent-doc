@@ -5668,6 +5668,46 @@ pub fn delete_actor_document_tx(conn: &mut Connection, document_id: &str) -> Res
     Ok(removed)
 }
 
+/// `#controllerclosefence`: [`delete_actor_document_tx`] fenced on the exact
+/// write the caller decided against.
+///
+/// The `#actorprune` sweep decides a record is long-dead from one read and
+/// deletes it later. A start that re-opens the document in between (a fresh
+/// `Starting` row, a lease) would otherwise be deleted with it. This fails with
+/// the same `generation compare-and-swap failed` error as
+/// [`store_actor_record_fenced_tx`] when the row's revision moved, and deletes
+/// nothing.
+pub fn delete_actor_document_fenced_tx(
+    conn: &mut Connection,
+    document_id: &str,
+    expected_prior_revision: ActorRevision,
+) -> Result<usize> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let found = load_actor_revision(&tx, document_id)?;
+    if found != expected_prior_revision {
+        anyhow::bail!(
+            "controller actor generation compare-and-swap failed for {}: the record was rewritten after the prune decision (expected revision {:?}, found {:?})",
+            document_id,
+            expected_prior_revision.last_transition_id,
+            found.last_transition_id
+        );
+    }
+    tx.execute(
+        "DELETE FROM actor_transitions WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.execute(
+        "DELETE FROM supervisor_leases WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    let removed = tx.execute(
+        "DELETE FROM documents WHERE document_id = ?1",
+        params![document_id],
+    )?;
+    tx.commit()?;
+    Ok(removed)
+}
+
 // ---------------------------------------------------------------------------
 // Control-plane durable facts.
 // ---------------------------------------------------------------------------
@@ -8201,6 +8241,56 @@ mod tests {
             load_actor_record_from_db(&conn, "doc")?.unwrap().pane_id,
             "%2"
         );
+        Ok(())
+    }
+
+    /// `#controllerclosefence`: the prune's fenced delete removes nothing when
+    /// the record was rewritten after the decision (a start re-opened it), and
+    /// removes the record when fenced on its current revision.
+    #[test]
+    fn fenced_actor_delete_refuses_a_record_rewritten_after_the_decision() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let actor = |state: ActorState| ActorRecord {
+            document_id: "doc".to_string(),
+            session_id: "session-doc".to_string(),
+            generation: 2,
+            pane_id: String::new(),
+            window_id: String::new(),
+            harness: "claude".to_string(),
+            state,
+            last_transition: ActorLastTransition {
+                caller: "test".to_string(),
+                reason: "test".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 2,
+                new_generation: 2,
+            },
+        };
+        store_actor_record_tx(&mut conn, None, &actor(ActorState::Closed), None, None)?;
+        let (_, decided) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+
+        // Re-opened at the same generation after the prune decided.
+        store_actor_record_tx(&mut conn, Some(2), &actor(ActorState::Starting), None, None)?;
+        let err = delete_actor_document_fenced_tx(&mut conn, "doc", decided)
+            .expect_err("a delete fenced on a superseded revision must fail");
+        assert!(
+            err.to_string()
+                .contains("generation compare-and-swap failed"),
+            "callers re-decide on this error: {err}"
+        );
+        assert_eq!(
+            load_actor_record_from_db(&conn, "doc")?.map(|record| record.state),
+            Some(ActorState::Starting),
+            "the re-opened record survives"
+        );
+
+        let (_, current) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+        assert_eq!(
+            delete_actor_document_fenced_tx(&mut conn, "doc", current)?,
+            1
+        );
+        assert!(load_actor_record_from_db(&conn, "doc")?.is_none());
         Ok(())
     }
 

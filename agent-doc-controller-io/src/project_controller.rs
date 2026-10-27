@@ -11826,6 +11826,51 @@ fn store_actor_lifecycle_record_write(
     )
 }
 
+/// `#controllerclosefence`: how many times a controller sweep re-decides one
+/// record after its fenced write lost to a newer commit before leaving the
+/// record to the next sweep.
+const ACTOR_CLOSE_FENCE_ATTEMPTS: usize = 3;
+
+/// The actor record for `document_id` with the [`ActorRevision`] it was
+/// committed at, read in one statement (`#controllerclosefence`). A sweep
+/// decides from this read and writes through [`store_actor_record_fenced`].
+///
+/// [`ActorRevision`]: agent_doc_controller::actor::ActorRevision
+fn load_actor_record_with_revision_from_conn(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<(
+    Option<agent_doc_controller::actor::ActorRecord>,
+    agent_doc_controller::actor::ActorRevision,
+)> {
+    state_store::load_actor_record_with_revision_from_db(conn, document_id)
+}
+
+/// `#controllerclosefence`: [`store_actor_record`] fenced on the generation AND
+/// revision the caller decided against
+/// ([`state_store::store_actor_record_fenced_tx`]). A same-generation commit
+/// after the decision (an owner's `Starting`→`Ready`, a `Busy`, another
+/// close) fails the write with the `generation compare-and-swap failed` error
+/// that [`agent_doc_session_actor_io::binding_fence_lost`] recognizes.
+fn store_actor_record_fenced(
+    project_root: &Path,
+    expected_prior_generation: u64,
+    expected_prior_revision: agent_doc_controller::actor::ActorRevision,
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> Result<agent_doc_controller::actor::ActorRecord> {
+    let mut conn = open_state_db(project_root)?;
+    let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
+    Ok(state_store::store_actor_record_fenced_tx(
+        &mut conn,
+        expected_prior_generation,
+        expected_prior_revision,
+        record,
+        launch_mode,
+        controller_epoch,
+    )?
+    .record)
+}
+
 /// Default staleness window for the cross-document supervisor-lease guard
 /// (`#xdocsuper0`). Matches the 60s heartbeat freshness window used by
 /// `reconcile_supervisor_leases_after_restart` and the GC's stale-actor sweep.
@@ -11908,72 +11953,134 @@ pub fn close_stale_starting_actors_for_caller(
     dry_run: bool,
     caller: &str,
 ) -> Result<(usize, usize)> {
-    let now = timestamp_secs();
+    close_stale_starting_actors_with_hook(project_root, stale_after, dry_run, caller, &mut |_| {})
+}
+
+/// [`close_stale_starting_actors_for_caller`] with a hook between each record's
+/// close decision and its fenced write, so tests land a commit in that window.
+///
+/// `#controllerclosefence`: the sweep decides from one read of the record and
+/// its [`ActorRevision`](agent_doc_controller::actor::ActorRevision) and writes
+/// `Closed` fenced on both. A same-generation `Starting`→`Ready` (or any other
+/// commit) landing in between fails the write; the sweep re-reads and
+/// re-decides, so an actor that became `Ready` is kept, not closed as stale.
+fn close_stale_starting_actors_with_hook(
+    project_root: &Path,
+    stale_after: Duration,
+    dry_run: bool,
+    caller: &str,
+    between_decision_and_write: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
+) -> Result<(usize, usize)> {
     let store = load_actor_store(project_root)?;
     let conn = open_state_db(project_root)?;
     let mut closed = 0;
     let mut kept = 0;
 
-    for record in store.values() {
-        if record.state != agent_doc_controller::actor::ActorState::Starting {
-            continue;
-        }
-        let age = now.saturating_sub(record.last_transition.timestamp);
-        if age <= stale_after.as_secs() {
-            kept += 1;
-            continue;
-        }
+    let candidates = store
+        .values()
+        .filter(|record| record.state == agent_doc_controller::actor::ActorState::Starting)
+        .map(|record| record.document_id.clone())
+        .collect::<Vec<_>>();
+    for document_id in candidates {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let now = timestamp_secs();
+            let (record, revision) =
+                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+            let Some(record) = record
+                .filter(|record| record.state == agent_doc_controller::actor::ActorState::Starting)
+            else {
+                // No longer `Starting`: an owner moved it on after the
+                // enumeration (or after a lost fence). Nothing is stale.
+                kept += 1;
+                break;
+            };
+            let age = now.saturating_sub(record.last_transition.timestamp);
+            if age <= stale_after.as_secs() {
+                kept += 1;
+                break;
+            }
 
-        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        if lease.as_ref().is_some_and(|lease| {
-            status::supervisor_lease_is_fresh_and_alive(
-                lease.last_heartbeat,
-                lease.supervisor_pid.is_some_and(process_is_alive),
-                now,
-                stale_after,
-            )
-        }) {
-            kept += 1;
-            continue;
-        }
+            let lease =
+                load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+            if lease.as_ref().is_some_and(|lease| {
+                status::supervisor_lease_is_fresh_and_alive(
+                    lease.last_heartbeat,
+                    lease.supervisor_pid.is_some_and(process_is_alive),
+                    now,
+                    stale_after,
+                )
+            }) {
+                kept += 1;
+                break;
+            }
 
-        if dry_run {
-            eprintln!(
-                "[{}] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
-                caller,
-                record.document_id,
-                record.session_id,
-                record.pane_id,
-                record.generation,
-                age
-            );
-            closed += 1;
-            continue;
-        }
+            if dry_run {
+                eprintln!(
+                    "[{}] would close stale starting actor: {} session={} pane={} generation={} age_secs={}",
+                    caller,
+                    record.document_id,
+                    record.session_id,
+                    record.pane_id,
+                    record.generation,
+                    age
+                );
+                closed += 1;
+                break;
+            }
 
-        let mut next = record.clone();
-        next.state = agent_doc_controller::actor::ActorState::Closed;
-        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
-            caller: caller.to_string(),
-            reason: "stale_starting_actor".to_string(),
-            timestamp: now,
-            prior_generation: record.generation,
-            new_generation: record.generation,
-        };
-        store_actor_record(project_root, Some(record.generation), &next)?;
-        agent_doc_ops_log_io::log_op(
-            Path::new(&record.document_id),
-            &format!(
-                "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
-                caller,
-                record.document_id,
-                record.session_id,
-                record.pane_id,
-                record.generation,
-                age
-            ),
-        );
-        closed += 1;
+            let mut next = record.clone();
+            next.state = agent_doc_controller::actor::ActorState::Closed;
+            next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                caller: caller.to_string(),
+                reason: "stale_starting_actor".to_string(),
+                timestamp: now,
+                prior_generation: record.generation,
+                new_generation: record.generation,
+            };
+            between_decision_and_write(&record);
+            match store_actor_record_fenced(project_root, record.generation, revision, &next) {
+                Ok(_) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_closed_stale_starting_actor file={} session={} pane={} generation={} age_secs={}",
+                            caller,
+                            record.document_id,
+                            record.session_id,
+                            record.pane_id,
+                            record.generation,
+                            age
+                        ),
+                    );
+                    closed += 1;
+                    break;
+                }
+                Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+                    let redecide = attempt < ACTOR_CLOSE_FENCE_ATTEMPTS;
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_close_stale_starting_actor_fence_lost file={} pane={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
+                            caller,
+                            record.document_id,
+                            record.pane_id,
+                            record.generation,
+                            attempt,
+                            redecide,
+                            err
+                        ),
+                    );
+                    if redecide {
+                        continue;
+                    }
+                    kept += 1;
+                    break;
+                }
+                Err(err) => return Err(err),
+            }
+        }
     }
 
     Ok((closed, kept))
@@ -12127,8 +12234,8 @@ fn dead_pane_actor_gc_decision_for_record(
 /// ownership observation injected, so tests pin it without tmux or processes.
 fn close_stale_or_idle_actors_with_crash_owner_for_caller<F, C>(
     project_root: &Path,
-    mut pane_alive: F,
-    mut crash_owner: C,
+    pane_alive: F,
+    crash_owner: C,
     idle_for: Option<Duration>,
     dry_run: bool,
     caller: &str,
@@ -12140,17 +12247,77 @@ where
         &agent_doc_controller::actor::ActorRecord,
     ) -> agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision,
 {
-    let now = timestamp_secs();
+    close_stale_or_idle_actors_with_hook(
+        project_root,
+        pane_alive,
+        crash_owner,
+        idle_for,
+        dry_run,
+        caller,
+        reason,
+        &mut |_| {},
+    )
+}
+
+/// [`close_stale_or_idle_actors_with_crash_owner_for_caller`] with a hook
+/// between each record's close decision and its fenced write.
+///
+/// `#controllerclosefence`: each record is decided from one read of it and its
+/// [`ActorRevision`](agent_doc_controller::actor::ActorRevision), and `Closed`
+/// is written fenced on both. A same-generation commit in between (the agent
+/// coming up, `Starting`→`Ready`; a `Busy`; another close) fails the write, and
+/// the sweep re-reads and re-decides against the newer record, so a now-live
+/// actor is kept.
+#[allow(clippy::too_many_arguments)]
+fn close_stale_or_idle_actors_with_hook<F, C>(
+    project_root: &Path,
+    mut pane_alive: F,
+    mut crash_owner: C,
+    idle_for: Option<Duration>,
+    dry_run: bool,
+    caller: &str,
+    reason: &str,
+    between_decision_and_write: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
+) -> Result<(usize, usize)>
+where
+    F: FnMut(&str) -> bool,
+    C: FnMut(
+        &agent_doc_controller::actor::ActorRecord,
+    ) -> agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision,
+{
     let store = load_actor_store(project_root)?;
+    let conn = open_state_db(project_root)?;
     let mut closed = 0;
     let mut kept = 0;
 
-    for record in store.values() {
-        if record.state == agent_doc_controller::actor::ActorState::Closed
-            || record.pane_id.is_empty()
-        {
+    let is_candidate = |record: &agent_doc_controller::actor::ActorRecord| {
+        record.state != agent_doc_controller::actor::ActorState::Closed
+            && !record.pane_id.is_empty()
+    };
+    let candidates = store
+        .values()
+        .filter(|record| is_candidate(record))
+        .map(|record| record.document_id.clone())
+        .collect::<Vec<_>>();
+    let mut attempts = BTreeMap::<String, usize>::new();
+    let mut queue = candidates
+        .into_iter()
+        .collect::<std::collections::VecDeque<_>>();
+    while let Some(document_id) = queue.pop_front() {
+        let attempt = {
+            let attempt = attempts.entry(document_id.clone()).or_insert(0);
+            *attempt += 1;
+            *attempt
+        };
+        let now = timestamp_secs();
+        let (record, revision) = load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+        let Some(record) = record.filter(|record| is_candidate(record)) else {
+            // Closed or unbound after the enumeration (or after a lost fence):
+            // nothing is left for this sweep to close.
+            kept += 1;
             continue;
-        }
+        };
+        let record = &record;
         let pane_is_alive = pane_alive(&record.pane_id);
         let last_activity = actor_last_activity_timestamp(record);
         let idle_age = now.saturating_sub(last_activity);
@@ -12254,7 +12421,8 @@ where
             prior_generation: record.generation,
             new_generation: record.generation,
         };
-        match store_actor_record(project_root, Some(record.generation), &next) {
+        between_decision_and_write(record);
+        match store_actor_record_fenced(project_root, record.generation, revision, &next) {
             Ok(_) => {
                 agent_doc_ops_log_io::log_op(
                     Path::new(&record.document_id),
@@ -12272,6 +12440,27 @@ where
                     ),
                 );
                 closed += 1;
+            }
+            Err(err)
+                if agent_doc_session_actor_io::binding_fence_lost(&err)
+                    && attempt < ACTOR_CLOSE_FENCE_ATTEMPTS =>
+            {
+                // `#controllerclosefence`: a commit landed after the decision.
+                // Re-decide against it instead of closing what it wrote.
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_close_stale_actor_fence_lost file={} pane={} generation={} cause={} attempt={} redecide=true error={:#} (#controllerclosefence)",
+                        caller,
+                        record.document_id,
+                        record.pane_id,
+                        record.generation,
+                        cause,
+                        attempt,
+                        err
+                    ),
+                );
+                queue.push_front(document_id);
             }
             Err(err) => {
                 agent_doc_ops_log_io::log_op(
@@ -12393,79 +12582,134 @@ pub fn prune_dead_actors_for_caller(
     dry_run: bool,
     caller: &str,
 ) -> Result<(usize, usize)> {
-    let now = timestamp_secs();
+    prune_dead_actors_with_hook(project_root, dead_after, dry_run, caller, &mut |_| {})
+}
+
+/// [`prune_dead_actors_for_caller`] with a hook between each record's prune
+/// decision and its fenced delete.
+///
+/// `#controllerclosefence`: each record is decided from one read of it and its
+/// [`ActorRevision`](agent_doc_controller::actor::ActorRevision) and deleted
+/// fenced on that revision ([`state_store::delete_actor_document_fenced_tx`]).
+/// A start that re-opens the document in between moves the revision, so the
+/// delete fails, the prune re-reads, and the re-opened actor is kept.
+fn prune_dead_actors_with_hook(
+    project_root: &Path,
+    dead_after: Duration,
+    dry_run: bool,
+    caller: &str,
+    between_decision_and_delete: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
+) -> Result<(usize, usize)> {
     let store = load_actor_store(project_root)?;
     let mut conn = open_state_db(project_root)?;
     let mut pruned = 0;
     let mut kept = 0;
 
-    for record in store.values() {
-        if record.state != agent_doc_controller::actor::ActorState::Closed {
-            kept += 1;
-            continue;
-        }
-        let age = now.saturating_sub(record.last_transition.timestamp);
-        if age <= dead_after.as_secs() {
-            kept += 1;
-            continue;
-        }
-        // Never prune a record a live supervisor still owns (same guard as the
-        // stale-Starting sweep). The pid-alive check inside means a dead
-        // supervisor's lingering lease never blocks the prune.
-        let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
-        if lease.as_ref().is_some_and(|lease| {
-            status::supervisor_lease_is_fresh_and_alive(
-                lease.last_heartbeat,
-                lease.supervisor_pid.is_some_and(process_is_alive),
-                now,
-                dead_after,
-            )
-        }) {
-            kept += 1;
-            continue;
-        }
+    let document_ids = store.keys().cloned().collect::<Vec<_>>();
+    for document_id in document_ids {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let now = timestamp_secs();
+            let (record, revision) =
+                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+            let Some(record) = record else {
+                // Already removed after the enumeration.
+                break;
+            };
+            if record.state != agent_doc_controller::actor::ActorState::Closed {
+                kept += 1;
+                break;
+            }
+            let age = now.saturating_sub(record.last_transition.timestamp);
+            if age <= dead_after.as_secs() {
+                kept += 1;
+                break;
+            }
+            // Never prune a record a live supervisor still owns (same guard as the
+            // stale-Starting sweep). The pid-alive check inside means a dead
+            // supervisor's lingering lease never blocks the prune.
+            let lease =
+                load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)?;
+            if lease.as_ref().is_some_and(|lease| {
+                status::supervisor_lease_is_fresh_and_alive(
+                    lease.last_heartbeat,
+                    lease.supervisor_pid.is_some_and(process_is_alive),
+                    now,
+                    dead_after,
+                )
+            }) {
+                kept += 1;
+                break;
+            }
 
-        if dry_run {
-            eprintln!(
-                "[{}] would prune dead actor record: {} session={} generation={} state={} age_secs={}",
-                caller,
-                record.document_id,
-                record.session_id,
-                record.generation,
-                record.state.as_str(),
-                age
-            );
-            agent_doc_ops_log_io::log_op(
-                Path::new(&record.document_id),
-                &format!(
-                    "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+            if dry_run {
+                eprintln!(
+                    "[{}] would prune dead actor record: {} session={} generation={} state={} age_secs={}",
                     caller,
                     record.document_id,
+                    record.session_id,
                     record.generation,
                     record.state.as_str(),
                     age
-                ),
-            );
-            pruned += 1;
-            continue;
-        }
+                );
+                agent_doc_ops_log_io::log_op(
+                    Path::new(&record.document_id),
+                    &format!(
+                        "{}_would_prune_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                        caller,
+                        record.document_id,
+                        record.generation,
+                        record.state.as_str(),
+                        age
+                    ),
+                );
+                pruned += 1;
+                break;
+            }
 
-        let removed = state_store::delete_actor_document_tx(&mut conn, &record.document_id)?;
-        if removed > 0 {
-            agent_doc_ops_log_io::log_op(
-                Path::new(&record.document_id),
-                &format!(
-                    "{}_pruned_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
-                    caller,
-                    record.document_id,
-                    record.generation,
-                    record.state.as_str(),
-                    age
-                ),
-            );
-            pruned += 1;
-        } else {
-            kept += 1;
+            between_decision_and_delete(&record);
+            match state_store::delete_actor_document_fenced_tx(
+                &mut conn,
+                &record.document_id,
+                revision,
+            ) {
+                Ok(removed) if removed > 0 => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_pruned_dead_actor document_id={} generation={} state={} age_secs={} reason=dead_closed_record",
+                            caller,
+                            record.document_id,
+                            record.generation,
+                            record.state.as_str(),
+                            age
+                        ),
+                    );
+                    pruned += 1;
+                    break;
+                }
+                Ok(_) => {
+                    kept += 1;
+                    break;
+                }
+                Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+                    let redecide = attempt < ACTOR_CLOSE_FENCE_ATTEMPTS;
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_prune_dead_actor_fence_lost document_id={} generation={} attempt={} redecide={} error={:#} (#controllerclosefence)",
+                            caller, record.document_id, record.generation, attempt, redecide, err
+                        ),
+                    );
+                    if redecide {
+                        continue;
+                    }
+                    kept += 1;
+                    break;
+                }
+                Err(err) => return Err(err),
+            }
         }
     }
 
@@ -12924,51 +13168,109 @@ pub fn evict_cross_document_pane_bindings(
     pane_id: &str,
     caller: &str,
 ) -> Result<usize> {
+    evict_cross_document_pane_bindings_with_hook(
+        project_root,
+        owner_document_id,
+        pane_id,
+        caller,
+        &mut |_| {},
+    )
+}
+
+/// [`evict_cross_document_pane_bindings`] with a hook between each record's
+/// eviction decision and its fenced write.
+///
+/// `#controllerclosefence`: each alias is decided from one read of it and its
+/// [`ActorRevision`](agent_doc_controller::actor::ActorRevision) and written
+/// `Closed` fenced on both. A same-generation commit in between (another
+/// sweep's close, the owner's own transition) fails the write; the eviction
+/// re-reads and re-decides, so an alias that already left the pane is not
+/// evicted (or counted) again, and an alias that still names it is closed from
+/// its newest record.
+fn evict_cross_document_pane_bindings_with_hook(
+    project_root: &Path,
+    owner_document_id: &str,
+    pane_id: &str,
+    caller: &str,
+    between_decision_and_write: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
+) -> Result<usize> {
     if pane_id.is_empty() {
         return Ok(0);
     }
-    let now = timestamp_secs();
     let store = load_actor_store(project_root)?;
+    let conn = open_state_db(project_root)?;
+    let is_alias = |record: &agent_doc_controller::actor::ActorRecord| {
+        record.document_id != owner_document_id && record.pane_id == pane_id
+    };
+    let candidates = store
+        .values()
+        .filter(|record| is_alias(record))
+        .map(|record| record.document_id.clone())
+        .collect::<Vec<_>>();
     let mut evicted = 0;
-    for record in store.values() {
-        if record.document_id == owner_document_id || record.pane_id != pane_id {
-            continue;
-        }
-        let mut next = record.clone();
-        next.state = agent_doc_controller::actor::ActorState::Closed;
-        next.pane_id.clear();
-        next.window_id.clear();
-        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
-            caller: caller.to_string(),
-            reason: format!("evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"),
-            timestamp: now,
-            prior_generation: record.generation,
-            new_generation: record.generation,
-        };
-        match store_actor_record(project_root, Some(record.generation), &next) {
-            Ok(_) => {
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
-                        caller,
-                        record.document_id,
-                        owner_document_id,
-                        pane_id,
-                        record.generation,
-                        record.state.as_str()
-                    ),
-                );
-                evicted += 1;
-            }
-            Err(err) => {
-                agent_doc_ops_log_io::log_op(
-                    Path::new(&record.document_id),
-                    &format!(
-                        "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
-                        caller, record.document_id, pane_id, record.generation, err
-                    ),
-                );
+    for document_id in candidates {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let now = timestamp_secs();
+            let (record, revision) =
+                load_actor_record_with_revision_from_conn(&conn, &document_id)?;
+            let Some(record) = record.filter(|record| is_alias(record)) else {
+                break;
+            };
+            let mut next = record.clone();
+            next.state = agent_doc_controller::actor::ActorState::Closed;
+            next.pane_id.clear();
+            next.window_id.clear();
+            next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+                caller: caller.to_string(),
+                reason: format!(
+                    "evicted_cross_document_pane owner={owner_document_id} pane={pane_id}"
+                ),
+                timestamp: now,
+                prior_generation: record.generation,
+                new_generation: record.generation,
+            };
+            between_decision_and_write(&record);
+            match store_actor_record_fenced(project_root, record.generation, revision, &next) {
+                Ok(_) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_evicted_cross_document_pane_binding stale_document={} owner_document={} pane={} generation={} prior_state={}",
+                            caller,
+                            record.document_id,
+                            owner_document_id,
+                            pane_id,
+                            record.generation,
+                            record.state.as_str()
+                        ),
+                    );
+                    evicted += 1;
+                    break;
+                }
+                Err(err)
+                    if agent_doc_session_actor_io::binding_fence_lost(&err)
+                        && attempt < ACTOR_CLOSE_FENCE_ATTEMPTS =>
+                {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_evict_cross_document_pane_binding_fence_lost stale_document={} pane={} generation={} attempt={} redecide=true error={:#} (#controllerclosefence)",
+                            caller, record.document_id, pane_id, record.generation, attempt, err
+                        ),
+                    );
+                }
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        Path::new(&record.document_id),
+                        &format!(
+                            "{}_evict_cross_document_pane_binding_skipped stale_document={} pane={} generation={} error={}",
+                            caller, record.document_id, pane_id, record.generation, err
+                        ),
+                    );
+                    break;
+                }
             }
         }
     }
@@ -16439,6 +16741,252 @@ mod tests {
             agent_doc_controller::actor::ActorState::Ready
         );
         assert_eq!(current.pane_id, "%dead");
+    }
+
+    /// `#controllerclosefence`: a same-generation commit written by the hook
+    /// between a controller sweep's decision and its write.
+    fn same_generation_transition(
+        project_root: &Path,
+        decided: &agent_doc_controller::actor::ActorRecord,
+        state: agent_doc_controller::actor::ActorState,
+        pane_id: &str,
+        caller: &str,
+        reason: &str,
+    ) {
+        let mut next = decided.clone();
+        next.state = state;
+        next.pane_id = pane_id.to_string();
+        if pane_id.is_empty() {
+            next.window_id.clear();
+        }
+        next.last_transition = agent_doc_controller::actor::ActorLastTransition {
+            caller: caller.to_string(),
+            reason: reason.to_string(),
+            timestamp: timestamp_secs(),
+            prior_generation: decided.generation,
+            new_generation: decided.generation,
+        };
+        store_actor_record(project_root, Some(decided.generation), &next).unwrap();
+    }
+
+    /// `#controllerclosefence`: the stale-`Starting` sweep decided to close an
+    /// old `Starting` actor; its agent came up (`Starting`→`Ready`, same
+    /// generation) before the write. A generation-only fence closed the now
+    /// `Ready` actor anyway. The revision fence fails that write, the sweep
+    /// re-reads, and the `Ready` actor stays open.
+    #[test]
+    fn stale_starting_close_is_fenced_against_a_same_generation_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/came-up.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        // `actor_record` is `Starting` at generation 1 with an ancient timestamp.
+        store_actor_record(
+            dir.path(),
+            Some(0),
+            &actor_record(&document_id, "%61", "@1"),
+        )
+        .unwrap();
+
+        let mut hooked = 0;
+        let (closed, kept) = close_stale_starting_actors_with_hook(
+            dir.path(),
+            Duration::from_secs(3600),
+            false,
+            "gc",
+            &mut |decided| {
+                hooked += 1;
+                if hooked == 1 {
+                    same_generation_transition(
+                        dir.path(),
+                        decided,
+                        agent_doc_controller::actor::ActorState::Ready,
+                        "%61",
+                        "supervisor",
+                        "ready",
+                    );
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(hooked, 1, "the re-decision must not reach a second write");
+        assert_eq!((closed, kept), (0, 1));
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Ready,
+            "a Ready actor must not be closed as a stale Starting one"
+        );
+        assert_eq!(current.last_transition.caller, "supervisor");
+    }
+
+    /// `#controllerclosefence`: the dead-pane sweep observed no live agent in
+    /// a `Starting` actor's pane and decided to close it; the agent came up in
+    /// that pane (`Starting`→`Ready`, same generation) before the write. The
+    /// revision fence fails the close, the re-decision sees the live pane, and
+    /// the binding stays open.
+    #[test]
+    fn dead_pane_close_is_fenced_against_a_same_generation_ready() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/dead-then-live.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        store_actor_record(
+            dir.path(),
+            Some(0),
+            &actor_record(&document_id, "%62", "@1"),
+        )
+        .unwrap();
+
+        let agent_up = std::cell::Cell::new(false);
+        let mut hooked = 0;
+        let (closed, kept) = close_stale_or_idle_actors_with_hook(
+            dir.path(),
+            |pane| pane == "%62" && agent_up.get(),
+            |_| agent_doc_supervisor::crash_policy::DeadPaneActorGcDecision::Close,
+            None,
+            false,
+            "sync",
+            "stale_dead_pane_actor",
+            &mut |decided| {
+                hooked += 1;
+                if hooked == 1 {
+                    agent_up.set(true);
+                    same_generation_transition(
+                        dir.path(),
+                        decided,
+                        agent_doc_controller::actor::ActorState::Ready,
+                        "%62",
+                        "supervisor",
+                        "ready",
+                    );
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(hooked, 1, "the re-decision must keep the live binding");
+        assert_eq!((closed, kept), (0, 1));
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Ready
+        );
+        assert_eq!(current.pane_id, "%62");
+        assert_eq!(current.window_id, "@1");
+    }
+
+    /// `#controllerclosefence`: the cross-document eviction decided an alias
+    /// still named the pane; another sweep closed it (same generation, pane
+    /// cleared) before the write. A generation-only fence re-closed it under
+    /// the eviction's name and counted an eviction that never happened. The
+    /// revision fence fails the write and the re-decision sees the alias gone.
+    #[test]
+    fn cross_document_eviction_is_fenced_against_a_same_generation_close() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let alias_doc = dir.path().join("tasks/alias.md");
+        std::fs::create_dir_all(owner_doc.parent().unwrap()).unwrap();
+        std::fs::write(&owner_doc, "body").unwrap();
+        std::fs::write(&alias_doc, "body").unwrap();
+        let owner_id = owner_doc.to_string_lossy().to_string();
+        let alias_id = alias_doc.to_string_lossy().to_string();
+        let mut alias = actor_record(&alias_id, "%63", "@1");
+        alias.state = agent_doc_controller::actor::ActorState::Ready;
+        store_actor_record(dir.path(), Some(0), &alias).unwrap();
+
+        let mut hooked = 0;
+        let evicted = evict_cross_document_pane_bindings_with_hook(
+            dir.path(),
+            &owner_id,
+            "%63",
+            "repair",
+            &mut |decided| {
+                hooked += 1;
+                if hooked == 1 {
+                    same_generation_transition(
+                        dir.path(),
+                        decided,
+                        agent_doc_controller::actor::ActorState::Closed,
+                        "",
+                        "sync",
+                        "stale_dead_pane_actor",
+                    );
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(hooked, 1);
+        assert_eq!(
+            evicted, 0,
+            "the alias left the pane before the eviction wrote"
+        );
+        let current = load_actor_record(dir.path(), &alias_id).unwrap().unwrap();
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Closed
+        );
+        assert_eq!(
+            (
+                current.last_transition.caller.as_str(),
+                current.last_transition.reason.as_str()
+            ),
+            ("sync", "stale_dead_pane_actor"),
+            "the close that actually happened keeps its attribution"
+        );
+    }
+
+    /// `#controllerclosefence`: the dead-actor prune decided a long-`Closed`
+    /// record was dead; a start re-opened the document (same generation)
+    /// before the delete. The delete had no fence at all and removed the
+    /// re-opened actor. The revision fence fails it and the actor is kept.
+    #[test]
+    fn dead_actor_prune_is_fenced_against_a_same_generation_reopen() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/reopened.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let document_id = doc.to_string_lossy().to_string();
+        let mut closed_record = actor_record(&document_id, "", "");
+        closed_record.state = agent_doc_controller::actor::ActorState::Closed;
+        store_actor_record(dir.path(), Some(0), &closed_record).unwrap();
+
+        let mut hooked = 0;
+        let (pruned, kept) = prune_dead_actors_with_hook(
+            dir.path(),
+            Duration::from_secs(3600),
+            false,
+            "gc",
+            &mut |decided| {
+                hooked += 1;
+                if hooked == 1 {
+                    same_generation_transition(
+                        dir.path(),
+                        decided,
+                        agent_doc_controller::actor::ActorState::Starting,
+                        "%64",
+                        "start",
+                        "session_start",
+                    );
+                }
+            },
+        )
+        .unwrap();
+        assert_eq!(hooked, 1);
+        assert_eq!((pruned, kept), (0, 1));
+        let current = load_actor_record(dir.path(), &document_id)
+            .unwrap()
+            .expect("a re-opened actor must not be pruned");
+        assert_eq!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Starting
+        );
+        assert_eq!(current.pane_id, "%64");
     }
 
     #[test]

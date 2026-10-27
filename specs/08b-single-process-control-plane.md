@@ -663,6 +663,26 @@ deterministic tests.
   generation must go through a transition-inserting path; the
   `every_actor_write_moves_the_revision_and_a_stale_revision_fence_fails` test
   pins the existing paths.
+- Controller sweeps that close or delete an actor they judged stale follow the
+  same rule (`#controllerclosefence`): the stale-`Starting` close, the
+  dead-pane/idle close, the cross-document pane eviction, the start_session
+  stale-alias close, and the `#actorprune` delete each decide from one read of
+  the record and its `ActorRevision`
+  (`state_store::load_actor_record_with_revision_from_db`) and write fenced on
+  both (`store_actor_record_fenced_tx`, `delete_actor_document_fenced_tx`). The
+  enumeration snapshot only selects candidates; it is never the decision. A
+  same-generation commit between the decision and the write (the agent coming
+  up `Starting`→`Ready`, an owner's `Busy`, another sweep's close, a start
+  re-opening a pruned document) fails the write with the generation
+  compare-and-swap error, and the sweep re-reads and re-decides against the
+  newer record, at most three times per record before leaving it to the next
+  sweep. A now-`Ready` or live actor is therefore kept, not closed as stale; a
+  start whose alias came up live in that window is refused; an alias that
+  already left the pane is neither re-closed nor counted. Each lost fence logs
+  `<caller>_..._fence_lost ... (#controllerclosefence)`. Operator-directed
+  writes (`admin reap`/`handoff`, fenced on the operator's observed generation)
+  and an owner's own lifecycle, harness, and placement writes are not sweeps and
+  keep their generation fence.
 - Every accepted command receives a durable dispatch receipt before external
   side effects such as tmux input, supervisor stdin, response write-back, or
   projection emission.

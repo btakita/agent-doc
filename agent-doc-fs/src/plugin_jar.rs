@@ -26,6 +26,12 @@ pub enum MappedPluginJar {
         mapped_inode: u64,
         disk_inode: u64,
     },
+    /// `#jb263probeblind`: mapped from the installer's private backup tree
+    /// (`<plugins>/.agent-doc-jetbrains-install/backup-*/`) while that tree
+    /// still exists. The atomic tree swap renamed the live package aside and
+    /// moved the replacement in, so the path no longer names the installed
+    /// package even though the file is still linked. Definitive.
+    Displaced { path: String },
     /// Mapped and byte-identical to what is on disk.
     Current { path: String, inode: u64 },
     /// Nothing conclusive: no jar mapped, an unreadable `map_files`, or a
@@ -39,9 +45,42 @@ impl MappedPluginJar {
     pub fn is_superseded(&self) -> bool {
         matches!(
             self,
-            MappedPluginJar::Deleted { .. } | MappedPluginJar::Superseded { .. }
+            MappedPluginJar::Deleted { .. }
+                | MappedPluginJar::Superseded { .. }
+                | MappedPluginJar::Displaced { .. }
         )
     }
+
+    /// The mapped path of a superseded mapping. `None` for a current or
+    /// inconclusive one.
+    pub fn superseded_path(&self) -> Option<&str> {
+        match self {
+            MappedPluginJar::Deleted { path }
+            | MappedPluginJar::Superseded { path, .. }
+            | MappedPluginJar::Displaced { path } => Some(path),
+            MappedPluginJar::Current { .. } | MappedPluginJar::Unknown => None,
+        }
+    }
+}
+
+/// `#jb263probeblind`: the private work directory the JetBrains installer's
+/// atomic tree swap renames the live package into (`backup-*`) before it moves
+/// the replacement in and deletes the backup.
+pub const JETBRAINS_INSTALL_WORK_DIR: &str = ".agent-doc-jetbrains-install";
+
+/// Whether `path` lies inside an installer backup tree
+/// (`<plugins>/.agent-doc-jetbrains-install/backup-<nonce>/...`).
+pub fn is_installer_backup_path(path: &std::path::Path) -> bool {
+    path.ancestors().any(|dir| {
+        dir.file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_prefix("backup-"))
+            .is_some_and(|nonce| !nonce.is_empty())
+            && dir
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .is_some_and(|name| name == JETBRAINS_INSTALL_WORK_DIR)
+    })
 }
 
 /// Pure classifier for one mapped jar.
@@ -57,6 +96,15 @@ pub fn classify_mapped_plugin_jar(
     if let Some(path) = mapped_link.strip_suffix(" (deleted)") {
         return MappedPluginJar::Deleted {
             path: path.to_string(),
+        };
+    }
+    // `#jb263probeblind`: a still-linked mapping under the installer's backup
+    // tree is the package the swap renamed aside, never the installed one —
+    // even though the file is present, so the inode arms below would call it
+    // current.
+    if is_installer_backup_path(std::path::Path::new(mapped_link)) {
+        return MappedPluginJar::Displaced {
+            path: mapped_link.to_string(),
         };
     }
     match (mapped_inode, disk_inode) {
@@ -107,7 +155,8 @@ pub fn prefer_mapped_plugin_jar(
 /// process can map. The classic 242-261 package ships
 /// `agent-doc-jetbrains-<v>.jar`; the exact-262 modular package ships its root
 /// descriptor jar as `agent.doc-<v>.jar` (its `lib/modules/agent.doc.*.jar`
-/// module jars are unversioned and never match); and the 263 package ships
+/// module jars are unversioned and never match a stem — see
+/// [`is_jetbrains_plugin_module_jar`]); and the 263 package ships
 /// `agent-doc-jetbrains-263-<v>.jar`. A probe missing a package-specific prefix
 /// reads that IDE line as "no plugin mapped".
 pub const JETBRAINS_PLUGIN_JAR_STEMS: &[&str] = &[
@@ -130,40 +179,114 @@ pub fn plugin_jar_version<'a>(file_name: &'a str, jar_stems: &[&str]) -> Option<
     })
 }
 
+/// The root-jar stem of the modular (Plugin Model v2) package line. Its code
+/// lives in unversioned `lib/modules/agent.doc.*.jar` content-module jars.
+pub const JETBRAINS_MODULAR_ROOT_JAR_STEM: &str = "agent.doc-";
+
+/// `#jb263probeblind`: whether `path` is one of the modular package's
+/// unversioned content-module jars, `<tree>/lib/modules/agent.doc.<module>.jar`
+/// (`backend`, `frontend`, `shared`). The exact-263 IDE maps ONLY these — its
+/// descriptor-only root jar `agent.doc-<v>.jar` is read, not mapped — so a
+/// probe restricted to versioned jar names is blind to that IDE.
+pub fn is_jetbrains_plugin_module_jar(path: &std::path::Path) -> bool {
+    let Some(module) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix("agent.doc."))
+        .and_then(|name| name.strip_suffix(".jar"))
+    else {
+        return false;
+    };
+    let modules_dir = path.parent();
+    !module.is_empty()
+        && module
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        && modules_dir
+            .and_then(|dir| dir.file_name())
+            .is_some_and(|name| name == "modules")
+        && modules_dir
+            .and_then(std::path::Path::parent)
+            .and_then(|dir| dir.file_name())
+            .is_some_and(|name| name == "lib")
+}
+
+/// Pure fold over one process's mapped files: `(readlink target, mapped inode)`
+/// per `/proc/<pid>/map_files` entry, with `disk_inode` resolving the inode now
+/// at a path.
+///
+/// Root jars (named by `jar_stems`) fold as they always have: a current mapping
+/// wins, because dynamic unload can leave the old classloader's mmap alive until
+/// GC while the replacement generation is already active.
+///
+/// `#jb263probeblind`: when `jar_stems` covers the modular package line, its
+/// content-module jars are classified too and fold among themselves the same
+/// way. A superseded module verdict outranks the root verdict: the modular
+/// package lines have no restart-free upgrade (`declined_by=modular_package`),
+/// so no newer module generation can be live in this process, and their root
+/// jar is descriptor-only — a current root mapping proves only that something
+/// read the installed descriptor, not which code executes. A current module
+/// mapping carries no version, so it never replaces the root verdict: on an IDE
+/// that maps only current module jars the probe stays `Unknown`, exactly as
+/// before, and every version-reading caller is unchanged.
+pub fn fold_mapped_plugin_jars(
+    mapped_files: impl IntoIterator<Item = (String, Option<u64>)>,
+    jar_stems: &[&str],
+    disk_inode: impl Fn(&std::path::Path) -> Option<u64>,
+) -> MappedPluginJar {
+    let scan_modules = jar_stems.contains(&JETBRAINS_MODULAR_ROOT_JAR_STEM);
+    let mut root = MappedPluginJar::Unknown;
+    let mut modules = MappedPluginJar::Unknown;
+    for (link, mapped_inode) in mapped_files {
+        let stem = std::path::Path::new(link.strip_suffix(" (deleted)").unwrap_or(&link));
+        let is_root = stem
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| plugin_jar_version(name, jar_stems).is_some());
+        if is_root {
+            if matches!(root, MappedPluginJar::Current { .. }) {
+                // The first current root mapping is the verdict.
+                continue;
+            }
+            let classified = classify_mapped_plugin_jar(&link, mapped_inode, disk_inode(stem));
+            root = prefer_mapped_plugin_jar(root, classified);
+        } else if scan_modules && is_jetbrains_plugin_module_jar(stem) {
+            let classified = classify_mapped_plugin_jar(&link, mapped_inode, disk_inode(stem));
+            modules = prefer_mapped_plugin_jar(modules, classified);
+        }
+    }
+    if modules.is_superseded() {
+        modules
+    } else {
+        root
+    }
+}
+
 /// Probe one process's mapped plugin jar. Linux-only; every other platform and
 /// every IO error yields [`MappedPluginJar::Unknown`].
 pub fn probe_mapped_plugin_jar(pid: u32, jar_stems: &[&str]) -> MappedPluginJar {
-    let map_files = std::path::PathBuf::from(format!("/proc/{pid}/map_files"));
+    probe_mapped_plugin_jar_at(std::path::Path::new("/proc"), pid, jar_stems)
+}
+
+/// Proc-root-parameterized core of [`probe_mapped_plugin_jar`], so a
+/// regression can drive the real probe over a `map_files` fixture.
+pub fn probe_mapped_plugin_jar_at(
+    proc_root: &std::path::Path,
+    pid: u32,
+    jar_stems: &[&str],
+) -> MappedPluginJar {
+    let map_files = proc_root.join(pid.to_string()).join("map_files");
     let Ok(entries) = std::fs::read_dir(&map_files) else {
         return MappedPluginJar::Unknown;
     };
-    let mut best = MappedPluginJar::Unknown;
-    for entry in entries.flatten() {
-        let Ok(target) = std::fs::read_link(entry.path()) else {
-            continue;
-        };
-        let link = target.to_string_lossy().into_owned();
-        let stem = link.strip_suffix(" (deleted)").unwrap_or(&link);
-        if !std::path::Path::new(stem)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| plugin_jar_version(name, jar_stems).is_some())
-        {
-            continue;
-        }
-        let mapped_inode = inode_of(&entry.path());
-        let disk_inode = inode_of(std::path::Path::new(stem));
-        let classified = classify_mapped_plugin_jar(&link, mapped_inode, disk_inode);
-        best = prefer_mapped_plugin_jar(best, classified);
-        if matches!(best, MappedPluginJar::Current { .. }) {
-            // Dynamic unload can leave the old classloader's mmap alive until
-            // GC while the replacement generation is already active. A mapped
-            // current jar proves this process loaded the installed generation;
-            // a historical `(deleted)` mapping no longer proves stale execution.
-            return best;
-        }
-    }
-    best
+    let mapped_files = entries.flatten().filter_map(|entry| {
+        let target = std::fs::read_link(entry.path()).ok()?;
+        Some((
+            target.to_string_lossy().into_owned(),
+            inode_of(&entry.path()),
+        ))
+    });
+    fold_mapped_plugin_jars(mapped_files, jar_stems, inode_of)
 }
 
 #[cfg(unix)]
@@ -199,7 +322,12 @@ pub fn plugin_jar_stems(editor_kind: &str) -> Option<&'static [&'static str]> {
 /// Both paths still belong to the same plugins directory and restart marker.
 fn plugins_dir_for_mapped_jar(path: &str) -> Option<&std::path::Path> {
     let jar = std::path::Path::new(path.trim_end_matches(" (deleted)"));
-    let tree = jar.parent()?.parent()?;
+    let mut lib = jar.parent()?;
+    if is_jetbrains_plugin_module_jar(jar) {
+        // `#jb263probeblind`: <tree>/lib/modules/agent.doc.<module>.jar
+        lib = lib.parent()?;
+    }
+    let tree = lib.parent()?;
     let parent = tree.parent()?;
     if tree
         .file_name()
@@ -207,7 +335,7 @@ fn plugins_dir_for_mapped_jar(path: &str) -> Option<&std::path::Path> {
         .is_some_and(|name| name.starts_with("backup-"))
         && parent
             .file_name()
-            .is_some_and(|name| name == ".agent-doc-jetbrains-install")
+            .is_some_and(|name| name == JETBRAINS_INSTALL_WORK_DIR)
     {
         parent.parent()
     } else {
@@ -260,10 +388,7 @@ pub fn recorded_restart_verdict_at(
     mapped: &MappedPluginJar,
     proc_root: &std::path::Path,
 ) -> Option<String> {
-    let path = match mapped {
-        MappedPluginJar::Deleted { path } | MappedPluginJar::Superseded { path, .. } => path,
-        _ => return None,
-    };
+    let path = mapped.superseded_path()?;
     recorded_restart_verdict_for_plugins_dir_at(pid, plugins_dir_for_mapped_jar(path)?, proc_root)
 }
 
@@ -280,6 +405,10 @@ pub fn superseded_mapping_detail(mapped: &MappedPluginJar) -> Option<String> {
             disk_inode,
         } => Some(format!(
             "{path} is mapped as inode {mapped_inode} but disk now holds inode {disk_inode}"
+        )),
+        MappedPluginJar::Displaced { path } => Some(format!(
+            "{path} is mapped from the installer's backup tree; the installed package was \
+             swapped in under it"
         )),
         _ => None,
     }
@@ -326,6 +455,14 @@ impl SupersededEditor {
 pub fn probe_superseded_editors(
     editors: impl IntoIterator<Item = (String, u32)>,
 ) -> Vec<SupersededEditor> {
+    probe_superseded_editors_at(std::path::Path::new("/proc"), editors)
+}
+
+/// Proc-root-parameterized core of [`probe_superseded_editors`].
+pub fn probe_superseded_editors_at(
+    proc_root: &std::path::Path,
+    editors: impl IntoIterator<Item = (String, u32)>,
+) -> Vec<SupersededEditor> {
     let mut probed = std::collections::HashSet::new();
     let mut superseded = Vec::new();
     for (editor_kind, pid) in editors {
@@ -335,7 +472,7 @@ pub fn probe_superseded_editors(
         if pid == 0 || !probed.insert(pid) {
             continue;
         }
-        let mapped = probe_mapped_plugin_jar(pid, jar_stems);
+        let mapped = probe_mapped_plugin_jar_at(proc_root, pid, jar_stems);
         let Some(detail) = superseded_mapping_detail(&mapped) else {
             continue;
         };
@@ -343,7 +480,7 @@ pub fn probe_superseded_editors(
             editor_kind,
             pid,
             detail,
-            restart_verdict: recorded_restart_verdict(pid, &mapped),
+            restart_verdict: recorded_restart_verdict_at(pid, &mapped, proc_root),
         });
     }
     superseded
@@ -563,6 +700,279 @@ mod tests {
             inode: 1,
         };
         assert_eq!(superseded_mapping_detail(&current), None);
+    }
+
+    /// `#jb263probeblind` fixture: a fake `/proc/<pid>/map_files` whose entries
+    /// are symlinks to the given `readlink` targets, the same shape the kernel
+    /// exposes (a `" (deleted)"` suffix makes the link dangle, as on the real
+    /// procfs where the target is gone).
+    fn write_map_files(proc_root: &std::path::Path, pid: u32, targets: &[String]) {
+        let dir = proc_root.join(pid.to_string()).join("map_files");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (index, target) in targets.iter().enumerate() {
+            let range = format!("7f{index:04x}000-7f{index:04x}fff");
+            std::os::unix::fs::symlink(target, dir.join(range)).unwrap();
+        }
+    }
+
+    /// The exact-263 modular tree as installed: a descriptor-only root jar
+    /// that the IDE never maps, and the three content-module jars it does map.
+    fn write_modular_tree(tree: &std::path::Path, version: &str) -> Vec<String> {
+        std::fs::create_dir_all(tree.join("lib/modules")).unwrap();
+        std::fs::write(tree.join(format!("lib/agent.doc-{version}.jar")), version).unwrap();
+        ["backend", "frontend", "shared"]
+            .iter()
+            .map(|module| {
+                let jar = tree.join(format!("lib/modules/agent.doc.{module}.jar"));
+                std::fs::write(&jar, format!("{module} {version}")).unwrap();
+                jar.display().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn module_jar_matcher_names_only_modular_content_modules() {
+        use std::path::Path;
+        for path in [
+            "/p/agent-doc-jetbrains/lib/modules/agent.doc.backend.jar",
+            "/p/agent-doc-jetbrains/lib/modules/agent.doc.frontend.jar",
+            "/p/.agent-doc-jetbrains-install/backup-1-2/lib/modules/agent.doc.shared.jar",
+        ] {
+            assert!(is_jetbrains_plugin_module_jar(Path::new(path)), "{path}");
+        }
+        for path in [
+            "/p/agent-doc-jetbrains/lib/agent.doc-0.2.866.jar",
+            "/p/agent-doc-jetbrains/lib/agent.doc.backend.jar",
+            "/p/agent-doc-jetbrains/modules/agent.doc.backend.jar",
+            "/p/agent-doc-jetbrains/lib/modules/agent.doc..jar",
+            "/p/agent-doc-jetbrains/lib/modules/agent.doc.backend-1.jar",
+            "/p/other/lib/modules/kotlinx.coroutines.jar",
+        ] {
+            assert!(!is_jetbrains_plugin_module_jar(Path::new(path)), "{path}");
+        }
+        assert!(is_installer_backup_path(Path::new(
+            "/p/.agent-doc-jetbrains-install/backup-1-2/lib/modules/agent.doc.shared.jar"
+        )));
+        assert!(!is_installer_backup_path(Path::new(
+            "/p/agent-doc-jetbrains/lib/modules/agent.doc.shared.jar"
+        )));
+        assert!(!is_installer_backup_path(Path::new(
+            "/p/other/backup-1-2/lib/agent-doc-jetbrains-0.2.1.jar"
+        )));
+        assert!(!is_installer_backup_path(Path::new(
+            "/p/.agent-doc-jetbrains-install/backup-/lib/agent-doc-jetbrains-0.2.1.jar"
+        )));
+    }
+
+    /// `#jb263probeblind`: the live exact-263 IDE (pid 3639588, 2026-10-27)
+    /// mapped only `lib/modules/agent.doc.{backend,frontend,shared}.jar`, never
+    /// a versioned jar, so the probe returned `Unknown` and route admission
+    /// passed silently while `restart_required pending=0.2.861` was outstanding.
+    /// Module jars that the install swapped out must now classify superseded.
+    #[test]
+    fn exact_263_module_only_maps_classify_swapped_module_jars_superseded() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("IntelliJIdea2026.3");
+        let installed = plugins.join("agent-doc-jetbrains");
+        write_modular_tree(&installed, "0.2.866");
+        let backup_tree = plugins.join(".agent-doc-jetbrains-install/backup-2095041-17920086");
+        let stems = plugin_jar_stems("jetbrains").unwrap();
+        let unrelated = vec![
+            "/tmp/agent-doc-native-3049656/libagent_doc-1793126683196-1205553c.so".to_string(),
+            "/opt/idea/lib/app-client.jar".to_string(),
+        ];
+
+        // 1. The production shape: the swap renamed the tree into the backup
+        //    and then deleted it, so every module mapping reads `(deleted)`.
+        let proc_root = root.path().join("proc-deleted");
+        let mut targets = unrelated.clone();
+        targets.extend(["backend", "frontend", "shared"].iter().map(|module| {
+            format!(
+                "{}/lib/modules/agent.doc.{module}.jar (deleted)",
+                backup_tree.display()
+            )
+        }));
+        write_map_files(&proc_root, 3_639_588, &targets);
+        let mapped = probe_mapped_plugin_jar_at(&proc_root, 3_639_588, stems);
+        assert!(
+            matches!(&mapped, MappedPluginJar::Deleted { path }
+                if path.contains("backup-2095041-17920086/lib/modules/agent.doc.")),
+            "{mapped:?}"
+        );
+        assert!(superseded_mapping_detail(&mapped).is_some());
+        // The versioned-jar stems alone (the pre-fix probe) are blind to it.
+        assert_eq!(
+            probe_mapped_plugin_jar_at(&proc_root, 3_639_588, &["agent-doc-jetbrains-"]),
+            MappedPluginJar::Unknown
+        );
+
+        // 2. The backup tree is still on disk (swap in flight, or its removal
+        //    failed): the links resolve, yet they no longer name the package.
+        let backup_jars = write_modular_tree(&backup_tree, "0.2.861");
+        let proc_root = root.path().join("proc-displaced");
+        let mut targets = unrelated.clone();
+        targets.extend(backup_jars.iter().cloned());
+        write_map_files(&proc_root, 3_639_588, &targets);
+        let mapped = probe_mapped_plugin_jar_at(&proc_root, 3_639_588, stems);
+        assert!(
+            matches!(&mapped, MappedPluginJar::Displaced { path }
+                if backup_jars.contains(path)),
+            "{mapped:?}"
+        );
+        assert!(
+            superseded_mapping_detail(&mapped)
+                .unwrap()
+                .contains("installer's backup tree")
+        );
+
+        // 3. A module jar rewritten in place under the installed tree.
+        let proc_root = root.path().join("proc-in-place");
+        let mut targets = unrelated.clone();
+        targets.push(format!(
+            "{}/lib/modules/agent.doc.backend.jar (deleted)",
+            installed.display()
+        ));
+        write_map_files(&proc_root, 3_639_588, &targets);
+        assert!(
+            probe_mapped_plugin_jar_at(&proc_root, 3_639_588, stems).is_superseded(),
+            "an unlinked installed module jar is superseded"
+        );
+
+        // 4. A current descriptor-only root jar read after the install does not
+        //    mask superseded module code (no restart-free upgrade exists).
+        let proc_root = root.path().join("proc-root-current");
+        let mut targets = vec![format!("{}/lib/agent.doc-0.2.866.jar", installed.display())];
+        targets.push(format!(
+            "{}/lib/modules/agent.doc.backend.jar (deleted)",
+            backup_tree.display()
+        ));
+        write_map_files(&proc_root, 3_639_588, &targets);
+        assert!(
+            probe_mapped_plugin_jar_at(&proc_root, 3_639_588, stems).is_superseded(),
+            "superseded module code outranks a current descriptor mapping"
+        );
+    }
+
+    /// `#jb263probeblind`: current module jars prove nothing about a version,
+    /// so they keep the probe `Unknown` (fail open, no advisory), and the
+    /// classic / exact-262 root-jar layouts classify exactly as before.
+    #[test]
+    fn current_module_jars_stay_unknown_and_root_jar_layouts_are_unchanged() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("IntelliJIdea2026.3");
+        let installed = plugins.join("agent-doc-jetbrains");
+        let module_jars = write_modular_tree(&installed, "0.2.866");
+        let stems = plugin_jar_stems("jetbrains").unwrap();
+
+        let proc_root = root.path().join("proc-current-263");
+        write_map_files(&proc_root, 11, &module_jars);
+        let mapped = probe_mapped_plugin_jar_at(&proc_root, 11, stems);
+        assert_eq!(mapped, MappedPluginJar::Unknown);
+        assert_eq!(superseded_mapping_detail(&mapped), None);
+        assert!(
+            probe_superseded_editors_at(&proc_root, [("jetbrains".to_string(), 11)]).is_empty()
+        );
+
+        // exact-262: the versioned root jar is mapped beside current modules.
+        let root_jar = format!("{}/lib/agent.doc-0.2.866.jar", installed.display());
+        let proc_root = root.path().join("proc-262");
+        let mut targets = vec![root_jar.clone()];
+        targets.extend(module_jars.iter().cloned());
+        write_map_files(&proc_root, 12, &targets);
+        assert!(matches!(probe_mapped_plugin_jar_at(&proc_root, 12, stems),
+                MappedPluginJar::Current { path, .. } if path == root_jar));
+
+        // classic: current, unlinked, and a lingering unlinked mapping beside
+        // the current generation (dynamic unload) — all as before.
+        let classic = plugins.join("classic/agent-doc-jetbrains/lib");
+        std::fs::create_dir_all(&classic).unwrap();
+        let current = classic.join("agent-doc-jetbrains-0.2.513.jar");
+        std::fs::write(&current, "classic").unwrap();
+        let current = current.display().to_string();
+        let old = format!(
+            "{}/agent-doc-jetbrains-0.2.512.jar (deleted)",
+            classic.display()
+        );
+        for (pid, targets, expect_current) in [
+            (13, vec![current.clone()], true),
+            (14, vec![old.clone()], false),
+            (15, vec![old.clone(), current.clone()], true),
+        ] {
+            let proc_root = root.path().join(format!("proc-classic-{pid}"));
+            write_map_files(&proc_root, pid, &targets);
+            let mapped = probe_mapped_plugin_jar_at(&proc_root, pid, stems);
+            if expect_current {
+                assert!(
+                    matches!(&mapped, MappedPluginJar::Current { path, .. } if *path == current),
+                    "{pid}: {mapped:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&mapped, MappedPluginJar::Deleted { .. }),
+                    "{pid}: {mapped:?}"
+                );
+            }
+        }
+
+        // No map_files at all stays inconclusive.
+        assert_eq!(
+            probe_mapped_plugin_jar_at(&root.path().join("proc-none"), 16, stems),
+            MappedPluginJar::Unknown
+        );
+    }
+
+    /// `#jb263probeblind`: the realtime remedy (`superseded_editors=`) counts a
+    /// module-only 263 IDE, and finds the restart verdict the 263 install wrote
+    /// beside the plugins directory from a `lib/modules` mapping.
+    #[test]
+    fn probe_superseded_editors_counts_exact_263_module_jars_with_restart_verdict() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("IntelliJIdea2026.3");
+        write_modular_tree(&plugins.join("agent-doc-jetbrains"), "0.2.866");
+        let proc_root = root.path().join("proc");
+        crate::process_start::fixture::write_fake_process_start(
+            &proc_root,
+            3_639_588,
+            1_699_990_000,
+            crate::process_start::fixture::ticks_after_boot(10_000),
+        );
+        write_map_files(
+            &proc_root,
+            3_639_588,
+            &[format!(
+                "{}/.agent-doc-jetbrains-install/backup-9-9/lib/modules/agent.doc.backend.jar (deleted)",
+                plugins.display()
+            )],
+        );
+        let marker = plugins.join(PLUGIN_RESTART_REQUIRED_MARKER);
+        std::fs::write(
+            &marker,
+            "dynamic upgrade unavailable: exact-263 modular package
+",
+        )
+        .unwrap();
+        filetime::set_file_mtime(
+            &marker,
+            filetime::FileTime::from_unix_time(1_700_000_100, 0),
+        )
+        .unwrap();
+
+        let found = probe_superseded_editors_at(&proc_root, [("jetbrains".to_string(), 3_639_588)]);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].pid, 3_639_588);
+        assert!(
+            found[0].detail.contains("agent.doc.backend.jar"),
+            "{found:?}"
+        );
+        assert_eq!(
+            found[0].restart_verdict.as_deref(),
+            Some("dynamic upgrade unavailable: exact-263 modular package")
+        );
+        assert!(
+            found[0]
+                .remedy()
+                .contains("Restart the editor to load them")
+        );
     }
 
     #[test]

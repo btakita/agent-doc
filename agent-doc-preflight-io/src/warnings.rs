@@ -799,10 +799,15 @@ fn jetbrains_plugins_dir_from_mapped_jar(mapped: &MappedPluginJar) -> Option<Pat
     let path = match mapped {
         MappedPluginJar::Deleted { path }
         | MappedPluginJar::Superseded { path, .. }
+        | MappedPluginJar::Displaced { path }
         | MappedPluginJar::Current { path, .. } => Path::new(path),
         MappedPluginJar::Unknown => return None,
     };
-    let lib_dir = path.parent()?;
+    let mut lib_dir = path.parent()?;
+    if agent_doc_fs::plugin_jar::is_jetbrains_plugin_module_jar(path) {
+        // `#jb263probeblind`: <tree>/lib/modules/agent.doc.<module>.jar
+        lib_dir = lib_dir.parent()?;
+    }
     let plugin_dir = lib_dir.parent()?;
     if lib_dir.file_name()? != "lib" {
         return None;
@@ -1759,6 +1764,46 @@ mod tests {
         assert!(message.contains("restart/reload"), "{message}");
         assert!(message.contains("do not reinstall"), "{message}");
         assert!(!message.contains("update to"), "{message}");
+
+        // `#jb263probeblind`: the exact-263 IDE maps only its content-module
+        // jars (`lib/modules/agent.doc.*.jar`), unlinked from the backup tree
+        // or still linked there; both resolve the same IDE data root.
+        for module_jar in [
+            MappedPluginJar::Deleted {
+                path: live
+                    .join(".agent-doc-jetbrains-install/backup-2095041-1792008622073994402")
+                    .join("lib/modules/agent.doc.backend.jar")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+            MappedPluginJar::Displaced {
+                path: live
+                    .join(".agent-doc-jetbrains-install/backup-2095041-1792008622073994402")
+                    .join("lib/modules/agent.doc.frontend.jar")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+            MappedPluginJar::Deleted {
+                path: live
+                    .join("agent-doc-jetbrains/lib/modules/agent.doc.shared.jar")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+        ] {
+            assert_eq!(
+                jetbrains_plugins_dir_from_mapped_jar(&module_jar).as_deref(),
+                Some(live.as_path()),
+                "{module_jar:?}"
+            );
+            assert_eq!(
+                expected_plugin_version_for_mapped_jar(
+                    "jetbrains",
+                    "classic-fallback",
+                    &module_jar
+                ),
+                modern
+            );
+        }
 
         let unrelated_backup = MappedPluginJar::Deleted {
             path: live

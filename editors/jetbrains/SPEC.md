@@ -211,9 +211,28 @@ either package as one that "predates restart-free dynamic upgrade support"; that
 wording is reserved for a classic jar without a `Main-Class`. The live-jar
 probes (`#pluginbyteidentity` superseded-bytes detection, the controller's
 `editor_route` admission, the install's `#jbdynamicfalsereport` load proof and
-the `#pluginactivationprobe` loaded-generation reading) match both versioned
-plugin jars, `agent-doc-jetbrains-<version>.jar` and `agent.doc-<version>.jar`,
-and never the unversioned module jars.
+the `#pluginactivationprobe` loaded-generation reading) read versions only from
+the versioned plugin jars, `agent-doc-jetbrains-<version>.jar` and
+`agent.doc-<version>.jar`.
+
+A live exact-263 IDE maps only the unversioned content-module jars
+`lib/modules/agent.doc.{backend,frontend,shared}.jar`; it reads the
+descriptor-only `agent.doc-<version>.jar` without mapping it. So superseded-bytes
+detection also classifies those module jars (`#jb263probeblind`). After the
+atomic tree swap the mapping reads
+`<plugins>/.agent-doc-jetbrains-install/backup-*/lib/modules/agent.doc.<module>.jar (deleted)`.
+A `(deleted)` module mapping, or one that still resolves inside a `backup-*`
+tree (`Displaced`), is superseded. Neither modular line has a restart-free
+upgrade, so no newer module generation can be live in the same process. A
+superseded module verdict therefore outranks a current root-jar mapping:
+something reading the installed descriptor does not show which code runs. A
+current module mapping carries no version, so it never becomes a `Current`
+verdict. An IDE that maps only current module jars stays `Unknown` and fails
+open: no warning, no advisory, no refusal. The version-reading probes behave as
+before. The restart verdict is found through the `lib/modules` path, and the
+data root is resolved from it in the same way. Classic and exact-262 root-jar
+mappings classify as before. The one change for them is that a still-linked
+root jar inside a `backup-*` tree is `Displaced` rather than `Current`.
 
 Because nothing in that fallback reaches the running IDE, the plugin itself
 prompts for the restart. Each plugin generation polls, every 30 seconds, the

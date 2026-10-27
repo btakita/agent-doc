@@ -393,6 +393,22 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - `#vscoderemoteparity`: `extensionKind`, activation receipt, install path, Coder smoke test.
 - `#vscodeupgradelayout`: stale-VSIX detection and a reload prompt, measured orientation, layout rules behind native derive.
 - `#zedparity`: registration identity, binary pickup, document-only routing, remote qualification.
+
+### Re: parity follow-ups dispatched — opus-5 · 2026-10-26T22:02-04:00
+
+**Dispatched all three parity items.** Each runs in its own worker and worktree, based on `main` `9aca9eec10`, and all three are 🚧 running:
+
+| Item | Worker | Branch | Owns |
+|---|---|---|---|
+| `#vscoderemoteparity` | `subagent:vscoderemote` | `feat/vscode-remote-parity` | `extensionKind`, the activation receipt, the install path, a Coder smoke test |
+| `#vscodeupgradelayout` | `subagent:vscodeupgrade` | `feat/vscode-upgrade-layout` | stale-VSIX detection and reload prompt, `getEditorLayout`, layout rules moved behind native derive |
+| `#zedparity` | `subagent:zedparity` | `feat/zed-parity` | `zed-lsp` identity, binary pickup, document-only routing, remote qualification |
+
+There is no Coder workspace or Zed remote host here, so each remote check ships as a script plus a runbook entry. The workers will say plainly what they actually exercised.
+
+The two VS Code workers have split the extension's files between them, and I'll integrate them one at a time.
+
+**Still running from earlier:** `#replicadiffcost`, `#jbsessioncmdoutcome` and `#jbshellr1`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -400,9 +416,9 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#vscoderemoteparity]
-- do [#vscodeupgradelayout]
-- do [#zedparity]
+- 🚧 [#subagent:vscoderemote#1] do [#vscoderemoteparity]
+- 🚧 [#subagent:vscodeupgrade#1] do [#vscodeupgradelayout]
+- 🚧 [#subagent:zedparity#1] do [#zedparity]
 - 🚧 [#subagent:replicadiff#1] do [#replicadiffcost]
 - 🚧 [#subagent:jbsessioncmd#1] do [#jbsessioncmdoutcome]
 - 🚧 [#subagent:jbshellr1#1] do [#jbshellr1]
@@ -425,7 +441,6 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
-- [x] [#jb339r1decision] Decide whether to queue GH 339 shell stage R1 (stable shell + forwarders + activation receipts, code still in one loader, costs one restart) once the shrink-restarts work reports its benchmark and moves. Same decision: restate the "Exact-263 decision" reopen rule as "module graph and registrations unchanged across the swap, and the retired implementation is collectable" (editors/jetbrains/SPEC.md).
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

@@ -539,6 +539,60 @@ No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-pr
 - **Why I didn't start a worker:** the claim I took for this row was released (requeued) without one, since a worker would only have waited on the same turn.
 
 If it's still uncommitted after that worker finishes, run `agent-doc session-check src/haiven-dev/tasks/sdk/sdk-demo.md` and queue it again. A finished worker with no commit would be a real defect.
+
+### Re: VS Code native-library fixes — opus-5 · 2026-10-26T23:13-04:00
+
+> **Queue prompt:** do [#vscodekoffisegv]
+
+**Found and fixed.** On `main` as `6431911c50` (VS Code 0.2.86, `636b72eb52`), installed.
+
+**Cause:**
+- `editors/vscode/src/native.ts` declared Rust-owned result strings (struct `text`/`json`/`error` fields, plus two return values) as `char*`.
+- koffi turns a `char*` into a JS string copy, so the Rust pointer was lost.
+- The wrapper's `finally` block then passed that JS string to `agent_doc_free_string(void*)`. koffi turned it into a pointer to its own temporary copy, and Rust called libc `free` on memory it never allocated.
+- **Effect:** every *successful* reposition, normalize or apply-node-patches call crashed the extension host, and every error-path call leaked.
+- The Rust side and the JetBrains JNA binding were already correct.
+
+**Fix:**
+- Every owned field and return value is now an opaque pointer.
+- All 22 free call sites go through one `freeOwnedCString` that refuses anything but a real pointer.
+- It also handles koffi 3's BigInt pointers.
+
+**Proof:**
+- With the unmodified wrappers, a node script crashes with exit 139. The gdb backtrace matches the report: `free` ← `CString` drop ← `agent_doc_free_string`.
+- A new child-process test drives the real wrappers against the built library and fails with "child died by SIGSEGV" against the old declarations.
+- Integrated: check-fast passed, VS Code 224 of 224.
+
+> **Queue prompt:** do [#vscodekoffivsix]
+
+**Confirmed and fixed.** On `main` as `91719d8a58` (VS Code 0.2.87, `07b9591e97`), installed.
+
+**Confirmed:**
+- Every VSIX so far shipped without koffi: the 0.2.85 package had no `node_modules`, and neither did any installed copy from 0.2.81 to 0.2.85.
+- So a VSIX install never loaded the native library and never registered with the controller, on Coder or anywhere else.
+- koffi 3.3.3 also splits its binaries into per-platform packages, so allow-listing `node_modules` alone would have shipped Linux x64 only.
+
+**Fix:**
+- A new `scripts/stage-koffi.mjs` runs in `vscode:prepublish`. It stages koffi binaries for linux-x64/arm64 (glibc and musl), darwin-x64/arm64 and win32-x64. Each download is checked against `package-lock.json`.
+- `.vscodeignore` now lets through only koffi's runtime and those binaries.
+- It's still one VSIX for every platform. It grew from 129 KB to 2.9 MB.
+
+**Packaging test** (`npm run test:package`):
+- It unzips the VSIX outside the checkout and checks every platform binary's header.
+- It refuses any other `node_modules` content.
+- It makes a real `getpid()` call through the packaged koffi.
+- It runs in `make check`, in `make install-editor-plugins` (which refuses to install a VSIX that fails it), and in the release workflow before publishing.
+- It fails 4 of 4 on the old 0.2.85 VSIX and passes 4 of 4 now.
+
+**Checks:**
+- Integrated: check-fast passed, VS Code 224 of 224, packaging 4 of 4.
+- The installed `btakita.agent-doc-0.2.87` now contains `node_modules/koffi/build/koffi/` for all 7 platforms.
+
+**Before these two fixes,** the VS Code extension had effectively been running without its native library. Reload VS Code to load 0.2.87; it's the first build where registration, layout and receipts can actually work end to end.
+
+**Dispatched:** the JetBrains `EditorFocusSyncListener` startup crash you reported on `sdk-demo.md` (`lateinit property mainSplitters`) → `subagent:focussyncinit` (🚧). `projectOpened` calls `getSplitters()` before the 2026.3 editor area exists. The worker will defer attaching the listener until the editor area exists, and will check that no later startup step can be skipped by one listener's failure.
+
+**Still running:** `#jbshellr1rest`, `#replicaremoteflush`, `#vscodesessionparsers`. `#kotlinflushprep` waits for `#jbshellr1rest`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -550,8 +604,8 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 - 🚧 [#subagent:vscodesession#1] do [#vscodesessionparsers]
 - 🚧 [#subagent:replicaremote#1] do [#replicaremoteflush]
 - 📥 do [#kotlinflushprep]
-- 🚧 [#subagent:vscodekoffi#1] do [#vscodekoffivsix]
-- 🚧 [#subagent:vscodesegv#1] do [#vscodekoffisegv]
+- ~~do [#vscodekoffivsix]~~
+- ~~do [#vscodekoffisegv]~~
 ---
 🚧 [#subagent:focussyncinit#1] Run Agent Doc on sdk-demo.md error
 ```
@@ -637,8 +691,6 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 - [ ] [#vscodesessionparsers] Point the VS Code extension clear/restart parsers (editors/vscode/src/sessionUi.ts) at the native session_command_outcome derivation behind agent_doc_editor_derive_json, with the TypeScript copy as the frozen fallback answering the shared session_command_outcome.json fixture identically.
 - [ ] [#replicaremoteflush] Fold remote CRDT ops into the replica visible-order index as they arrive (agent-doc-merge crdt_sync local_ops), so the first local flush after a remote update no longer pays a full index rebuild; keep the differential tests against lazily paths and gate on make jetbrains-keystroke-bench.
 - [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
-- [ ] [#vscodekoffivsix] Ship koffi in the VS Code VSIX: editors/vscode/.vscodeignore excludes node_modules, so a VSIX install has no koffi and the native library is off (nothing registers with the controller, including on Coder); bundle or include the koffi runtime for each target platform and add a packaging test that the VSIX contains it.
-- [ ] [#vscodekoffisegv] Investigate the VS Code extension-host SIGSEGV in free called from koffi into libagent_doc under code-server 4.143.1 (node v24.22.1), reproduced with the debug library on unmodified main by the vscoderemoteparity worker; find the ownership bug at the FFI boundary and add a regression test.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

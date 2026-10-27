@@ -19,6 +19,7 @@ pub mod route_owned_completion;
 pub mod screen;
 pub mod session_liveness;
 pub mod shared_writer;
+pub mod spawn_program;
 pub mod start_command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -261,6 +261,16 @@ a closed actor record is replaceable through the stale-authority path.
   3. `AGENT_DOC_SESSION=<uuid>` and `AGENT_DOC_DOCUMENT=<path>` (new, so claude can introspect its own session without parsing frontmatter)
 - **No inheritance of `PWD` from the tmux pane** — supervisor sets `PWD` explicitly to match the resolved CWD, so shell-side `$PWD` matches the process-level CWD.
 
+#### Harness program resolution (GH #380)
+- The pty spawn clears the ambient env, so a bare harness name (`claude`, `codex`, `opencode`, `grok`) is looked up only on the **child** `PATH`. A route-owned supervisor inherits that `PATH` from the project controller, and some hosts start the controller with a system-default `PATH` that omits the harness's user-local install directory (the Coder workspace default leaves out `~/.local/bin`, where the Claude Code installer puts `claude`). Before GH #380 the start failed with `spawn_command failed for program: claude … No viable candidates found in PATH`.
+- `supervisor_process::spawn_program::resolve_spawn_program` runs inside `PtySession::spawn`, for every harness and every launch (initial, restart, harness switch), in this order:
+  1. A program that names a path (contains `/`) is spawned as given.
+  2. A bare name that is executable on the child `PATH` (relative entries joined to the child cwd, as `portable-pty` does) is spawned as given — byte-identical to the pre-fix spawn, same `argv[0]`.
+  3. Otherwise the well-known install directories are searched in order: under the child `HOME` (or the supervisor's own `HOME` when the child env has none) `~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.grok/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.cargo/bin`, `~/bin`; then `/usr/local/bin`, `/opt/homebrew/bin`, `/home/linuxbrew/.linuxbrew/bin`. The first executable hit is spawned by that absolute path (never its canonicalized symlink target, so a versioned install keeps its `claude` process name for `pane_current_command`), and its directory is **appended** to the child `PATH` so the harness's own subprocesses find the same install. Existing `PATH` entries keep precedence.
+  4. If nothing is found, the spawn fails before `portable-pty` with an error naming the program, the child `PATH` entries searched, and the install directories searched, plus the fix: install the harness, or put its directory on the supervisor's `PATH` or the document `env:` `PATH`.
+- The parent `PATH` is never read, so the deterministic-env invariant holds. A fallback spawn logs `harness_program_resolved harness=<name> source=install_dir_fallback program=<abs path> path_dir_appended=<dir>` to the supervisor session log. Non-Unix platforms pass the program through to `portable-pty` unchanged.
+- Pinned by `spawn_program` unit tests and the `pty` regression `bare_harness_name_missing_from_coder_default_path_spawns_from_user_local_bin` (Coder default `PATH`, harness only under `~/.local/bin`, child `PATH` gains that directory last).
+
 ### Pty lifecycle
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.

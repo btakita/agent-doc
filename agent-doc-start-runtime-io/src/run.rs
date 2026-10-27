@@ -2187,6 +2187,27 @@ pub fn run_with_reap_policy_resume_and_harness(
         // at the launch-time `default` guess and route the live Claude/Codex/OpenCode
         // pane with the wrong protocol (`#actorharnessinitialwriteback`).
         shared.set_current_harness(&harness.binary);
+        // GH #380: record when the bare harness name was missing from the
+        // child PATH and was spawned from a well-known install directory.
+        if let Some(resolved) = session.spawn_program().filter(|resolved| {
+            resolved.source
+                == agent_doc_supervisor_process::spawn_program::SpawnProgramSource::InstallDirFallback
+        }) {
+            log_event(
+                &mut session_log,
+                &format!(
+                    "harness_program_resolved harness={} source={} program={} path_dir_appended={}",
+                    harness.binary,
+                    resolved.source.as_str(),
+                    resolved.program,
+                    resolved
+                        .path_dir_appended
+                        .as_deref()
+                        .map(|dir| dir.display().to_string())
+                        .unwrap_or_else(|| "<none>".to_string()),
+                ),
+            );
+        }
 
         // Extract writer and reader for shared I/O
         #[cfg(unix)]

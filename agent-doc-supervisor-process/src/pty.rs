@@ -37,7 +37,10 @@
 //! - The caller-supplied `env` is the complete env for the child. Parent env
 //!   is **not** inherited — this enforces the "deterministic env" invariant
 //!   from the spec. Callers that want PATH, HOME, etc. populate them
-//!   explicitly.
+//!   explicitly. The one addition is GH #380: a bare program missing from the
+//!   child `PATH` is resolved through `spawn_program`'s well-known install
+//!   directories, and the directory it was found in is appended to the
+//!   child `PATH`.
 //! - The slave side of the pty is dropped immediately after spawn so the
 //!   child is the sole owner; without this the master reader never sees EOF
 //!   when the child exits.
@@ -49,6 +52,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::spawn_program::{ResolvedSpawnProgram, append_path_dir, resolve_spawn_program};
 use agent_doc_supervisor::terminal_filter::{
     TerminalFilter, TerminalFilterAction, TerminalFilterConfig, TerminalFilterTrace,
     TerminalFilterTraceKind,
@@ -136,8 +140,9 @@ impl ResizeHandle {
 /// Built by the caller (typically `start.rs` after `cwd::resolve`) and
 /// consumed by [`PtySession::spawn`].
 pub struct PtySpawnConfig {
-    /// Program to execute (e.g. `"claude"`). Looked up via `$PATH` in the
-    /// parent environment only if the caller includes `PATH` in `env`.
+    /// Program to execute (e.g. `"claude"`). A bare name is looked up on the
+    /// `PATH` in `env`, then in the well-known harness install directories
+    /// (GH #380, [`crate::spawn_program`]); the parent `PATH` is never read.
     pub program: String,
     /// Arguments passed to the program, in order.
     pub args: Vec<String>,
@@ -184,6 +189,9 @@ pub struct PtySession {
     /// default out-of-process host path this stays `Some` and [`wait`](Self::wait)
     /// reaps it inline.
     child: Option<Box<dyn Child + Send + Sync>>,
+    /// How [`spawn`](Self::spawn) resolved the program (GH #380). `None` for a
+    /// child adopted across a supervisor `execve`, which spawned nothing.
+    spawn_program: Option<ResolvedSpawnProgram>,
 }
 
 impl PtySession {
@@ -198,20 +206,32 @@ impl PtySession {
             .openpty(cfg.size)
             .with_context(|| "openpty: failed to allocate pty pair")?;
 
-        let mut cmd = CommandBuilder::new(&cfg.program);
+        // GH #380: a bare harness name missing from the child PATH (the Coder
+        // workspace default omits `~/.local/bin`) resolves through the
+        // well-known install directories instead of failing in portable-pty.
+        let parent_home = std::env::var("HOME").ok();
+        let resolved =
+            resolve_spawn_program(&cfg.program, &cfg.env, &cfg.cwd, parent_home.as_deref())
+                .with_context(|| format!("spawn_command failed for program: {}", cfg.program))?;
+        let mut env = cfg.env;
+        if let Some(dir) = resolved.path_dir_appended.as_deref() {
+            append_path_dir(&mut env, dir);
+        }
+
+        let mut cmd = CommandBuilder::new(&resolved.program);
         for arg in &cfg.args {
             cmd.arg(arg);
         }
         cmd.cwd(&cfg.cwd);
         cmd.env_clear();
-        for (k, v) in &cfg.env {
+        for (k, v) in &env {
             cmd.env(k, v);
         }
 
         let child = pair
             .slave
             .spawn_command(cmd)
-            .with_context(|| format!("spawn_command failed for program: {}", cfg.program))?;
+            .with_context(|| format!("spawn_command failed for program: {}", resolved.program))?;
 
         // Drop the slave immediately: the child now owns the only reference.
         // Without this, master reads block forever on child exit because the
@@ -221,7 +241,14 @@ impl PtySession {
         Ok(Self {
             master: pair.master,
             child: Some(child),
+            spawn_program: Some(resolved),
         })
+    }
+
+    /// How the spawned program was resolved, for the supervisor's launch log.
+    /// `None` for an adopted child.
+    pub fn spawn_program(&self) -> Option<&ResolvedSpawnProgram> {
+        self.spawn_program.as_ref()
     }
 
     /// Resize the pty. Called by `resize.rs` on SIGWINCH (Unix) or
@@ -375,6 +402,7 @@ impl PtySession {
         Ok(Self {
             master: Box::new(master),
             child: Some(Box::new(RawPidChild::new(child_pid))),
+            spawn_program: None,
         })
     }
 }
@@ -911,6 +939,94 @@ mod tests {
         assert!(
             msg.contains("spawn_command failed") || msg.contains("definitely-not-claude"),
             "error should identify the failed program, got: {msg}"
+        );
+    }
+
+    /// GH #380 regression: the route-owned supervisor's child PATH is the
+    /// Coder workspace default, which omits `~/.local/bin`, and the harness is
+    /// spawned by its bare name. The spawn must resolve the installed binary
+    /// there instead of failing with `No viable candidates found in PATH`, and
+    /// the child must see that directory on its PATH.
+    #[test]
+    fn bare_harness_name_missing_from_coder_default_path_spawns_from_user_local_bin() {
+        let home = TempDir::new().unwrap();
+        let local_bin = home.path().join(".local/bin");
+        fs::create_dir_all(&local_bin).unwrap();
+        let program = "agent-doc-gh380-fake-claude";
+        let marker = home.path().join("child-path.txt");
+        let script = local_bin.join(program);
+        fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprintf '%s' \"$PATH\" > '{}'\nexit 0\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let coder_default_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+        let cfg = PtySpawnConfig {
+            program: program.to_string(),
+            args: vec![],
+            cwd: home.path().to_path_buf(),
+            env: minimal_env(&[
+                ("PATH", coder_default_path),
+                ("HOME", home.path().to_str().unwrap()),
+            ]),
+            size: PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        };
+
+        let mut session = PtySession::spawn(cfg).expect("bare harness name must resolve");
+        let resolved = session
+            .spawn_program()
+            .cloned()
+            .expect("spawn records resolution");
+        assert_eq!(
+            resolved.source,
+            crate::spawn_program::SpawnProgramSource::InstallDirFallback
+        );
+        assert_eq!(resolved.program, script.to_str().unwrap());
+        let status = session.wait().expect("wait fake claude");
+        assert!(status.success(), "fake claude failed: {status:?}");
+        let child_path = fs::read_to_string(&marker).expect("child wrote its PATH");
+        assert_eq!(
+            child_path,
+            format!("{coder_default_path}:{}", local_bin.display()),
+            "child PATH must keep the inherited entries first and gain the install dir"
+        );
+    }
+
+    #[test]
+    fn bare_harness_name_not_installed_anywhere_names_searched_dirs() {
+        let home = TempDir::new().unwrap();
+        let cfg = PtySpawnConfig {
+            program: "agent-doc-gh380-not-installed".to_string(),
+            args: vec![],
+            cwd: home.path().to_path_buf(),
+            env: minimal_env(&[("HOME", home.path().to_str().unwrap())]),
+            size: PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        };
+        let err = match PtySession::spawn(cfg) {
+            Ok(_) => panic!("spawn should fail for a harness installed nowhere"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}");
+        assert!(msg.contains("spawn_command failed for program"), "{msg}");
+        assert!(msg.contains("child PATH /usr/bin:/bin"), "{msg}");
+        assert!(
+            msg.contains(home.path().join(".local/bin").to_str().unwrap()),
+            "{msg}"
         );
     }
 

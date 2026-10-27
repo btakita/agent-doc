@@ -1303,6 +1303,51 @@ Both remaining workers have reported, so all four queued items are now done.
 **Still running:** #tmuxguardclaudeuser. The worker is investigating whether the guard should also go into your user-level `~/.claude/settings.json`. It will come back with options for you to choose from, and it won't change your home config.
 
 **agent-doc bug seen this cycle:** the `--done lzcoverageresync` strike didn't end that worker's reported claim. When `#lzspecreadmeci` took that queue position, the claim attached itself to the new row (`followed_from: do [#lzcoverageresync]`). The row then showed `☑️` (worker reported), and the binary told me to forward the new item to the finished worker. I released the stale claim with `queue release --requeue --generation 1` and gave the item a new worker (generation 2).
+
+### Re: #tmuxguardclaudeuser — needs your decision (Grok guard fix landed) — opus-5-5 · 2026-10-27T00:12-04:00
+
+The worker landed one fix that needed no decision from you, and returned a blocking question about your user-level Claude config. It did not touch `~/.claude/settings.json`, `~/.codex/` or any other real config.
+
+**Landed: agent-doc `cd73bda514`, pushed to main and installed.**
+- **The gap:** Grok Build already runs hooks from `~/.claude/settings.json`, and from a trusted project's `.claude/settings.json`. But it names its shell tool `run_terminal_command`, or `Shell` under its Cursor preset. The tmux guard only inspected `Bash`, so in Grok panes it let a `tmux kill-server` through (exit 0).
+- **The fix:** the guard now treats all three names as shell tools and also reads Grok's `toolName`/`toolInput` payload keys. Spec 10 is updated to match.
+- **Tests:**
+  - `cargo test -p agent-doc-hooks-io --lib` passed 82 of 82, including two new tests.
+  - With the fix reduced to `Bash` only, the new guard test fails.
+  - clippy and rustfmt are clean.
+  - The full `make check` was not run.
+- **Installed:** I ran `make install` from the worker's worktree at `cd73bda514`, and the binary was rebuilt at 00:11.
+  - **Live probe:** a Grok-shaped `tmux kill-server` payload against the installed hook now exits **2** (blocked).
+  - VS Code was skipped again because `vsce` isn't installed.
+- **CI:** the latest agent-doc CI run was still pending.
+
+**Other findings (no action taken):**
+- `agent-doc turn-status install --user` already writes the *full* Claude hook set into `~/.claude/settings.json`: the guard, preflight, claude-stop and steering, not only turn-status. This isn't documented. Your current file has only the turn-status entries, left from an older run.
+- **Hook cost:** about 3–4 ms per tool call in a project with no agent-doc setup, and 4–6 ms in agent-loop. The document is parsed on every call, Reads included.
+- **`$HOME` edge case:** `~/.agent-doc/state.db` makes every project under `$HOME` that has no `.agent-doc` of its own resolve to `$HOME` for the coined-id check. The home registry has 0 rows today, so nothing is blocked.
+- **Other harnesses:**
+  - OpenCode has a `tool.execute.before` plugin hook. Nothing is installed for it.
+  - Cursor has `preToolUse`/`beforeShellExecution` in its own `hooks.json` format. Nothing is installed for it either.
+
+[#subagent-operator-request-tmuxguser-scope] subagent operator request
+- *queue_item:* do [#tmuxguardclaudeuser]
+- *kind:* question
+- *blocking:* true
+- *request:* Should agent-doc write the `PreToolUse` guard (`agent-doc hook coined-id-pre-tool-use`) into user-level `~/.claude/settings.json`, and if so, in what scope?
+- *context:* Recommendation is option A. The guard costs about 3–4 ms per tool call in a project with no agent-doc setup and allows everything except a tmux kill aimed at the operator's server. Claude Code runs an identical handler defined in both user and project settings only once, and settings-file hooks also run inside subagents, which is the incident's source. Grok Build reads `~/.claude/settings.json` too, so a user-level entry also covers Grok everywhere (effective since cd73bda514). Risks of writing it: it changes home config for every Claude project; every tool call logs an error if `agent-doc` is not on `PATH`; and under `$HOME`, `~/.agent-doc` makes the coined-id check consult the home registry (empty today). A user-level write already exists today without being documented: `agent-doc turn-status install --user` writes the full Claude hook set there.
+- *choices:*
+  - **A. User-level guard only (recommended):** a bare-root `skill install --harness claude` (and `--all`) also merges only the unmatched `PreToolUse` guard into `~/.claude/settings.json`, like Codex. Preflight, claude-stop and steering stay in the project file. Code: new `install_claude_user_hook_artifacts`, gated like Codex's at `src/skill.rs` around lines 1960/1995/2019. Specs: 10-security drops "does not write the user-level settings"; 09-git-integration and the runbook line 181 get updated. Tests: merge into a fake HOME keeps the operator's matcher entries and runs idempotently.
+  - **B. Opt-in flag:** same as A, but only with something like `skill install --harness claude --user-guard`. Specs and runbook document the flag. The default stays project-only.
+  - **C. Keep project-only and document it:** no install change. Specs say a project without the install is unguarded, and that `turn-status install --user` currently writes the full set at user level (or split that command; see D).
+  - **D. Add-on to any choice: split `turn-status install --user`** so it writes only the turn-status hooks and stops putting preflight, claude-stop and steering in the user layer.
+  - **E. Add-on to any choice: guards for other harnesses.** An OpenCode `tool.execute.before` plugin adapter, user-level `~/.config/opencode/plugins/` or project-level. A Cursor `preToolUse`/`beforeShellExecution` entry in `~/.cursor/hooks.json` (Cursor's own format, exit 2 blocks).
+
+**Other possible follow-ups (not queued):**
+- Skip the coined-id check when the project root is `$HOME`.
+- Read the document only for tools that can write.
+- Add a coined-id commit-message check for Grok's `run_terminal_command`.
+
+The claim stays open (🚧, generation 1, refreshed). I'll send your answer to the same worker.
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  

@@ -17,11 +17,17 @@
 //!
 //! ## Spec
 //! - `run(file, options, effects)` is the sole public entry point.
-//! - Calls `validate_file_claim(file)` to remove dead-pane entries for this specific
-//!   file and log why the re-claim was needed. Explicit claim never runs the global
-//!   resync/prune path, so its latency is not proportional to unrelated live panes.
 //! - Canonicalises the file path to handle CWD drift (e.g. when called from a
-//!   submodule directory).
+//!   submodule directory), then resolves the document's store
+//!   (`project_root_or_file_parent`: the nearest `.agent-doc` project, or the
+//!   canonical parent for a rootless document), the store `start`, the route,
+//!   and sync's recovered-owner bind use. Every registry/actor read and write,
+//!   the config merge, and `claims.log` use that store, never the process cwd's
+//!   (`#claimwrongstore`).
+//! - Calls `validate_file_claim(file, store_root)` to remove dead-pane entries for
+//!   this specific file and log why the re-claim was needed. Explicit claim never
+//!   runs the global resync/prune path, so its latency is not proportional to
+//!   unrelated live panes. A store that does not exist yet is not created.
 //! - Window resolution when `--window` is provided:
 //!   1. Window is alive → use it directly.
 //!   2. Window is dead → search the durable registry for an alive window in the same
@@ -49,10 +55,12 @@
 //! - Scaffolds the canonical managed component sections when the document has none
 //!   and format is `template`. Each `##` heading shares the component opening-tag
 //!   line, and the runnable-work section is titled `## Run`.
-//! - Merges default component configuration into `.agent-doc/config.toml` (under the
-//!   `[components]` section) if the document is template format.
-//! - Registers the session→pane mapping using the pane's own PID (not the short-lived
-//!   CLI process PID) via `sessions::register_with_pid`.
+//! - Merges default component configuration into the document store's
+//!   `.agent-doc/config.toml` (under the `[components]` section) if the document is
+//!   template format.
+//! - Registers the session→pane mapping in the document's store using the pane's own
+//!   PID (not the short-lived CLI process PID) via
+//!   `sessions::register_with_pid_and_cwd_in`.
 //! - Focuses the claimed pane via `tmux select-pane` (cross-window safe); warns but
 //!   continues if the pane is not alive.
 //! - Displays a 3-second tmux notification on the target pane.
@@ -100,6 +108,13 @@
 //!   file contains `<!-- agent:status -->` and `<!-- agent:exchange -->` sections.
 //! - claim_does_not_overwrite_existing_format: document with explicit `agent_doc_format`
 //!   set → claim leaves the format field unchanged.
+//! - test_cli_claim_from_another_project_binds_in_the_documents_project_store /
+//!   test_cli_claim_of_a_rootless_document_binds_in_its_parent_store: a claim run
+//!   from another project's cwd binds (actor + registry + config + `claims.log`) in
+//!   the document's store and writes nothing into the cwd's (`#claimwrongstore`).
+//! - test_cli_claim_from_another_project_sees_the_documents_store_pane_occupant: the
+//!   occupancy check reads the store the bind writes, so a pane bound to another
+//!   document of the same project makes the claim provision instead of evicting it.
 use anyhow::{Context, Result};
 use std::io::Write;
 use std::path::Path;
@@ -318,13 +333,19 @@ pub fn run(
     if isolate {
         return run_isolate(file);
     }
-    // Check for stale claims on this specific file and log if found
-    validate_file_claim(file)?;
-
     // Canonicalize to handle CWD drift (e.g., when CWD is in a submodule)
     let file = &file
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("file not found: {}", file.display()))?;
+    // `#claimwrongstore`: the document's store, never the process cwd's. The
+    // claim's stale cleanup, pane-occupancy check, bind, config merge, and
+    // `claims.log` all use it, as `start`, the route, and sync's recovered-owner
+    // bind (`#syncnorootfallback`) do: the project's `.agent-doc/`, or for a
+    // document with no `.agent-doc` ancestor its canonical parent's.
+    let store_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+
+    // Check for stale claims on this specific file and log if found
+    validate_file_claim(file, &store_root)?;
 
     // Validate --window if provided: if dead, fall back to a live project window
     let effective_window: Option<String> = if let Some(win) = window {
@@ -529,7 +550,10 @@ pub fn run(
     // find existing OR provision new, NEVER commandeer another document's pane."
     let file_str = file.to_string_lossy();
     if let Some(pane_id) = pane_id.as_deref() {
-        let registry = agent_doc_session_registry_io::load().unwrap_or_default();
+        // The store the bind below writes (and evicts this pane's other
+        // entries from), so the occupancy check sees what the bind would
+        // replace (`#claimwrongstore`).
+        let registry = load_existing_store_registry(&store_root).unwrap_or_default();
         for (registry_key, entry) in &registry {
             let same_document = registry_entry_matches_claimed_document(
                 file,
@@ -651,13 +675,16 @@ pub fn run(
             eprintln!("scaffolded default components in {}", file.display());
         }
 
-        // Merge default components into .agent-doc/config.toml if template format
+        // Merge default components into the document's project
+        // `.agent-doc/config.toml` if template format (`#claimwrongstore`: not
+        // the process cwd's project).
         if is_template {
-            let mut proj_cfg = project_config_io::load_project();
+            let config_path = store_root.join(".agent-doc").join("config.toml");
+            let mut proj_cfg = project_config_io::load_project_from(&config_path);
 
             merge_default_template_component_config(&mut proj_cfg);
 
-            if let Err(e) = project_config_io::save_project(&proj_cfg) {
+            if let Err(e) = project_config_io::save_project_to(&proj_cfg, &config_path) {
                 eprintln!("warning: failed to save config with components: {}", e);
             } else {
                 eprintln!("merged default components into .agent-doc/config.toml");
@@ -702,7 +729,8 @@ pub fn run(
         "[claim] using cwd={} for registry entry",
         resolved_cwd.display()
     );
-    sessions::register_with_pid_and_cwd(
+    sessions::register_with_pid_and_cwd_in(
+        &store_root,
         &session_id,
         &pane_id,
         &file_str,
@@ -729,9 +757,7 @@ pub fn run(
 
     // Append to claims log so the skill can display it on next invocation
     let log_line = format!("Claimed {} for pane {}\n", file_str, pane_id);
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
-    let log_path = project_root.join(".agent-doc/claims.log");
+    let log_path = store_root.join(".agent-doc/claims.log");
     if let Some(parent) = log_path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
@@ -784,16 +810,19 @@ pub fn run(
 /// This is intentionally file-scoped: explicit claim must not run the global
 /// resync/prune path or wait on unrelated panes before it fences and mutates the
 /// requested document.
-fn validate_file_claim(file: &Path) -> Result<()> {
+///
+/// `#claimwrongstore`: it cleans the document's store (`store_root`), the one
+/// the claim then binds in, not the process cwd's. A store that does not exist
+/// yet holds no claim and is not created here.
+fn validate_file_claim(file: &Path, store_root: &Path) -> Result<()> {
     let file_str = file.to_string_lossy();
-    // `#testisolationleaks`: no CWD registry for a test outside its scope.
-    if !agent_doc_session_registry_io::cwd_registry_in_test_scope() {
+    let registry_path = agent_doc_session_registry_io::registry_path_in(store_root);
+    if !registry_path.is_file() {
         return Ok(());
     }
-    let registry_path = agent_doc_session_registry_io::registry_path();
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)
         .with_context(|| format!("failed to lock registry before claiming {}", file.display()))?;
-    let registry = agent_doc_session_registry_io::load()
+    let registry = agent_doc_session_registry_io::load_in(store_root)
         .with_context(|| format!("failed to load registry before claiming {}", file.display()))?;
 
     let tmux = agent_doc_tmux_io::configured_tmux();
@@ -834,7 +863,7 @@ fn validate_file_claim(file: &Path) -> Result<()> {
         );
         registry.remove(key);
     }
-    agent_doc_session_registry_io::save(&registry).with_context(|| {
+    agent_doc_session_registry_io::save_in(store_root, &registry).with_context(|| {
         format!(
             "failed to save stale-claim registry cleanup for {}",
             file.display()
@@ -852,6 +881,15 @@ fn validate_file_claim(file: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The session registry in `store_root`, or an empty one when that store does
+/// not exist yet: a read never creates the document's store.
+fn load_existing_store_registry(store_root: &Path) -> Result<tmux_router::Registry> {
+    if !agent_doc_session_registry_io::registry_path_in(store_root).is_file() {
+        return Ok(tmux_router::Registry::default());
+    }
+    agent_doc_session_registry_io::load_in(store_root)
 }
 
 /// Check if a tmux window is alive by listing its panes.

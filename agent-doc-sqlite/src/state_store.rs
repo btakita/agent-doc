@@ -24,7 +24,9 @@ const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 static STATE_DB_CONNECTIONS_FORBIDDEN: AtomicBool = AtomicBool::new(false);
 
-use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState, ActorStoreWrite};
+use agent_doc_controller::actor::{
+    ActorLastTransition, ActorRecord, ActorRevision, ActorState, ActorStoreWrite,
+};
 use agent_doc_state_backbone::{
     EditorViewBindingProjection, StateEvent as BackboneStateEvent, StateFact,
 };
@@ -2868,6 +2870,63 @@ pub fn load_actor_record_from_db(
     .context("failed to load actor record from controller state")
 }
 
+/// [`load_actor_record_from_db`] plus the [`ActorRevision`] of the same row, read
+/// in one statement so a fenced writer decides against exactly that write.
+pub fn load_actor_record_with_revision_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<(Option<ActorRecord>, ActorRevision)> {
+    let loaded = conn
+        .query_row(
+            r#"
+        SELECT
+            d.document_id,
+            d.session_id,
+            d.generation,
+            d.pane_id,
+            d.window_id,
+            d.harness_id,
+            d.actor_state,
+            t.caller,
+            t.reason,
+            t.timestamp,
+            t.prior_generation,
+            t.new_generation,
+            d.last_transition_id AS revision
+        FROM documents d
+        JOIN actor_transitions t ON t.id = d.last_transition_id
+        WHERE d.document_id = ?1
+        "#,
+            params![document_id],
+            |row| {
+                Ok((
+                    actor_record_from_row(row)?,
+                    row.get::<_, Option<i64>>("revision")?,
+                ))
+            },
+        )
+        .optional()
+        .context("failed to load actor record revision from controller state")?;
+    Ok(match loaded {
+        Some((record, last_transition_id)) => (Some(record), ActorRevision { last_transition_id }),
+        None => (None, load_actor_revision(conn, document_id)?),
+    })
+}
+
+/// The [`ActorRevision`] of `document_id`'s row as it stands in `conn`.
+fn load_actor_revision(conn: &Connection, document_id: &str) -> Result<ActorRevision> {
+    let last_transition_id = conn
+        .query_row(
+            "SELECT last_transition_id FROM documents WHERE document_id = ?1",
+            params![document_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()
+        .context("failed to load actor revision from controller state")?
+        .flatten();
+    Ok(ActorRevision { last_transition_id })
+}
+
 pub fn load_actor_store_from_db(conn: &Connection) -> Result<BTreeMap<String, ActorRecord>> {
     let mut stmt = conn.prepare(
         r#"
@@ -5416,6 +5475,35 @@ pub fn store_actor_record_tx(
     store_actor_record_in_tx(
         conn,
         expected_prior_generation,
+        None,
+        record,
+        launch_mode,
+        controller_epoch,
+        None,
+    )
+    .map(|(write, _)| write)
+}
+
+/// `#syncbindingfence`: [`store_actor_record_tx`] fenced on the exact write the
+/// caller decided against, not only its generation.
+///
+/// The generation compare-and-swap misses every commit that keeps the
+/// generation (see [`ActorRevision`]), so a binding writer that decided from a
+/// `Ready` projection would bind over an owner's `Busy` written in between.
+/// This fails with the same `generation compare-and-swap failed` error when the
+/// row's `last_transition_id` moved, so callers re-decide on either race.
+pub fn store_actor_record_fenced_tx(
+    conn: &mut Connection,
+    expected_prior_generation: u64,
+    expected_prior_revision: ActorRevision,
+    record: &ActorRecord,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+) -> Result<ActorStoreWrite> {
+    store_actor_record_in_tx(
+        conn,
+        Some(expected_prior_generation),
+        Some(expected_prior_revision),
         record,
         launch_mode,
         controller_epoch,
@@ -5455,6 +5543,7 @@ pub fn store_actor_lifecycle_record_tx(
     store_actor_record_in_tx(
         conn,
         expected_prior_generation,
+        None,
         record,
         launch_mode,
         controller_epoch,
@@ -5465,6 +5554,7 @@ pub fn store_actor_lifecycle_record_tx(
 fn store_actor_record_in_tx(
     conn: &mut Connection,
     expected_prior_generation: Option<u64>,
+    expected_prior_revision: Option<ActorRevision>,
     record: &ActorRecord,
     launch_mode: Option<String>,
     controller_epoch: Option<i64>,
@@ -5491,6 +5581,18 @@ fn store_actor_record_in_tx(
             expected,
             prior_generation
         );
+    }
+    if let Some(expected) = expected_prior_revision {
+        let found = load_actor_revision(&tx, &record.document_id)?;
+        if found != expected {
+            anyhow::bail!(
+                "controller actor generation compare-and-swap failed for {}: generation {} was rewritten after the decision (expected revision {:?}, found {:?})",
+                record.document_id,
+                prior_generation,
+                expected.last_transition_id,
+                found.last_transition_id
+            );
+        }
     }
     if record.generation < prior_generation {
         anyhow::bail!(
@@ -7997,6 +8099,108 @@ mod tests {
         let (_, released) =
             store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, past_grace)?;
         assert_eq!(released, 1, "the pre-turn-grace sweep still runs");
+        Ok(())
+    }
+
+    /// `#syncbindingfence`: same-generation writes exist (lifecycle, same-pane
+    /// projection, harness writeback, cross-document eviction), so a fence on the
+    /// generation alone misses them. Every actor write path must move the row's
+    /// revision, and a write fenced on a stale revision must fail with the
+    /// generation compare-and-swap error callers re-decide on.
+    #[test]
+    fn every_actor_write_moves_the_revision_and_a_stale_revision_fence_fails() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let actor =
+            |document_id: &str, pane_id: &str, state: ActorState, caller: &str| ActorRecord {
+                document_id: document_id.to_string(),
+                session_id: format!("session-{document_id}"),
+                generation: 3,
+                pane_id: pane_id.to_string(),
+                window_id: "@1".to_string(),
+                harness: "claude".to_string(),
+                state,
+                last_transition: ActorLastTransition {
+                    caller: caller.to_string(),
+                    reason: "test".to_string(),
+                    timestamp: timestamp_secs(),
+                    prior_generation: 3,
+                    new_generation: 3,
+                },
+            };
+        let revision = |conn: &Connection, document_id: &str| {
+            load_actor_record_with_revision_from_db(conn, document_id).map(|(_, revision)| revision)
+        };
+        assert_eq!(revision(&conn, "doc")?, ActorRevision::ABSENT);
+
+        let ready = actor("doc", "%1", ActorState::Ready, "route");
+        store_actor_record_tx(&mut conn, None, &ready, None, None)?;
+        let (loaded, decided) = load_actor_record_with_revision_from_db(&conn, "doc")?;
+        assert_eq!(loaded.as_ref(), Some(&ready));
+        assert!(decided.last_transition_id.is_some());
+
+        // A same-generation owner transition (plain and lifecycle write paths).
+        let busy = actor("doc", "%1", ActorState::Busy, "supervisor");
+        store_actor_record_tx(&mut conn, Some(3), &busy, None, None)?;
+        let after_busy = revision(&conn, "doc")?;
+        assert_ne!(
+            after_busy, decided,
+            "a same-generation write moves the revision"
+        );
+        store_actor_lifecycle_record_tx(&mut conn, Some(3), &busy, None, None, 0)?;
+        let after_lifecycle = revision(&conn, "doc")?;
+        assert_ne!(after_lifecycle, after_busy);
+
+        // A cross-document pane eviction rewrites `doc` at the same generation.
+        store_actor_record_tx(
+            &mut conn,
+            None,
+            &actor("other", "%1", ActorState::Ready, "start"),
+            None,
+            None,
+        )?;
+        let after_eviction = revision(&conn, "doc")?;
+        assert_ne!(
+            after_eviction, after_lifecycle,
+            "an eviction moves the revision"
+        );
+        assert_eq!(
+            load_actor_record_from_db(&conn, "doc")?.unwrap().generation,
+            3,
+            "the eviction kept the generation, so only the revision shows it"
+        );
+
+        // The generation still matches what the projection decided against;
+        // the revision does not, so the fenced write fails and changes nothing.
+        let err = store_actor_record_fenced_tx(
+            &mut conn,
+            3,
+            decided,
+            &actor("doc", "%2", ActorState::Ready, "route"),
+            None,
+            None,
+        )
+        .expect_err("a write fenced on a superseded revision must fail");
+        assert!(
+            err.to_string()
+                .contains("generation compare-and-swap failed"),
+            "callers re-decide on this error: {err}"
+        );
+        assert_eq!(revision(&conn, "doc")?, after_eviction);
+
+        // Fenced on the current revision, the write lands.
+        store_actor_record_fenced_tx(
+            &mut conn,
+            3,
+            after_eviction,
+            &actor("doc", "%2", ActorState::Ready, "route"),
+            None,
+            None,
+        )?;
+        assert_eq!(
+            load_actor_record_from_db(&conn, "doc")?.unwrap().pane_id,
+            "%2"
+        );
         Ok(())
     }
 

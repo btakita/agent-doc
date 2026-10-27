@@ -20,6 +20,10 @@
 //! - Store updates must be monotonic and fail closed on generation regressions.
 //! - Legacy logs with at least one `session_start` but no explicit generation
 //!   markers infer the current generation from the number of starts.
+//! - A generation is not a write identity: lifecycle, same-pane projection,
+//!   harness writeback, and eviction writes keep it. Fenced binding writes
+//!   (`project_binding_fenced_in`, `correct_binding_window_fenced_in`) also
+//!   compare the record's `ActorRevision` (`#syncbindingfence`).
 //!
 //! ## Evals
 //! - `project_binding_stores_initial_generation`
@@ -31,6 +35,7 @@ use agent_doc_supervisor::{OwnershipGeneration, infer_latest_generation_from_con
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
+pub use agent_doc_controller::actor::ActorRevision;
 use agent_doc_controller::actor::{ActorLastTransition, ActorRecord, ActorState};
 use agent_doc_sqlite::state_store;
 
@@ -47,6 +52,9 @@ struct ActorRecordUpdate<'a> {
     reason: &'a str,
     generation: u64,
     expected_prior_generation: Option<u64>,
+    /// `#syncbindingfence`: the exact write the caller decided against. With
+    /// it, a commit that kept the generation also fails the write.
+    expected_prior_revision: Option<ActorRevision>,
 }
 
 fn log_path(file: &Path, session_id: &str) -> Result<Option<PathBuf>> {
@@ -110,10 +118,26 @@ fn load_actor_record_by_document_id(
 fn store_actor_record_in(
     base_dir: &Path,
     expected_prior_generation: Option<u64>,
+    expected_prior_revision: Option<ActorRevision>,
     record: &ActorRecord,
 ) -> Result<ActorRecord> {
     let mut conn = state_store::open_state_db(base_dir)?;
-    state_store::store_actor_record_tx(&mut conn, expected_prior_generation, record, None, None)?;
+    match (expected_prior_generation, expected_prior_revision) {
+        (Some(generation), Some(revision)) => {
+            state_store::store_actor_record_fenced_tx(
+                &mut conn, generation, revision, record, None, None,
+            )?;
+        }
+        _ => {
+            state_store::store_actor_record_tx(
+                &mut conn,
+                expected_prior_generation,
+                record,
+                None,
+                None,
+            )?;
+        }
+    }
     Ok(record.clone())
 }
 
@@ -208,7 +232,12 @@ fn store_record_in(
             new_generation: update.generation,
         },
     };
-    let stored = store_actor_record_in(base_dir, update.expected_prior_generation, &record)?;
+    let stored = store_actor_record_in(
+        base_dir,
+        update.expected_prior_generation,
+        update.expected_prior_revision,
+        &record,
+    )?;
     Ok(stored)
 }
 
@@ -255,6 +284,7 @@ pub fn project_binding_in(
             reason,
             generation,
             expected_prior_generation: Some(prior_generation),
+            expected_prior_revision: None,
         },
     )?;
     Ok(OwnershipGeneration {
@@ -277,6 +307,10 @@ pub struct BindingFence {
     pub prior_generation: u64,
     /// Whether that observed record already named the pane being bound.
     pub prior_names_pane: bool,
+    /// The exact write the caller observed (`#syncbindingfence`). A commit that
+    /// kept the generation (an owner's `Busy`, a `Closed`, a same-pane
+    /// projection) still moves the revision, so the fenced write fails on it.
+    pub prior_revision: ActorRevision,
 }
 
 /// [`project_binding_in`] fenced on the record the caller decided against
@@ -285,9 +319,11 @@ pub struct BindingFence {
 /// `project_binding_in` re-reads the generation it supersedes, so a writer
 /// that decided from an earlier read silently binds over whatever committed
 /// in between: a supervisor's `start_session` landing there was overwritten
-/// as `Ready`. This variant compare-and-swaps on `fence.prior_generation`, so
-/// any commit after the caller's decision fails the write with a generation
-/// compare-and-swap error and the caller re-decides against the newer record.
+/// as `Ready`. This variant compare-and-swaps on `fence.prior_generation` and
+/// `fence.prior_revision`, so any commit after the caller's decision, including
+/// one that kept the generation (`#syncbindingfence`), fails the write with a
+/// generation compare-and-swap error and the caller re-decides against the
+/// newer record.
 #[allow(clippy::too_many_arguments)]
 pub fn project_binding_fenced_in(
     base_dir: &Path,
@@ -318,12 +354,75 @@ pub fn project_binding_fenced_in(
             reason,
             generation,
             expected_prior_generation: Some(fence.prior_generation),
+            expected_prior_revision: Some(fence.prior_revision),
         },
     )?;
     Ok(OwnershipGeneration {
         prior_generation: fence.prior_generation,
         new_generation: generation,
     })
+}
+
+/// The authoritative actor record for `file` with the [`ActorRevision`] it was
+/// committed at, read together (`#syncbindingfence`). A writer that decides from
+/// this read and writes through a fenced write fails on any commit after it.
+pub fn load_record_with_revision_in(
+    base_dir: &Path,
+    file: &str,
+) -> Result<(Option<ActorRecord>, ActorRevision)> {
+    let document_id = canonical_document_id_in(base_dir, file);
+    let conn = state_store::open_state_db(base_dir)?;
+    state_store::load_actor_record_with_revision_from_db(&conn, &document_id)
+}
+
+/// Whether `err` is a fenced actor write that lost to a commit after its
+/// decision: a generation or same-generation revision compare-and-swap failure.
+pub fn binding_fence_lost(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("generation compare-and-swap failed")
+    })
+}
+
+/// Correct the recorded window of an existing binding, fenced on the record the
+/// caller decided against (`#syncbindingfence`).
+///
+/// A window refresh corrects a stale FACT about a binding (`#panewindowbindingrebind`):
+/// the pane, session, generation, and lifecycle state stand exactly as the
+/// observed record had them, and only `window_id` (and the re-derived harness)
+/// change. Writing it through [`project_binding_in`] re-projected the record as
+/// `Ready`, overwriting an owner's `Busy`/`Starting`, and, because it re-reads
+/// the generation, bound the observed pane back over an owner that had moved the
+/// document to another pane in between. This fails with a generation
+/// compare-and-swap error (see [`binding_fence_lost`]) when anything committed
+/// after `observed_revision`.
+pub fn correct_binding_window_fenced_in(
+    base_dir: &Path,
+    file: &str,
+    observed: &ActorRecord,
+    observed_revision: ActorRevision,
+    window_id: &str,
+    caller: &str,
+    reason: &str,
+) -> Result<ActorRecord> {
+    let harness = detect_document_harness_in(base_dir, file);
+    store_record_in(
+        base_dir,
+        file,
+        ActorRecordUpdate {
+            session_id: &observed.session_id,
+            pane_id: &observed.pane_id,
+            window_id,
+            harness: &harness,
+            state: observed.state,
+            caller,
+            reason,
+            generation: observed.generation,
+            expected_prior_generation: Some(observed.generation),
+            expected_prior_revision: Some(observed_revision),
+        },
+    )
 }
 
 pub fn record_session_start_direct(
@@ -354,6 +453,7 @@ pub fn record_session_start_direct(
             reason: "session_start",
             generation,
             expected_prior_generation: Some(generation.saturating_sub(1)),
+            expected_prior_revision: None,
         },
     )
 }
@@ -428,6 +528,7 @@ pub fn set_record_harness_in(
             reason: "agent_harness_switch_writeback",
             generation: current.generation,
             expected_prior_generation: Some(current.generation),
+            expected_prior_revision: None,
         },
     )
 }
@@ -495,6 +596,7 @@ pub fn transition_state_in(
             reason,
             generation: current.generation,
             expected_prior_generation: Some(current.generation),
+            expected_prior_revision: None,
         },
     )
 }

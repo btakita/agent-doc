@@ -643,6 +643,26 @@ deterministic tests.
 - Same-generation lifecycle updates are compare-and-swap guarded by document id,
   session id, pane id, and generation. A stale supervisor adapter or CLI request
   cannot mark a different owner ready, busy, blocked, or closed.
+- Same-generation writes exist and are routine: lifecycle transitions
+  (`Starting`/`Ready`/`Busy`/`WaitingInput`/`Closed`), a binding projection onto
+  the pane the record already names, the supervisor's harness writeback, stale
+  and dead-pane closes, registry prune, and a cross-document pane eviction all
+  commit at the current generation. A generation is therefore not a write
+  identity. Every one of these writes inserts an `actor_transitions` row and
+  points `documents.last_transition_id` at it, so that id (`ActorRevision`) is
+  the record's write identity (`#syncbindingfence`). A binding writer that
+  decides from one read of the actor record and writes later is fenced on BOTH
+  the generation and the revision it read
+  (`state_store::store_actor_record_fenced_tx`): an owner's same-generation
+  `Busy` landing between the decision and the write fails the write with the
+  same `generation compare-and-swap failed` error as a generation bump, and the
+  writer re-decides against the newer record. The one write that does not move
+  the revision is tmux-router's `update_window_for_entry`, which rewrites only
+  `window_id` of a non-closed row: a physical fact that changes no ownership
+  decision. Any new writer that changes a row's pane, session, state, or
+  generation must go through a transition-inserting path; the
+  `every_actor_write_moves_the_revision_and_a_stale_revision_fence_fails` test
+  pins the existing paths.
 - Every accepted command receives a durable dispatch receipt before external
   side effects such as tmux input, supervisor stdin, response write-back, or
   projection emission.

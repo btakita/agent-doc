@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.DumbAware
@@ -19,7 +20,7 @@ internal class DumbAwareGroup(name: String? = null, popup: Boolean = false) :
  * Shows a popup menu with Agent Doc commands when Ctrl+Shift+Alt+D (rebindable) is pressed in a .md file;
  * the "Default for XWin" keymap also keeps Alt+Space (`altshiftmenu`).
  */
-class AgentDocPopupAction : AnAction(), DumbAware {
+class AgentDocPopupAction : ImplAction {
     companion object {
         internal val PRIMARY_ACTION_IDS = listOf(
             "AgentDoc.Submit",
@@ -129,9 +130,5 @@ class AgentDocPopupAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

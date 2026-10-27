@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.DumbAware
 
 /**
  * Action that loads (autostarts) the tmux window for the focused .md session
@@ -24,7 +22,7 @@ import com.intellij.openapi.project.DumbAware
  * call `agent-doc start` directly: that runs the harness as a blocking child
  * inside a restart loop and is not appropriate to invoke from a plugin thread.
  */
-class LoadTmuxWindowAction : AnAction(), DumbAware {
+class LoadTmuxWindowAction : ImplAction {
 
     companion object {
         private val LOG = Logger.getInstance(LoadTmuxWindowAction::class.java)
@@ -40,8 +38,6 @@ class LoadTmuxWindowAction : AnAction(), DumbAware {
         // syncLayout runs on a background thread and is safe to call from EDT.
         SyncLayoutAction.syncLayout(project, notify = true, noAutostart = false)
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

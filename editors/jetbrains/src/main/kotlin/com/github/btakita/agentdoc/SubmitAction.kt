@@ -1,12 +1,10 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import com.intellij.openapi.project.DumbAware
 
 /**
  * Action that routes the active document through the Project Controller editor_route RPC.
@@ -18,7 +16,7 @@ import com.intellij.openapi.project.DumbAware
  * editor does not try to infer whether the tmux session is "already running" or otherwise
  * mid-recovery.
  */
-class SubmitAction : AnAction(), DumbAware {
+class SubmitAction : ImplAction {
 
     companion object {
         private val LOG =
@@ -89,8 +87,6 @@ class SubmitAction : AnAction(), DumbAware {
             }
         }
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

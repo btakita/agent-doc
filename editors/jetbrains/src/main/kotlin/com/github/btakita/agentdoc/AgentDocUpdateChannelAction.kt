@@ -1,14 +1,12 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationInfo
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.updateSettings.impl.UpdateSettings
 
 /** Opts the IDE into Agent Doc's GitHub-hosted update feed, like IdeaVim's EAP toggle. */
-class AgentDocUpdateChannelAction : AnAction(), DumbAware {
+class AgentDocUpdateChannelAction : ImplAction {
     companion object {
         internal const val REPOSITORY_PREFIX =
             "https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-"
@@ -63,6 +61,4 @@ class AgentDocUpdateChannelAction : AnAction(), DumbAware {
                 if (subscribed) "Disable Agent Doc GitHub Updates" else "Enable Agent Doc GitHub Updates"
         }
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 }

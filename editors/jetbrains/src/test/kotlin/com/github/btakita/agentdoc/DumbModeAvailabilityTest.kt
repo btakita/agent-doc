@@ -68,11 +68,17 @@ class DumbModeAvailabilityTest {
     @Test
     fun `every AnAction subclass in the plugin sources is DumbAware`() {
         val sourceRoot = File("src/main/kotlin/com/github/btakita/agentdoc")
-        val declaration = Regex("""(?m)^(?:internal |private )?class (\w+)\b[^{\n]*:\s*AnAction\(\)""")
+        // GH #339 R1: the platform-held actions are the shell forwarders.
+        val declaration =
+            Regex("""(?m)^(?:internal |private |abstract )*class (\w+)\b[^{\n]*:\s*(?:AnAction\(\)|ShellActionForwarder\()""")
         val actionClasses = sourceRoot.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
-            .flatMap { file -> declaration.findAll(file.readText()).map { it.groupValues[1] } }
-            .map { "com.github.btakita.agentdoc.$it" }
+            .flatMap { file ->
+                val pkg = (listOf("com.github.btakita.agentdoc") +
+                    file.parentFile.relativeTo(sourceRoot).invariantSeparatorsPath.split('/').filter { it.isNotEmpty() })
+                    .joinToString(".")
+                declaration.findAll(file.readText()).map { "$pkg.${it.groupValues[1]}" }
+            }
             .filter { AnAction::class.java.isAssignableFrom(load(it)) }
             .toList()
         assertTrue("expected agent-doc action classes in sources", actionClasses.size >= 20)

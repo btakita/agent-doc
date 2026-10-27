@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc.split.backend
 
+import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationKind
@@ -48,6 +49,28 @@ class AuthenticatedSurfaceIngressStateTest {
 
         assertTrue("client-a" to clientA1.connectionGeneration in publisher.retired)
         assertEquals(3, publisher.published.size)
+    }
+
+    /** GH #339 R1: the backend records and logs each connection's frontend receipt once per change. */
+    @Test
+    fun frontendActivationReceiptIsRecordedOncePerChange() = runBlocking {
+        val reported = mutableListOf<Triple<String, Long, ActivationReceipt>>()
+        val state = AuthenticatedSurfaceIngressState(RecordingPublisher()) { client, generation, receipt ->
+            reported += Triple(client, generation, receipt)
+        }
+        val lease = state.open("client-a", "frontend-a")
+        val receipt = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND)
+
+        state.publish("client-a", lease, snapshot("frontend-a", 1))
+        assertEquals(emptyMap(), state.frontendActivationReceipts(), "schema 4 carries no receipt")
+        state.publish("client-a", lease, snapshot("frontend-a", 2).copy(activationReceipt = receipt.encode()))
+        state.publish("client-a", lease, snapshot("frontend-a", 3).copy(activationReceipt = receipt.encode()))
+        state.publish("client-a", lease, snapshot("frontend-a", 4).copy(activationReceipt = "not a receipt"))
+
+        assertEquals(listOf(Triple("client-a", lease.connectionGeneration, receipt)), reported)
+        assertEquals(mapOf("client-a" to receipt), state.frontendActivationReceipts())
+        state.retire("client-a", lease)
+        assertEquals(emptyMap(), state.frontendActivationReceipts())
     }
 
     @Test

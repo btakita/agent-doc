@@ -1,0 +1,25 @@
+# GH #339 shell file set for the modular exact-262/263 packages, added to the
+# classic set in ../jetbrains/shell-sources.txt (the backend module compiles the
+# classic sources). Same rules as that file; paths are relative to this file.
+#
+# The frontend is shell-only (FrontendPolicy SHELL_ONLY): every frontend change
+# is a shell change. The backend's Fleet RPC provider, RPC implementation and
+# ingress service are platform-held, so they are shell too. gradle.properties is
+# in neither set.
+
+[shell]
+src/main/
+shared/src/main/
+shared/build.gradle.kts
+frontend/src/main/
+frontend/build.gradle.kts
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/SurfaceSnapshotRemoteApiProvider.kt
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/BackendSurfaceSnapshotRpcApi.kt
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/AuthenticatedSurfaceIngressService.kt
+backend/build.gradle.kts
+build.gradle.kts
+settings.gradle.kts
+shell-sources.txt
+
+[impl]
+backend/src/main/

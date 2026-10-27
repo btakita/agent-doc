@@ -61,6 +61,8 @@ sourceSets {
     main {
         kotlin.srcDir("../../jetbrains/src/main/kotlin")
         kotlin.exclude("**/PluginLifecycleListener.kt")
+        // GH #339 R1: `agent.doc.shared` owns the one copy, shared with the frontend module.
+        kotlin.exclude("com/github/btakita/agentdoc/shell/receipt/**")
         java.srcDir("../../jetbrains/src/main/java")
     }
     test {

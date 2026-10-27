@@ -44,7 +44,11 @@ class DashboardActionTest {
         val nodes = document.getElementsByTagName("action")
         val action = (0 until nodes.length).map { nodes.item(it) as Element }
             .single { it.getAttribute("id") == "AgentDoc.Dashboard" }
-        assertEquals("com.github.btakita.agentdoc.DashboardAction", action.getAttribute("class"))
+        // GH #339 R1: the platform holds the shell forwarder; DashboardAction is its handler.
+        assertEquals("com.github.btakita.agentdoc.shell.DashboardForwarder", action.getAttribute("class"))
+        assertTrue(
+            AgentDocImplGeneration.ACTION_HANDLERS.getValue("AgentDoc.Dashboard")() is DashboardAction,
+        )
         val groupNodes = action.getElementsByTagName("add-to-group")
         val groups = (0 until groupNodes.length).map { (groupNodes.item(it) as Element).getAttribute("group-id") }
         assertTrue("dashboard must be in the Tools menu: $groups", "ToolsMenu" in groups)

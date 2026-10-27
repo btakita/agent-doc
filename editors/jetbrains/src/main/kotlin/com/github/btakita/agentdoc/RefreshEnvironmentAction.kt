@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -27,7 +25,7 @@ import java.io.File
  *
  * Triggered via the Agent Doc Actions popup (Ctrl+Shift+Alt+D) or Ctrl+Shift+Alt+R.
  */
-class RefreshEnvironmentAction : AnAction(), DumbAware {
+class RefreshEnvironmentAction : ImplAction {
 
     private data class TmuxSession(
         val name: String,
@@ -148,9 +146,5 @@ class RefreshEnvironmentAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

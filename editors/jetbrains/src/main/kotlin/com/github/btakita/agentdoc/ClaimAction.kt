@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
@@ -11,7 +10,6 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.VirtualFile
@@ -79,7 +77,7 @@ internal class ClaimDocumentFence private constructor(
  * surfacing the raw exit-1 text, this action parses the marker and prompts the
  * user with New Pane in This Session / Force Claim / Switch Project Session / Cancel.
  */
-class ClaimAction : AnAction(), DumbAware {
+class ClaimAction : ImplAction {
 
     companion object {
         private val LOG = Logger.getInstance(ClaimAction::class.java)
@@ -372,8 +370,6 @@ class ClaimAction : AnAction(), DumbAware {
             allowCrossSessionPrompt = false,
         )
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

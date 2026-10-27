@@ -293,10 +293,14 @@ nothing in it changes the decision above until its migration step R4 lands.
 
 ### Restart-free implementation generations: shell plus child loader (GH #339 design)
 
-**Status.** This is a design plus a test-only proof of concept
-(`src/test/kotlin/com/github/btakita/agentdoc/shellspike/`). It ships nothing.
-The plugin version, the descriptors, and what users install are unchanged.
-Until migration step R4 below lands with the receipts it names, the
+**Status.** R0 (this design plus the test-only proof of concept in
+`src/test/kotlin/com/github/btakita/agentdoc/shellspike/`) and the first R1
+step have landed. R1 so far moves the actions behind shell forwarders,
+classifies the services, settings and JNA binding as shell, splits the shell
+and implementation digests, and publishes the activation receipt on both JVMs;
+"R1 status" below lists each registration class and what remains. The
+implementation still loads in the plugin classloader, so behaviour is unchanged
+for users. Until migration step R4 below lands with the receipts it names, the
 "Exact-263 decision" above stays in force, and every JetBrains source-digest
 change stays restart-bound. The restart-required prompt remains the fallback
 for every case this design cannot cover.
@@ -486,11 +490,10 @@ rather than acting on a half-upgraded pair.
 
 This design never replaces the module graph. Point (1) of the "Exact-263
 decision" reopen rule ("removal and replacement of the full modular graph")
-therefore has to be restated, when R4 lands, as "the module graph and every
-platform registration are unchanged across the swap, and the retired
-generation is collectable". Point (2), the generation-fenced receipts, applies
-as written. That restatement needs the operator's agreement in the R4 change
-and is not made here.
+therefore has to be restated before R4 can satisfy it. The proposed wording is
+in "Proposed restatement of the Exact-263 reopen rule" below. It is a proposal
+awaiting the operator's agreement and is not adopted; the rule as written above
+stays in force.
 
 #### When a restart is still required
 
@@ -552,7 +555,8 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
 
 - **R0 (this change):** this section and the test-only spike. No shipped
   change and no version bump.
-- **R1, shell in place in the same loader (restart-bound):** add the SPI,
+- **R1, shell in place in the same loader (restart-bound; in progress, see
+  "R1 status"):** add the SPI,
   `GenerationHost`, forwarders for every XML registration, and the generation
   context. Move the implementation behind the SPI, still compiled into the same
   jar and loaded through the shell by the plugin loader. Add the receipt line
@@ -575,6 +579,130 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
   Each move brings its own handoff schema and a collectability test. Pure policy
   keeps moving behind `agent_doc_editor_derive_json`, which stays the cheaper
   lever.
+
+#### R1 status
+
+The first R1 step is restart-bound like every shell change: installing it
+costs one IDE restart. It keeps the frontend shell-only (`SHELL_ONLY`) and
+keeps the restart-required prompt, marker, and diagnostics unchanged.
+
+| Registration class | R1 status | What exists, and what remains |
+|---|---|---|
+| Actions (27 ids) | **done** | Every `plugin.xml` `<action>` names a `com.github.btakita.agentdoc.shell.<Id>Forwarder` (`ShellActionForwarders.kt`). The forwarder owns the id, text, shortcuts, groups, `DumbAware`, and the update thread (`BGT`, which every action already used). It hands the platform's own event to the `ImplAction` that `AgentDocImplGeneration.ACTION_HANDLERS` maps to the id. The 27 former `AnAction` classes now implement `ImplAction`, so no implementation class is an `AnAction`. `ActionWrapperUtil` is not used, because its update copies the delegate's empty template presentation. The 262/263 backend descriptor still copies 26 of the ids, and `AgentDoc.UpdateChannel` stays frontend-owned. |
+| Services and settings | **done (shell classification)** | The three `applicationService`s, the `projectService`, both `applicationConfigurable`s and the settings state classes are shell files in `shell-sources.txt`. The shell's own `ShellGenerationHost` is a light application service. The audit refuses an `@Service` in implementation files. `PluginLifecycleListener.kt`, which declares two of those services, still calls implementation code directly; that goes away with project lifecycle. |
+| Project lifecycle (`<projectListeners>`) | pending | `PluginLifecycleListener` is shell-classified but still runs the implementation inline. It now activates the generation in `projectOpened`. Forwarding `projectOpened`/`projectClosing` must also move the marker-sliced text that `generateModularLifecycle` copies into the 262/263 backend. |
+| Programmatic listeners (Tier A) | pending | The audit measures `message_bus_subscribe=6` and `document_or_vfs_listener=2` in implementation files. |
+| Editor/language extensions | pending | The completion contributor, folding builder, line marker provider, structure view extension, status bar widget factory, notification provider, and the two notification groups still name implementation classes. |
+| Modular extensions and Fleet RPC | partial | The RPC contract carries the receipt (snapshot schema 5). The frontend module, `SurfaceSnapshotRemoteApiProvider`, `BackendSurfaceSnapshotRpcApi` and `AuthenticatedSurfaceIngressService` are shell files in `editors/jetbrains-262/shell-sources.txt`. The ingress service still drives implementation classes (the controller publisher and the layout forwarder) directly. |
+| EDT work | pending | `invoke_later=45`. `GenerationContext` lends no `invokeLater` yet, because a fenced task with nothing behind it would half-wire the class. |
+| Pooled work and threads | pending | `pooled_thread=20 app_executor_util=7 raw_thread=23 executors_new=9 alarm=1`. |
+| Native library (JNA) | **done (shell classification)** | `NativeLib.kt` and `NativeReloadCoordinator.kt` are shell files. |
+| Controller identity | pending | The controller's `EditorRegistration` (Rust, about 34 struct literals across 10 crates) has no receipt field yet, so the backend receipt is logged but not registered. The Kotlin `Register` op and the Rust field land together. |
+| Per-platform-object state | pending | `key_create=3 put_user_data=4`. |
+
+The counts come from `ShellRegistrationOwnershipTest`, whose pending-class
+test prints them as `[shell-audit] implementation registrations still direct:`
+from regex searches of the implementation file set. The design table counted
+the whole source tree, so its numbers are larger. When a class lands, its
+pattern moves from the printed list to an enforced zero.
+
+**Activation receipt as implemented.** `shell/receipt/ActivationReceipt.kt` is
+JDK-only. The classic jar compiles it, and so does the modular
+`agent.doc.shared` module, which keeps one copy, and therefore one JVM instance
+id, for the backend and frontend content modules. It is in its own package so
+that no package is split across those modules. The line is exactly the
+documented `agent_doc_activation_receipt/v1` format. A whitespace or `=`
+character inside a value is replaced with `_`, so a receipt always stays one
+line. Values in R1:
+
+- `role=backend` on classic and on the 262/263 backend; `role=frontend` from
+  the JetBrains Client frontend module.
+- `jvm=` is a UUID stored in the `agent.doc.shell.jvm.instance` system
+  property. Every classloader in one JVM reads the same value, and it survives
+  a dynamic plugin reload.
+- `shell=` is `shell_digest` from the build-time
+  `com/github/btakita/agentdoc/shell/receipt/shell-identity.properties`;
+  `unknown` when a build skipped `generateShellIdentity`.
+- `spi=1` (`SHELL_SPI_VERSION`).
+- Backend: `impl_version=<plugin version> impl_sha256=none generation=1
+  epoch=0`. There is no separate implementation jar before R2, so nothing was
+  verified by sha256. Frontend: `impl_version=none impl_sha256=none
+  generation=0 epoch=0`.
+
+Where it is published:
+
+- The backend's `ShellGenerationHost` logs `[shell] <receipt>` once per plugin
+  load, on first activation from `projectOpened`.
+- The frontend logs `[shell] <receipt>` once per JVM. It sends the receipt in
+  `FrontendSurfaceSnapshot.activationReceipt` (schema 5, never encoded while
+  null), and `forSchema` drops it for a schema-4 backend.
+- The backend records the latest receipt for each connection and logs
+  `[shell] frontend client=<id> connection_generation=<n> <receipt>` when it
+  changes. Nothing fences on receipts yet; that starts at R4.
+
+**Digests.** `editors/jetbrains/shell-sources.txt` (classic) and
+`editors/jetbrains-262/shell-sources.txt` (added for 262/263) list the shell
+file set; implementation is classic `src/main/kotlin` plus modular
+`backend/src/main` outside it. `shell-identity.gradle.kts` hashes each set,
+path plus bytes in path order, into `shell_digest` and `impl_digest`.
+`gradle.properties` is in neither set, because its version and recorded source
+digest change on every release. The digests are computed at build time and
+not yet recorded: `pluginSourceDigest` and `scripts/check_plugin_versions.py`
+still allocate versions from the union, as designed. Recording the shell digest
+for the installer is R3 work.
+
+**Re-measured yield.** The measurement takes the commits that `git log` lists
+between 2026-09-26 and 2026-10-26 under `editors/jetbrains` and
+`editors/jetbrains-262`. Under this classification, 110 of the 184 commits
+that touched plugin sources or build files changed only implementation files.
+The design's rule, applied to the same commits, gives 115 of 174; its earlier
+figure of 138 of 187 used a different selection of commits. The 10 extra
+commits in the total are build-script-only changes, which now count as shell.
+Five commits that the design's rule called implementation-only now touch shell
+files: `AuthenticatedSurfaceIngressService.kt` accounts for 3 and a
+`build.gradle.kts` for 3, and one commit has both. Moving
+`AuthenticatedSurfaceIngressState` out of the service file would bring the
+ingress share back.
+
+**Not yet present.** There is no `verifyImplJar` while no implementation jar
+exists; `ShellRegistrationOwnershipTest` is the R1 audit in its place. The
+forwarders do not yet wrap implementation failures as `PluginException`, which
+matters only once a child loader defines the implementation (R2).
+
+**What remains of R1, in order:**
+
+1. Project lifecycle and Tier A programmatic listeners: forward
+   `projectOpened`/`projectClosing` and each topic through shell forwarders,
+   and retarget `generateModularLifecycle` to the moved text.
+2. Editor and language extensions: shell forwarders that build the Swing
+   components, plus the platform-cache refreshes listed above.
+3. EDT and pooled work: `GenerationContext.invokeLater` with `FencedTask`, and
+   per-generation executors and `CoroutineScope`.
+4. Controller identity: a receipt field on the Rust `EditorRegistration` (serde
+   default) and the Kotlin `Register` op, published together.
+5. Per-platform-object `Key`s created by the shell, and the shell-side Fleet
+   RPC delegation into the generation.
+
+#### Proposed restatement of the Exact-263 reopen rule (awaiting operator agreement; not adopted)
+
+**Proposal, for the operator's agreement.** The "Exact-263 decision" rule
+above still applies as written. Under this design the module graph is never
+removed or replaced, so point (1) could never be met. The proposed wording:
+
+> This boundary may change only with tests proving both (1) that across an
+> implementation swap the modular module graph, the plugin descriptor, and
+> every platform registration (actions, extensions, listeners, services, RPC
+> providers) are unchanged, and the retired implementation generation's
+> classloader becomes unreachable and is collected; and (2)
+> generation-fenced backend/frontend activation receipts for the same verified
+> artifact. A backend-only success is not acceptance evidence.
+
+Point (2) is unchanged. The restated point (1) is what the swap protocol
+asserts: forwarders registered once per IDE run, retirement through the
+generation slot, and the `impl_generation_leak` watcher. Adopting it would
+change the rule's text only. The receipts, the fence, and the R4 tests it
+names would still have to exist before any exact-263 release skipped a
+restart.
 
 #### What the spike proves, and what it does not
 

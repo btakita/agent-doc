@@ -1,13 +1,11 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.project.DumbAware
 
 /**
  * Force-claim the focused .md file, overriding the binding invariant.
@@ -16,7 +14,7 @@ import com.intellij.openapi.project.DumbAware
  * already claimed by another document. Use when the normal claim provisions
  * a new pane but you want to reuse the existing one.
  */
-class ForceClaimAction : AnAction(), DumbAware {
+class ForceClaimAction : ImplAction {
 
     companion object {
         private val LOG = Logger.getInstance(ForceClaimAction::class.java)
@@ -92,8 +90,6 @@ class ForceClaimAction : AnAction(), DumbAware {
             }
         }
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

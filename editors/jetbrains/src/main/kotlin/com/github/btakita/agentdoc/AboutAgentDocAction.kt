@@ -1,15 +1,13 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ide.CopyPasteManager
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import java.awt.datatransfer.StringSelection
@@ -173,7 +171,7 @@ internal fun nativeAboutFacts(snapshot: NativeAboutSnapshot): Pair<AgentDocBuild
  * --json` (falling back to `--version` for older binaries). The native library is the generation
  * already loaded; About never loads or reloads it.
  */
-class AboutAgentDocAction : AnAction(), DumbAware {
+class AboutAgentDocAction : ImplAction {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val projectRoot = TerminalUtil.cleanupProjectRoot(project)
@@ -255,8 +253,6 @@ class AboutAgentDocAction : AnAction(), DumbAware {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible = e.project != null
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     private companion object {
         private val LOG = Logger.getInstance(AboutAgentDocAction::class.java)

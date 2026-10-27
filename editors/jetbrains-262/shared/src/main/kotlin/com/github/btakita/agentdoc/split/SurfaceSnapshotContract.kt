@@ -15,13 +15,14 @@ import kotlinx.serialization.Serializable
 /**
  * Current snapshot schema. Schema 2 added measured window bounds. Schema 3 added the frontend's
  * frozen compatibility column vector; schema 4 adds the focused editor document proved by the
- * frontend component tree (GH #368). The hot-reloaded native library remains the live grouping
- * authority over the bounds.
+ * frontend component tree (GH #368). Schema 5 adds the frontend JVM's GH #339 activation receipt.
+ * The hot-reloaded native library remains the live grouping authority over the bounds.
  */
-const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 4
+const val SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 5
 const val GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 2
 const val FRONTEND_LAYOUT_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 3
 const val FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 4
+const val ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 5
 
 /** The oldest snapshot schema a backend still accepts (a frontend that predates geometry). */
 const val LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION: Int = 1
@@ -169,6 +170,7 @@ data class FrontendSurface(
 )
 
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class FrontendSurfaceSnapshot(
     val schemaVersion: Int = SURFACE_SNAPSHOT_SCHEMA_VERSION,
     val frontendInstanceId: String,
@@ -178,16 +180,28 @@ data class FrontendSurfaceSnapshot(
     val presentationCapability: FrontendPresentationCapability =
         FrontendPresentationCapability.SNAPSHOT_ONLY,
     val surfaces: List<FrontendSurface>,
+    /**
+     * Schema 5: the frontend JVM's `agent_doc_activation_receipt/v1` line (GH #339). The backend
+     * logs it and, from R4, fences frontend-dependent work on it. Never encoded while null, so a
+     * schema-4 backend never sees the key.
+     */
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val activationReceipt: String? = null,
 )
 
 /**
- * The same snapshot in an older schema the backend accepts. Schema 2 carries bounds but no
- * frontend column vector; schema 1 carries neither.
+ * The same snapshot in an older schema the backend accepts. Schema 4 carries no activation
+ * receipt; schema 2 carries bounds but no frontend column vector; schema 1 carries neither.
  */
 fun FrontendSurfaceSnapshot.forSchema(version: Int): FrontendSurfaceSnapshot {
     require(isSupportedSurfaceSnapshotSchema(version)) { "unsupported surface snapshot schema $version" }
     return copy(
         schemaVersion = version,
+        activationReceipt = if (version >= ACTIVATION_RECEIPT_SURFACE_SNAPSHOT_SCHEMA_VERSION) {
+            activationReceipt
+        } else {
+            null
+        },
         surfaces = surfaces.map { surface ->
             surface.copy(
                 windows = if (version >= GEOMETRY_SURFACE_SNAPSHOT_SCHEMA_VERSION) {

@@ -23,11 +23,10 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c`; tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels). JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. GH #378 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). Post-release `origin/main` is `d1155e8943` (unreleased, installed locally; JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 need an IDE restart, VS Code 0.2.88, Zed 0.1.2): the in-IDE restart-required prompt, no-argument `/agent-doc` via `agent-doc document`, `agent-doc queue repair-stale-completion`, id-less `agent:run` / `agent:loop` named by kind, the GH #376 measured-route ordering fix, the GH #339 shell design with stage R1 complete and the adopted Exact-263 reopen rule, route-outcome / exchange-prefix-repair / session-command-outcome moved into the hot-reloaded native library (JetBrains and VS Code), an edit-proportional native replica flush that also folds remote ops incrementally plus a windowed Kotlin flush-prepare step, the JetBrains editor-tree focus listener deferred until the split tree exists, todo `id=` always winning, the editor frontend/backend parity matrix, VS Code stale-VSIX prompt + measured layout + workspace extensionKind + activation receipt + code-server/Remote-SSH install, the VS Code koffi owned-string free crash fix and koffi shipped in the VSIX for 7 platforms, Zed registration identity + in-place binary handoff + document-only routing, and a PreToolUse guard against agents killing the live tmux server.
+Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c`; tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels). JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). Post-release `origin/main` is `c0a4e87ed7` (unreleased, installed locally; JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 need an IDE restart, VS Code 0.2.88, Zed 0.1.2): the in-IDE restart-required prompt, no-argument `/agent-doc` via `agent-doc document`, `agent-doc queue repair-stale-completion`, id-less `agent:run` / `agent:loop` named by kind, the GH #376 measured-route ordering fix, the GH #339 shell design with stage R1 complete and the adopted Exact-263 reopen rule, route-outcome / exchange-prefix-repair / session-command-outcome moved into the hot-reloaded native library (JetBrains and VS Code), an edit-proportional native replica flush that also folds remote ops incrementally plus a windowed Kotlin flush-prepare step, the JetBrains editor-tree focus listener deferred until the split tree exists, todo `id=` always winning, the editor frontend/backend parity matrix, VS Code stale-VSIX prompt + measured layout + workspace extensionKind + activation receipt + code-server/Remote-SSH install, the VS Code koffi owned-string free crash fix and koffi shipped in the VSIX for 7 platforms, Zed registration identity + in-place binary handoff + document-only routing, a PreToolUse guard against agents killing the live tmux server, the GH #380 supervisor harness-binary install-dir fallback, GH #381 project-preset queue heads draining as presets, and queue claims that end on a strike and never follow across queues (`#claimfollowstruck`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -893,10 +892,10 @@ The worker worktrees and the integration worktree are removed; their branches st
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#vscodenativeceiling]
-- do [#claimclosureallqueues]
-- do [#headlessharnesspath]
-- do [#claimpanecasrace]
+- 🚧 [#subagent:vscodenativeceiling#1] do [#vscodenativeceiling]
+- 🚧 [#subagent:claimclosureallqueues#1] do [#claimclosureallqueues]
+- 🚧 [#subagent:headlessharnesspath#1] do [#headlessharnesspath]
+- 🚧 [#subagent:claimpanecasrace#1] do [#claimpanecasrace]
 - ~~do [#claimfollowstruck]~~
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/380~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~#gh-fix https://github.com/btakita/agent-doc/issues/381~~ — auto-struck: answered this cycle (#ftstrike)

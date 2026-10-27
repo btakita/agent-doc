@@ -30,9 +30,10 @@
 //!   unrelated live panes. A store that does not exist yet is not created.
 //! - Window resolution when `--window` is provided:
 //!   1. Window is alive → use it directly.
-//!   2. Window is dead → search the durable registry for an alive window in the same
-//!      project CWD via `find_alive_project_window`. Falls through to no-window
-//!      behaviour if none found.
+//!   2. Window is dead → search the document store's durable registry for an alive
+//!      window whose entry `cwd` is the document's pane cwd (`resolve_pane_cwd`) via
+//!      `find_alive_project_window`, never the process cwd's registry
+//!      (`#cwdfallbackrest`). Falls through to no-window behaviour if none found.
 //!   3. No `--window` → no window scoping.
 //! - Ensures the session UUID exists in frontmatter via `frontmatter::ensure_session`;
 //!   writes the UUID back to disk if it was freshly generated.
@@ -113,6 +114,9 @@
 //!   test_cli_claim_of_a_rootless_document_binds_in_its_parent_store: a claim run
 //!   from another project's cwd binds (actor + registry + config + `claims.log`) in
 //!   the document's store and writes nothing into the cwd's (`#claimwrongstore`).
+//! - test_cli_claim_dead_window_fallback_reads_the_documents_store_never_the_cwd: a dead
+//!   `--window` falls back to the document store's live window, never the cwd project's
+//!   (`#cwdfallbackrest`).
 //! - test_cli_claim_from_another_project_sees_the_documents_store_pane_occupant: the
 //!   occupancy check reads the store the bind writes, so a pane bound to another
 //!   document of the same project makes the claim provision instead of evicting it.
@@ -358,7 +362,7 @@ pub fn run(
                 "warning: window {} is dead, searching for alive window",
                 win
             );
-            find_alive_project_window()
+            find_alive_project_window(file, &store_root)
         }
     } else {
         None
@@ -555,7 +559,8 @@ pub fn run(
         // The store the bind below writes (and evicts this pane's other
         // entries from), so the occupancy check sees what the bind would
         // replace (`#claimwrongstore`).
-        let registry = load_existing_store_registry(&store_root).unwrap_or_default();
+        let registry =
+            agent_doc_session_registry_io::load_existing_in(&store_root).unwrap_or_default();
         for (registry_key, entry) in &registry {
             let same_document = registry_entry_matches_claimed_document(
                 file,
@@ -885,29 +890,29 @@ fn validate_file_claim(file: &Path, store_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The session registry in `store_root`, or an empty one when that store does
-/// not exist yet: a read never creates the document's store.
-fn load_existing_store_registry(store_root: &Path) -> Result<tmux_router::Registry> {
-    if !agent_doc_session_registry_io::registry_path_in(store_root).is_file() {
-        return Ok(tmux_router::Registry::default());
-    }
-    agent_doc_session_registry_io::load_in(store_root)
-}
-
 /// Check if a tmux window is alive by listing its panes.
 fn is_window_alive(window: &str) -> bool {
     let tmux = agent_doc_tmux_io::configured_tmux();
     agent_doc_tmux_io::list_panes(&tmux, Some(window), "#{pane_id}").is_ok()
 }
 
-/// Search the durable registry for a live window belonging to the current project.
+/// Search the document store's durable registry for a live window of the
+/// document's project.
 ///
-/// Iterates all entries in the session registry. For each entry whose `cwd`
-/// matches the current working directory and has a non-empty `window` field,
-/// checks if the window is alive. Returns the first alive match.
-fn find_alive_project_window() -> Option<String> {
-    let registry = agent_doc_session_registry_io::load().ok()?;
-    let cwd = std::env::current_dir().ok()?.to_string_lossy().to_string();
+/// Iterates the entries of `store_root`'s registry (the store this claim binds
+/// in). For each entry whose `cwd` is the pane cwd a bind of `file` records
+/// (`resolve_pane_cwd`, the document's nearest git root, as claim and the
+/// route record it) and whose `window` is set, checks if the window is alive.
+/// Returns the first alive match.
+///
+/// `#cwdfallbackrest`: never the process cwd's registry or cwd. Read from the
+/// cwd, a `--window` fallback run from another project adopted a window of
+/// that project's panes, and a store that does not exist yet was created.
+fn find_alive_project_window(file: &Path, store_root: &Path) -> Option<String> {
+    let registry = agent_doc_session_registry_io::load_existing_in(store_root).ok()?;
+    let cwd = agent_doc_git_io::dirs::resolve_pane_cwd(file)
+        .to_string_lossy()
+        .to_string();
     let result = find_alive_window_in_registry(
         registry
             .iter()

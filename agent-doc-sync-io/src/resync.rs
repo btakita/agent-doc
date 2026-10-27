@@ -13,7 +13,9 @@
 //!   problem classes: `InStash` (pane parked in a stash window), `WrongProcess`
 //!   (pane running a non-agent process such as `corky watch`), `WrongSession`
 //!   (pane's tmux session differs from the document's `tmux_session` frontmatter
-//!   field, or from `project_config_io::project_tmux_session()` when frontmatter field is absent),
+//!   field, or, when that field is absent, from the `tmux_session` pin of the
+//!   document's store (`project_tmux_session_for_root`), never the process cwd's,
+//!   `#cwdfallbackrest`),
 //!   `NoLiveOwner` (alive registered pane no longer proves ownership of its
 //!   document), and `WrongWindow` (panes for the same tmux session are scattered
 //!   across multiple non-stash windows, determined by majority-window vote).
@@ -191,12 +193,7 @@ fn resync_document_is_main_eligible(
     if document.trim().is_empty() {
         return true;
     }
-    let path = Path::new(document);
-    let path = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        project_root.join(path)
-    };
+    let path = resync_entry_document_path(project_root, document);
     eligibility.permits(&path.canonicalize().unwrap_or(path).to_string_lossy())
 }
 
@@ -262,11 +259,36 @@ fn resolve_target_file(file: &Path) -> Result<PathBuf> {
     Ok(resolved.canonicalize().unwrap_or(resolved))
 }
 
-/// Resolve the `.agent-doc` project root for a target file.
-/// Falls back to the current working directory when no `.agent-doc/` ancestor is found.
-fn resolve_registry_root(target: &Path) -> PathBuf {
-    agent_doc_project_root_io::project_root_containing(target)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+/// Resolve the store a targeted resync reads and repairs for `target` (a
+/// canonical, existing document): the nearest `.agent-doc` project, or for a
+/// document with no `.agent-doc` ancestor its canonical parent directory
+/// ([`agent_doc_project_root_io::project_root_or_file_parent`]), the store
+/// `start`, claim, the route and sync's recovered-owner bind use.
+///
+/// `#cwdfallbackrest`: never the process cwd. The fallback this replaces
+/// repaired a rootless document against whatever project the command ran in,
+/// launching that project's controller and pruning its registry, where no
+/// reader of the document looks.
+fn resolve_registry_root(target: &Path) -> Result<PathBuf> {
+    agent_doc_project_root_io::project_root_or_file_parent(target)
+}
+
+/// Whether the store at `base_dir` exists yet (has a session registry). A
+/// targeted read of a store that does not exist finds no binding and must not
+/// create it (`#rootlessstorecreate`).
+fn store_registry_exists(base_dir: &Path) -> bool {
+    agent_doc_session_registry_io::registry_path_in(base_dir).is_file()
+}
+
+/// A registry entry's document as an absolute path: entries are stored
+/// relative to their store, never to the process cwd.
+fn resync_entry_document_path(project_root: &Path, document: &str) -> PathBuf {
+    let path = Path::new(document);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    }
 }
 
 fn filter_registry_for_target(
@@ -294,9 +316,11 @@ fn registry_entry_session_id<'a>(key: &'a str, entry: &'a tmux_router::RegistryE
 
 fn kill_redundant_associated_stash_panes(
     tmux: &Tmux,
+    base_dir: &Path,
     redundant: &[agent_doc_tmux::AssociatedPaneCandidate],
 ) -> usize {
-    let registry = agent_doc_session_registry_io::load().unwrap_or_default();
+    // The target document's store, never the process cwd's (`#cwdfallbackrest`).
+    let registry = agent_doc_session_registry_io::load_existing_in(base_dir).unwrap_or_default();
     let mut killed = 0;
 
     for candidate in redundant {
@@ -377,7 +401,9 @@ fn recover_target_document_pane_in(
         return Ok(TargetDocumentFixOutcome::default());
     };
 
-    let preferred_window = project_config_io::project_tmux_session()
+    // `#cwdfallbackrest`: the target document store's pin, never the process
+    // cwd project's.
+    let preferred_window = project_config_io::project_tmux_session_for_root(base_dir)
         .as_deref()
         .and_then(|session| tmux.active_window(session));
     let candidates = crate::sync::filter_associated_panes_for_document(
@@ -389,9 +415,13 @@ fn recover_target_document_pane_in(
         agent_doc_tmux::AssociatedPaneResolution::None => Ok(TargetDocumentFixOutcome::default()),
         agent_doc_tmux::AssociatedPaneResolution::Selected { winner, redundant } => {
             let mut outcome = TargetDocumentFixOutcome::default();
-            if agent_doc_session_registry_io::lookup_in(base_dir, &session_id)?.as_deref()
-                != Some(winner.pane_id.as_str())
-            {
+            // A store with no registry yet binds nothing; never create it here.
+            let registered_pane = if store_registry_exists(base_dir) {
+                agent_doc_session_registry_io::lookup_in(base_dir, &session_id)?
+            } else {
+                None
+            };
+            if registered_pane.as_deref() != Some(winner.pane_id.as_str()) {
                 crate::sync::reregister_recovered_owner(
                     tmux,
                     target,
@@ -405,7 +435,7 @@ fn recover_target_document_pane_in(
                     winner.pane_id
                 );
             }
-            let killed = kill_redundant_associated_stash_panes(tmux, &redundant);
+            let killed = kill_redundant_associated_stash_panes(tmux, base_dir, &redundant);
             outcome.killed_redundant_stash_panes = killed;
             if killed > 0 {
                 eprintln!(
@@ -597,38 +627,9 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
 
         // Check 2: Is the pane in the expected tmux session?
 
-        let frontmatter_session = match std::fs::read_to_string(&entry.file) {
-            Ok(content) => match frontmatter::parse(&content) {
-                Ok((fm, _)) => fm.tmux_session,
-                Err(_) => None,
-            },
-            Err(_) => None,
-        };
-
-        // Use frontmatter `tmux_session` if present; otherwise fall back to project config.
-        // This ensures cross-session drift is detected even when documents lack a
-        // `tmux_session` frontmatter field (the common case).
-        //
-        // Multi-session projects (`tmux_sessions`, GH #17): an unbound pane in
-        // any allowed session is in the right place; a bound pane belongs to
-        // its binding; a pane in a disallowed session belongs to the allowed
-        // pin (or the first allowed session).
-        let session_policy = crate::sync::tmux_session_policy_for_scope(&[], Some(&entry.file));
-        let expected_session = if session_policy.is_multi_session() {
-            let actual = tmux.pane_session(&entry.pane).ok();
-            agent_doc_sync::start_session_target(
-                &session_policy,
-                actual.as_deref(),
-                frontmatter_session.as_deref(),
-                project_config_io::project_tmux_session().as_deref(),
-            )
-            .ok()
-            .flatten()
-            .map(|target| target.session)
-            .or_else(|| session_policy.allowed().first().cloned())
-        } else {
-            frontmatter_session.or_else(project_config_io::project_tmux_session)
-        };
+        let expected_session = expected_session_for_entry(project_root, &entry.file, || {
+            tmux.pane_session(&entry.pane).ok()
+        });
 
         if let Some(ref expected) = expected_session {
             match tmux.pane_session(&entry.pane) {
@@ -708,6 +709,57 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
     }
 
     issues
+}
+
+/// The tmux session a registered pane of `document` (a registry entry of the
+/// store at `project_root`) is expected to be in, or `None` when nothing pins
+/// it. `pane_session` observes the pane's actual session, consulted only in a
+/// multi-session project.
+///
+/// The document's `tmux_session` frontmatter wins; otherwise its store's
+/// `tmux_session` pin. This ensures cross-session drift is detected even when
+/// documents lack a `tmux_session` frontmatter field (the common case).
+/// Multi-session projects (`tmux_sessions`, GH #17): an unbound pane in any
+/// allowed session is in the right place; a bound pane belongs to its binding;
+/// a pane in a disallowed session belongs to the allowed pin (or the first
+/// allowed session).
+///
+/// `#cwdfallbackrest`: the document, its store's policy and its store's pin
+/// are resolved from the entry (a relative entry is relative to its store,
+/// `project_store_for_doc` names the store), never the process cwd's project.
+/// Read from the cwd, `resync` of a project run from inside another one
+/// judged every pane against that project's pin and killed or relocated the
+/// panes it called `WrongSession`.
+fn expected_session_for_entry(
+    project_root: &Path,
+    document: &str,
+    pane_session: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let entry_document = resync_entry_document_path(project_root, document);
+    let entry_store = project_config_io::project_store_for_doc(&entry_document)
+        .unwrap_or_else(|| project_root.to_path_buf());
+    let store_tmux_session = project_config_io::project_tmux_session_for_root(&entry_store);
+    let frontmatter_session = std::fs::read_to_string(&entry_document)
+        .ok()
+        .and_then(|content| frontmatter::parse(&content).ok().map(|(fm, _)| fm))
+        .and_then(|fm| fm.tmux_session);
+
+    let session_policy = crate::sync::tmux_session_policy_for_root(&entry_store);
+    if session_policy.is_multi_session() {
+        let actual = pane_session();
+        agent_doc_sync::start_session_target(
+            &session_policy,
+            actual.as_deref(),
+            frontmatter_session.as_deref(),
+            store_tmux_session.as_deref(),
+        )
+        .ok()
+        .flatten()
+        .map(|target| target.session)
+        .or_else(|| session_policy.allowed().first().cloned())
+    } else {
+        frontmatter_session.or(store_tmux_session)
+    }
 }
 
 fn registered_pane_still_owns_file(tmux: &Tmux, key: &str, file: &str, pane: &str) -> bool {
@@ -1273,7 +1325,24 @@ pub fn run(fix: bool, relocate_session: Option<&str>, target_file: Option<&Path>
 
     if let Some(file) = target_file {
         let target = resolve_target_file(file)?;
-        let base_dir = resolve_registry_root(&target);
+        let base_dir = resolve_registry_root(&target)?;
+        if !store_registry_exists(&base_dir) {
+            // `#cwdfallbackrest` / `#rootlessstorecreate`: the document's store
+            // does not exist yet, so it holds no binding to prune or repair.
+            // Neither its controller nor its registry is created by a read;
+            // `--fix` may still re-register a live owner pane through the fenced
+            // recovered-owner bind, which creates the store as `start` would.
+            if fix && recover_target_document_pane_in(&tmux, &target, &base_dir)?.reregistered_owner
+            {
+                return Ok(());
+            }
+            eprintln!(
+                "No registered sessions found for {} (its store {} has no registry yet).",
+                target.display(),
+                base_dir.display()
+            );
+            return Ok(());
+        }
         agent_doc_controller_io::project_controller::ensure_controller_running(
             &base_dir,
             agent_doc_controller::status::LaunchMode::Lazy,
@@ -2829,7 +2898,7 @@ mod tests {
         let doc = sub.join("tasks/test.md");
         std::fs::write(&doc, "# test\n").unwrap();
 
-        let root = resolve_registry_root(&doc);
+        let root = resolve_registry_root(&doc).unwrap();
         assert_eq!(
             root,
             sub.canonicalize().unwrap_or(sub.clone()),
@@ -2846,13 +2915,94 @@ mod tests {
         let doc = dir.path().join("tasks/test.md");
         std::fs::write(&doc, "# test\n").unwrap();
 
-        let root = resolve_registry_root(&doc);
+        let root = resolve_registry_root(&doc).unwrap();
         assert_eq!(
             root,
             dir.path()
                 .canonicalize()
                 .unwrap_or(dir.path().to_path_buf()),
             "should resolve to the superproject .agent-doc root"
+        );
+    }
+    /// `#cwdfallbackrest`: a registered pane's expected tmux session is its
+    /// document's store pin (or frontmatter), resolved from the entry, never the
+    /// process cwd project's pin. A relative entry is relative to its store; a
+    /// rootless entry's store has no pin until it is created.
+    #[test]
+    fn expected_session_for_entry_reads_the_entry_store_never_the_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let project = base.join("doc-project");
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(project.join("tasks")).unwrap();
+        std::fs::write(
+            project.join(".agent-doc/config.toml"),
+            "tmux_session = \"doc-pin\"\n",
+        )
+        .unwrap();
+        std::fs::write(project.join("tasks/doc.md"), "# doc\n").unwrap();
+        std::fs::write(
+            project.join("tasks/bound.md"),
+            "---\ntmux_session: bound\n---\n# bound\n",
+        )
+        .unwrap();
+        let loose = base.join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        let rootless = loose.join("rootless.md");
+        std::fs::write(&rootless, "# rootless\n").unwrap();
+        let no_pane = || -> Option<String> { panic!("single-session never observes the pane") };
+
+        assert_eq!(
+            expected_session_for_entry(&project, "tasks/doc.md", no_pane).as_deref(),
+            Some("doc-pin"),
+            "a relative entry resolves against its store and reads that store's pin"
+        );
+        assert_eq!(
+            expected_session_for_entry(
+                Path::new("."),
+                &project.join("tasks/doc.md").to_string_lossy(),
+                no_pane
+            )
+            .as_deref(),
+            Some("doc-pin"),
+            "an absolute entry reads its own store's pin whatever the scanned root"
+        );
+        assert_eq!(
+            expected_session_for_entry(&project, "tasks/bound.md", no_pane).as_deref(),
+            Some("bound"),
+            "frontmatter outranks the store pin"
+        );
+        assert_eq!(
+            expected_session_for_entry(&loose, &rootless.to_string_lossy(), no_pane),
+            None,
+            "a rootless document's store has no pin"
+        );
+        assert!(!loose.join(".agent-doc").exists());
+    }
+    /// `#cwdfallbackrest`: a document with no `.agent-doc` ancestor resolves to
+    /// its canonical parent's store (the one `start`, claim, the route and
+    /// sync's recovered-owner bind use), never the process cwd's project, and
+    /// resolving it creates no store.
+    #[test]
+    fn resolve_registry_root_of_a_rootless_document_is_its_parent_never_the_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        let loose = dir.path().join("loose/deep");
+        std::fs::create_dir_all(&loose).unwrap();
+        let doc = loose.join("rootless.md");
+        std::fs::write(&doc, "# rootless\n").unwrap();
+        let doc = doc.canonicalize().unwrap();
+        assert!(
+            agent_doc_project_root_io::project_root_containing(&doc).is_none(),
+            "fixture document must have no .agent-doc ancestor"
+        );
+
+        let root = resolve_registry_root(&doc).unwrap();
+        assert_eq!(root, loose.canonicalize().unwrap());
+        assert_ne!(root, std::env::current_dir().unwrap());
+        assert!(!store_registry_exists(&root));
+        assert!(
+            !root.join(".agent-doc").exists(),
+            "resolving the store must not create it"
         );
     }
     #[test]

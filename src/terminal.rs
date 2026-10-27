@@ -6,8 +6,13 @@
 //!   have no terminal open yet.
 //! - Session resolution order:
 //!   1. Explicit `--session` flag, if provided.
-//!   2. Scan the durable registry for any live pane belonging to this project; reuse its session.
+//!   2. Scan the document store's durable registry for any live pane; reuse its session.
 //!   3. Default session name `"0"`.
+//! - The store, its multi-session policy (`tmux_sessions`), its registry and its
+//!   `tmux_session` pin are the **document's** (`project_store_for_doc`: the nearest
+//!   `.agent-doc` project, or a rootless document's canonical parent), never the
+//!   process cwd's (`#cwdfallbackrest`). A store that does not exist yet has no
+//!   registry and no pin, and reading it creates nothing.
 //! - `tmux_session` frontmatter field is deprecated and never consulted during resolution.
 //! - When no live session is found, the session name falls back to the project
 //!   `tmux_session` binding in `.agent-doc/config.toml` before the `"0"` default,
@@ -39,6 +44,8 @@
 //! - resolve_session_name_uses_explicit_flag: explicit flag "correct" → returns "correct" ignoring frontmatter
 //! - resolve_session_name_prefers_project_binding: no flag, project binding "ws" → returns "ws"
 //! - resolve_session_name_explicit_beats_project_binding: flag "correct" + binding "ws" → returns "correct"
+//! - resolve_target_session_reads_the_document_store_pin_never_the_cwd: stopped tmux → creates the
+//!   document store's pin (`"0"` for a rootless document), never the cwd's; creates no store
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
@@ -125,10 +132,15 @@ fn resolve_target_session(
     file: &Path,
     explicit: Option<&str>,
 ) -> Result<SessionTarget> {
+    // `#cwdfallbackrest`: the document's store, never the process cwd's.
+    let store = agent_doc_project_config_io::project_store_for_doc(file);
     // Multi-session projects (`tmux_sessions`, GH #17): a document bound to an
     // allowed session targets that session, and every target must be allowed.
     let file_arg = file.to_string_lossy().into_owned();
-    let policy = agent_doc_sync_io::sync::tmux_session_policy_for_scope(&[], Some(&file_arg));
+    let policy = store
+        .as_deref()
+        .map(agent_doc_sync_io::sync::tmux_session_policy_for_root)
+        .unwrap_or_default();
     let binding = agent_doc_sync_io::sync::scoped_document_tmux_session_binding(
         &policy,
         &[],
@@ -154,7 +166,7 @@ fn resolve_target_session(
 
     if !tmux.running() {
         // tmux not running at all — create with the best session name we have
-        let name = resolve_session_name(file, explicit)?;
+        let name = resolve_session_name(store.as_deref(), explicit)?;
         policy.require(&name, agent_doc_sync::LayoutSessionAuthority::ScopedProject)?;
         return Ok(SessionTarget::Create(name));
     }
@@ -164,8 +176,8 @@ fn resolve_target_session(
         return Ok(classify_session(tmux, name));
     }
 
-    // Scan the durable registry for any live session hosting this project's panes
-    if let Some(active_session) = find_active_project_session(tmux)?
+    // Scan the document store's registry for any live session hosting its panes
+    if let Some(active_session) = find_active_project_session(tmux, store.as_deref())?
         && policy.allows(&active_session)
     {
         eprintln!(
@@ -176,7 +188,7 @@ fn resolve_target_session(
     }
 
     // No active session found — create with default name
-    let name = resolve_session_name(file, None)?;
+    let name = resolve_session_name(store.as_deref(), None)?;
     policy.require(&name, agent_doc_sync::LayoutSessionAuthority::ScopedProject)?;
     Ok(SessionTarget::Create(name))
 }
@@ -190,13 +202,18 @@ fn classify_session(tmux: &Tmux, name: &str) -> SessionTarget {
     }
 }
 
-/// Scan the durable registry for any live pane, and return the tmux session that pane belongs to.
+/// Scan the document store's durable registry for any live pane, and return the
+/// tmux session that pane belongs to.
 ///
 /// This handles the "stale frontmatter" case: if the frontmatter says session "foo"
 /// but "foo" doesn't exist, we check if there's any OTHER session with live agent-doc
-/// panes for this project.
-fn find_active_project_session(tmux: &Tmux) -> Result<Option<String>> {
-    let registry = agent_doc_session_registry_io::load()?;
+/// panes for this project. `store` is the document's (`#cwdfallbackrest`); a
+/// store that does not exist yet has no panes and is not created.
+fn find_active_project_session(tmux: &Tmux, store: Option<&Path>) -> Result<Option<String>> {
+    let Some(store) = store else {
+        return Ok(None);
+    };
+    let registry = agent_doc_session_registry_io::load_existing_in(store)?;
     for entry in registry.values() {
         if tmux.pane_alive(&entry.pane) {
             // This pane is alive — find which tmux session it belongs to
@@ -293,17 +310,20 @@ fn terminal_policy_for_file(
 
 /// Resolve the tmux session name from (in order):
 /// 1. Explicit --session flag
-/// 2. Project `tmux_session` binding in `.agent-doc/config.toml`
+/// 2. The document store's `tmux_session` binding in `.agent-doc/config.toml`
 ///    (written by `agent-doc session set`, auto-rebound by `start` when the
-///    configured session is dead)
+///    configured session is dead), never the process cwd project's
+///    (`#cwdfallbackrest`)
 /// 3. Default "0"
 ///
-/// Note: `tmux_session` frontmatter is deprecated and no longer consulted — the
-/// unused `_file` parameter is what makes that structurally true.
-fn resolve_session_name(_file: &Path, explicit: Option<&str>) -> Result<String> {
+/// Note: `tmux_session` frontmatter is deprecated and no longer consulted: only
+/// the document's store, not the document, reaches this function.
+fn resolve_session_name(store: Option<&Path>, explicit: Option<&str>) -> Result<String> {
     Ok(resolve_session_name_from(
         explicit,
-        agent_doc_project_config_io::project_tmux_session().as_deref(),
+        store
+            .and_then(agent_doc_project_config_io::project_tmux_session_for_root)
+            .as_deref(),
     ))
 }
 
@@ -504,10 +524,63 @@ mod tests {
     #[test]
     fn resolve_session_name_uses_explicit_flag() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let doc = tmp.path().join("test.md");
-        std::fs::write(&doc, "---\ntmux_session: wrong-session\n---\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        std::fs::write(
+            tmp.path().join(".agent-doc/config.toml"),
+            "tmux_session = \"workspace\"\n",
+        )
+        .unwrap();
 
-        let name = resolve_session_name(&doc, Some("correct")).unwrap();
+        let name = resolve_session_name(Some(tmp.path()), Some("correct")).unwrap();
         assert_eq!(name, "correct", "explicit flag should take precedence");
+        let name = resolve_session_name(Some(tmp.path()), None).unwrap();
+        assert_eq!(name, "workspace", "the store's pin beats the '0' fallback");
+    }
+
+    /// `#cwdfallbackrest`: with no tmux server running, `terminal` creates the
+    /// session its document's store pins, never the process cwd project's pin.
+    /// A rootless document's store has no pin until it is created, so it gets
+    /// `"0"`; resolving either creates no store and no registry.
+    #[test]
+    fn resolve_target_session_reads_the_document_store_pin_never_the_cwd() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let project = base.join("doc-project");
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::write(
+            project.join(".agent-doc/config.toml"),
+            "tmux_session = \"doc-pin\"\n",
+        )
+        .unwrap();
+        let tracked = project.join("doc.md");
+        std::fs::write(&tracked, "# tracked\n").unwrap();
+        let loose = base.join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        let rootless = loose.join("rootless.md");
+        std::fs::write(&rootless, "# rootless\n").unwrap();
+        // A socket no server listens on: `has-session` fails, so tmux is not
+        // running and nothing reaches a live server.
+        let tmux = Tmux::default().with_server_socket(Some(format!(
+            "agent-doc-terminal-store-test-{}-absent",
+            std::process::id()
+        )));
+        assert!(!tmux.running(), "fixture tmux server must not be running");
+
+        match resolve_target_session(&tmux, &tracked, None).unwrap() {
+            SessionTarget::Create(name) => assert_eq!(name, "doc-pin"),
+            _ => panic!("expected Create for a stopped tmux server"),
+        }
+        match resolve_target_session(&tmux, &rootless, None).unwrap() {
+            SessionTarget::Create(name) => assert_eq!(name, "0"),
+            _ => panic!("expected Create for a stopped tmux server"),
+        }
+        assert!(
+            !loose.join(".agent-doc").exists(),
+            "resolving a rootless document's session must not create its store"
+        );
+        assert!(
+            !project.join(".agent-doc/state.db").exists(),
+            "resolving the session must not create the store's registry"
+        );
     }
 }

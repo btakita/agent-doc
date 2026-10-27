@@ -336,6 +336,11 @@ may republish the retained intent, but remains subject to the same rule.
   exempted from the document store's; a rootless document's store has no pin until it is
   created. Every document-scoped config read (`load_project_for_doc`) resolves the same store
   ([Config](06-config.md#project-config)).
+- A dead `--window W` falls back to a live window from the same store's registry, an entry whose
+  `cwd` is the pane cwd a bind of the document records (`resolve_pane_cwd`, the document's nearest
+  git root), never the process cwd's registry or cwd (`#cwdfallbackrest`). A claim run from
+  inside another project never adopts that project's window; a store with no registry yet offers
+  no window and is not created (`load_existing_in`).
 - `--new-pane` is a provisioning mode, not a force/reuse mode. It bypasses current-pane resolution and cross-session validation, provisions exactly one pane in the project's configured tmux session (or the normal auto-detected session when unconfigured), and binds the new document there. It conflicts with `--position`, `--window`, `--pane`, `--force`, and `--isolate`, so it cannot silently replace or migrate the operator's current pane/window.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.
 - The binding invariant is enforced **across project/submodule roots**, not just against the document's own store registry. A pane owned by a document rooted in another project/submodule does not appear in that store's rows, so `claim` also inspects the requested pane's live process tree: if it runs an agent-doc/codex owner session for a different document, `claim` provisions a new pane instead of commandeering it.
@@ -964,6 +969,19 @@ thread or in a detached periodic timer.
 
 - Prunes dead panes from the registry, reaps idle stash windows, and reports orphaned windows.
 - In scoped mode, it must limit repair to the target document and fail closed if ownership is still ambiguous.
+- Scoped mode (`resync FILE`, `fix FILE`, and the route's targeted fix) reads and repairs the
+  **document's** store, never the process cwd's (`#cwdfallbackrest`): the nearest `.agent-doc`
+  project of the canonical document, or for a document with no `.agent-doc` ancestor its
+  canonical parent directory (`project_root_or_file_parent`), the store `start`, claim, the route
+  and sync's recovered-owner bind use. The controller it ensures, the registry it prunes, the
+  stash-pane registration check, and the `tmux_session` pin that picks the preferred window are
+  that store's. A store with no registry yet holds no binding: resync reports that, launches no
+  controller, and creates nothing; only `--fix` (or the route) may re-register a live owner pane,
+  through the fenced recovered-owner bind, which creates the store as `start` would.
+- `WrongSession` detection judges each registered pane against its document's `tmux_session`
+  frontmatter, else the `tmux_session` pin and `tmux_sessions` policy of the entry's own store
+  (`project_store_for_doc` of the entry, a relative entry resolved against its store), never the
+  process cwd project's pin (`#cwdfallbackrest`).
 - `--fix` may deregister wrong-process panes, move wrong-window panes into stash, and either kill or relocate wrong-session panes, but only when no stronger live-owner proof keeps the current pane authoritative.
 - Stash cleanup must preserve recoverable agent panes that still prove ownership of a registered document or still host a live supervisor socket.
 - Resync repairs registry/liveness state; it does not infer editor visibility from

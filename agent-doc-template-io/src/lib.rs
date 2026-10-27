@@ -524,7 +524,18 @@ fn load_max_lines_configs(
         .collect()
 }
 
-/// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
+/// The document's project config: the caller's already-loaded config, else
+/// [`agent_doc_project_config_io::load_project_for_doc`], the config of the
+/// store that owns `file`.
+///
+/// `#cwdfallbackrest`: this used to walk up from the document for the nearest
+/// `.agent-doc/config.toml` on its own, ignoring the root ceiling
+/// (`AGENT_DOC_ROOT_CEILING_DIRECTORIES`), and fell back to the process cwd's
+/// project when it found none. A rootless document run from inside another
+/// project patched with that project's `[components]` modes, and a document
+/// below a ceiling read a config above it. The shared resolver is
+/// ceiling-aware, reads a rootless document's own store (defaults until that
+/// store has a config), and creates nothing.
 fn load_project_from_doc(
     file: &Path,
     project_config: Option<&Arc<ProjectConfig>>,
@@ -532,19 +543,7 @@ fn load_project_from_doc(
     if let Some(project_config) = project_config {
         return Arc::clone(project_config);
     }
-    let start = file.parent().unwrap_or(file);
-    let mut current = start;
-    loop {
-        let candidate = current.join(".agent-doc").join("config.toml");
-        if candidate.exists() {
-            return Arc::new(agent_doc_project_config_io::load_project_from(&candidate));
-        }
-        match current.parent() {
-            Some(p) if p != current => current = p,
-            _ => break,
-        }
-    }
-    Arc::new(agent_doc_project_config_io::load_project())
+    Arc::new(agent_doc_project_config_io::load_project_for_doc(file))
 }
 
 /// Default mode for a component by name.

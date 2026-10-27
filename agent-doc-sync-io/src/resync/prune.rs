@@ -35,6 +35,11 @@ pub(crate) fn prune_targeted_in(
     target: &Path,
     base_dir: &Path,
 ) -> Result<Vec<(String, tmux_router::RegistryEntry)>> {
+    // A store that does not exist yet has nothing to prune and is not created
+    // by pruning it (`#rootlessstorecreate`).
+    if !store_registry_exists(base_dir) {
+        return Ok(Vec::new());
+    }
     let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
@@ -55,7 +60,18 @@ pub fn apply_targeted_fix_for_route(
     target_file: &Path,
 ) -> Result<TargetDocumentFixOutcome> {
     let target = resolve_target_file(target_file)?;
-    let base_dir = resolve_registry_root(&target);
+    let base_dir = resolve_registry_root(&target)?;
+    if !store_registry_exists(&base_dir) {
+        // `#cwdfallbackrest`: no store yet means no binding to prune or repair;
+        // only a live owner pane may be re-registered (fenced, creating the
+        // store as `start` would).
+        let recovered = recover_target_document_pane_in(tmux, &target, &base_dir)?;
+        return Ok(TargetDocumentFixOutcome {
+            reregistered_owner: recovered.reregistered_owner,
+            killed_redundant_stash_panes: recovered.killed_redundant_stash_panes,
+            ..TargetDocumentFixOutcome::default()
+        });
+    }
     let main_layout_eligibility =
         agent_doc_controller_io::project_controller::main_layout_eligibility(&base_dir)?;
     if !resync_document_is_main_eligible(

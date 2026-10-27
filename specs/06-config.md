@@ -275,6 +275,18 @@ read creates nothing. Only process-level reads with no document (`load_project`,
 `describe-image` of an image outside any project (an image is not a session
 document and has no store) use the cwd's project.
 
+The same store answers every other document-scoped read (`#cwdfallbackrest`):
+template patching's `[components]` modes and `max_lines` (`agent-doc-template-io`
+calls `load_project_for_doc`; it no longer walks up for `.agent-doc/config.toml`
+on its own, which ignored the root ceiling `AGENT_DOC_ROOT_CEILING_DIRECTORIES`
+and fell back to the cwd's project), `terminal`'s session policy, registry scan
+and `tmux_session` pin, scoped `resync`/`fix`, and claim's `--window` fallback
+([Session and tmux commands](07-session-tmux-commands.md)). Discovery is the
+ceiling-aware walk (`agent_doc_fs::find_project_root`), so a project above a
+ceiling never owns a document below it. A registry read of a store that does not
+exist yet (`agent_doc_session_registry_io::load_existing_in`) answers empty and
+creates nothing.
+
 Fields:
 - `default_agent` — the default agent backend for documents in this project. It
   overrides the global `default_agent`; document frontmatter and an explicit

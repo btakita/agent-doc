@@ -1091,17 +1091,58 @@ Nothing was technically blocking it. Generations 2 and 3 were workers that disap
 3. `#lzauditbranchprune` (recommended): delete the superseded audit branches in py and cpp.
 
 `#lzcorecireachaudit` is complete.
+
+### Re: do [#tmuxkittyterminal] — root cause and fix — opus-5.5 · 2026-10-26T23:40-04:00
+
+**Root cause:** a background subagent ran a tmux cleanup command that killed your live tmux server. agent-doc's own tmux code was not involved.
+
+- **The command:** at 22:26:47, a subagent of the agent-doc-bugs session (cleaning up its code-server test in the vscoderemote worktree) ran `TMUX_TMPDIR=$CS/home/tmux tmux ls; TMUX_TMPDIR=$CS/home/tmux tmux kill-server`.
+- **Why it hit your server:** tmux picks a server from `-L`/`-S` first, then `$TMUX`, and only then `TMUX_TMPDIR`. The subagent inherited `$TMUX` from your pane, so the `TMUX_TMPDIR` prefix did nothing.
+- **Proof:** that `tmux ls` printed your real sessions 0, 1 and 2, and the tool exited 137. Every Claude, Codex and subagent transcript stops at 22:26:48, and agent-doc logged the panes dead at 22:26:59.
+- **Why kitty went too:** i3 launches it as `kitty -e tmux`, so it exits with its client.
+- **Ruled out:** no OOM kill, no tmux or kitty core dump, no kernel errors, no leaked process or session pile-up. agent-doc's ops.log shows no tmux activity from 22:15 to 22:26.
+
+**The fix** is pushed fast-forward to agent-doc `main`: `edcfce58d0` and `bc3da0e033`, 21 files.
+
+- **Hook guard:** a new guard (`agent-doc-hooks-io/src/tmux_live_server_guard.rs`) runs first in the existing `coined-id-pre-tool-use` PreToolUse hook. It refuses, with exit 2:
+  - tmux `kill*`, and `respawn*`/`unlink*` with `-k`, unless the command clearly targets a private server;
+  - `pkill`/`killall` patterns matching tmux or kitty.
+
+  A sourced env file doesn't count as private. The refusal message names the server the command would reach and gives the safe form.
+- **Subagent brief:** every dispatched subagent's prompt now requires both `env -u TMUX` and `-L <unique-name>` on every tmux command, and forbids touching your server.
+- **Docs:** specs `10-security`, `12-deterministic-simulation` and `07-orchestration-commands`, plus `respond.md` and its mirrors.
+
+**Verification:**
+- **Worker:** `make check` exit 0 (11789 passed, 182 skipped) on the previous base. After the final rebase (about 15 unrelated vscode/jetbrains commits) it ran a targeted check: clippy clean and the touched crates' suites green.
+- **New tests:** 12 guard tests, a brief test, and a hook-binary test that feeds in the incident command.
+- **Live tmux test:** a throwaway-server test reproduces the incident and shows the safe forms leave a second server alive.
+- **Mutation check:** making the guard trust `TMUX_TMPDIR` over `TMUX` turned 2 tests red.
+- **Install:** I ran `make install` at `bc3da0e033` (exit 0) and `agent-doc admin recycle`.
+- **Live check against the installed binary:** the incident command is now blocked (exit 2, with the guidance message). `env -u TMUX tmux -L lzsafe-1 kill-server` passes (exit 0).
+
+**Correction to my earlier brief:** it suggested `TMUX_TMPDIR` alone as isolation, which is exactly the trap that caused this. I sent the worker a correction mid-task, and the brief template now requires both safeguards.
+
+**Follow-up:** I added `#tmuxguardclaudeinstall`. `skill install` wires this hook only for Codex; agent-loop has it for Claude only because `.claude/settings.json` was hand-edited, so other Claude projects aren't protected yet.
+
+**Left alone deliberately:**
+- seven stale `agent-doc-run-owner-test-*` sockets in `/tmp/tmux-1000/` from Oct 25;
+- any code-server or chromium leftovers from the vscoderemote smoke test;
+- `freehold-host.service` and the corky timers, which keep failing because their binaries are missing.
+
+The tmux-router `IsolatedTmux` already passes `-L`, so it is safe as is.
+
+`#tmuxkittyterminal` is complete.
 <!-- agent:boundary:e199c066 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 🚧 [#subagent:tmuxkittycrash#1] do [#tmuxkittyterminal]
-- ~~do [#lzcorecireachaudit]: Why is this blocked?~~
-- do [#lzcoverageresync]
-- do [#lzbindingevidenceci]
-- do [#lzauditbranchprune]
+- ~~do [#tmuxkittyterminal]~~
+- 📥 do [#lzcoverageresync]
+- 📥 do [#lzbindingevidenceci]
+- 📥 do [#lzauditbranchprune]
+- do [#tmuxguardclaudeinstall]
 <!-- /agent:queue -->
 
 ## Todo
@@ -1113,10 +1154,10 @@ Nothing was technically blocking it. Generations 2 and 3 were workers that disap
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmuxguardclaudeinstall] Make agent-doc skill install wire the coined-id-pre-tool-use PreToolUse hook (which now carries the live-tmux-server guard) for Claude Code projects, not only Codex; today agent-loop has it only because .claude/settings.json was hand-edited, so other Claude projects' subagents can still kill the operator's tmux server.
 - [ ] [#lzcoverageresync] Restore lazily-spec's local make check: run node scripts/sync-coverage.mjs in lazily-spec and commit the regenerated README coverage tables in all nine Core bindings (drift since spec c30bd8f; spec CI misses it because it does not check out binding READMEs).
 - [ ] [#lzbindingevidenceci] Add a per-binding Core evidence gate to each of the nine bindings' CI (check-core-evidence.mjs --binding <id> --generate-reports --require-all), so stale-handle-style evidence drift is caught on push instead of only on a manual cohort-qualification dispatch (py/cpp drift went unnoticed four days).
 - [ ] [#lzauditbranchprune] [recommended] Delete superseded branches audit/core-ci-reach-20261022 and task/lzcorecireachaudit-20261022 in lazily-py and lazily-cpp.
-- [ ] [#tmuxkittyterminal] tmux + the kitty terminal crashed. Fix agent-doc causes. This may have to do with reaping tmux sessions?
 <!-- /agent:backlog -->
 
 ## Review

@@ -22,7 +22,7 @@ import {
 } from './native.js';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 
 // ESM has no `__dirname`; derive it from the module URL.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -354,6 +354,22 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
 
     it('round-trips owned strings through the built library without crashing', { skip: libPath ? false : 'no built libagent_doc (cargo build --lib)' }, () => {
         const nativeUrl = pathToFileURL(path.join(__dirname, 'native.js')).href;
+        // `#vscodenativeceiling`: resolve a document inside a hermetic fixture
+        // project, never this checkout. The checkout itself carries no
+        // `.agent-doc/`; under `make check` the root ceiling
+        // (`AGENT_DOC_ROOT_CEILING_DIRECTORIES=<TMPDIR>:<workspace>`) stops the
+        // walk at the workspace, and a fresh CI checkout has no project above it,
+        // so resolving `native.js` returned null there and only passed where an
+        // ambient project (e.g. `~/.agent-doc`) sat above the checkout. A null
+        // result also frees nothing, so the `FfiProjectPath` owned strings this
+        // test exists for went unexercised. The fixture lives below `TMPDIR`
+        // (the walk examines its start directory, so a ceiling entry at
+        // `TMPDIR` never hides it) and always yields both owned strings.
+        const fixtureRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agent-doc-native-ffi-')));
+        fs.mkdirSync(path.join(fixtureRoot, '.agent-doc'));
+        fs.mkdirSync(path.join(fixtureRoot, 'docs'));
+        const fixtureDoc = path.join(fixtureRoot, 'docs', 'session.md');
+        fs.writeFileSync(fixtureDoc, '# session\n');
         const script = `
             const n = await import(${JSON.stringify(nativeUrl)});
             const doc = '<!-- agent:exchange -->\\nhi\\n<!-- /agent:exchange -->\\n';
@@ -365,15 +381,20 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
                 out.nodePatches = n.applyNodePatches(doc, []);
                 out.nodePatchesError = n.applyNodePatches(doc, [{ bogus: 1 }]);
                 out.deriveError = n.editorDeriveJson('{}');
-                out.resolved = n.resolveProjectPath(${JSON.stringify(path.join(__dirname, 'native.js'))});
+                out.resolved = n.resolveProjectPath(${JSON.stringify(fixtureDoc)});
             }
             process.stdout.write('RESULT ' + JSON.stringify(out) + '\\n');
         `;
-        const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-            env: { ...process.env, AGENT_DOC_LIB_PATH: libPath },
-            encoding: 'utf-8',
-            timeout: 60_000,
-        });
+        let child: SpawnSyncReturns<string>;
+        try {
+            child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+                env: { ...process.env, AGENT_DOC_LIB_PATH: libPath },
+                encoding: 'utf-8',
+                timeout: 60_000,
+            });
+        } finally {
+            fs.rmSync(fixtureRoot, { recursive: true, force: true });
+        }
         assert.strictEqual(child.signal, null, `child died by ${child.signal}: ${child.stderr}`);
         assert.strictEqual(child.status, 0, child.stderr);
         assert.doesNotMatch(child.stderr, /refusing to free/);
@@ -387,6 +408,6 @@ describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)
         assert.match(out.preserveHead, /agent:boundary:/);
         assert.strictEqual(out.nodePatchesError, null);
         assert.strictEqual(out.deriveError, null);
-        assert.strictEqual(out.resolved?.relativePath?.endsWith('native.js'), true);
+        assert.deepStrictEqual(out.resolved, { projectRoot: fixtureRoot, relativePath: path.join('docs', 'session.md') });
     });
 });

@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.DumbAware
 
 /**
  * #s81q: a "Kill Supervisor" menu command that runs
@@ -14,7 +12,7 @@ import com.intellij.openapi.project.DumbAware
  * ancestor, so this is safe to run from an editor terminal (not the supervisor's
  * own pane). Mirrors [RestartAgentAction] / [StopAgentAction].
  */
-class KillSupervisorAction : AnAction(), DumbAware {
+class KillSupervisorAction : ImplAction {
     private val log = Logger.getInstance(KillSupervisorAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -28,9 +26,5 @@ class KillSupervisorAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

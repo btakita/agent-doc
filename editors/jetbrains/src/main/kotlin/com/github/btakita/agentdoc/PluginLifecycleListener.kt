@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.intellij.openapi.application.ApplicationActivationListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.Disposable
@@ -32,6 +33,9 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Prompt for the IDE restart an agent-doc install leaves pending (GH #299/#339): the
         // modular packages cannot be swapped into a running IDE, and nothing else told the IDE.
         PluginRestartRequiredNotifier.ensureStarted()
+        // GH #339 R1: activate the implementation generation behind the shell forwarders, which
+        // logs this JVM's `agent_doc_activation_receipt/v1` line once per plugin load.
+        ShellGenerationHost.getInstance().activate()
         // `lifecycle` is this initialization's own scope, not the project service itself, so a
         // dynamic-unload release can drop every listener below and a later projectOpened -- the
         // still-live generation's restore after an aborted upgrade (GH #94) -- rebuilds them.

@@ -1,17 +1,15 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.vfs.VirtualFile
 import java.io.File
 import java.util.concurrent.CompletableFuture
@@ -41,7 +39,7 @@ internal object AgentDocSessionFiles {
  * Runs immediately (no debounce) and clears the dedup cache so
  * automatic sync picks up subsequent changes.
  */
-class SyncLayoutAction : AnAction(), DumbAware {
+class SyncLayoutAction : ImplAction {
 
     companion object {
         private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(SyncLayoutAction::class.java)
@@ -722,10 +720,6 @@ class SyncLayoutAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }
 

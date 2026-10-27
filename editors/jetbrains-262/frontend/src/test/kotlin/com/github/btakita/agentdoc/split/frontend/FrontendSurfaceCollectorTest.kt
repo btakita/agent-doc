@@ -120,7 +120,7 @@ class FrontendSurfaceCollectorTest {
         assertEquals(first, retained)
     }
 
-    /** Schema 4 carries editor-focus proof; older peers receive only known fields. */
+    /** Schema 5 carries the activation receipt; older peers receive only known fields. */
     @Test
     fun snapshotSchemaNegotiationFallsBackToSchemaOneForAnOldBackend() {
         assertEquals(1, negotiatedSnapshotSchema(null))
@@ -128,7 +128,8 @@ class FrontendSurfaceCollectorTest {
         assertEquals(2, negotiatedSnapshotSchema(2))
         assertEquals(3, negotiatedSnapshotSchema(3))
         assertEquals(4, negotiatedSnapshotSchema(4))
-        assertEquals(4, negotiatedSnapshotSchema(9))
+        assertEquals(5, negotiatedSnapshotSchema(5))
+        assertEquals(5, negotiatedSnapshotSchema(9))
         assertEquals(1, negotiatedSnapshotSchema(0))
     }
 

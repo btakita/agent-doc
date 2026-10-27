@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import com.intellij.openapi.project.DumbAware
 
 /**
  * Action that runs `agent-doc fix <file>` for the focused markdown document.
@@ -13,7 +11,7 @@ import com.intellij.openapi.project.DumbAware
  * Use this when a tracked document needs the deterministic repair path without
  * leaving the editor for a terminal.
  */
-class FixDocumentAction : AnAction(), DumbAware {
+class FixDocumentAction : ImplAction {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -22,8 +20,6 @@ class FixDocumentAction : AnAction(), DumbAware {
         TerminalUtil.fixDocument(project, file)
         TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "fix-document")
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)

@@ -1,0 +1,34 @@
+# GH #339 shell file set for the classic package (editors/jetbrains/SPEC.md
+# "Restart-free implementation generations"). Paths are relative to this file.
+# An entry ending in "/" is a directory prefix; any other entry is one file.
+#
+# A file is shell when it matches a [shell] entry, otherwise implementation when
+# it matches an [impl] entry, otherwise neither. `generateShellIdentity` hashes
+# each set into `shell_digest` / `impl_digest`, and the activation receipt
+# reports `shell=<shell_digest>`. A shell change always needs an IDE restart.
+#
+# gradle.properties is deliberately in neither set: it carries the package
+# version and source digest, which change on every release.
+
+[shell]
+src/main/kotlin/com/github/btakita/agentdoc/shell/
+# JNA binding: JNA caches interface proxies and native code retains callbacks.
+src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt
+src/main/kotlin/com/github/btakita/agentdoc/NativeReloadCoordinator.kt
+# <projectListeners> owner, plus the XML project/application services it declares.
+src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt
+# PersistentStateComponent state binds to its class; configurables build Swing.
+src/main/kotlin/com/github/btakita/agentdoc/AgentDocColorSettings.kt
+src/main/kotlin/com/github/btakita/agentdoc/AgentDocColorConfigurable.kt
+src/main/kotlin/com/github/btakita/agentdoc/MarkdownStyleSettings.kt
+src/main/kotlin/com/github/btakita/agentdoc/MarkdownStyleConfigurable.kt
+# Descriptors, icons, the classic attach launcher, and artifact-shaping build files.
+src/main/resources/
+src/main/java/
+build.gradle.kts
+settings.gradle.kts
+shell-sources.txt
+shell-identity.gradle.kts
+
+[impl]
+src/main/kotlin/

@@ -49,7 +49,7 @@
 
     <actions>
         <action id="AgentDoc.Popup"
-                class="com.github.btakita.agentdoc.AgentDocPopupAction"
+                class="com.github.btakita.agentdoc.shell.PopupForwarder"
                 text="Agent Doc Actions"
                 description="Show Agent Doc actions for the current markdown file">
             <!-- #gh116: never `alt SPACE` — Windows consumes it for the window
@@ -70,7 +70,7 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.Submit"
-                class="com.github.btakita.agentdoc.SubmitAction"
+                class="com.github.btakita.agentdoc.shell.SubmitForwarder"
                 text="Run Agent Doc"
                 description="Route agent-doc command to the correct agent session via tmux">
             <keyboard-shortcut first-keystroke="ctrl shift alt A" keymap="$default"/>
@@ -79,7 +79,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.InitSession"
-                class="com.github.btakita.agentdoc.InitSessionAction"
+                class="com.github.btakita.agentdoc.shell.InitSessionForwarder"
                 text="Initialize Session"
                 description="Initialize the selected markdown file as a template session and start it; claim existing sessions">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -87,7 +87,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.FixDocument"
-                class="com.github.btakita.agentdoc.FixDocumentAction"
+                class="com.github.btakita.agentdoc.shell.FixDocumentForwarder"
                 text="Fix Document"
                 description="Run agent-doc fix for the current markdown document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -95,7 +95,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.LintDocument"
-                class="com.github.btakita.agentdoc.LintDocumentAction"
+                class="com.github.btakita.agentdoc.shell.LintDocumentForwarder"
                 text="Inspect Document Directives"
                 description="Run the read-only agent-doc lint policy for the current markdown document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -103,7 +103,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.RunWithJunie"
-                class="com.github.btakita.agentdoc.RunWithJunieAction"
+                class="com.github.btakita.agentdoc.shell.RunWithJunieForwarder"
                 text="Run with Junie"
                 description="Run agent-doc via the Junie agent">
             <keyboard-shortcut first-keystroke="ctrl shift alt J" keymap="$default"/>
@@ -112,7 +112,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.Claim"
-                class="com.github.btakita.agentdoc.ClaimAction"
+                class="com.github.btakita.agentdoc.shell.ClaimForwarder"
                 text="Claim for Tmux Pane"
                 description="Claim this document for the currently active tmux pane">
             <keyboard-shortcut first-keystroke="ctrl shift alt C" keymap="$default"/>
@@ -121,7 +121,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.CompactExchange"
-                class="com.github.btakita.agentdoc.CompactExchangeAction"
+                class="com.github.btakita.agentdoc.shell.CompactExchangeForwarder"
                 text="Compact Exchange"
                 description="Compact the exchange component for this document and commit the result">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -129,7 +129,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.ForceClaim"
-                class="com.github.btakita.agentdoc.ForceClaimAction"
+                class="com.github.btakita.agentdoc.shell.ForceClaimForwarder"
                 text="Force Claim for Tmux Pane"
                 description="Force-claim this document, overriding existing pane bindings">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -137,7 +137,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.SyncLayout"
-                class="com.github.btakita.agentdoc.SyncLayoutAction"
+                class="com.github.btakita.agentdoc.shell.SyncLayoutForwarder"
                 text="Sync Tmux Layout"
                 description="Re-sync tmux pane layout to match the current editor split">
             <keyboard-shortcut first-keystroke="ctrl shift alt L" keymap="$default"/>
@@ -145,7 +145,7 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.LoadTmuxWindow"
-                class="com.github.btakita.agentdoc.LoadTmuxWindowAction"
+                class="com.github.btakita.agentdoc.shell.LoadTmuxWindowForwarder"
                 text="Load Tmux Window"
                 description="Load (autostart) the tmux window for the focused agent-doc document on demand">
             <keyboard-shortcut first-keystroke="ctrl shift alt W" keymap="$default"/>
@@ -153,7 +153,7 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.ShowSessionStatus"
-                class="com.github.btakita.agentdoc.ShowSessionStatusAction"
+                class="com.github.btakita.agentdoc.shell.ShowSessionStatusForwarder"
                 text="Show Session Status"
                 description="Show the authoritative agent-doc session status for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -161,7 +161,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.RestartSupervisorProcess"
-                class="com.github.btakita.agentdoc.RestartSupervisorProcessAction"
+                class="com.github.btakita.agentdoc.shell.RestartSupervisorProcessForwarder"
                 text="Recycle Supervisor"
                 description="Recycle the bound agent-doc supervisor process for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -169,7 +169,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.RestartAgent"
-                class="com.github.btakita.agentdoc.RestartAgentAction"
+                class="com.github.btakita.agentdoc.shell.RestartAgentForwarder"
                 text="Restart Agent"
                 description="Restart the agent harness for this document (reloads a changed `agent:` frontmatter)">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -177,7 +177,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.StopAgent"
-                class="com.github.btakita.agentdoc.StopAgentAction"
+                class="com.github.btakita.agentdoc.shell.StopAgentForwarder"
                 text="Stop Agent"
                 description="Stop the agent harness for this document (the supervisor stays running; use Restart Agent to bring it back)">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -185,7 +185,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.CancelTurn"
-                class="com.github.btakita.agentdoc.CancelTurnAction"
+                class="com.github.btakita.agentdoc.shell.CancelTurnForwarder"
                 text="Cancel Turn"
                 description="Cancel the currently running turn (no-op if the agent is idle, so it never closes the agent)">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -193,7 +193,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.KillSupervisor"
-                class="com.github.btakita.agentdoc.KillSupervisorAction"
+                class="com.github.btakita.agentdoc.shell.KillSupervisorForwarder"
                 text="Kill Supervisor"
                 description="Kill the supervisor process for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -201,7 +201,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.ClearSessionContext"
-                class="com.github.btakita.agentdoc.ClearSessionContextAction"
+                class="com.github.btakita.agentdoc.shell.ClearSessionContextForwarder"
                 text="Clear Session Context"
                 description="Send /clear to the bound agent-doc session for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -209,7 +209,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.InterruptClearSessionContext"
-                class="com.github.btakita.agentdoc.InterruptClearSessionContextAction"
+                class="com.github.btakita.agentdoc.shell.InterruptClearSessionContextForwarder"
                 text="Interrupt and Clear Session Context"
                 description="Interrupt the bound agent-doc session, then clear its context">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -217,7 +217,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.CopySessionDiagnostics"
-                class="com.github.btakita.agentdoc.CopySessionDiagnosticsAction"
+                class="com.github.btakita.agentdoc.shell.CopySessionDiagnosticsForwarder"
                 text="Copy Session Diagnostics"
                 description="Copy the current agent-doc session diagnostics for this document">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -225,7 +225,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.RefreshEnvironment"
-                class="com.github.btakita.agentdoc.RefreshEnvironmentAction"
+                class="com.github.btakita.agentdoc.shell.RefreshEnvironmentForwarder"
                 text="Refresh Agent Doc Environment"
                 description="Clears slash command cache and forces VFS rescan of .claude/ dirs">
             <keyboard-shortcut first-keystroke="ctrl shift alt R" keymap="$default"/>
@@ -233,19 +233,19 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.InstallCli"
-                class="com.github.btakita.agentdoc.InstallAgentDocCliAction"
+                class="com.github.btakita.agentdoc.shell.InstallCliForwarder"
                 text="Install Agent Doc CLI"
                 description="Install or update the agent-doc command-line tool with the official checksummed installer">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.UpdateChannel"
-                class="com.github.btakita.agentdoc.AgentDocUpdateChannelAction"
+                class="com.github.btakita.agentdoc.shell.UpdateChannelForwarder"
                 text="Enable Agent Doc GitHub Updates"
                 description="Toggle the compatibility-matched Agent Doc GitHub update repository">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.ResyncFixSessions"
-                class="com.github.btakita.agentdoc.ResyncFixSessionsAction"
+                class="com.github.btakita.agentdoc.shell.ResyncFixSessionsForwarder"
                 text="Resync / Fix Sessions"
                 description="Run agent-doc resync --fix to repair stale routing/registry state and reap dead panes">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -253,7 +253,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.GcStaleSessions"
-                class="com.github.btakita.agentdoc.GcStaleSessionsAction"
+                class="com.github.btakita.agentdoc.shell.GcStaleSessionsForwarder"
                 text="GC Stale Sessions"
                 description="Run agent-doc gc to reap orphaned panes and prune stale startup/diagnostic state">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -261,7 +261,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.About"
-                class="com.github.btakita.agentdoc.AboutAgentDocAction"
+                class="com.github.btakita.agentdoc.shell.AboutForwarder"
                 text="About Agent Doc"
                 description="Show the running Agent Doc plugin, agent-doc CLI, and native library versions, and warn when they do not match">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
@@ -269,7 +269,7 @@
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
         <action id="AgentDoc.Dashboard"
-                class="com.github.btakita.agentdoc.DashboardAction"
+                class="com.github.btakita.agentdoc.shell.DashboardForwarder"
                 text="Agent Doc Dashboard"
                 description="Show the Agent Doc dashboard: the fleet work board plus controller/supervisor liveness, kept live in .agent-doc/dashboard.md">
             <add-to-group group-id="ToolsMenu" anchor="last"/>

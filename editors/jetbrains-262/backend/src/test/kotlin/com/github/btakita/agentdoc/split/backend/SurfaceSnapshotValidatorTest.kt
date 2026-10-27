@@ -51,9 +51,10 @@ class SurfaceSnapshotValidatorTest {
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 2)))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 3)))
         assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 4)))
+        assertNull(SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 5)))
         assertEquals(
             SurfaceIngressStatus.INVALID_SCHEMA,
-            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 5))?.status,
+            SurfaceSnapshotValidator.validate(snapshot(main).copy(schemaVersion = 6))?.status,
         )
     }
 

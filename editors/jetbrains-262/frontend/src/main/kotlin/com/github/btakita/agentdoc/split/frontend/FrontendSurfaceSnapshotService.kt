@@ -2,6 +2,7 @@
 
 package com.github.btakita.agentdoc.split.frontend
 
+import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
@@ -66,6 +67,7 @@ class FrontendSurfaceSnapshotService(
 
     fun start() {
         if (!started.compareAndSet(false, true)) return
+        FrontendActivationReceipt.line
 
         project.messageBus.connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
@@ -200,6 +202,7 @@ class FrontendSurfaceSnapshotService(
                             snapshot = capture.snapshot.copy(
                                 presentationCapability = presentationAdapter?.capability
                                     ?: FrontendPresentationCapability.SNAPSHOT_ONLY,
+                                activationReceipt = FrontendActivationReceipt.line,
                             ),
                         )
                     },
@@ -315,6 +318,19 @@ internal suspend fun maintainFrontendIngress(
  * The snapshot schema to publish, from the backend's advertised newest schema (null when the
  * backend predates negotiation). Never above what this frontend writes, never below schema 1.
  */
+/**
+ * GH #339 R1: this JVM's frontend activation receipt. The frontend is shell-only
+ * (`SHELL_ONLY`), so it reports no implementation generation; the line is logged once per JVM
+ * and travels to the backend in every schema-5 snapshot.
+ */
+internal object FrontendActivationReceipt {
+    val line: String by lazy {
+        ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND).encode().also { receipt ->
+            Logger.getInstance(FrontendActivationReceipt::class.java).info("[shell] $receipt")
+        }
+    }
+}
+
 internal fun negotiatedSnapshotSchema(backendOffered: Int?): Int =
     (backendOffered ?: LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION)
         .coerceIn(LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION, SURFACE_SNAPSHOT_SCHEMA_VERSION)

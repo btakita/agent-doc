@@ -1,16 +1,14 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 
 /** Installs or updates the agent-doc CLI through the checked official installer. */
-class InstallAgentDocCliAction : AnAction(), DumbAware {
+class InstallAgentDocCliAction : ImplAction {
     companion object {
         private val LOG = Logger.getInstance(InstallAgentDocCliAction::class.java)
 
@@ -118,6 +116,4 @@ class InstallAgentDocCliAction : AnAction(), DumbAware {
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible = shouldEnable(e.project != null)
     }
-
-    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 }

@@ -75,6 +75,10 @@ kotlin {
     }
 }
 
+// GH #339 R1: the shell/implementation digests the activation receipt reports.
+extra["shellIdentityManifests"] = listOf(layout.projectDirectory.file("shell-sources.txt").asFile)
+apply(from = "shell-identity.gradle.kts")
+
 intellijPlatform {
     buildSearchableOptions = false
     // One source tree produces the classic 242-261 package and the separately

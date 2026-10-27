@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.DumbAware
 
 /**
  * #s81q: a "Stop Agent" menu command that runs `agent-doc session stop-agent`,
@@ -13,7 +11,7 @@ import com.intellij.openapi.project.DumbAware
  * restart-or-quit keepalive prompt. Mirrors [RestartAgentAction]; the operator
  * can bring the agent back with "Restart Agent".
  */
-class StopAgentAction : AnAction(), DumbAware {
+class StopAgentAction : ImplAction {
     private val log = Logger.getInstance(StopAgentAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -27,9 +25,5 @@ class StopAgentAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

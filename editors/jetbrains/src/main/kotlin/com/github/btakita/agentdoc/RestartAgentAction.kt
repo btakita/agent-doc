@@ -1,11 +1,9 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.project.DumbAware
 
 /**
  * "Restart Agent" replaces the harness child and re-resolves the current
@@ -13,7 +11,7 @@ import com.intellij.openapi.project.DumbAware
  * [RestartSupervisorProcessAction], which recycles controller code while
  * preserving the child.
  */
-class RestartAgentAction : AnAction(), DumbAware {
+class RestartAgentAction : ImplAction {
     private val log = Logger.getInstance(RestartAgentAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -28,9 +26,5 @@ class RestartAgentAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

@@ -2,6 +2,7 @@
 
 package com.github.btakita.agentdoc.split.backend
 
+import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
@@ -15,6 +16,7 @@ import com.github.btakita.agentdoc.split.SurfaceRole
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -77,6 +79,9 @@ internal enum class LayoutPublicationReadiness {
 internal class AuthenticatedSurfaceIngressState(
     private val publisher: SurfaceSnapshotPublisher,
     private val layoutForwarder: RemoteClientLayoutForwarder = RemoteClientLayoutForwarder.Disabled,
+    /** GH #339 R1: called when a connection reports a new frontend activation receipt. */
+    private val onFrontendReceipt: (clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) -> Unit =
+        ::logFrontendReceipt,
 ) {
     private val generation = AtomicLong(0)
     private val mutex = Mutex()
@@ -148,10 +153,15 @@ internal class AuthenticatedSurfaceIngressState(
                 delivery.diagnostic ?: "controller delivery failed",
             )
         }
+        val receipt = ActivationReceipt.decodeOrNull(snapshot.activationReceipt)
         connections[authenticatedClientId] = current.copy(
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
+            activationReceipt = receipt ?: current.activationReceipt,
         )
+        if (receipt != null && receipt != current.activationReceipt) {
+            onFrontendReceipt(authenticatedClientId, lease.connectionGeneration, receipt)
+        }
         refreshFrontendAuthority()
         // GH #320 option B: the controller policy has now seen the complete snapshot, so its
         // measured main-window geometry may drive pane layout. The pane-layout surface fences
@@ -219,6 +229,13 @@ internal class AuthenticatedSurfaceIngressState(
         refreshFrontendAuthority()
     }
 
+    /** The latest frontend activation receipt each connected client reported (schema 5). */
+    suspend fun frontendActivationReceipts(): Map<String, ActivationReceipt> = mutex.withLock {
+        connections.values.mapNotNull { connection ->
+            connection.activationReceipt?.let { connection.clientId to it }
+        }.toMap()
+    }
+
     private fun refreshFrontendAuthority() {
         mutableFrontendAuthorityActive.value = connections.isNotEmpty()
         mutableLayoutAuthorityActive.value = connections.values.any { it.layoutAuthority }
@@ -248,7 +265,16 @@ internal class AuthenticatedSurfaceIngressState(
         val acceptedSequence: Long,
         val acceptedSurfaces: Map<String, Long>,
         val layoutAuthority: Boolean,
+        val activationReceipt: ActivationReceipt? = null,
     )
+
+    private companion object {
+        val LOG = Logger.getInstance(AuthenticatedSurfaceIngressState::class.java)
+
+        fun logFrontendReceipt(clientId: String, connectionGeneration: Long, receipt: ActivationReceipt) {
+            LOG.info("[shell] frontend client=$clientId connection_generation=$connectionGeneration ${receipt.encode()}")
+        }
+    }
 }
 
 internal data class SnapshotValidationFailure(

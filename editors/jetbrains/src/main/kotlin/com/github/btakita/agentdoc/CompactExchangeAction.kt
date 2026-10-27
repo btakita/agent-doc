@@ -1,14 +1,12 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
-import com.intellij.openapi.project.DumbAware
 
-class CompactExchangeAction : AnAction(), DumbAware {
+class CompactExchangeAction : ImplAction {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CompactExchangeAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -120,10 +118,6 @@ class CompactExchangeAction : AnAction(), DumbAware {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
         e.presentation.isEnabledAndVisible =
             file != null && file.extension?.lowercase() == "md"
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 
     private fun attachRefusalMessage(reason: String?, remedy: String?): String =

@@ -1,12 +1,10 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
+import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
-import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
@@ -24,7 +22,7 @@ import java.io.File
  * Thin event-reporter: the binary owns rendering, refresh, and atomic writes.
  * Project-scoped, so it is enabled whenever a project is open.
  */
-class DashboardAction : AnAction(), DumbAware {
+class DashboardAction : ImplAction {
     companion object {
         private val LOG = Logger.getInstance(DashboardAction::class.java)
 
@@ -83,9 +81,5 @@ class DashboardAction : AnAction(), DumbAware {
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible = shouldEnable(e.project != null)
-    }
-
-    override fun getActionUpdateThread(): ActionUpdateThread {
-        return ActionUpdateThread.BGT
     }
 }

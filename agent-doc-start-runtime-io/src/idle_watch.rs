@@ -363,6 +363,40 @@ fn idle_watch_queue_observation_held_for_test() -> bool {
             .is_some_and(|gate| !Path::new(&gate).exists())
 }
 
+/// `#clearqueuedciflake` debug-build seam. While
+/// `AGENT_DOC_TEST_HOLD_DEFERRED_CLEAR_RECEIPT_PROBE` names a file that EXISTS,
+/// the idle watch, having read a waiting deferred clear's dispatch receipts and
+/// before deciding on them, writes `<file>.held` (with the tick's sampled
+/// `prompt_visible` and `turn_active`) and waits until the test removes
+/// `<file>`. The live tmux suite uses it to start a Run Agent Doc turn exactly
+/// between the watch's pane sample and its delivery decision, by handshake
+/// rather than by load.
+/// Bounded and stop-aware; unavailable in optimized production builds.
+fn hold_deferred_clear_receipt_probe_for_test(
+    stop: &AtomicBool,
+    prompt_visible: bool,
+    turn_active: bool,
+) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let Some(gate) = std::env::var_os("AGENT_DOC_TEST_HOLD_DEFERRED_CLEAR_RECEIPT_PROBE")
+        .map(PathBuf::from)
+        .filter(|gate| gate.exists())
+    else {
+        return;
+    };
+    let held = PathBuf::from(format!("{}.held", gate.display()));
+    let _ = std::fs::write(
+        &held,
+        format!("prompt_visible={prompt_visible} turn_active={turn_active}\n"),
+    );
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while gate.exists() && !stop.load(Ordering::Relaxed) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn record_idle_watch_queue_observation_attempt(
     queue_state_observed: &mut bool,
     last_quiescent_maintenance: &mut Option<std::time::Instant>,
@@ -5683,11 +5717,23 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // clear was queued behind it: a prompt redrawn before the trigger
                 // lands is not the turn's end). An unreadable receipt store fails
                 // closed (keep waiting).
+                //
+                // `#clearqueuedciflake`: running and pending are ONE snapshot.
+                // The pane facts above were sampled earlier in this tick; a Run
+                // Agent Doc turn starting since then promotes its receipt
+                // `accepted` -> `running`, and read as two separate queries that
+                // promotion fell between them, read as neither, and the clear
+                // was typed into the turn that had just started (main CI
+                // 40485993738). Either half of one snapshot holds the clear.
                 let dispatch_turn_running = live_turn_deferral
-                    && agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(&path)
-                        .and_then(|running| {
-                            Ok(running
-                                || agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&path)?)
+                    && agent_doc_controller_io::project_controller::open_dispatch_turn_for_file(&path)
+                        .map(|open| {
+                            hold_deferred_clear_receipt_probe_for_test(
+                                &stop,
+                                prompt_visible,
+                                turn_active,
+                            );
+                            open.is_some()
                         })
                         .unwrap_or_else(|err| {
                             let event = format!(

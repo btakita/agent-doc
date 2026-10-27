@@ -257,6 +257,11 @@ struct LiveClearScenario {
 /// The file whose creation releases a held idle-watch queue observation.
 const QUEUE_OBSERVATION_RELEASE: &str = "release_queue_observation";
 
+/// The file whose existence arms the idle watch's deferred-clear receipt-probe
+/// hold (`AGENT_DOC_TEST_HOLD_DEFERRED_CLEAR_RECEIPT_PROBE`); removing it
+/// releases the held tick.
+const RECEIPT_PROBE_HOLD: &str = "hold_receipt_probe";
+
 const PLAIN_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
 
 const CODEX_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c2\nagent: codex\n---\n\n# Session\n\n## User\n\nhello\n";
@@ -280,19 +285,26 @@ impl LiveClearScenario {
             document,
             hold_queue_observation,
             false,
+            false,
             FakeHarness::Claude,
         )
+    }
+
+    /// The supervisor's idle watch honors the deferred-clear receipt-probe
+    /// hold ([`Self::arm_receipt_probe_hold`]).
+    fn start_with_receipt_probe_hold(label: &str) -> Self {
+        Self::start_inner(label, PLAIN_DOC, false, false, true, FakeHarness::Claude)
     }
 
     /// The fake harness renders the unsubmitted composer line (see
     /// `FAKE_CLAUDE_COMPOSER` in [`FAKE_CLAUDE`]).
     fn start_with_composer(label: &str) -> Self {
-        Self::start_inner(label, PLAIN_DOC, false, true, FakeHarness::Claude)
+        Self::start_inner(label, PLAIN_DOC, false, true, false, FakeHarness::Claude)
     }
 
     /// The supervisor launches the fake Codex harness ([`FAKE_CODEX`]).
     fn start_codex(label: &str) -> Self {
-        Self::start_inner(label, CODEX_DOC, false, false, FakeHarness::Codex)
+        Self::start_inner(label, CODEX_DOC, false, false, false, FakeHarness::Codex)
     }
 
     fn start_inner(
@@ -300,6 +312,7 @@ impl LiveClearScenario {
         document: &str,
         hold_queue_observation: bool,
         composer: bool,
+        hold_receipt_probe: bool,
         harness: FakeHarness,
     ) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -370,6 +383,14 @@ impl LiveClearScenario {
         };
         let hold = if composer {
             format!("{hold}export FAKE_CLAUDE_COMPOSER=1\n")
+        } else {
+            hold
+        };
+        let hold = if hold_receipt_probe {
+            format!(
+                "{hold}export AGENT_DOC_TEST_HOLD_DEFERRED_CLEAR_RECEIPT_PROBE={}\n",
+                shell_quote(&fake.join(RECEIPT_PROBE_HOLD).to_string_lossy())
+            )
         } else {
             hold
         };
@@ -625,6 +646,25 @@ impl LiveClearScenario {
     /// Let a held idle watch make its first queue observation.
     fn release_queue_observation(&self) {
         std::fs::write(self.fake.join(QUEUE_OBSERVATION_RELEASE), "").unwrap();
+    }
+
+    /// Arm the receipt-probe hold: the idle watch's next deferred-clear tick
+    /// stops after its pane sample, mid receipt read, until
+    /// [`Self::release_receipt_probe_hold`].
+    fn arm_receipt_probe_hold(&self) {
+        std::fs::write(self.fake.join(RECEIPT_PROBE_HOLD), "").unwrap();
+    }
+
+    /// Wait until the watch is held, and return the pane facts its held tick
+    /// sampled (`prompt_visible=.. turn_active=..`).
+    fn wait_receipt_probe_held(&self) -> String {
+        let held = self.fake.join(format!("{RECEIPT_PROBE_HOLD}.held"));
+        self.wait_until("the idle watch is held mid receipt read", || held.exists());
+        std::fs::read_to_string(held).unwrap().trim().to_string()
+    }
+
+    fn release_receipt_probe_hold(&self) {
+        std::fs::remove_file(self.fake.join(RECEIPT_PROBE_HOLD)).unwrap();
     }
 
     /// The harness finishes its turn: `Stop` hook, then the idle frame.
@@ -1196,6 +1236,76 @@ fn a_repeat_press_rearms_the_queued_clear_behind_the_run_started_before_it() {
             .contains("idle_queue_watch_deferred_clear_superseded"),
         "{}",
         scenario.ops_log_tail()
+    );
+    scenario.end_turn();
+    scenario.wait_until("the re-armed clear reached the pane", || {
+        scenario.clears() == 1
+    });
+    std::thread::sleep(Duration::from_secs(3));
+    let inputs = scenario.inputs();
+    assert_eq!(scenario.clears(), 1, "{inputs:?}");
+    assert_eq!(
+        inputs.last().map(String::as_str),
+        Some("/clear"),
+        "{inputs:?}"
+    );
+}
+
+/// `#clearqueuedciflake` (main CI 40485993738, `make tmux-ci`): the
+/// [`a_repeat_press_rearms_the_queued_clear_behind_the_run_started_before_it`]
+/// interleaving, forced by handshake. The idle watch samples the idle pane after
+/// turn A ended (prompt visible, no turn lease) while B is accepted but not
+/// started, and is held while it reads B's receipt. B then starts: its trigger
+/// lands, its preflight promotes the receipt `accepted` -> `running`, and its
+/// `UserPromptSubmit` hook writes the lease. Released, the watch must still see
+/// B as running or pending. When it read `running` and `pending` as two
+/// separate snapshots, B's promotion between them read as neither, and the
+/// clear was typed into B's running turn.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn a_run_starting_mid_receipt_read_never_receives_the_queued_clear() {
+    let scenario = LiveClearScenario::start_with_receipt_probe_hold("clear-receipt-probe");
+    scenario.route_dispatch_turn();
+    scenario.hook(true, "UserPromptSubmit");
+    let first = scenario.press_clear();
+    scenario.assert_clear_queued(&first);
+    std::thread::sleep(Duration::from_secs(2));
+
+    scenario.accept_dispatch();
+    std::thread::sleep(Duration::from_millis(1100));
+    let second = scenario.press_clear();
+    assert!(
+        stderr(&second).contains("rearmed=true"),
+        "a repeat press re-arms the queued clear: {}",
+        stderr(&second)
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    scenario.end_turn();
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        scenario.clears(),
+        0,
+        "B was accepted before the press: wait for it"
+    );
+
+    // Hold the watch's next tick between its pane sample and its decision.
+    scenario.arm_receipt_probe_hold();
+    let sampled = scenario.wait_receipt_probe_held();
+    assert_eq!(
+        sampled, "prompt_visible=true turn_active=false",
+        "the held tick saw the idle prompt with no lease: only B's receipt holds the clear"
+    );
+    std::thread::sleep(Duration::from_millis(1100));
+    scenario.submit_dispatched_trigger();
+    scenario.hook(true, "UserPromptSubmit");
+    scenario.release_receipt_probe_hold();
+    std::thread::sleep(Duration::from_secs(3));
+    assert_eq!(
+        scenario.clears(),
+        0,
+        "nothing is typed into B's running turn: {:?}\n--- ops.log tail ---\n{}",
+        scenario.inputs(),
+        scenario.ops_log_tail(),
     );
     scenario.end_turn();
     scenario.wait_until("the re-armed clear reached the pane", || {

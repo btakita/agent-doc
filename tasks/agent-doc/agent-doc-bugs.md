@@ -354,6 +354,45 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - One at a time, in the order they report.
 - One plugin version bump covers both Kotlin branches.
 - `replicadiffcost` has to beat the keystroke benchmark before it lands.
+
+### Re: do [#editorbackendparity] — opus-5 · 2026-10-26T22:00-04:00
+
+> **Queue prompt:** do [#editorbackendparity]
+
+**On `main` as `9aca9eec10`.** It adds a parity matrix as `editors/SPEC.md` § 13, a pointer in `editors/PARITY.md`, and an `editor_contract` test. The test fails whenever code closes a gap the matrix still claims, or the matrix drifts from `plugin-parity.tsv`. `make check-fast` passed: 5830 run, 5830 passed. It's docs and a test only, so there's nothing to install.
+
+**Does VS Code on Coder have a similar architecture? Only partly.**
+
+- **What's the same:** the UI runs locally (Desktop through Remote-SSH) or in the browser (code-server or VS Code Web), and extensions run in an extension host on the workspace.
+- **What's different:** a VS Code extension is never split into frontend and backend halves. It runs whole in one host, and VS Code's API carries editor, tab and terminal state across. So the JetBrains-style version mismatch between a frontend and a backend can't happen.
+- **What VS Code still lacks:**
+  - We don't declare `extensionKind`.
+  - On a remote connection, an update still needs a window reload; "restart extensions", added in 1.88, is local only.
+  - Nothing detects an installed but not-yet-running VSIX.
+  - Split orientation is assumed rather than measured.
+  - `plugin install vscode` doesn't reach code-server.
+
+**What Zed's architecture implies.**
+
+- **Extensions:** they're sandboxed WASM with a narrow surface and no access to panes or splits. Zed already reloads a changed extension without a restart.
+- **Remote:** it pushes extensions to a headless server whose version must match exactly.
+- **So:** our WASM extension already acts as the stable shell. The work is in the `zed-lsp` process it launches.
+  - It needs a way to pick up a new binary without restarting Zed.
+  - Its registration carries no editor kind or version.
+  - It can't do measured-layout routing, because Zed exposes no layout, so routing is by document only.
+
+**Matrix** (upgrade · version proof · layout routing · status):
+
+- **JetBrains classic:** dynamic reload, native code hot-reloads · single process · measured · supported
+- **JetBrains 262/263:** restart only · receipts designed, not shipped · measured by the client · supported
+- **VS Code local:** restart extensions · version sent at registration only · tab-group order · supported
+- **VS Code on Coder:** window reload · same as local · same as local · runbook only
+- **Zed local / remote:** extension reload, binary waits for a language-server restart · `serverInfo` only · none · staged
+
+**Queued as the 3 grouped items you chose:**
+- `#vscoderemoteparity`: `extensionKind`, activation receipt, install path, Coder smoke test.
+- `#vscodeupgradelayout`: stale-VSIX detection and a reload prompt, measured orientation, layout rules behind native derive.
+- `#zedparity`: registration identity, binary pickup, document-only routing, remote qualification.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -381,9 +420,6 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
-- [x] [#jb263-feed-verify] In IntelliJ IDEA 2026.3, configure only https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml, refresh Plugins, update Agent Doc from 0.2.816 to 0.2.824 or newer, restart the IDE, and verify the “Cannot update plugin” warning clears; if it does not, capture the configured repository entry and relevant idea.log update-check lines.
-- [x] [#xj75] Choose the JetBrains restart-free upgrade direction in the [#subagent-operator-request-autoupgrade-263-path] packet in agent:exchange: keep restart-only + prompt, re-qualify on IU 263.7307.44, build the GH #339 shell, or shrink the restart count
-- [x] [#subagent-operator-request-autoupgrade-263-path] Answer the blocking subagent question for tracked work jb262dynlauncherrecommen for queue item ‘Fix the auto-upgrade not working...the IDE needed to be restarted.’ in agent:exchange: The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). (choices: Keep restart-only + prompt, Re-qualify on 263.7307.44, Build the GH #339 architecture, Shrink the restart count) (source: agent:review [#jb262dynlauncherrecommen])
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [x] [#jb339r1decision] Decide whether to queue GH 339 shell stage R1 (stable shell + forwarders + activation receipts, code still in one loader, costs one restart) once the shrink-restarts work reports its benchmark and moves. Same decision: restate the "Exact-263 decision" reopen rule as "module graph and registrations unchanged across the swap, and the retired implementation is collectable" (editors/jetbrains/SPEC.md).

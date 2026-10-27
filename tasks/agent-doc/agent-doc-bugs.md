@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c`; tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels). JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). Post-release `origin/main` is `c0a4e87ed7` (unreleased, installed locally; JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 need an IDE restart, VS Code 0.2.88, Zed 0.1.2): the in-IDE restart-required prompt, no-argument `/agent-doc` via `agent-doc document`, `agent-doc queue repair-stale-completion`, id-less `agent:run` / `agent:loop` named by kind, the GH #376 measured-route ordering fix, the GH #339 shell design with stage R1 complete and the adopted Exact-263 reopen rule, route-outcome / exchange-prefix-repair / session-command-outcome moved into the hot-reloaded native library (JetBrains and VS Code), an edit-proportional native replica flush that also folds remote ops incrementally plus a windowed Kotlin flush-prepare step, the JetBrains editor-tree focus listener deferred until the split tree exists, todo `id=` always winning, the editor frontend/backend parity matrix, VS Code stale-VSIX prompt + measured layout + workspace extensionKind + activation receipt + code-server/Remote-SSH install, the VS Code koffi owned-string free crash fix and koffi shipped in the VSIX for 7 platforms, Zed registration identity + in-place binary handoff + document-only routing, a PreToolUse guard against agents killing the live tmux server, the GH #380 supervisor harness-binary install-dir fallback, GH #381 project-preset queue heads draining as presets, and queue claims that end on a strike and never follow across queues (`#claimfollowstruck`).
+Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c`; tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels). JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). Post-release `origin/main` is `66f7655b54` (unreleased, installed locally; JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 need an IDE restart, VS Code 0.2.89, Zed 0.1.2): the in-IDE restart-required prompt, no-argument `/agent-doc` via `agent-doc document`, `agent-doc queue repair-stale-completion`, id-less `agent:run` / `agent:loop` named by kind, the GH #376 measured-route ordering fix, the GH #339 shell design with stage R1 complete and the adopted Exact-263 reopen rule, route-outcome / exchange-prefix-repair / session-command-outcome moved into the hot-reloaded native library (JetBrains and VS Code), an edit-proportional native replica flush that also folds remote ops incrementally plus a windowed Kotlin flush-prepare step, the JetBrains editor-tree focus listener deferred until the split tree exists, todo `id=` always winning, the editor frontend/backend parity matrix, VS Code stale-VSIX prompt + measured layout + workspace extensionKind + activation receipt + code-server/Remote-SSH install, the VS Code koffi owned-string free crash fix and koffi shipped in the VSIX for 7 platforms, Zed registration identity + in-place binary handoff + document-only routing, a PreToolUse guard against agents killing the live tmux server, the GH #380 supervisor harness-binary install-dir fallback, GH #381 project-preset queue heads draining as presets, and queue claims that end on a strike and never follow across queues (`#claimfollowstruck`), the PreToolUse tmux guard in every harness user layer, the same install-dir fallback for headless harness launches (`#headlessharnesspath`), claim closure judged across every queue (`#claimclosureallqueues`), no actor write after a provisioning claim launches its start (`#claimpanecasrace`), and a hermetic koffi round-trip test that turns `make check` / CI green (`#vscodenativeceiling`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -885,6 +885,27 @@ All three fixes are on `main` (`d1155e8943..c0a4e87ed7`, fast-forward) and insta
 - One Todo for you: when a claimed row is deleted and a different row is added at the same position, should the claim be cancelled instead of moving to the new row?
 
 The worker worktrees and the integration worktree are removed; their branches stay on origin.
+
+### Re: follow-ups #vscodenativeceiling, #claimclosureallqueues, #headlessharnesspath, #claimpanecasrace — opus-5 · 2026-10-27T02:35-04:00
+
+All four follow-ups are on `main` (`cd7ddd3f31..66f7655b54`, fast-forward, on top of another session's `#tmuxguardclaudeuser` push) and installed locally with one `make install`. **`make check` is fully green again:** 11852/11852 Rust (182 skipped), VS Code 225/225 + 4/4, exit 0.
+
+| Item | Main commit | Fix |
+|---|---|---|
+| `#vscodenativeceiling` | `5f38ddfb47` (+ `66f7655b54` VS Code 0.2.89 bump) | The test was wrong, not the native code. It resolved a file inside the checkout and only passed when some agent-doc project existed above the checkout. Under `make check`'s root ceiling and in a fresh CI checkout the lookup correctly returns null, which also meant the owned strings the test exists for were never freed. It now builds a hermetic temp project and asserts the exact result. |
+| `#claimclosureallqueues` | `a4ba26dfaa` | `live_queue_head_identities` (`queue_continuation.rs:1185`) listed only the selected queue, so a claim on a live `agent:loop` row was pruned at closeout while `agent:run` had work. Now it lists live rows across every queue, and struck rows still close their claims. Drain and dispatch still read only the selected queue. Behaviour change (in the spec): a claim whose row has left every queue now closes even when no queue is ready. |
+| `#headlessharnesspath` | `78b0554346` | The #380 resolver moved down into `agent-doc-harness` and is shared. Every headless launch (claude send/streaming, codex turns and probes, opencode probes, opencode, grok, junie, and the `cleanup` summarizer) now goes through one `harness_command` helper. It uses the child's actual PATH/HOME, including document `env:` overrides. |
+| `#claimpanecasrace` | `11602fde31` | A product race, not a test defect. A provisioning claim registered the pane before launching `agent-doc start`, then re-registered it after launch (`startup.rs:1299`). By then the child owns the actor generation, so the claim either hit `expected 1, found 2` or silently overwrote the child's `Starting` record with `Ready`. The post-launch write is removed. A test-only barrier now makes the interleaving deterministic: without the fix 0/10 pass, with it 60/60 pass under parallel load. |
+
+**Integration notes.**
+- The VS Code test change tripped the editor package-generation check (`plugin-version-check`), so I bumped the extension to 0.2.89 the same way as `b2700613ad`. `scripts/check_plugin_versions.py --bump` doesn't support VS Code.
+- `make install` replaced the binary and `libagent_doc.so` and installed VSIX 0.2.89. It marked 7 supervisors to restart at their next idle point. No JetBrains restart is needed.
+- CI for `66f7655b54` (run 40461614400) was in progress when I checked once.
+- All worker and integration worktrees are removed.
+
+**Filed:**
+- `#dispatchrebindaudit`: the waiting route path in `dispatch_recovery.rs:79-85` can still re-register a pane after the child is up. Flagged by the `#claimpanecasrace` worker.
+- `#statussynccommitrefusal`: the status-sync checkpoint's `agent-doc commit` refuses while binary-owned completion cells are pending, so this session's `main`-moved status edit waited for this closeout.
 <!-- agent:boundary:d7b4ac5d -->
 <!-- /agent:exchange -->
 
@@ -892,13 +913,12 @@ The worker worktrees and the integration worktree are removed; their branches st
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:vscodenativeceiling#1] do [#vscodenativeceiling]
-- 🚧 [#subagent:claimclosureallqueues#1] do [#claimclosureallqueues]
-- 🚧 [#subagent:headlessharnesspath#1] do [#headlessharnesspath]
-- 🚧 [#subagent:claimpanecasrace#1] do [#claimpanecasrace]
-- ~~do [#claimfollowstruck]~~
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/380~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~#gh-fix https://github.com/btakita/agent-doc/issues/381~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#dispatchrebindaudit]
+- do [#statussynccommitrefusal]
+- ~~do [#vscodenativeceiling]~~
+- ~~do [#claimclosureallqueues]~~
+- ~~do [#headlessharnesspath]~~
+- ~~do [#claimpanecasrace]~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -917,10 +937,8 @@ The worker worktrees and the integration worktree are removed; their branches st
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#vscodenativeceiling] Fix VS Code editors/vscode/src/native.test.ts 'round-trips owned strings through the built library without crashing': under make check's AGENT_DOC_ROOT_CEILING_DIRECTORIES=/tmp:<workspace>, resolveProjectPath returns null for the workspace's own files, so out.resolved?.relativePath is undefined. It is red on main CI (40449457567 on d1155e89) and keeps make check from going green (dev-harness-test).
-- [ ] [#claimclosureallqueues] Judge queue-claim closure across every queue: live_queue_head_identities still reads only the selected queue, and prune / active() / claimed_items use it, so a claim on a live row in a non-selected queue (e.g. agent:loop while agent:run has work) can be pruned as closed. Follow-up to #claimfollowstruck.
-- [ ] [#headlessharnesspath] Headless harness launches in agent-doc-agent-io (claude.rs, codex.rs, opencode.rs, grok.rs) resolve the bare program name only on the inherited PATH and would fail under the Coder workspace default PATH just as the supervisor did in GH #380; reuse the supervisor's spawn_program install-dir fallback.
-- [ ] [#claimpanecasrace] Fix the race in test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning: claim and the supervisor it starts both write the controller actor generation (CAS 'expected 1, found 2'); seen once in a full run during GH #380 work.
+- [ ] [#dispatchrebindaudit] Audit the waiting route path for the #claimpanecasrace class: agent-doc-route-io/src/dispatch_recovery.rs:79-85 still calls register_dispatch_target after the child is up when a concurrent sync moved the registry to another pane. It cannot produce the CAS failure, but it can overwrite the supervisor's state with Ready and could race a supervisor restart.
+- [ ] [#statussynccommitrefusal] The agent:status final status-sync checkpoint tells the agent to run 'agent-doc status set' then 'agent-doc commit', but 'agent-doc commit' refuses ('working tree has response-bearing exchange edits that are not committed', dogfood terminal_failure issue_key=666ddabe3b) whenever binary-owned subagent completion cells from 'queue report-complete' are pending, which the runbook says must never be hand-committed. A status-only update then stays uncommitted until the next closeout. Make the status checkpoint's commit path land a status-only change without absorbing the pending completion cells, or route it through the next closeout explicitly.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

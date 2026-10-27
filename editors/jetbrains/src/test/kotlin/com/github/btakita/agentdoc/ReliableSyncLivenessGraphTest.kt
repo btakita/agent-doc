@@ -6,6 +6,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
+import com.google.gson.JsonParser
+import java.io.File
 
 class ReliableSyncLivenessGraphTest {
     @Test
@@ -120,5 +123,62 @@ class ReliableSyncLivenessGraphTest {
             }
         assertTrue(later.contains("next-transition"))
         assertEquals(2, produced)
+    }
+
+    /** The `Register` op of [batch], with its wall-clock timestamp pinned for comparison. */
+    private fun registerOp(batch: String): String {
+        val op = JsonParser.parseString(batch).asJsonArray
+            .map { it.asJsonObject }
+            .single { it.has("Register") }
+        op.getAsJsonObject("Register").addProperty("timestamp_ms", 1)
+        return op.toString()
+    }
+
+    @Test
+    fun `registration carries the backend activation receipt the controller reads`() {
+        // GH #339 R1 controller identity. The same bytes are the Rust fixture
+        // (agent-doc-reliable-sync-io/tests/jetbrains_registration_receipt.rs), which decodes them
+        // as an EditorRegistration whose receipt parses as role=backend.
+        val receipt = ActivationReceipt(
+            role = ActivationReceipt.ROLE_BACKEND,
+            jvmInstanceId = "11111111-2222-3333-4444-555555555555",
+            shellDigest = "abc123",
+            spiVersion = 1,
+            implVersion = "0.2.851",
+            implSha256 = null,
+            generation = 1,
+            epoch = 0,
+        ).encode()
+        var current: String? = receipt
+        val graph = ReliableSyncLivenessGraph(42) { current }
+        val opened = graph.open(
+            "docA",
+            "/tmp/doc.md",
+            "jetbrains-42-test",
+            "jetbrains",
+            "0.2.851",
+            "operator_text_authority_v1,lazily_transport_receipts_v1",
+        )!!
+        val fixture = File("src/test/resources/reliable-sync/jetbrains-register-with-receipt.json").readText().trim()
+        assertEquals(fixture, registerOp(opened))
+
+        // A republish reads the receipt again, so it reports the generation active then.
+        current = receipt.replace("generation=1", "generation=2")
+        val republished = graph.republishOpen("docA", "/tmp/doc.md", "jetbrains-42-test", "jetbrains", "0.2.851", "")
+        assertTrue(registerOp(republished).contains("generation=2"))
+    }
+
+    @Test
+    fun `registration without a receipt keeps the wire shape an older controller reads`() {
+        val graph = ReliableSyncLivenessGraph(42)
+        val opened = graph.open("docA", "/tmp/doc.md", "jetbrains-42-test", "jetbrains", "0.2.851", "")!!
+        assertFalse(registerOp(opened).contains("activation_receipt"))
+    }
+
+    @Test
+    fun `the liveness listener registers with this JVM's backend receipt`() {
+        val listener = File("src/main/kotlin/com/github/btakita/agentdoc/ReliableSyncLivenessListener.kt").readText()
+        assertTrue(listener.contains("ReliableSyncLivenessGraph(pid) {"))
+        assertTrue(listener.contains("ShellGenerationHost.getInstanceIfCreated()?.receipt()?.encode()"))
     }
 }

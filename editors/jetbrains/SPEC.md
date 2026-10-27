@@ -303,7 +303,8 @@ nothing in it changes the decision above until its migration step R4 lands.
 `src/test/kotlin/com/github/btakita/agentdoc/shellspike/`) and the first R1
 step have landed. R1 so far moves the actions, the project lifecycle, the Tier A programmatic
 listeners and the editor and language extensions behind shell forwarders,
-routes EDT and pooled work through per-generation shell owners, classifies the services, settings and JNA binding as shell, splits the shell
+routes EDT and pooled work through per-generation shell owners, registers the
+backend receipt with the controller, classifies the services, settings and JNA binding as shell, splits the shell
 and implementation digests, and publishes the activation receipt on both JVMs;
 "R1 status" below lists each registration class and what remains. The
 implementation still loads in the plugin classloader, so behaviour is unchanged
@@ -603,7 +604,7 @@ keeps the restart-required prompt, marker, and diagnostics unchanged.
 | EDT work | **done** | Implementation code queues all 43 EDT tasks through `GenerationWork.invokeLater`, which calls `GenerationContext.invokeLater`. The shell's `ShellGenerationWork` wraps each in a `FencedTask` and queues it with `ModalityState.defaultModalityState()` (what `Application.invokeLater(Runnable)` used) and an `expired` condition that is the generation's fence, so the event queue holds only shell tasks. A task drops its implementation runnable once it ran. Retirement takes a policy: a swap (R3) retires with `CANCEL`, which expires every queued task and clears its runnable before it runs; R1's only retirement, plugin unload, retires with `DRAIN`, so queued tasks still run exactly as before R1 (unload teardown itself queues EDT work, such as an AWT listener detached from a pooled dispose path). |
 | Pooled work and threads | **done** | `GenerationContext.work` (`ShellGenerationWork`, one per generation) serves `executeOnPooledThread` (20 sites), `schedule`/`scheduleWithFixedDelay`/`submit` on the application pools (7), `newSingleThreadScheduledExecutor`/`newSingleThreadExecutor` with named daemon threads (9), `newThread` and `threadFactory` (14 raw threads), `newPooledAlarm` (1), and one `CoroutineScope` (`SupervisorJob` + `Dispatchers.Default`) that retirement cancels. Pooled tasks are counted while they run; executors and threads are tracked weakly, and retirement logs `[shell] implementation generation <n> retired pending_edt=… pooled_in_flight=… live_executors=… live_threads=…`. R1 does not stop or join them at retirement: the implementation's own unload owners (`PluginGeneration.registerResource`, `disposeProject`) still do, as before. Joining with a deadline belongs to the swap's quiesce (R3). The implementation reaches all of it through `GenerationWork`, which falls back to the platform call it replaced when no generation exists. The audit enforces `invoke_later`, `pooled_thread`, `app_executor_util`, `raw_thread`, `executors_new` and `alarm` at zero in implementation files and pins the staged counts. |
 | Native library (JNA) | **done (shell classification)** | `NativeLib.kt` and `NativeReloadCoordinator.kt` are shell files. |
-| Controller identity | pending | The controller's `EditorRegistration` (Rust, about 34 struct literals across 10 crates) has no receipt field yet, so the backend receipt is logged but not registered. The Kotlin `Register` op and the Rust field land together. |
+| Controller identity | **done** | Every `Register` op the backend's `ReliableSyncLivenessGraph` builds carries this JVM's `agent_doc_activation_receipt/v1` line as `activation_receipt` (`ShellGenerationHost.receipt()`, read when the op is built, so a native-reload republish reports the generation active then). It reuses the controller's existing `EditorRegistration.activation_receipt` (`agent_doc_reliable_sync_io::liveness`, serde default, omitted when absent), which the VS Code adapter introduced with `role=workspace`; the field is omitted when no host exists, so an older controller reads the same registration. `editors/jetbrains/src/test/resources/reliable-sync/jetbrains-register-with-receipt.json` is the exact op: `ReliableSyncLivenessGraphTest` asserts the plugin produces it, and `agent-doc-reliable-sync-io/tests/jetbrains_registration_receipt.rs` decodes it as a `role=backend` receipt and re-encodes it unchanged. `agent-doc reliable-sync-status` prints the parsed receipt. The receipt still carries `impl_sha256=none` and `epoch=0` until R2/R3, and a retired generation's context still refuses new listener registrations. |
 | Per-platform-object state | pending | `key_create=3 put_user_data=4`. |
 
 The counts come from `ShellRegistrationOwnershipTest`, whose pending-class
@@ -645,6 +646,8 @@ Where it is published:
 - The backend records the latest receipt for each connection and logs
   `[shell] frontend client=<id> connection_generation=<n> <receipt>` when it
   changes. Nothing fences on receipts yet; that starts at R4.
+- Every controller registration (`Register` op) from the backend carries the
+  backend receipt as `activation_receipt` (see "Controller identity" above).
 
 **Digests.** `editors/jetbrains/shell-sources.txt` (classic) and
 `editors/jetbrains-262/shell-sources.txt` (added for 262/263) list the shell
@@ -682,8 +685,8 @@ matters only once a child loader defines the implementation (R2).
    with the swap in R3).
 3. ~~EDT and pooled work~~ (done; `CANCEL` retirement and the quiesce join come
    with the swap in R3).
-4. Controller identity: a receipt field on the Rust `EditorRegistration` (serde
-   default) and the Kotlin `Register` op, published together.
+4. ~~Controller identity~~ (done; the Rust field already existed from the
+   VS Code receipt work).
 5. Per-platform-object `Key`s created by the shell, and the shell-side Fleet
    RPC delegation into the generation.
 

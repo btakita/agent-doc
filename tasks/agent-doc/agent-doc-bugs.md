@@ -735,6 +735,39 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 **Dispatched:** `#kotlinflushprep` → `subagent:kotlinflush` (🚧), now that R1 has landed.
 
 **Also on main, from another session:** a PreToolUse guard that refuses agent commands that would kill your live tmux server (`edcfce58d0`, `bc3da0e033`, `e3b716ae8a`). It covers this morning's incident.
+
+### Re: do [#replicaremoteflush] — opus-5 · 2026-10-27T00:08-04:00
+
+> **Queue prompt:** do [#replicaremoteflush]
+
+**On `main` as `60c7f4c73b`, installed.** Native only, so no IDE restart; the library hot-reloads.
+
+**What changed:**
+- **Remote ops fold into the index:** the replica's order index now covers the whole CRDT graph, deleted characters included. Remote ops are folded in as they arrive, using lazily's own placement rule, instead of the index being thrown away and rebuilt.
+- **Out-of-order ops wait:** an op whose origin hasn't arrived is held and placed once the origin lands.
+- **Big batches still rebuild:** more than 4,096 ops, or more than 1/8 of the graph.
+- **Incremental bookkeeping:** the version vector updates in place. The journal now records remote changes too, so more peers get answered without a document scan.
+- **Guard kept:** a folded order is used only after it spells exactly lazily's text. Otherwise that replica keeps lazily's paths for good, and displayed text always comes from lazily.
+
+**Numbers** (125 KB, `p50_best`; the gated benchmark reports "no keystroke regression"):
+
+| Case | Before | After |
+|---|---|---|
+| first local flush after a remote update (new case) | 46–74 ms | 166–172 µs |
+| `replica_flush_1` | 58–64 µs | 59–60 µs |
+| `typing_report` | 108–116 µs | 108 µs |
+
+Applying the remote update itself is unchanged (≈64–71 ms), because lazily's own text projection dominates it and the editor needs that text anyway.
+
+**Tests:**
+- **Differential runs:** 1–3 concurrent peers, covering shared-offset bursts, out-of-order and duplicate delivery, multibyte text, and local deletes of remote text. After every step they compare the full order (deleted characters and held ops included) and the version vector against lazily.
+- **Property test:** `folded_order_equals_lazily_after_every_remote_batch`.
+- **Mutation checks:** 11 of 11 mutations are caught.
+- **Integrated:** check-fast 6327 run, 6327 passed.
+
+**Possible follow-up, not queued:** after a remote update, the first local splice walks back from the end of the document to find its position, about 57 µs at 125 KB. This is older behaviour, not part of this change.
+
+**Still running:** `#kotlinflushprep`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -744,7 +777,7 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#jbshellr1rest]~~
 - ~~do [#vscodesessionparsers]~~
-- 🚧 [#subagent:replicaremote#1] do [#replicaremoteflush]
+- ~~do [#replicaremoteflush]~~
 - 🚧 [#subagent:kotlinflush#1] do [#kotlinflushprep]
 - ~~do [#vscodekoffivsix]~~
 - ~~do [#vscodekoffisegv]~~
@@ -830,7 +863,6 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#replicaremoteflush] Fold remote CRDT ops into the replica visible-order index as they arrive (agent-doc-merge crdt_sync local_ops), so the first local flush after a remote update no longer pays a full index rebuild; keep the differential tests against lazily paths and gate on make jetbrains-keystroke-bench.
 - [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
 <!-- /agent:backlog -->
 

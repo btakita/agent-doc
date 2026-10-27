@@ -67,6 +67,9 @@ interface ImplGeneration {
     /** The classic attach bridge's `disposeOpenProjectsForDynamicUnload` hook; the projects released. */
     fun disposeOpenProjectsForDynamicUnload(): Int
 
+    /** The handlers behind the shell's editor and language extension forwarders. */
+    fun editorExtensions(): ImplEditorExtensions
+
     /** Stop work and return version-neutral state for the next generation. */
     fun quiesce(): String
 

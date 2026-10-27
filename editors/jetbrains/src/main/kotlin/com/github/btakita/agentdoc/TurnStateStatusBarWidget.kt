@@ -1,72 +1,32 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.TurnStateStatus
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.StatusBar
-import com.intellij.openapi.wm.StatusBarWidget
-import com.intellij.openapi.wm.StatusBarWidgetFactory
+import com.intellij.openapi.util.Disposer
 
 /**
- * Status-bar widget that makes Project Controller turn-state coordination visible in the
- * JetBrains editor (goal 1). Reads the project turn-state cache updated by the
- * event-driven [TurnStateBannerRefresher], so painting never calls native
- * projection APIs on a Swing timer. Parity with the VS Code status-bar indicator
- * (`specs/14-realtime-workflow.md` § Editor Parity Requirement).
+ * What the shell's turn-state status-bar widget (`ShellTurnStateStatusBarWidget`, GH #339 R1)
+ * shows. It reads the project turn-state cache updated by the event-driven
+ * [TurnStateBannerRefresher], so painting never calls native projection APIs on a Swing timer.
  */
-class TurnStateStatusBarWidgetFactory : StatusBarWidgetFactory {
-    override fun getId(): String = TurnStateStatusBarWidget.WIDGET_ID
-    override fun getDisplayName(): String = "Agent Doc Turn State"
-    override fun isAvailable(project: Project): Boolean = true
-    override fun createWidget(project: Project): StatusBarWidget = TurnStateStatusBarWidget(project)
-    override fun disposeWidget(widget: StatusBarWidget) = widget.dispose()
-    override fun canBeEnabledOn(statusBar: StatusBar): Boolean = true
-}
+internal object TurnStateStatusBarWidget {
+    private const val BRAND = "agent-doc"
+    private const val DEFAULT_TOOLTIP =
+        "Agent Doc turn state — the Project Controller's authoritative turn phase for this document"
 
-class TurnStateStatusBarWidget(private val project: Project) :
-    StatusBarWidget, StatusBarWidget.TextPresentation {
-
-    companion object {
-        const val WIDGET_ID = "com.github.btakita.agentdoc.TurnStateStatusBar"
-        private const val BRAND = "agent-doc"
-        private const val DEFAULT_TOOLTIP =
-            "Agent Doc turn state — the Project Controller's authoritative turn phase for this document"
-        private val LOG = Logger.getInstance(TurnStateStatusBarWidget::class.java)
-    }
-
-    private var statusBar: StatusBar? = null
-    private var listenerDisposable: Disposable? = null
-    // Never empty: an empty TextPresentation makes the platform build a zero-width
-    // TextPanel at creation that a later updateWidget won't re-grow, so the widget
-    // stays invisible. Seed with the brand so the component has a paintable size
-    // from the first render.
-    private var widgetText: String = BRAND
-    private var widgetTooltip: String = DEFAULT_TOOLTIP
-
-    override fun ID(): String = WIDGET_ID
-
-    override fun getPresentation(): StatusBarWidget.WidgetPresentation = this
-
-    override fun install(statusBar: StatusBar) {
-        this.statusBar = statusBar
+    fun watch(project: Project, parent: Disposable, onChange: Runnable) {
         val refresher = TurnStateBannerRefresher.getInstance(project)
         refresher.start()
-        listenerDisposable = refresher.addListener(TurnStateBannerRefresher.Listener {
-            refreshFromCache()
-        })
-        LOG.info("[turn-widget] installed on status bar; using event-driven turn-state cache")
-        refreshFromCache()
-        refresher.requestSelectedRefresh("statusbar-install")
+        Disposer.register(parent, refresher.addListener(TurnStateBannerRefresher.Listener { onChange.run() }))
     }
 
-    override fun dispose() {
-        listenerDisposable?.dispose()
-        listenerDisposable = null
-        statusBar = null
+    fun requestRefresh(project: Project, reason: String) {
+        TurnStateBannerRefresher.getInstance(project).requestSelectedRefresh(reason)
     }
 
-    private fun refreshFromCache() {
+    fun status(project: Project): TurnStateStatus {
         val file = FileEditorManager.getInstance(project).selectedFiles
             .firstOrNull { it.name.endsWith(".md") }
         // Always show a visible, non-empty indicator so the widget stays findable
@@ -76,7 +36,7 @@ class TurnStateStatusBarWidget(private val project: Project) :
         val presentation = file?.let {
             TurnStateBannerRefresher.getInstance(project).cachedPresentationFor(it.path)
         }
-        val next = if (file == null) {
+        val text = if (file == null) {
             BRAND
         } else {
             presentation
@@ -84,16 +44,6 @@ class TurnStateStatusBarWidget(private val project: Project) :
                 ?.ifEmpty { "$BRAND: idle" }
                 ?: "$BRAND: idle"
         }
-        val nextTooltip = presentation?.tooltip ?: DEFAULT_TOOLTIP
-        if (next != widgetText || nextTooltip != widgetTooltip) {
-            LOG.info("[turn-widget] refresh: file=${file?.path ?: "(none)"} text=\"$next\"")
-            widgetText = next
-            widgetTooltip = nextTooltip
-            statusBar?.updateWidget(WIDGET_ID)
-        }
+        return TurnStateStatus(text, presentation?.tooltip ?: DEFAULT_TOOLTIP, file?.path)
     }
-
-    override fun getText(): String = widgetText
-    override fun getAlignment(): Float = 0f
-    override fun getTooltipText(): String = widgetTooltip
 }

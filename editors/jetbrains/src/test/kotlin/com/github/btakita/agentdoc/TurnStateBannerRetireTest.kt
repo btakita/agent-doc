@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ShellTurnStateStrips
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,7 +20,7 @@ import javax.swing.JPanel
 class TurnStateBannerRetireTest {
     @After
     fun tearDown() {
-        TurnStateBannerProvider.retireStrips()
+        ShellTurnStateStrips.retireStrips()
     }
 
     @Test
@@ -29,15 +30,15 @@ class TurnStateBannerRetireTest {
         val sibling = JPanel()
         editorTop.add(stale)
         editorTop.add(sibling)
-        TurnStateBannerProvider.trackStripForTest(stale)
+        ShellTurnStateStrips.trackStripForTest(stale)
 
-        assertEquals(1, TurnStateBannerProvider.retireStrips())
+        assertEquals(1, ShellTurnStateStrips.retireStrips())
 
         assertNull("the frozen strip must leave the editor", stale.parent)
         assertFalse(stale.isVisible)
         assertEquals(listOf(sibling), editorTop.components.toList())
-        assertEquals(0, TurnStateBannerProvider.trackedStripCountForTest())
-        assertEquals("retiring twice removes nothing more", 0, TurnStateBannerProvider.retireStrips())
+        assertEquals(0, ShellTurnStateStrips.trackedStripCountForTest())
+        assertEquals("retiring twice removes nothing more", 0, ShellTurnStateStrips.retireStrips())
     }
 
     @Test
@@ -52,7 +53,7 @@ class TurnStateBannerRetireTest {
         )
         val cleanup = source.substring(source.indexOf("fun retire()"))
         val retireGeneration = cleanup.indexOf("PluginGeneration.retire()")
-        val retireStrips = cleanup.indexOf("TurnStateBannerProvider.retireStrips()")
+        val retireStrips = cleanup.indexOf("ShellTurnStateStrips.retireStrips()")
 
         assertTrue(retireGeneration >= 0)
         assertTrue(
@@ -70,7 +71,7 @@ class TurnStateBannerSweepTest {
     @After
     fun tearDown() {
         PluginGeneration.resetForTest()
-        TurnStateBannerProvider.retireStrips()
+        ShellTurnStateStrips.retireStrips()
     }
 
     @Test
@@ -78,13 +79,13 @@ class TurnStateBannerSweepTest {
         val editorTop = JPanel()
         val legacy = JPanel().apply { add(JLabel("⟳ agent-doc: awaiting response")) }
         val marked = JPanel().apply {
-            putClientProperty(TurnStateBannerProvider.STRIP_MARKER_KEY, "another-generation")
+            putClientProperty(ShellTurnStateStrips.STRIP_MARKER_KEY, "another-generation")
         }
         val unrelated = JPanel().apply { add(JLabel("Markdown preview is disabled")) }
-        val live = TurnStateBannerProvider.createStrip("⟳ agent-doc: awaiting response", null)!!
+        val live = ShellTurnStateStrips.createStrip("⟳ agent-doc: awaiting response", null)!!
         listOf(legacy, marked, unrelated, live).forEach(editorTop::add)
 
-        assertEquals(2, TurnStateBannerProvider.sweepForeignTurnStrips(editorTop, live))
+        assertEquals(2, ShellTurnStateStrips.sweepForeignTurnStrips(editorTop, live))
 
         assertEquals(listOf(unrelated, live), editorTop.components.toList())
         assertNull(legacy.parent)
@@ -95,12 +96,12 @@ class TurnStateBannerSweepTest {
     fun `wrapped top components are swept one level down, never the live strip`() {
         val editorTop = JPanel()
         val staleWrapper = JPanel().apply { add(JPanel().apply { add(JLabel("⚠ agent-doc: input required")) }) }
-        val live = TurnStateBannerProvider.createStrip("⟳ agent-doc: persisting", null)!!
+        val live = ShellTurnStateStrips.createStrip("⟳ agent-doc: persisting", null)!!
         val liveWrapper = JPanel().apply { add(live) }
         editorTop.add(staleWrapper)
         editorTop.add(liveWrapper)
 
-        assertEquals(1, TurnStateBannerProvider.sweepForeignTurnStrips(editorTop, live))
+        assertEquals(1, ShellTurnStateStrips.sweepForeignTurnStrips(editorTop, live))
 
         assertEquals(0, staleWrapper.componentCount)
         assertEquals(listOf(live), liveWrapper.components.toList())
@@ -109,7 +110,7 @@ class TurnStateBannerSweepTest {
     @Test
     fun `a retired generation builds no strip`() {
         PluginGeneration.retire()
-        assertNull(TurnStateBannerProvider.createStrip("⟳ agent-doc: awaiting response", null))
-        assertEquals(0, TurnStateBannerProvider.trackedStripCountForTest())
+        assertNull(ShellTurnStateStrips.createStrip("⟳ agent-doc: awaiting response", null))
+        assertEquals(0, ShellTurnStateStrips.trackedStripCountForTest())
     }
 }

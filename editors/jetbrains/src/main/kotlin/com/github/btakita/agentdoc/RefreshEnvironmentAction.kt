@@ -129,7 +129,7 @@ class RefreshEnvironmentAction : ImplAction {
     }
 
     private fun refreshCachesAndVfs(project: Project) {
-        SlashCommandCompletionContributor.clearCache()
+        SlashCommandCompletions.clearCache()
 
         val toRefresh = buildList {
             add(File(System.getProperty("user.home"), ".claude"))

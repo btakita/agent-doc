@@ -1,10 +1,21 @@
 .gitignore
 .vscodeignore
 src/**
+scripts/**
 tsconfig.json
 esbuild.js
-node_modules/**
 out/**/*.test.js
 out/**/*.test.js.map
 out/**/*.map
 test-fixtures/**
+# esbuild inlines every dependency except the koffi FFI (#vscodekoffivsix).
+# Ship only koffi's CommonJS runtime and the natives scripts/stage-koffi.mjs
+# staged under build/koffi for every published platform; the build host's
+# @koromix/koffi-<platform> package is dropped so every VSIX is the same.
+node_modules/**
+!node_modules/koffi/package.json
+!node_modules/koffi/LICENSE.txt
+!node_modules/koffi/index.cjs
+!node_modules/koffi/src/koffi/index.cjs
+!node_modules/koffi/src/koffi/src/static.cjs
+!node_modules/koffi/build/koffi/*/koffi.node

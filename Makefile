@@ -285,6 +285,7 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 	@python3 scripts/agent-doc-dev self-test
 	@cd editors/jetbrains && ./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q test
 	@cd editors/vscode && npm test
+	@cd editors/vscode && npm run test:package
 
 # Every release records coverage, tests both supported plugins, and executes
 # their shipped native forwarders together through a real controller.
@@ -616,6 +617,10 @@ install-editor-plugins:
 	@if agent-doc plugin list 2>/dev/null | grep -q '^vscode'; then \
 		if [ -x editors/vscode/node_modules/.bin/vsce ] || command -v vsce >/dev/null 2>&1; then \
 			( cd editors/vscode && npm run package ) || exit 1; \
+			( cd editors/vscode && AGENT_DOC_VSIX="agent-doc-$$(node -p "require('./package.json').version").vsix" npm run test:package ) || { \
+				echo "The VS Code package is missing its koffi FFI runtime (#vscodekoffivsix). Refusing to install a VSIX whose native library cannot load." >&2; \
+				exit 1; \
+			}; \
 			agent-doc plugin install vscode --local; \
 		else \
 			echo "WARNING: vsce is not installed; VS Code package sync skipped. The installed VS Code agent-doc package stays on its previous generation. Run \`npm install\` in editors/vscode (or install @vscode/vsce globally), then re-run \`make install-editor-plugins\` to refresh it." >&2; \

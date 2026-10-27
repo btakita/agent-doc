@@ -335,6 +335,9 @@ jobs:
           npm run package --prefix editors/vscode
           version=$(node -p "require('./editors/vscode/package.json').version")
           test -n "$version"
+          # #vscodekoffivsix: the VSIX must carry koffi's runtime and a native
+          # for every libagent_doc platform, and koffi must load from it.
+          AGENT_DOC_VSIX="agent-doc-$version.vsix" npm run test:package --prefix editors/vscode
           cp "editors/vscode/agent-doc-$version.vsix" editor-packages/
           ls -la editor-packages
 

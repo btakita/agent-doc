@@ -34393,6 +34393,241 @@ fn test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning(
     );
 }
 
+/// `#claimwrongstore` fixture: a live pane on an isolated tmux server whose
+/// cwd (and the server's) is `start_dir`, so no pane resolves to a live
+/// project (`#prunetestisolation`).
+fn claim_store_test_pane(tmux: &IsolatedTmuxServer, start_dir: &Path, session: &str) -> String {
+    let output = ProcessCommand::new("tmux")
+        .current_dir(start_dir)
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .args([
+            "-L",
+            &tmux.socket,
+            "-f",
+            "/dev/null",
+            "new-session",
+            "-d",
+            "-P",
+        ])
+        .args(["-F", "#{pane_id}", "-s", session, "-c"])
+        .arg(start_dir)
+        .arg("sleep 120")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// Run `agent-doc claim <doc> --pane <pane>` from `cwd`, a different agent-doc
+/// project than the document's, and assert the binding landed in `doc_store`
+/// (the store `project_root_or_file_parent(doc)` names, where the claim's
+/// `claims.log` goes and every reader of the document looks) and nowhere in
+/// the cwd's store.
+fn assert_claim_from_foreign_cwd_binds_in_document_store(
+    tmux: &IsolatedTmuxServer,
+    cwd: &Path,
+    doc: &Path,
+    doc_store: &Path,
+    pane: &str,
+) {
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(cwd)
+        .arg("claim")
+        .arg(doc)
+        .args(["--pane", pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+
+    let doc_key = doc.to_string_lossy().into_owned();
+    let session_id = agent_doc_frontmatter::frontmatter::session_id_from_content(
+        &fs::read_to_string(doc).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        fs::read_to_string(doc_store.join(".agent-doc/claims.log"))
+            .unwrap_or_default()
+            .contains(&format!("for pane {pane}")),
+        "claims.log goes to the document's store: {stderr}"
+    );
+    let record = agent_doc_session_actor_io::load_record_in(doc_store, &doc_key)
+        .unwrap()
+        .unwrap_or_else(|| panic!("claim bound no actor in the document's store: {stderr}"));
+    assert_eq!(
+        (record.pane_id.as_str(), record.session_id.as_str()),
+        (pane, session_id.as_str())
+    );
+    assert_eq!(record.last_transition.caller, "claim");
+    assert!(
+        agent_doc_session_registry_io::load_in(doc_store)
+            .unwrap()
+            .values()
+            .any(|entry| entry.session_id == session_id && entry.pane == pane),
+        "the claim's registry entry is in the document's store: {stderr}"
+    );
+    assert!(
+        doc_store.join(".agent-doc/config.toml").is_file(),
+        "template components merge into the document's project config: {stderr}"
+    );
+
+    assert_eq!(
+        agent_doc_session_actor_io::load_record_in(cwd, &doc_key).unwrap(),
+        None,
+        "the claim's process cwd is not the document's actor store: {stderr}"
+    );
+    assert!(
+        agent_doc_session_registry_io::load_in(cwd)
+            .unwrap()
+            .values()
+            .all(|entry| entry.session_id != session_id && entry.pane != pane),
+        "no registry entry for the document lands in the cwd's store: {stderr}"
+    );
+    assert!(
+        !cwd.join(".agent-doc/config.toml").exists(),
+        "claim writes no project config into the cwd's project: {stderr}"
+    );
+}
+
+/// `#claimwrongstore`: `claim` resolved its actor/registry store from the
+/// process cwd while it wrote `claims.log` under the document's store, so a
+/// claim run from another project bound the document in that project's store,
+/// which no reader of the document consults.
+#[test]
+fn test_cli_claim_from_another_project_binds_in_the_documents_project_store() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new("claim-store");
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let project = tmp.path().join("doc-project");
+    fs::create_dir_all(&project).unwrap();
+    let doc = project.join("doc.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: doc-project-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    init_git_repo(&project, &doc);
+    let (cwd_project, project, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        project.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    let pane = claim_store_test_pane(&tmux, &project, "claim-store");
+
+    assert_claim_from_foreign_cwd_binds_in_document_store(
+        &tmux,
+        &cwd_project,
+        &doc,
+        &project,
+        &pane,
+    );
+}
+
+/// `#claimwrongstore`: a document with no `.agent-doc` ancestor binds in its
+/// canonical parent's store, as `start`, the route, and sync's recovered-owner
+/// bind (`#syncnorootfallback`) do, never the claim's cwd project.
+#[test]
+fn test_cli_claim_of_a_rootless_document_binds_in_its_parent_store() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new("claim-rootless-store");
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let loose = tmp.path().join("loose");
+    fs::create_dir_all(&loose).unwrap();
+    let doc = loose.join("rootless.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: rootless-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    let (cwd_project, loose, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        loose.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    assert!(
+        agent_doc_project_root_io::project_root_containing(&doc).is_none(),
+        "fixture document must have no project root"
+    );
+    let pane = claim_store_test_pane(&tmux, &loose, "claim-rootless-store");
+
+    assert_claim_from_foreign_cwd_binds_in_document_store(&tmux, &cwd_project, &doc, &loose, &pane);
+}
+
+/// `#claimwrongstore`: claim's pane-occupancy check reads the store its bind
+/// writes. A pane bound to another document of the same project is occupied
+/// whatever the claim's cwd, so the claim provisions a new pane instead of
+/// commandeering it (SPEC §8.5). Read from the cwd's store, the check saw no
+/// occupant and the bind evicted the other document's entry on that pane.
+#[test]
+fn test_cli_claim_from_another_project_sees_the_documents_store_pane_occupant() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new("claim-store-occupied");
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let project = tmp.path().join("doc-project");
+    fs::create_dir_all(&project).unwrap();
+    let doc = project.join("doc.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: claimed-session\nagent: claude\nclaude_args: --version\n---\n# Doc\n",
+    )
+    .unwrap();
+    let other = project.join("other.md");
+    fs::write(
+        &other,
+        "---\nagent_doc_session: occupant-session\n---\n# Other\n",
+    )
+    .unwrap();
+    init_git_repo(&project, &doc);
+    let (cwd_project, project) = (
+        cwd_project.canonicalize().unwrap(),
+        project.canonicalize().unwrap(),
+    );
+    let pane = claim_store_test_pane(&tmux, &project, "claim-store-occupied");
+    agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+        &project,
+        "occupant-session",
+        &pane,
+        "other.md",
+        std::process::id(),
+        "",
+        &project.to_string_lossy(),
+    )
+    .unwrap();
+
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(&cwd_project)
+        .arg("claim")
+        .arg(&doc)
+        .args(["--pane", &pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("pane {pane} is already claimed")),
+        "the occupant in the document's store makes the claim provision: {stderr}"
+    );
+    let registry = agent_doc_session_registry_io::load_in(&project).unwrap();
+    assert!(
+        registry
+            .values()
+            .any(|entry| entry.session_id == "occupant-session" && entry.pane == pane),
+        "the claim never evicts the occupant's binding: {stderr}"
+    );
+    assert!(
+        registry
+            .values()
+            .all(|entry| entry.session_id != "claimed-session" || entry.pane != pane),
+        "the claim never binds the occupied pane: {stderr}"
+    );
+}
+
 #[test]
 fn test_cli_route_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();

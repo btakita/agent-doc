@@ -14,6 +14,9 @@
 //! - `register(session_id, pane_id, file)` acquires the lock, calls
 //!   `register_with_pid` using the current process ID.
 //! - `register_with_pid` queries the pane's window and delegates to `register_full`.
+//! - `register_with_pid_and_cwd_in` is `claim`'s bind (`claim`/`claim_bind`) into
+//!   an explicit store, the document's (`#claimwrongstore`); it never resolves
+//!   its store from the process cwd.
 //! - `register_supervisor` records the authoritative supervisor PID +
 //!   supervisor instance identity for a live pane owner.
 //! - `register_full` rejects a session identity already owned by another document,
@@ -124,10 +127,18 @@ fn register_with_pid_internal(
     )
 }
 
-/// Like `register_with_pid` but accepts an explicit `cwd` override.
-/// Used by `claim` to record the document's nearest git repo root as cwd,
-/// avoiding superproject drift when claiming submodule-hosted documents.
-pub fn register_with_pid_and_cwd(
+/// `claim`'s bind (`claim`/`claim_bind`): registers `session_id` on `pane_id`
+/// in the store at `base_dir`, recording an explicit `cwd` (the document's
+/// nearest git repo root, avoiding superproject drift when claiming
+/// submodule-hosted documents, `#tw4a`).
+///
+/// `#claimwrongstore`: `base_dir` is the document's store
+/// (`agent_doc_project_root_io::project_root_or_file_parent`), never the
+/// process cwd. The cwd-resolved form this replaces bound a document claimed
+/// from another project in that project's store, which no reader of the
+/// document consults, while the claim's `claims.log` went to the document's.
+pub fn register_with_pid_and_cwd_in(
+    base_dir: &Path,
     session_id: &str,
     pane_id: &str,
     file: &str,
@@ -136,7 +147,11 @@ pub fn register_with_pid_and_cwd(
 ) -> Result<()> {
     let tmux = agent_doc_tmux_io::configured_tmux();
     let window = agent_doc_tmux_io::target_window_id(&tmux, pane_id).unwrap_or_default();
-    register_full_with_cwd_internal_call(
+    let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+    let mut registry = session_registry_io::load_in(base_dir)?;
+    register_full_internal(
+        base_dir,
+        &mut registry,
         session_id,
         pane_id,
         file,

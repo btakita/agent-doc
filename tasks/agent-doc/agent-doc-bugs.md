@@ -236,6 +236,41 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 **Review gate `#jb262dynlauncherrecommen` is resolved by your autoupgrade decision:**
 - The 2026.2 package keeps the accurate-warning policy (`declined_by=modular_package`, then file replacement and the restart prompt).
 - A real restart-free path for 2026.2 and 2026.3 is now tracked by `#jb339shelldesign` instead of a separate 2026.2-only launcher.
+
+### Re: do [#jb339shelldesign] — opus-5 · 2026-10-26T20:54-04:00
+
+> **Queue prompt:** do [#jb339shelldesign]
+
+**On `main` as `d8f0db1ea6`. This is a design and a test-only spike; nothing users install changes.** The plugin version and source digest are unchanged, so no install was needed. Integrated check: `make check-fast` passed, including 971 JetBrains JUnit tests with 0 failures and the spike's 12 tests.
+
+**The design (`editors/jetbrains/SPEC.md`, "Restart-free implementation generations"):**
+
+- **The plugin never gets unloaded.** The installed plugin becomes a stable shell with the same id and package, and no extra plugin is installed. It loads the real code from a versioned `impl/` jar into a classloader agent-doc owns. An upgrade swaps that code in place and never calls `DynamicPlugins.unloadPlugin`, so the 2026.3 module-graph refusal no longer applies.
+- **The IDE only ever holds shell objects.** A table maps every registration the plugin makes today (27 actions, services, message-bus topics, extensions, the Remote Dev RPC, threads, JNA, `Key`s) to the shell forwarder that owns it during a swap. The code being swapped is barred from registering anything directly.
+- **Remote Dev:** each JVM publishes an activation receipt. Work that depends on the frontend runs only when the backend and frontend receipts match.
+- **A restart is still needed for:** a shell change, an implementation jar built for a different shell version, a detected leak, the first install of the shell itself, and any update IntelliJ performs on its own (Marketplace, custom repository). Only agent-doc's own installer can swap without a restart. The restart prompt stays as the fallback.
+- **Expected benefit:** a rough estimate from changed file paths says 50 of the last 82 plugin releases would have upgraded without a restart.
+- **Staged plan:**
+  - **R1:** shell and forwarders, code still in one loader. Costs one restart.
+  - **R2:** load the code through the child loader at IDE start.
+  - **R3:** live swaps on the classic plugin.
+  - **R4:** live swaps on the 2026.2/2026.3 backend.
+  - **R5:** move the remaining subsystems over.
+
+**What the spike proves:**
+- A jar is verified by sha256 and loaded in its own classloader.
+- A swap keeps exactly one platform subscriber.
+- The retired classloader really is garbage-collected. As a negative control, a deliberately leaky implementation pins its loader, and further swaps are refused.
+- Bad jars are refused, and a failed swap rolls back.
+- Two deliberate breakages each turned the garbage-collection test red.
+
+**What it doesn't prove:** anything inside a real IDE (EDT, `Disposer`, `MessageBus`, JNA, Remote Dev, Marketplace). That is what R1–R4 are for.
+
+**Risk:** this rewrites how the plugin owns its IDE registrations, about 1.6 MB of Kotlin across 89 files. Leaks show up only through natural garbage collection, and IntelliJ can't attribute errors in the swapped code to Agent Doc.
+
+**Your decisions:**
+- **Keep the frontend shell-only.** In Remote Dev, frontend changes still restart, and no code reaches your local JVM except through a plugin install. Frontend swaps are parked in the icebox as `#jbfrontendswap`.
+- **R1 waits for `#jbshrinkrestarts`.** Its benchmark and moves report first, then you decide; the todo is `#jb339r1decision`. The same todo covers restating the 2026.3 reopen rule as "module graph and registrations unchanged across the swap, and the retired code is collectable", because this design never replaces the module graph.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -243,7 +278,7 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:jb339shell#1] do [#jb339shelldesign]
+- ~~do [#jb339shelldesign]~~
 - 🚧 [#subagent:jbshrink#1] do [#jbshrinkrestarts]
 - ~~do [#cazn]~~
 - ~~do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.~~
@@ -263,10 +298,10 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 - [x] [#subagent-operator-request-autoupgrade-263-path] Answer the blocking subagent question for tracked work jb262dynlauncherrecommen for queue item ‘Fix the auto-upgrade not working...the IDE needed to be restarted.’ in agent:exchange: The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). (choices: Keep restart-only + prompt, Re-qualify on 263.7307.44, Build the GH #339 architecture, Shrink the restart count) (source: agent:review [#jb262dynlauncherrecommen])
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
+- [ ] [#jbshrinkrestarts] Decide whether to queue GH #339 shell stage R1 (stable shell + forwarders + activation receipts, code still in one loader, costs one restart) once #jbshrinkrestarts reports its benchmark and moves. Same decision: restate the "Exact-263 decision" reopen rule as "module graph and registrations unchanged across the swap, and the retired implementation is collectable" (editors/jetbrains/SPEC.md). (source: agent:backlog [#jbshrinkrestarts])
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#jb339shelldesign] Design the GH #339 restart-free JetBrains architecture for the exact-263 (and 262) split-mode plugin: a stable shell plugin that loads the real implementation in an agent-doc-owned child classloader, so an upgrade swaps the implementation without IntelliJ unloading a plugin. Cover how IntelliJ registrations and callbacks are owned by the shell (no retained child references), activation receipts that prove the JetBrains Client frontend runs the same generation in Remote Dev, when a shell change still needs a restart, and a release-by-release migration plan. Deliverable: a spec section plus a proof-of-concept spike, not the full migration. Keep the restart-required prompt as the fallback.
 - [ ] [#jbshrinkrestarts] Shrink the JetBrains restart count: move TerminalUtil (tmux/process orchestration) and PatchWatcher logic behind the native agent-doc library, which already hot-reloads without an IDE restart, so fewer releases change plugin Kotlin. First add a per-keystroke latency benchmark on a large session document and gate each move on no regression. Leave CrdtReplicaManager in Kotlin unless the native side keeps the replica behind a handle and the boundary carries binary op deltas, not whole-document JSON.
 <!-- /agent:backlog -->
 
@@ -277,6 +312,7 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#jbfrontendswap] [agent-doc] Remote Dev frontend implementation swaps for the GH #339 shell design: let the JetBrains Client load the swappable implementation from the backend so frontend changes stop needing a restart. Parked 2026-10-26: it pushes backend code into the local client JVM without a plugin install, which changes the security boundary. The frontend stays shell-only (editors/jetbrains/SPEC.md, "Restart-free implementation generations").
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->
 

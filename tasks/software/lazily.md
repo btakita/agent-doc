@@ -1,7 +1,7 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
-  claude: c21b1ca5-28bc-4bfc-b8da-7959562eb263
+  claude: 62d9849d-6ef7-44d3-9e33-c667b53bcbba
   codex: 01a17636-406a-7b73-935e-8c09a7f7a445
 agent: claude
 claude_model: opus
@@ -1132,17 +1132,121 @@ Nothing was technically blocking it. Generations 2 and 3 were workers that disap
 The tmux-router `IsolatedTmux` already passes `-L`, so it is safe as is.
 
 `#tmuxkittyterminal` is complete.
-<!-- agent:boundary:e199c066 -->
+
+### Re: Subagent completed: `subagent:lzprune` returned work for queue item “do [#lzauditbranchprune]” — agent-doc
+<!-- agent-doc-subagent-response sha256=942c3bda4237db320b681e18efb6d7055d78ca8ce2e3eacf653c5976ab4c9f09 -->
+> **Subagent response:**
+>
+> I deleted all four superseded branches, in both lazily-py and lazily-cpp. No branch had work that wasn't already on main, so nothing needed your call. This was ref deletion only: no files edited, no commits, nothing pushed except the remote deletes, and no tests run.
+>
+> **lazily-py** (`/home/brian/work/btakita/agent-loop/src/lazily-py`)
+> - **`audit/core-ci-reach-20261022`** (remote only): its one commit, 68b3c68, is already on main as 87c217e (git's patch-match check confirms it). Deleted on origin.
+> - **`task/lzcorecireachaudit-20261022`** (local and remote): its one commit, b729acb, did not patch-match main. It only changes `scripts/core-conformance.json`, and the only difference from main's copy is one entry in a different position. Comparing the JSON with order ignored, b729acb, 68b3c68 and main's current file are identical, so the content landed via 87c217e. Deleted on origin and locally.
+>
+> **lazily-cpp** (`/home/brian/work/btakita/agent-loop/src/lazily-cpp`)
+> - **`audit/core-ci-reach-20261022`** (remote only): its one commit, 4441b87, is already on main. Deleted on origin.
+> - **`task/lzcorecireachaudit-20261022`** (local and remote): its one commit, 64a7581, is already on main. Deleted on origin and locally.
+>
+> **Worktrees removed:** the local `task/` branch was checked out in a worktree in each repo. Both were clean, so I removed them before deleting the branches:
+> - `/home/brian/worktrees/lzcorecireachaudit-20261022-corecireachaudit/lazily-py`
+> - `/home/brian/worktrees/lzcorecireachaudit-20261022-corecireachaudit/lazily-cpp`
+>
+> The parent folder still holds the other bindings' worktrees (cs, dart, go, js, kt, rs, spec, zig); I didn't touch those.
+>
+> **Final check:** after a fresh `git fetch --prune`, the requested `git branch -a --list '*core-ci-reach*' '*lzcorecireachaudit-20261022*'` printed nothing usable because the RTK proxy mangled its output. I verified the end state another way instead:
+> - `git ls-remote origin` for both branch names returns nothing in either repo.
+> - The only matching ref left in each repo is `refs/heads/task/lzcorecireachaudit4`, which was out of scope and left alone.
+>
+> There's no new commit SHA or branch to report, and no follow-up queue items.
+<!-- agent-doc-subagent-completion key=0416c9da6959f26fbd1ad847eeeb437381b7432cba9fb6601bcdb29683f2e11f -->
+
+### Re: Subagent completed: `subagent:lzcov` returned work for queue item “do [#lzcoverageresync]” — agent-doc
+<!-- agent-doc-subagent-response sha256=d67821b15a59274d8620d754302aa859b6ffc272f0190cc9ccbe91e70cb082fd -->
+> **Subagent response:**
+>
+> I regenerated the README coverage tables and pushed one commit to `origin/main` in 11 binding repos, not nine: `scripts/sync-coverage.mjs` checks 11 sibling READMEs, and all 11 were stale. lazily-spec's local `make check` now passes against those pushed READMEs. lazily-spec itself needed no change.
+>
+> **Setup.** The script finds bindings at fixed sibling paths (`../lazily-<x>/README.md`), with no env var. So I created worktrees from `origin/main` side by side under `~/worktrees/lzcov-20261026/` (12 worktrees, each on local branch `lzcov-20261026`). The coordinator checkouts were not touched.
+>
+> **Change.** In each README, one line changed: "A family cell summarises 83 feature rows" became "84 feature rows". Nothing else in the tables moved.
+>
+> **Per repo.** Each push was a fast-forward of exactly one commit on the `origin/main` I started from, after a fetch and rebase. No upstream commits had landed in between, and there was no force-push.
+>
+> | Repo | Commit | Parent | File | CI right after push |
+> |---|---|---|---|---|
+> | lazily-rs | 1204da9 | 0036675 | README.md | CI in_progress |
+> | lazily-py | 3d93d73 | 63a811f | README.md | poe precommit in_progress |
+> | lazily-kt | 222685d | 6da80cf | README.md | CI in_progress |
+> | lazily-js | 9e33238 | ff1fe27 | README.md | CI in_progress |
+> | lazily-dart | 09a44ac | 0ba2c12 | README.md | CI in_progress |
+> | lazily-zig | b63ad59 | 0a91430 | README.md | CI queued |
+> | lazily-go | 81329df | d393322 | README.md | CI queued |
+> | lazily-cpp | 86106bc | b51ef0e | README.md | CI queued |
+> | lazily-cs | a182809 | 42437ba | README.md | CI queued |
+> | lazily-gd | 2fc75ce | b2f16dd | README.md | CI queued |
+> | lazily-formal | 364246b | 78ed399 | README.md | no CI runs |
+>
+> `git ls-remote` confirms each remote `main` equals the commit shown. I checked CI once and did not wait for results.
+>
+> **Verification** (run in `~/worktrees/lzcov-20261026/lazily-spec`, at `e3b5ff8`):
+> - **Before the regen:** `node scripts/sync-coverage.mjs --check` printed "11 target(s) stale" and exited 1.
+> - **After the regen:** the same `--check` exited 0, and `make check` exited 0. The log has no failures; the only notes are the existing "no floor declared … reported, not failed" message.
+> - **After pushing:** I re-ran `--check` with lazily-spec rebased to the latest `origin/main`, and it exited 0.
+>
+> **Follow-ups:**
+> 1. The backlog item says "nine Core bindings", but the script also covers lazily-dart, lazily-gd and lazily-formal. You may want to correct the item's wording.
+> 2. The root cause is still there: lazily-spec CI doesn't check out the binding READMEs, so this drift can come back silently. Possible follow-up: "lazily-spec CI clones the 11 sibling binding READMEs and runs `sync-coverage.mjs --check`, so binding README drift fails CI."
+>
+> I left the 12 worktrees and their local `lzcov-20261026` branches in place. They can be removed with `git worktree remove` and `git branch -D lzcov-20261026` in each coordinator submodule.
+<!-- agent-doc-subagent-completion key=da1f90e2eeb9650d7b87275fb5a62e0da543ab04e81b3110a919b69b6a9dee20 -->
+
+### Re: queue subagents — #lzauditbranchprune, #lzcoverageresync done — opus-5-5 · 2026-10-26T23:58-04:00
+
+I sent the four queued items to four background workers. Two have finished and are marked done below. **#lzbindingevidenceci** and **#tmuxguardclaudeinstall** are still running (🚧). I'll close each one when its worker reports.
+
+**#lzauditbranchprune: done**
+- I deleted `audit/core-ci-reach-20261022` and `task/lzcorecireachaudit-20261022` in lazily-py and lazily-cpp, both on the remote and locally where they existed.
+- **Why it was safe:** every branch's commit was already on main.
+  - In three branches git confirmed it directly.
+  - py `b729acb` only changed `scripts/core-conformance.json`, and its content matches main's once entry order is ignored.
+- I removed two clean worktrees under `~/worktrees/lzcorecireachaudit-20261022-corecireachaudit/` that had the branches checked out.
+- **My check:** `git ls-remote` finds neither branch in either repo. The only matching ref left is `task/lzcorecireachaudit4`, which was out of scope.
+
+**#lzcoverageresync: done**
+- **Scope:** `sync-coverage.mjs` checks **11** binding READMEs, not nine. It also covers dart, gd and formal. All 11 were stale by one line: "83 feature rows" should read "84".
+- **Pushes:** one README-only commit per repo, each a fast-forward onto `origin/main` without force:
+
+| Repo | Commit | | Repo | Commit |
+|---|---|---|---|---|
+| rs | 1204da9 | | cpp | 86106bc |
+| py | 3d93d73 | | cs | a182809 |
+| kt | 222685d | | gd | 2fc75ce |
+| js | 9e33238 | | zig | b63ad59 |
+| dart | 09a44ac | | go | 81329df |
+| formal | 364246b | | | |
+
+- **Tests:** the worker ran these in its lazily-spec worktree at `e3b5ff8`.
+  - `sync-coverage.mjs --check` exited 1 before the regen ("11 target(s) stale") and 0 after.
+  - `make check` exited 0.
+  - After rebasing to the newest spec main, `--check` exited 0 again.
+- **My check:** every remote `main` matches the commit above.
+- **CI:** binding CI was queued or still running when last checked, and lazily-formal has no CI.
+- **Leftover:** 12 worktrees remain at `~/worktrees/lzcov-20261026/`, each with a local `lzcov-20261026` branch. They can be removed whenever you like.
+- **New backlog item #lzspecreadmeci:** the root cause is still there. Spec CI never checks out the binding READMEs, so this drift can come back without failing CI. The new item makes spec CI run `--check` against the 11 sibling READMEs.
+
+The exchange is now about 1,100 lines and the queue is still running, so I haven't compacted it.
+<!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
+- do [#lzspecreadmeci]
 - ~~do [#tmuxkittyterminal]~~
-- 📥 do [#lzcoverageresync]
-- 📥 do [#lzbindingevidenceci]
-- 📥 do [#lzauditbranchprune]
-- do [#tmuxguardclaudeinstall]
+- ~~do [#lzcoverageresync]~~
+- 🚧 [#subagent:lzevci#1] do [#lzbindingevidenceci]
+- ~~do [#lzauditbranchprune]~~
+- 🚧 [#subagent:tmuxguard#1] do [#tmuxguardclaudeinstall]
 <!-- /agent:queue -->
 
 ## Todo
@@ -1154,10 +1258,9 @@ The tmux-router `IsolatedTmux` already passes `-L`, so it is safe as is.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzspecreadmeci] lazily-spec CI should clone the 11 sibling binding READMEs and run sync-coverage.mjs --check, so binding README coverage drift fails spec CI instead of surfacing only in a local make check (root cause of #lzcoverageresync).
 - [ ] [#tmuxguardclaudeinstall] Make agent-doc skill install wire the coined-id-pre-tool-use PreToolUse hook (which now carries the live-tmux-server guard) for Claude Code projects, not only Codex; today agent-loop has it only because .claude/settings.json was hand-edited, so other Claude projects' subagents can still kill the operator's tmux server.
-- [ ] [#lzcoverageresync] Restore lazily-spec's local make check: run node scripts/sync-coverage.mjs in lazily-spec and commit the regenerated README coverage tables in all nine Core bindings (drift since spec c30bd8f; spec CI misses it because it does not check out binding READMEs).
 - [ ] [#lzbindingevidenceci] Add a per-binding Core evidence gate to each of the nine bindings' CI (check-core-evidence.mjs --binding <id> --generate-reports --require-all), so stale-handle-style evidence drift is caught on push instead of only on a manual cohort-qualification dispatch (py/cpp drift went unnoticed four days).
-- [ ] [#lzauditbranchprune] [recommended] Delete superseded branches audit/core-ci-reach-20261022 and task/lzcorecireachaudit-20261022 in lazily-py and lazily-cpp.
 <!-- /agent:backlog -->
 
 ## Review

@@ -6,6 +6,7 @@ import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Key
 import com.intellij.util.messages.Topic
 
 /*
@@ -70,6 +71,13 @@ interface ImplGeneration {
     /** The handlers behind the shell's editor and language extension forwarders. */
     fun editorExtensions(): ImplEditorExtensions
 
+    /**
+     * This generation's implementation of [type], a shell-declared interface that a modular
+     * content module adds (the 262/263 backend's Fleet RPC surface ingress), or null when this
+     * package has none. One instance per generation.
+     */
+    fun <T : Any> moduleService(type: Class<T>): T?
+
     /** Stop work and return version-neutral state for the next generation. */
     fun quiesce(): String
 
@@ -118,6 +126,13 @@ interface GenerationContext {
 
     /** Pooled work, executors, threads and the coroutine scope of this generation. */
     val work: ShellGenerationWork
+
+    /**
+     * The shell's `Key` named [name], created once per IDE run and shared by every generation,
+     * for the implementation's user data on platform objects. Store only shell or JDK values
+     * under it: a platform object holding an implementation class would pin that generation.
+     */
+    fun <T> userDataKey(name: String): Key<T>
 }
 
 /**

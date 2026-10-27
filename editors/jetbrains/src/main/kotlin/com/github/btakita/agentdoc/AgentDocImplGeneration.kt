@@ -53,6 +53,23 @@ class AgentDocImplGeneration : ImplGeneration {
 
     override fun editorExtensions(): ImplEditorExtensions = AgentDocEditorExtensions
 
+    private val moduleServices = ConcurrentHashMap<String, Any>()
+
+    override fun <T : Any> moduleService(type: Class<T>): T? {
+        val implementation = MODULE_SERVICES[type.name] ?: return null
+        val service = moduleServices.computeIfAbsent(type.name) {
+            // R1: the plugin (or content-module) classloader defines both; by name, so the
+            // classic package, which has no such module, compiles without it.
+            val loaded = try {
+                Class.forName(implementation, true, AgentDocImplGeneration::class.java.classLoader)
+            } catch (_: ClassNotFoundException) {
+                return@computeIfAbsent ABSENT
+            }
+            loaded.getDeclaredConstructor().newInstance()
+        }
+        return if (service === ABSENT) null else type.cast(service)
+    }
+
     override fun quiesce(): String {
         handlers.clear()
         return ""
@@ -63,6 +80,18 @@ class AgentDocImplGeneration : ImplGeneration {
     override fun retire() = AgentDocProjectLifecycle.retire()
 
     companion object {
+        private val ABSENT = Any()
+
+        /**
+         * Shell-declared module interfaces and this generation's implementation of each, by
+         * class name: the 262/263 backend's Fleet RPC surface ingress
+         * (`editors/jetbrains-262/backend/.../SurfaceIngressSpi.kt`).
+         */
+        internal val MODULE_SERVICES: Map<String, String> = mapOf(
+            "com.github.btakita.agentdoc.split.backend.SurfaceIngressFactory" to
+                "com.github.btakita.agentdoc.split.backend.ControllerSurfaceIngressFactory",
+        )
+
         /**
          * The context the shell lent this classloader's generation. R1 defines exactly one
          * generation per plugin classloader, so implementation code reaches it statically.
@@ -221,5 +250,22 @@ internal object GenerationWork {
 
     private fun daemonThreads(threadName: () -> String) = java.util.concurrent.ThreadFactory { runnable ->
         java.lang.Thread(runnable, threadName()).apply { isDaemon = true }
+    }
+}
+
+/**
+ * GH #339 R1, per-platform-object state: implementation code creates every user-data `Key`
+ * here, never with `Key.create`. The shell creates the key (`GenerationContext.userDataKey`), so it
+ * outlives this generation; store only shell or JDK values under it.
+ */
+internal object GenerationKeys {
+    fun <T> create(name: String): com.intellij.openapi.util.Key<T> {
+        val context = AgentDocImplGeneration.activeContext ?: run {
+            com.intellij.openapi.application.ApplicationManager.getApplication()
+                ?.getService(ShellGenerationHost::class.java)
+                ?.activate()
+            AgentDocImplGeneration.activeContext
+        }
+        return context?.userDataKey(name) ?: com.github.btakita.agentdoc.shell.ShellUserDataKeys.key(name)
     }
 }

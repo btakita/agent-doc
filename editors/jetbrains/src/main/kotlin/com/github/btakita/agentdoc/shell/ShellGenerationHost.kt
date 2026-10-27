@@ -13,6 +13,7 @@ import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Key
 import com.intellij.util.messages.Topic
 
 /**
@@ -53,6 +54,8 @@ class ShellGenerationHost : Disposable {
         override val work = ShellGenerationWork(generation)
 
         override fun invokeLater(task: Runnable) = work.invokeLater(task)
+
+        override fun <T> userDataKey(name: String): Key<T> = ShellUserDataKeys.key(name)
 
         private fun admits(what: String): Boolean {
             if (!retired) return true

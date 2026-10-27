@@ -451,43 +451,59 @@ Operator-written and legacy items may have no own id. A todo own id is a tracked
 backlog id is: the shadow-backlog guard never reports it as an open backlog
 item outside `agent:backlog`, the coined-id guards (`session-check` warn and
 the `PreToolUse` source/commit hook) resolve it, and a queue line citing it
-(`- [#<id>]: note`) is a reference, not stray work. A todo that reuses a
-review/backlog/icebox id (`#todoids` below) shares that id with its tracked
-item by design; it is the operator prompt for that item, not a duplicate of it. The
+(`- [#<id>]: note`) is a reference, not stray work. A todo never takes the id
+of an open review/backlog/icebox item (`#todoaddidhijack` below); a legacy
+todo written by `#todoidlayer` that shares a tracked item's id is still read
+as the operator prompt for that item, not a duplicate of it. The
 keyed document merge splits `agent:todo` per item like the list components, so
 a concurrent operator edit and agent write to the checklist merge item by item
 instead of character by character (which could duplicate an edit both sides
 made, `#tododupdone`).
 
-**Todo id discipline (`#todoids`, `#todoidlayer`).** Todo ids LAYER on
-tracked-work ids. A todo exists for visibility: it surfaces an operator
-decision on a backlog, review, or icebox item, so it carries that item's id
-rather than a new one. Because neither an own id nor an unqualified `#id`
-citation identifies the source component, `--todo-add` makes every single
-open tracked-work link visible in the action by appending
-`(source: agent:<component> [#<tracked-id>])`. This applies to both explicit
-`id=<tracked-id>` selection and implicit one-id citations. Every todo an
-agent adds with `--todo-add` carries an
-own id: it either REUSES the id of the one tracked item it is the operator
-prompt for, or gets a SURROGATE id (minted, or a caller-chosen `id=` that names
-no tracked work) — only when the action cites several open tracked items or
-none. An id-less add is never written
-(auto-mint, not rejection). The binary decides from the document's tracked
-work (open `agent:review` / `agent:backlog` / `agent:icebox` ids; resolved ids
-from `[x]` items, inline `agent:done` entries, and the `agent:done archive=`
-file):
+**Todo id discipline (`#todoids`, `#todoaddidhijack`).** A todo's own id is
+its OWN identity. A todo exists for visibility: it surfaces an operator
+decision on a backlog, review, or icebox item, and it LINKS to that item
+rather than taking its id. One id names one active meaning, so a todo never
+takes an id that an open tracked item already owns, and a `#<id>` citation in the
+action stays a reference, never the row's identity (`#todoaddidhijack`
+supersedes the id reuse `#todoidlayer` introduced: on 2026-10-26
+`--todo-add "id=jb339r1decision ... once #jbshrinkrestarts reports ..."`
+produced `[#jbshrinkrestarts]`, colliding with the open backlog item of that
+id). Because neither an own id nor an unqualified `#id` citation identifies
+the source component, `--todo-add` makes every single open tracked-work link
+visible by appending `(source: agent:<component> [#<tracked-id>])` — the
+canonical locator the auto-completion and operator-done paths read. Every
+todo an agent adds with `--todo-add` carries an own id: the caller's explicit
+`id=<id>` / `[#<id>]`, which ALWAYS wins, else a minted one. An id-less add is
+never written (auto-mint, not rejection). The binary decides from the
+document's tracked work (open `agent:review` / `agent:backlog` /
+`agent:icebox` ids; resolved ids from `[x]` items, inline `agent:done`
+entries, and the `agent:done archive=` file):
 
-| `--todo-add` input | Own id |
-|---|---|
-| Action cites exactly one OPEN `agent:review`, `agent:backlog`, or `agent:icebox` id (`Verify [#gate1] live`; unknown ids such as `GH #267` beside it do not count) | Reuses it: `- [ ] [#gate1] Verify [#gate1] live`. The todo text is the actionable operator prompt for that item. |
-| …and an OPEN todo already owns that id | No-op: duplicate todos for one id fold into the existing item (`--todo-edit` changes its text). |
-| …and only a CHECKED todo owns that id | A follow-up action: surrogate id (minted, or the caller's `id=`), still citing the item. One id names one row, so the checked row keeps it. |
-| Action cites several open tracked ids, or none (only resolved/unknown ids such as `GH #267`) | Surrogate: minted like a backlog id. |
-| Explicit `id=<id>` / `[#<id>]` naming open review/backlog/icebox work | Reuses it. |
-| Explicit id naming nothing tracked, action cites exactly one open tracked id | Layers on the cited id; the receipt prints `requested id=<id> not used`. |
-| Explicit id naming nothing tracked, action cites several open tracked ids or none | A custom surrogate id. |
-| Explicit id naming RESOLVED tracked work | Rejected: a todo for finished work is moot. |
-| Explicit id already owned by a todo item | Rejected; use `--todo-edit`. |
+| `--todo-add` input | Own id | Source locator |
+|---|---|---|
+| No `id=`; action cites exactly one OPEN `agent:review`, `agent:backlog`, or `agent:icebox` id (`Verify [#gate1] live`; unknown ids such as `GH #267` beside it do not count) | Minted: `- [ ] [#t1a2] Verify [#gate1] live (source: agent:review [#gate1])`. | Appended for that item. |
+| …and an OPEN todo is already linked to that item (its locator, or a legacy row sharing the id) | No-op: duplicate todos for one item fold into the existing row (`--todo-edit` changes its text). | — |
+| …and only a CHECKED todo is linked to it | A follow-up action: minted id. | Appended. |
+| No `id=`; action cites several open tracked ids, or none (only resolved/unknown ids such as `GH #267`) | Minted like a backlog id. | None. |
+| Explicit `id=<id>` / `[#<id>]` naming nothing tracked | Used verbatim, whatever the action cites; never folded into another row. | Appended when the action cites exactly one open tracked item. |
+| Explicit id OWNED by an open review/backlog/icebox item | Rejected with an actionable error naming the owner: pass a new `id=` and cite the item, or drop `id=`. | — |
+| Explicit id naming RESOLVED tracked work | Rejected: a todo for finished work is moot. | — |
+| Explicit id already owned by a todo item | Rejected; use `--todo-edit`. | — |
+| Explicit reserved `subagent-operator-request-<suffix>` id (`#queueoperatoraction`) | Used verbatim. | None (the action stays as written). |
+
+A replayed add the document already shows (same action text, any checkbox
+state) stays a no-op before any rejection, so replaying a closeout recorded by
+an older binary never fails on a row it already wrote. Legacy rows whose own id
+equals a tracked id keep every link behavior: the link index reads that shared
+id as a backlink.
+
+The tracked-work add paths enforce the same rule: `--backlog-add`,
+`--icebox-add`, and `--review-add` keep an explicit `id=` over any `#<id>` citation the
+text cites, and refuse an explicit id that another active source (open
+backlog/review/icebox item or prompt preset) already owns
+(`#preset-item-id-collision-enforce`); a replay of the identical add stays a
+no-op.
 
 Minted ids avoid every `#id` token in the document, the active tracked-work
 ids, and every id in the done archive, so a minted id is never mistaken for a
@@ -504,7 +520,8 @@ actually exists. It may carry trailing `(todos: [#todo-a] [#todo-b])` metadata: 
 durable reverse edge from that tracked-work id to one or more Todo own ids.
 Ordinary `#id` prose is not a backlink. The binary also resolves the same edge
 without rewriting legacy rows when a Todo shares the tracked-work id or carries
-the canonical `(source: agent:<component> [#tracked-id])` locator. An id-backed
+the canonical `(source: agent:<component> [#tracked-id])` locator (the edge every
+new todo carries, `#todoaddidhijack`). An id-backed
 queue head therefore resolves through its backlog/icebox source id; free-text
 queue work first joins the normal queue-to-backlog surrogate-id coining/mirror
 path. An id-backed head that directly names a Todo also satisfies the queue
@@ -547,14 +564,12 @@ that same maintenance after response and tracked-work projection and before
 commit, so a `patch:todo` addition is addressable in the commit that introduces
 it rather than only after another cycle. This also covers rows the operator
 typed by hand and rows an older binary wrote. The rules match
-`--todo-add`: an OPEN row whose action cites exactly one OPEN
-`agent:review`/`agent:backlog`/`agent:icebox` id that no todo owns reuses that id (the row is
-the operator prompt for that work, so checking it reports the prerequisite done
-and resolving the work checks it off); every other row gets a minted id that
-avoids every document, tracked-work, done-archive, and todo id. A CHECKED
-id-less row always gets a surrogate: no decision is pending on it, and taking
-the tracked id would leave the open row that surfaces the live decision
-without it (`#todoidlayer`). The pass:
+`--todo-add`: every row gets a minted id that avoids every document,
+tracked-work, done-archive, and todo id; a row never takes a tracked item's id
+(`#todoaddidhijack`). A row whose action cites exactly one OPEN
+`agent:review`/`agent:backlog`/`agent:icebox` id is then linked to it by the
+source qualification pass below (`#todocontextmigration`), so checking it
+reports the prerequisite done and resolving the work checks it off. The pass:
 
 - never re-ids a row that already has an own id, bracketed or bare;
 - inserts only the `[#id] ` token, keeping checkbox, marker, indentation, and
@@ -565,7 +580,7 @@ without it (`#todoidlayer`). The pass:
 - runs before queue maintenance during preflight, and before publication during
   strict closeout, against the same editor authority with the same
   compare-and-swap write; carries the ids into the snapshot when its todo body
-  matched, and logs `todo_id_assigned id=<id> linked=<component|none>`;
+  matched, and logs `todo_id_assigned id=<id>`;
 - fails closed: unreadable tracked-work evidence, an editor head that is not
   current, or a refused write assigns nothing that pass and never blocks
   admission.
@@ -582,9 +597,9 @@ preflight with this mapping:
 
 | Operator-checked todo | Preflight signal | What happens |
 |---|---|---|
-| Own id is an OPEN `agent:review` gate | `operator_done_review_open` | The agent resolves the gate that cycle (`--review-resolve <id>`) after reading any operator note, or records the follow-up. The binary never resolves a gate from a checkbox: which outcome the operator chose is judgement. |
-| Own id is OPEN `agent:backlog` work | `operator_done_backlog_open` | The operator prerequisite is done; the item is unblocked (`--backlog-ungate <id>` when gated). |
-| Own id is an OPEN `agent:icebox` item (`#todoidlayer`) | `operator_done_icebox_open` | The operator made the decision the todo surfaced for the parked item; the agent reads any operator note and acts that cycle (`--done <id>` to drop it, move it into active work, or record the follow-up). The binary never moves or closes parked work from a checkbox. |
+| Linked (canonical source locator, or a legacy shared own id) to an OPEN `agent:review` gate | `operator_done_review_open` | The agent resolves the gate that cycle (`--review-resolve <id>`) after reading any operator note, or records the follow-up. The binary never resolves a gate from a checkbox: which outcome the operator chose is judgement. |
+| Linked to OPEN `agent:backlog` work | `operator_done_backlog_open` | The operator prerequisite is done; the item is unblocked (`--backlog-ungate <id>` when gated). |
+| Linked to an OPEN `agent:icebox` item | `operator_done_icebox_open` | The operator made the decision the todo surfaced for the parked item; the agent reads any operator note and acts that cycle (`--done <id>` to drop it, move it into active work, or record the follow-up). The binary never moves or closes parked work from a checkbox. |
 | No link, or linked work already resolved | none | Nothing; the operator prunes checked items. |
 
 An operator check is never reverted by an agent write. A `patch:todo` that
@@ -599,12 +614,12 @@ and its done archive; no network, no clock, no prose heuristics:
 
 - **Preflight** (read-only) emits `todo_signals` in its JSON and a
   `[preflight] todo:` stderr line per signal: the two operator-done signals
-  above, `linked_work_resolved` (an OPEN todo whose OWN id is resolved
-  tracked work), and `cited_work_resolved` (an OPEN todo that only CITES
+  above, `linked_work_resolved` (an OPEN todo whose OWN id, or every source
+  its canonical locator names, is resolved tracked work), and `cited_work_resolved` (an OPEN todo that only CITES
   tracked work, all of it resolved). Signals are state, not events, so they
   repeat until the state changes.
 - **Closeout** (any write that carries tracked-work flags) checks off every
-  OPEN todo whose OWN id is resolved — including ids this closeout resolved with
+  OPEN todo whose OWN id, or every linked source, is resolved — including ids this closeout resolved with
   `--done` / `--review-resolve` — in the same transaction, prints
   `[todo] auto-done: #<id>`, and logs `todo_auto_done ... reason=linked_work_resolved`
   to `ops.log` once the envelope publishes. This is the only automatic todo

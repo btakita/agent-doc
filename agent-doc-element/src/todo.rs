@@ -17,10 +17,10 @@
 //!   before its marker would split the `## Review` heading from its component.
 //! - [`add_todo_item_to_document`] appends one `- [ ] [#<id>] <action>` line
 //!   to the end of the component body, creating the component first when
-//!   absent. The leading `[#<id>]` is the item's own stable id (derived from
-//!   the action, collision-free against every id the todo body cites and the
-//!   document's tracked-work ids, or caller-chosen via `id=<id> ` /
-//!   `[#<id>] `). It never removes, reorders, or rewrites an existing line, so
+//!   absent. The leading `[#<id>]` is the item's own stable id (caller-chosen
+//!   via `id=<id> ` / `[#<id>] `, which always wins, else derived from the
+//!   action, collision-free against every id the todo body cites and the
+//!   document's tracked-work ids). It never removes, reorders, or rewrites an existing line, so
 //!   every existing checklist item and every operator edit survives
 //!   byte-for-byte.
 //! - Adding is idempotent: when any existing checklist item (open, done, or
@@ -34,9 +34,9 @@
 //!   `Decide X (#gate)`) is a reference to tracked work. Operator-authored and
 //!   legacy items may have no own id.
 //! - [`assign_missing_todo_ids`] (`#todoidbackfill`) gives each id-less row
-//!   an own id by the `--todo-add` rules (reuse the one open
-//!   review/backlog/icebox id it cites, else mint), behind a typing gate, never re-id'ing a row and
-//!   inserting only the id token. Preflight runs it every cycle.
+//!   a minted own id (never a tracked item's id, `#todoaddidhijack`), behind a
+//!   typing gate, never re-id'ing a row and inserting only the id token.
+//!   Preflight runs it every cycle.
 //! - [`todo_owns_id`] reports whether a todo owns an id, so a closeout's
 //!   `--done <id>` naming a todo's own id (and no tracked work) checks that
 //!   todo off instead of failing (`#sdktododone`).
@@ -63,30 +63,29 @@
 //!   [`open_todo_items_referencing`] reports open items tied to ids a closeout
 //!   resolved, for the "mark it done" advisory.
 //!
-//! ### Todo id discipline (`#todoids`, `#todoidlayer`)
-//! - A todo is a visibility layer over the tracked work it surfaces an
-//!   operator decision for, so its id LAYERS on that work's id. Every
-//!   `--todo-add` item carries an own id: it either REUSES the id of the one
-//!   open `agent:review` / `agent:backlog` / `agent:icebox` item it is the
-//!   operator prompt for, or gets a SURROGATE id (minted, or a caller-chosen
-//!   `id=` naming no tracked work) only when the action cites several such
-//!   items or none; an id-less add is never written. [`TodoLinkIndex`] carries the tracked-work
-//!   evidence (open `agent:review` / `agent:backlog` / `agent:icebox` ids and
-//!   resolved ids) the caller read from the document.
-//! - Reuse is automatic when the action cites exactly one OPEN
+//! ### Todo id discipline (`#todoids`, `#todoaddidhijack`)
+//! - A todo's own id is its OWN identity: it never takes the id an open
+//!   `agent:review` / `agent:backlog` / `agent:icebox` item already owns, and
+//!   a `#<id>` citation in the action stays a reference (`#todoaddidhijack`
+//!   supersedes the `#todoidlayer` id reuse). Every `--todo-add` item carries
+//!   an own id: the caller's explicit `id=`, which always wins, else a minted
+//!   one; an id-less add is never written. [`TodoLinkIndex`] carries the
+//!   tracked-work evidence (open `agent:review` / `agent:backlog` /
+//!   `agent:icebox` ids and resolved ids) the caller read from the document.
+//! - A todo is still the visibility layer over the tracked work it surfaces
+//!   an operator decision for: when the action cites exactly one OPEN
 //!   `agent:review`, `agent:backlog`, or `agent:icebox` id (`Verify [#gate1]
-//!   live`): the item becomes `- [ ] [#gate1] Verify [#gate1] live`. A
-//!   caller-chosen `id=` naming no tracked work does not override the layer:
-//!   the item still reuses the cited id and the caller is told. When an OPEN todo already
-//!   owns that id the add is a no-op (duplicate todos for one id fold into the
-//!   existing item); when only a CHECKED todo owns it, the new action is a
-//!   follow-up and gets a surrogate id that still cites the gate (one id names
-//!   one row, so the checked row keeps it).
-//! - An explicit `id=<id>` / `[#<id>]` reuses `<id>` when it is open tracked
-//!   work, is a custom surrogate id when the document has no such tracked work
-//!   and the action does not layer on exactly one tracked item,
-//!   and is REJECTED when `<id>` names tracked work that is already resolved —
-//!   a todo for finished work is moot.
+//!   live`), the row links to it through the canonical source locator —
+//!   `- [ ] [#t1a2] Verify [#gate1] live (source: agent:review [#gate1])`.
+//!   When an OPEN todo is already linked to that item (locator, or a legacy
+//!   row that shares its id) an add without `id=` is a no-op (duplicate todos
+//!   for one item fold into the existing row).
+//! - An explicit `id=<id>` / `[#<id>]` is used verbatim, and is REJECTED when
+//!   `<id>` is owned by an open tracked item (cite it instead), names tracked
+//!   work that is already resolved (a todo for finished work is moot), or is
+//!   already a todo's own id.
+//! - Legacy rows whose own id equals a tracked id (written by `#todoidlayer`)
+//!   keep working: the link index reads that shared id as a backlink.
 //! - Minted ids avoid every `#id` token in the document plus every id the
 //!   link index knows (open or resolved), so a minted id can never be mistaken
 //!   for a link to tracked work.
@@ -376,13 +375,11 @@ pub struct TodoAddOutcome {
     /// The item's own id: the new id when inserted, or the matching existing
     /// item's id (`None` for an id-less legacy item) when the add was a no-op.
     pub id: Option<String>,
-    /// `#todoids`: the tracked-work component (`review` / `backlog` /
-    /// `icebox`) whose id the item reuses as its own id; `None` for a
-    /// surrogate (minted or caller-chosen) id.
-    pub linked: Option<String>,
-    /// `#todoidlayer`: a caller-chosen `id=` that was NOT used because the
-    /// action cites exactly one open tracked item, whose id the todo layers on.
-    pub requested_id_unused: Option<String>,
+    /// `#todoaddidhijack`: the one open tracked item, as `(id, component)`,
+    /// that the row names in its canonical `(source: agent:<component>
+    /// [#<id>])` locator; `None` when the action cites zero or several open
+    /// tracked items. A new row's own id is never this id.
+    pub source: Option<(String, String)>,
 }
 
 /// `#todoids`: tracked-work evidence a todo id is evaluated against.
@@ -749,18 +746,22 @@ fn body_id_tokens(body: &str) -> std::collections::HashSet<String> {
 /// The new item gets a stable own id, `- [ ] [#<id>] <action>`, so later
 /// `--todo-done`/`--todo-edit` calls (and the keyed document merge) address it
 /// by identity rather than by its text (`#todoids`):
-/// - an explicit `id=<id>` / `[#<id>]` prefix naming open tracked work is used
-///   verbatim, and any explicit id is rejected when it names tracked work
-///   `links` reports resolved;
+/// - `#todoaddidhijack`: an explicit `id=<id>` / `[#<id>]` prefix ALWAYS
+///   wins — `#<id>` citations in the action never replace it. It is rejected when
+///   a todo already owns it, when it names tracked work `links` reports
+///   resolved, and when it names an OPEN review/backlog/icebox item: a todo
+///   never takes the id an open tracked item owns;
 /// - otherwise, when the action cites exactly one OPEN `agent:review` /
-///   `agent:backlog` / `agent:icebox` id, the item reuses that id (a no-op when
-///   an OPEN todo already owns it) — `#todoidlayer`: this also overrides an
-///   explicit `id=` that names no tracked work, which is reported back in
-///   [`TodoAddOutcome::requested_id_unused`];
-/// - otherwise an explicit `id=` naming no tracked work is used verbatim;
+///   `agent:backlog` / `agent:icebox` id and an OPEN todo is already linked to
+///   it (canonical source locator, or a legacy row sharing the id), the add is
+///   a no-op;
 /// - otherwise `id_for(action, counter)` derives candidates and the first one
 ///   not cited anywhere in the document, not in `reserved` (the document's
 ///   tracked-work ids), and unknown to `links` wins.
+///
+/// Whatever the own id, an action citing exactly one open tracked item gets
+/// the canonical `(source: agent:<component> [#<id>])` locator, the same one
+/// preflight's `#todocontextmigration` would add.
 pub fn add_todo_item_to_document(
     content: &str,
     text: &str,
@@ -771,8 +772,8 @@ pub fn add_todo_item_to_document(
     let (explicit_id, action) = parse_todo_input(text, "--todo-add")?;
     // `#queueoperatoraction`: request packets deliberately own an identity
     // distinct from the tracked work whose queue row they pause. Preserve that
-    // reserved explicit id even when the action cites exactly one tracked id;
-    // ordinary todos retain `#todoidlayer` behavior below.
+    // reserved explicit id and leave the action as written (no source
+    // locator), even when it cites exactly one tracked id.
     let explicit_request_id = explicit_id.as_deref().filter(|id| {
         id.to_ascii_lowercase()
             .starts_with("subagent-operator-request-")
@@ -804,10 +805,7 @@ pub fn add_todo_item_to_document(
         })
     {
         let id = existing.own_id.map(str::to_ascii_lowercase);
-        let linked = id
-            .as_deref()
-            .and_then(|id| links.linkable_component(id))
-            .map(str::to_string);
+        let source = contextual_source.clone();
         if wanted != wanted_legacy
             && normalize_action_text(existing.action) == wanted_legacy
             && id.as_deref() == contextual_source.as_ref().map(|(id, _)| id.as_str())
@@ -833,8 +831,7 @@ pub fn add_todo_item_to_document(
                 source_reference_added: true,
                 created_component,
                 id,
-                linked,
-                requested_id_unused: None,
+                source,
             });
         }
         return Ok(TodoAddOutcome {
@@ -843,8 +840,7 @@ pub fn add_todo_item_to_document(
             source_reference_added: false,
             created_component,
             id,
-            linked,
-            requested_id_unused: None,
+            source,
         });
     }
     let owner = |id: &str| {
@@ -861,83 +857,69 @@ pub fn add_todo_item_to_document(
             !links.is_resolved(id),
             "--todo-add: [#{id}] names tracked work that is already resolved, so an operator todo for it is moot (#todoids). Cite it in a new action without id= to get a fresh id, or reopen the tracked item first"
         );
+        // `#todoaddidhijack`: one id names one row. A todo never takes the id
+        // an open tracked item already owns; it cites the item instead.
+        if explicit_request_id.is_none()
+            && let Some(component) = links.open_component(id)
+        {
+            anyhow::bail!(
+                "--todo-add: id={id} is already owned by the open agent:{component} item [#{id}]; a todo never takes a tracked item's id (#todoaddidhijack). Pass a new id (`id=<todo-id> ... [#{id}] ...`), or drop `id=` and cite [#{id}] in the action to get a fresh id plus `(source: agent:{component} [#{id}])`"
+            );
+        }
     }
-    // `#todoidlayer`: the todo is a visibility layer over the ONE open
-    // review/backlog/icebox item its action cites. A surrogate id (minted, or
-    // a caller-chosen `id=` naming no tracked work) is written only when the
-    // action cites zero or several such items — or when a CHECKED todo already
-    // owns the one id, because one id names one row.
-    let explicit_tracked = explicit_id
-        .as_deref()
-        .and_then(|id| links.linkable_component(id).map(|_| id.to_string()));
-    let (id, linked) = if let Some(id) = explicit_request_id {
-        (id.to_ascii_lowercase(), None)
+    // `#todoaddidhijack`: a todo's own id is never taken from tracked work.
+    // An explicit `id=` always wins; a `#<id>` citation in the action stays a
+    // reference. When the action cites exactly one open review/backlog/icebox
+    // item, the row links to it through the canonical
+    // `(source: agent:<component> [#<id>])` locator instead, which is the edge
+    // auto-completion and the operator-done signals read.
+    let source = if explicit_request_id.is_some() {
+        None
     } else {
-        match explicit_tracked {
-            Some(id) => {
-                let linked = links.linkable_component(&id).map(str::to_string);
-                (id, linked)
+        contextual_source.clone()
+    };
+    let id = match explicit_id.clone() {
+        Some(id) => id,
+        None => {
+            // `#todoids`: one open todo per tracked source — a second add for
+            // the same item folds into the open todo already linked to it
+            // (its canonical locator, or a legacy row that shares the id).
+            if let Some((source_id, _)) = source.as_ref()
+                && let Some(existing) = items.iter().find(|item| {
+                    item.state.is_open() && todo_line_links_source(item, source_id)
+                })
+            {
+                return Ok(TodoAddOutcome {
+                    content: ensured.clone(),
+                    inserted: false,
+                    source_reference_added: false,
+                    created_component,
+                    id: existing.own_id.map(str::to_ascii_lowercase),
+                    source,
+                });
             }
-            None => {
-                let link_candidates: Vec<String> = cited_ids(&action)
-                    .into_iter()
-                    .filter(|id| links.linkable_component(id).is_some())
-                    .collect();
-                let reuse = match link_candidates.as_slice() {
-                    [only] => match owner(only) {
-                        // `#todoids`: one open todo per tracked id — a second add
-                        // for the same item folds into the existing todo.
-                        Some(existing) if existing.state.is_open() => {
-                            return Ok(TodoAddOutcome {
-                                content: ensured.clone(),
-                                inserted: false,
-                                source_reference_added: false,
-                                created_component,
-                                id: Some(only.clone()),
-                                linked: links.linkable_component(only).map(str::to_string),
-                                requested_id_unused: explicit_id,
-                            });
-                        }
-                        // A checked todo already owns the id: this is a follow-up
-                        // action, given a surrogate below and still citing the item.
-                        Some(_) => None,
-                        None => Some(only.clone()),
-                    },
-                    _ => None,
-                };
-                match (reuse, explicit_id.clone()) {
-                    (Some(id), _) => {
-                        let linked = links.linkable_component(&id).map(str::to_string);
-                        (id, linked)
-                    }
-                    // A caller-chosen id naming no tracked work is the surrogate.
-                    (None, Some(custom)) => (custom, None),
-                    (None, None) => {
-                        let taken = body_id_tokens(&ensured);
-                        let mut chosen = None;
-                        for counter in 0..256u64 {
-                            let candidate = id_for(&action, counter).to_ascii_lowercase();
-                            if is_valid_todo_id(&candidate)
-                                && !taken.contains(&candidate)
-                                && !reserved.contains(&candidate)
-                                && !links.knows(&candidate)
-                            {
-                                chosen = Some(candidate);
-                                break;
-                            }
-                        }
-                        (
-                            chosen
-                                .context("--todo-add could not derive a collision-free todo id")?,
-                            None,
-                        )
-                    }
+            let taken = body_id_tokens(&ensured);
+            let mut chosen = None;
+            for counter in 0..256u64 {
+                let candidate = id_for(&action, counter).to_ascii_lowercase();
+                if is_valid_todo_id(&candidate)
+                    && !taken.contains(&candidate)
+                    && !reserved.contains(&candidate)
+                    && !links.knows(&candidate)
+                {
+                    chosen = Some(candidate);
+                    break;
                 }
             }
+            chosen.context("--todo-add could not derive a collision-free todo id")?
         }
     };
-    let requested_id_unused = explicit_id.filter(|requested| *requested != id);
-    let action = action_with_source_reference(&action, &id, linked.as_deref());
+    let action = match source.as_ref() {
+        Some((source_id, component)) => {
+            action_with_source_reference(&action, source_id, Some(component.as_str()))
+        }
+        None => action,
+    };
     let mut new_body = String::with_capacity(body.len() + action.len() + 16);
     new_body.push_str(body);
     if !new_body.is_empty() && !new_body.ends_with('\n') {
@@ -957,19 +939,15 @@ pub fn add_todo_item_to_document(
         source_reference_added: false,
         created_component,
         id: Some(id),
-        linked,
-        requested_id_unused,
+        source,
     })
 }
 
 /// One own id [`assign_missing_todo_ids`] gave an id-less todo row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TodoIdAssignment {
-    /// The new own id.
+    /// The new own id, always minted (`#todoaddidhijack`).
     pub id: String,
-    /// The tracked-work component (`review` / `backlog` / `icebox`) whose id
-    /// the row now reuses, or `None` for a minted id.
-    pub linked: Option<String>,
     /// The row's action text, unchanged.
     pub action: String,
 }
@@ -990,13 +968,13 @@ pub struct TodoIdAssignOutcome {
 /// - A row that already has an own id (`[#id]` or bare `#id`) is never re-id'd.
 /// - `admit(line)` is the typing gate: a row it rejects (still being typed) is
 ///   left for a later pass. The line is passed trimmed, list marker included.
-/// - An OPEN row whose action cites exactly one OPEN `agent:review` /
-///   `agent:backlog` / `agent:icebox` id that no todo owns REUSES that id: the row is the
-///   operator prompt for that tracked work, so the existing `#todoids` signals
-///   apply (an operator check reports the prerequisite done; resolving the
-///   work checks the row off). Otherwise an id is minted with `id_for`,
-///   avoiding every `#id` token in the document, `reserved`, every id `links`
-///   knows, and ids assigned earlier in this pass.
+/// - Every assigned id is minted with `id_for`, avoiding every `#id` token in
+///   the document, `reserved`, every id `links` knows, and ids assigned
+///   earlier in this pass (`#todoaddidhijack`: a row never takes a tracked
+///   item's id). A row citing exactly one open review/backlog/icebox item is
+///   linked to it by [`qualify_todo_source_references`], so the `#todoids`
+///   signals still apply (an operator check reports the prerequisite done;
+///   resolving the work checks the row off).
 /// - Rows whose action text duplicates another row's are skipped: duplicate
 ///   folding (`#tododupdone`) handles them, and two distinct ids would make the
 ///   copies permanent.
@@ -1045,45 +1023,28 @@ pub fn assign_missing_todo_ids(
         if !admit(line) {
             continue;
         }
-        let link_candidates: Vec<String> = cited_ids(&item.action)
-            .into_iter()
-            .filter(|id| links.linkable_component(id).is_some())
-            .collect();
-        let reuse = match link_candidates.as_slice() {
-            [only] if item.state.is_open() && !owned.contains(only) => Some(only.clone()),
-            _ => None,
-        };
-        let (id, linked) = match reuse {
-            Some(id) => {
-                let linked = links.linkable_component(&id).map(str::to_string);
-                (id, linked)
+        // `#todoaddidhijack`: a backfilled row never takes a tracked item's
+        // id; a single cited source is linked by the canonical locator that
+        // `qualify_todo_source_references` appends.
+        let mut chosen = None;
+        for counter in 0..256u64 {
+            let candidate = id_for(&item.action, counter).to_ascii_lowercase();
+            if is_valid_todo_id(&candidate)
+                && !taken.contains(&candidate)
+                && !reserved.contains(&candidate)
+                && !links.knows(&candidate)
+                && !owned.contains(&candidate)
+            {
+                chosen = Some(candidate);
+                break;
             }
-            None => {
-                let mut chosen = None;
-                for counter in 0..256u64 {
-                    let candidate = id_for(&item.action, counter).to_ascii_lowercase();
-                    if is_valid_todo_id(&candidate)
-                        && !taken.contains(&candidate)
-                        && !reserved.contains(&candidate)
-                        && !links.knows(&candidate)
-                        && !owned.contains(&candidate)
-                    {
-                        chosen = Some(candidate);
-                        break;
-                    }
-                }
-                (
-                    chosen.context("todo id backfill could not derive a collision-free todo id")?,
-                    None,
-                )
-            }
-        };
+        }
+        let id = chosen.context("todo id backfill could not derive a collision-free todo id")?;
         body.rewrite_line(item.line, item.state, Some(&id), &item.action);
         owned.insert(id.clone());
         taken.insert(id.clone());
         assigned.push(TodoIdAssignment {
             id,
-            linked,
             action: item.action.clone(),
         });
     }
@@ -1121,6 +1082,17 @@ pub struct TodoSourceQualificationOutcome {
     pub findings: Vec<TodoSourceQualification>,
     /// Selectors of findings actually rewritten in `content`.
     pub qualified: Vec<String>,
+}
+
+/// Whether todo row `item` is linked to tracked work `source_id`: its
+/// canonical `(source: agent:<component> [#<id>])` locator names it, or it is a
+/// legacy row whose own id IS that id (written before `#todoaddidhijack`).
+fn todo_line_links_source(item: &TodoLine<'_>, source_id: &str) -> bool {
+    item.own_id
+        .is_some_and(|own| normalize_link_id(own) == source_id)
+        || canonical_source_ids(item.action)
+            .iter()
+            .any(|id| id == source_id)
 }
 
 /// Return the one open tracked-work source represented by a todo row.
@@ -2734,20 +2706,25 @@ mod tests {
         assert!(!index.knows("k3vd"));
     }
 
+    /// `#todoaddidhijack`: a todo citing exactly one open tracked item gets a
+    /// minted own id and LINKS to the item through the canonical source
+    /// locator; it never takes the item's id.
     #[test]
-    fn add_reuses_the_one_open_review_or_backlog_id_the_action_cites() {
+    fn add_links_the_one_open_review_or_backlog_item_the_action_cites_by_locator() {
         let index = links(&[("gate1", "review"), ("work", "backlog")], &[]);
         let review = add_linked(&wrap(""), "Verify [#gate1] in a live pane", &index).unwrap();
         assert!(review.inserted);
-        assert_eq!(review.id.as_deref(), Some("gate1"));
-        assert_eq!(review.linked.as_deref(), Some("review"));
+        let id = review.id.clone().unwrap();
+        assert_ne!(id, "gate1", "a todo never takes a tracked item's id");
+        assert!(id.starts_with('t'), "{id}");
+        assert_eq!(review.source, Some(("gate1".to_string(), "review".to_string())));
         assert_eq!(
             todo_body(&review.content),
-            "- [ ] [#gate1] Verify [#gate1] in a live pane (source: agent:review [#gate1])\n"
+            format!("- [ ] [#{id}] Verify [#gate1] in a live pane (source: agent:review [#gate1])\n")
         );
         let backlog = add_linked(&wrap(""), "Grant CI access for (#work)", &index).unwrap();
-        assert_eq!(backlog.id.as_deref(), Some("work"));
-        assert_eq!(backlog.linked.as_deref(), Some("backlog"));
+        assert_ne!(backlog.id.as_deref(), Some("work"));
+        assert_eq!(backlog.source, Some(("work".to_string(), "backlog".to_string())));
     }
 
     #[test]
@@ -2756,19 +2733,18 @@ mod tests {
             &[("gate1", "review"), ("gate2", "review"), ("cold", "icebox")],
             &["old"],
         );
-        // Two open gates: the action spans both, so it gets its own id.
+        // Two open gates: the action spans both, so no single source.
         let two = add_linked(&wrap(""), "Decide #gate1 vs #gate2", &index).unwrap();
-        assert_eq!(two.linked, None);
+        assert_eq!(two.source, None);
         assert!(two.id.as_deref().is_some_and(|id| id.starts_with('t')));
-        // `#todoidlayer`: an open review id plus an icebox id is two tracked
-        // items, so the action gets a surrogate.
+        // An open review id plus an icebox id is two tracked items.
         let mixed = add_linked(&wrap(""), "Decide #gate1 before thawing #cold", &index).unwrap();
-        assert_eq!(mixed.linked, None);
+        assert_eq!(mixed.source, None);
         assert!(mixed.id.as_deref().is_some_and(|id| id.starts_with('t')));
         // Resolved work and unknown ids (GitHub numbers) never link.
         for action in ["Re-check (#old)", "Watch GH #267"] {
             let outcome = add_linked(&wrap(""), action, &index).unwrap();
-            assert_eq!(outcome.linked, None, "{action}");
+            assert_eq!(outcome.source, None, "{action}");
             assert!(outcome.id.as_deref().is_some_and(|id| id.starts_with('t')), "{action}");
         }
     }
@@ -2776,41 +2752,111 @@ mod tests {
     #[test]
     fn add_for_an_already_linked_open_todo_folds_into_it() {
         let index = links(&[("gate1", "review")], &[]);
-        let content = wrap("- [ ] [#gate1] Verify [#gate1] in a live pane\n");
-        let again = add_linked(&content, "Verify [#gate1] in the 263 IDE", &index).unwrap();
-        assert!(!again.inserted, "one open todo per tracked id");
-        assert_eq!(again.id.as_deref(), Some("gate1"));
-        assert_eq!(again.content, content);
+        // A legacy row that shares the tracked id, and a canonical row linked
+        // by its locator, both already surface the gate.
+        for content in [
+            wrap("- [ ] [#gate1] Verify [#gate1] in a live pane\n"),
+            wrap("- [ ] [#t0a] Verify in a live pane (source: agent:review [#gate1])\n"),
+        ] {
+            let again = add_linked(&content, "Verify [#gate1] in the 263 IDE", &index).unwrap();
+            assert!(!again.inserted, "one open todo per tracked item: {content}");
+            assert_eq!(again.content, content);
+        }
         // Once the operator checked it, a new action for the gate is a follow-up
-        // with its own minted id that still cites the gate.
+        // with its own minted id, still linked to the gate.
         let checked = wrap("- [x] [#gate1] Verify [#gate1] in a live pane\n");
         let follow = add_linked(&checked, "Re-verify [#gate1] after the fix", &index).unwrap();
         assert!(follow.inserted);
         assert_ne!(follow.id.as_deref(), Some("gate1"));
-        assert_eq!(follow.linked, None);
+        assert_eq!(follow.source, Some(("gate1".to_string(), "review".to_string())));
     }
 
+    /// `#todoaddidhijack`: an explicit id that an OPEN tracked item owns is
+    /// refused with an actionable error; a custom id is kept; an id naming
+    /// resolved work is moot. A row the document already holds stays a no-op,
+    /// so replaying an older closeout never fails.
     #[test]
-    fn add_explicit_id_links_open_work_mints_custom_and_rejects_resolved_work() {
-        let index = links(&[("gate1", "review")], &["shipped"]);
-        let linked = add_linked(&wrap(""), "id=gate1 Verify live", &index).unwrap();
-        assert_eq!(linked.linked.as_deref(), Some("review"));
-        assert_eq!(
-            todo_body(&linked.content),
-            "- [ ] [#gate1] Verify live (source: agent:review [#gate1])\n"
-        );
-        let repeated = add_linked(&linked.content, "id=gate1 Verify live", &index).unwrap();
+    fn add_explicit_id_refuses_open_work_keeps_custom_and_rejects_resolved_work() {
+        let index = links(&[("gate1", "review"), ("work", "backlog")], &["shipped"]);
+        for (id, component) in [("gate1", "review"), ("work", "backlog")] {
+            let err = add_linked(&wrap(""), &format!("id={id} Verify live"), &index).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains(&format!("already owned by the open agent:{component} item [#{id}]"))
+                    && msg.contains("#todoaddidhijack")
+                    && msg.contains("id=<todo-id>"),
+                "{msg}"
+            );
+        }
+        // Replaying an add a legacy row already satisfies stays a no-op /
+        // locator upgrade rather than an error.
+        let canonical = wrap("- [ ] [#gate1] Verify live (source: agent:review [#gate1])\n");
+        let repeated = add_linked(&canonical, "id=gate1 Verify live", &index).unwrap();
         assert!(!repeated.inserted);
-        assert_eq!(repeated.content, linked.content);
+        assert_eq!(repeated.content, canonical);
         let legacy = wrap("- [ ] [#gate1] Verify live\n");
         let upgraded = add_linked(&legacy, "id=gate1 Verify live", &index).unwrap();
         assert!(upgraded.inserted && upgraded.source_reference_added);
-        assert_eq!(upgraded.content, linked.content);
+        assert_eq!(upgraded.content, canonical);
         let custom = add_linked(&wrap(""), "id=rotate Rotate the key", &index).unwrap();
-        assert_eq!(custom.linked, None);
+        assert_eq!(custom.source, None);
         assert_eq!(custom.id.as_deref(), Some("rotate"));
         let err = add_linked(&wrap(""), "id=shipped Verify the release", &index).unwrap_err();
         assert!(err.to_string().contains("already resolved"), "{err}");
+    }
+
+    /// `#todoaddidhijack`, the exact live 2026-10-26 shape: an explicit
+    /// `id=jb339r1decision` whose action mentions the open backlog item
+    /// `#jbshrinkrestarts` must keep its explicit id. The cited item stays a
+    /// reference (linked by the canonical locator), never the todo's identity.
+    #[test]
+    fn todoaddidhijack_explicit_id_wins_over_a_cited_open_backlog_id() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [/] [#jbshrinkrestarts] Shrink JetBrains restarts; report the benchmark\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:todo -->\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let index = links(&[("jbshrinkrestarts", "backlog")], &[]);
+        let outcome = add_linked(
+            content,
+            "id=jb339r1decision Decide whether to queue GH #339 shell stage R1 (restart-free shell) once #jbshrinkrestarts reports its benchmark and moves. Same decision: restate the \"Exact-263 decision\" reopen rule",
+            &index,
+        )
+        .unwrap();
+        assert!(outcome.inserted);
+        assert_eq!(outcome.id.as_deref(), Some("jb339r1decision"));
+        assert_eq!(
+            outcome.source,
+            Some(("jbshrinkrestarts".to_string(), "backlog".to_string()))
+        );
+        let body = todo_body(&outcome.content);
+        assert!(
+            body.starts_with("- [ ] [#jb339r1decision] Decide whether to queue GH #339"),
+            "{body}"
+        );
+        assert!(!body.contains("[ ] [#jbshrinkrestarts]"), "{body}");
+        assert!(
+            body.trim_end()
+                .ends_with("(source: agent:backlog [#jbshrinkrestarts])"),
+            "{body}"
+        );
+        // A second, different decision about the same item with its own
+        // explicit id is a second row: the explicit id wins over the fold.
+        let second = add_linked(
+            &outcome.content,
+            "id=jb339r2decision Decide R2 once #jbshrinkrestarts reports",
+            &index,
+        )
+        .unwrap();
+        assert!(second.inserted);
+        assert_eq!(second.id.as_deref(), Some("jb339r2decision"));
+        // And without an explicit id the same citation mints, never the
+        // tracked id.
+        let minted = add_linked(content, "Decide once #jbshrinkrestarts reports", &index).unwrap();
+        assert!(minted.inserted);
+        assert_ne!(minted.id.as_deref(), Some("jbshrinkrestarts"));
     }
 
     #[test]
@@ -2849,69 +2895,62 @@ mod tests {
         assert_eq!(held.content, content);
     }
 
-    /// `#todoidlayer`: a todo surfacing an operator decision on one parked
-    /// icebox item layers on that item's id, like review and backlog items.
+    /// `#todoaddidhijack`: a todo surfacing an operator decision on one parked
+    /// icebox item links to it like review and backlog items, with a minted
+    /// own id; an explicit id naming the icebox item is refused.
     #[test]
-    fn todoidlayer_add_layers_on_the_one_icebox_item_the_action_cites() {
+    fn add_links_the_one_icebox_item_the_action_cites() {
         let index = links(&[("cold", "icebox"), ("gate1", "review")], &[]);
         let outcome = add_linked(&wrap(""), "Thaw or drop (#cold)?", &index).unwrap();
         assert!(outcome.inserted);
-        assert_eq!(outcome.id.as_deref(), Some("cold"));
-        assert_eq!(outcome.linked.as_deref(), Some("icebox"));
-        assert_eq!(outcome.requested_id_unused, None);
+        let id = outcome.id.clone().unwrap();
+        assert_ne!(id, "cold");
+        assert_eq!(outcome.source, Some(("cold".to_string(), "icebox".to_string())));
         assert_eq!(
             todo_body(&outcome.content),
-            "- [ ] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n"
+            format!("- [ ] [#{id}] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n")
         );
         // An unknown id (a GitHub number) beside the one tracked id does not
         // count as a second tracked item.
         let gh = add_linked(&wrap(""), "Verify GH #267 against [#gate1]", &index).unwrap();
-        assert_eq!(gh.id.as_deref(), Some("gate1"));
-        // An explicit id naming the icebox item layers on it too.
-        let explicit = add_linked(&wrap(""), "id=cold Decide whether to thaw", &index).unwrap();
-        assert_eq!(explicit.linked.as_deref(), Some("icebox"));
-        assert_eq!(explicit.requested_id_unused, None);
-        assert_eq!(
-            todo_body(&explicit.content),
-            "- [ ] [#cold] Decide whether to thaw (source: agent:icebox [#cold])\n"
-        );
+        assert_eq!(gh.source, Some(("gate1".to_string(), "review".to_string())));
+        assert_ne!(gh.id.as_deref(), Some("gate1"));
+        let err = add_linked(&wrap(""), "id=cold Decide whether to thaw", &index).unwrap_err();
+        assert!(err.to_string().contains("agent:icebox item [#cold]"), "{err}");
     }
 
-    /// `#todoidlayer`: a caller-chosen `id=` that names no tracked work is a
-    /// surrogate, written only when the action does not layer on exactly one
-    /// open tracked item. When it does, the todo reuses the item's id and the
-    /// unused requested id is reported back.
+    /// `#todoaddidhijack`: a caller-chosen `id=` naming no tracked work is
+    /// ALWAYS used verbatim, whatever the action cites (this reverses the
+    /// `#todoidlayer` override that let a cited id replace it).
     #[test]
-    fn todoidlayer_explicit_surrogate_id_yields_to_the_one_cited_item() {
+    fn explicit_custom_id_always_wins_over_cited_tracked_ids() {
         let index = links(
             &[("jb262dynlauncherrecommen", "review"), ("gate2", "review")],
             &[],
         );
-        let layered = add_linked(
+        let one = add_linked(
             &wrap(""),
             "id=tdlauncher Decide the launcher policy (#jb262dynlauncherrecommen)",
             &index,
         )
         .unwrap();
-        assert!(layered.inserted);
-        assert_eq!(layered.id.as_deref(), Some("jb262dynlauncherrecommen"));
-        assert_eq!(layered.linked.as_deref(), Some("review"));
-        assert_eq!(layered.requested_id_unused.as_deref(), Some("tdlauncher"));
+        assert!(one.inserted);
+        assert_eq!(one.id.as_deref(), Some("tdlauncher"));
         assert_eq!(
-            todo_body(&layered.content),
-            "- [ ] [#jb262dynlauncherrecommen] Decide the launcher policy (#jb262dynlauncherrecommen) (source: agent:review [#jb262dynlauncherrecommen])\n"
+            todo_body(&one.content),
+            "- [ ] [#tdlauncher] Decide the launcher policy (#jb262dynlauncherrecommen) (source: agent:review [#jb262dynlauncherrecommen])\n"
         );
-        // The same request against an OPEN layered todo folds into it.
+        // An open todo already linked to the same item does not swallow a new
+        // explicit id either.
         let again = add_linked(
-            &layered.content,
+            &one.content,
             "id=tdother Re-decide (#jb262dynlauncherrecommen)",
             &index,
         )
         .unwrap();
-        assert!(!again.inserted);
-        assert_eq!(again.id.as_deref(), Some("jb262dynlauncherrecommen"));
-        assert_eq!(again.content, layered.content);
-        // Several tracked items: the explicit surrogate is used verbatim.
+        assert!(again.inserted);
+        assert_eq!(again.id.as_deref(), Some("tdother"));
+        // Several tracked items, or none: verbatim, no locator.
         let several = add_linked(
             &wrap(""),
             "id=tdpair Decide #jb262dynlauncherrecommen vs #gate2",
@@ -2919,52 +2958,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(several.id.as_deref(), Some("tdpair"));
-        assert_eq!(several.linked, None);
-        assert_eq!(several.requested_id_unused, None);
-        // No tracked item: the explicit surrogate is used verbatim.
+        assert_eq!(several.source, None);
         let none = add_linked(&wrap(""), "id=tdkey Rotate the deploy key", &index).unwrap();
         assert_eq!(none.id.as_deref(), Some("tdkey"));
-        assert_eq!(none.requested_id_unused, None);
-        // A CHECKED todo owns the one cited id: the follow-up keeps the
-        // caller's surrogate (one id names one row).
-        let checked = wrap("- [x] [#gate2] Verify [#gate2] live\n");
-        let follow = add_linked(&checked, "id=tdreverify Re-verify [#gate2]", &index).unwrap();
-        assert!(follow.inserted);
-        assert_eq!(follow.id.as_deref(), Some("tdreverify"));
-        assert_eq!(follow.requested_id_unused, None);
+        // A bracketed `[#id]` prefix is the same explicit request.
+        let bracket = add_linked(&wrap(""), "[#tdbracket] Verify [#gate2] live", &index).unwrap();
+        assert_eq!(bracket.id.as_deref(), Some("tdbracket"));
     }
 
-    /// `#todoidlayer`: the operator checking a todo layered on an open icebox
-    /// item is a signal for the agent, never an automatic move or close; when
-    /// the icebox item is resolved the open layered todo auto-completes.
+    /// `#todoaddidhijack`: the operator checking a todo linked to an open
+    /// icebox item is a signal for the agent, never an automatic move or close;
+    /// when the icebox item is resolved the open linked todo auto-completes.
+    /// Both the canonical locator row (what `--todo-add` writes now) and a
+    /// legacy row sharing the id (written by `#todoidlayer`) take these paths.
     #[test]
-    fn todoidlayer_icebox_layer_joins_the_operator_done_and_auto_complete_paths() {
-        let open = links(&[("cold", "icebox")], &[]);
-        let checked = wrap(
-            "- [x] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n",
-        );
-        let findings = todo_link_findings(&checked, &open).unwrap();
-        assert_eq!(findings.len(), 1, "{findings:?}");
-        assert_eq!(findings[0].kind, TodoLinkFindingKind::OperatorDoneIceboxOpen);
-        assert_eq!(findings[0].kind.as_str(), "operator_done_icebox_open");
-        assert_eq!(findings[0].ids, vec!["cold".to_string()]);
-        let pending = wrap(
-            "- [ ] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n",
-        );
-        assert!(todo_link_findings(&pending, &open).unwrap().is_empty());
-        let resolved = links(&[], &["cold"]);
-        let done = auto_complete_linked_todos(&pending, &resolved).unwrap();
-        assert_eq!(done.completed, vec!["cold".to_string()]);
-        assert_eq!(
-            todo_body(&done.content),
-            "- [x] [#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n"
-        );
+    fn icebox_link_joins_the_operator_done_and_auto_complete_paths() {
+        for (own, row) in [
+            ("t0x", "[#t0x] Thaw or drop (#cold)? (source: agent:icebox [#cold])"),
+            ("cold", "[#cold] Thaw or drop (#cold)? (source: agent:icebox [#cold])"),
+        ] {
+            let open = links(&[("cold", "icebox")], &[]);
+            let checked = wrap(&format!("- [x] {row}\n"));
+            let findings = todo_link_findings(&checked, &open).unwrap();
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(findings[0].kind, TodoLinkFindingKind::OperatorDoneIceboxOpen);
+            assert_eq!(findings[0].kind.as_str(), "operator_done_icebox_open");
+            assert_eq!(findings[0].ids, vec!["cold".to_string()]);
+            let pending = wrap(&format!("- [ ] {row}\n"));
+            assert!(todo_link_findings(&pending, &open).unwrap().is_empty());
+            let mut resolved = links(&[], &["cold"]);
+            resolved.resolve_todo_backlinks_from_document(&pending).unwrap();
+            let done = auto_complete_linked_todos(&pending, &resolved).unwrap();
+            assert_eq!(done.completed, vec![own.to_string()]);
+            assert_eq!(todo_body(&done.content), format!("- [x] {row}\n"));
+        }
     }
 
-    /// `#todoidlayer`: id backfill layers an open id-less row on the one open
-    /// icebox item it cites; a row citing two tracked items gets a surrogate.
+    /// `#todoaddidhijack`: id backfill mints for an open id-less row citing
+    /// one open icebox item (the locator pass links it), and for a row citing
+    /// two tracked items.
     #[test]
-    fn todoidlayer_backfill_layers_open_rows_on_one_icebox_item() {
+    fn backfill_never_takes_a_cited_tracked_id() {
         let content = wrap(concat!(
             "- [ ] Thaw or drop (#cold)?\n",
             "- [ ] Decide #cold before #gate1\n",
@@ -2979,10 +3013,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.assigned.len(), 2);
-        assert_eq!(outcome.assigned[0].id, "cold");
-        assert_eq!(outcome.assigned[0].linked.as_deref(), Some("icebox"));
-        assert_eq!(outcome.assigned[1].linked, None);
-        assert!(outcome.assigned[1].id.starts_with('t'));
+        for assignment in &outcome.assigned {
+            assert!(assignment.id.starts_with('t'), "{assignment:?}");
+        }
+        let qualified =
+            qualify_todo_source_references(&outcome.content, &index, &|_| true).unwrap();
+        assert_eq!(
+            todo_body(&qualified.content),
+            format!(
+                "- [ ] [#{}] Thaw or drop (#cold)? (source: agent:icebox [#cold])\n- [ ] [#{}] Decide #cold before #gate1\n",
+                outcome.assigned[0].id, outcome.assigned[1].id
+            )
+        );
     }
 
     #[test]
@@ -3364,39 +3406,33 @@ mod tests {
             &|_| true,
         )
         .unwrap();
-        let ids: Vec<(&str, Option<&str>)> = outcome
-            .assigned
-            .iter()
-            .map(|a| (a.id.as_str(), a.linked.as_deref()))
-            .collect();
+        let ids: Vec<&str> = outcome.assigned.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids.len(), 5, "{ids:?}");
-        // The docs.md row is the operator prompt for the one open backlog item
-        // it cites, so it reuses that id.
-        assert_eq!(ids[0], ("httpsdocsgoogle", Some("backlog")));
-        // `#cligoshell` is already cited by owned rows but OWNED by none, so the
-        // first id-less row citing it reuses it.
-        assert_eq!(ids[1], ("cligoshell", Some("review")));
-        // Nothing linkable: minted. A checked row never reuses a gate.
-        assert!(
-            ids[2].1.is_none() && ids[3].1.is_none() && ids[4].1.is_none(),
-            "{ids:?}"
-        );
+        // `#todoaddidhijack`: every backfilled id is minted — the docs.md row
+        // cites the open backlog item `#httpsdocsgoogle` and the re-run row
+        // cites the open gate `#cligoshell`, but neither takes that id.
+        for id in &ids {
+            assert!(
+                id.starts_with('t') && !["httpsdocsgoogle", "cligoshell"].contains(id),
+                "{ids:?}"
+            );
+        }
         let body = todo_body(&outcome.content);
         assert_eq!(
             body,
             format!(
                 concat!(
-                    "- [ ] [#httpsdocsgoogle] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip\n",
+                    "- [ ] [#{}] Re-authenticate the Google Drive connector (/mcp, sign in) or paste the Google Doc text into tasks/docs.md so #httpsdocsgoogle can proceed; or say skip\n",
                     "- [ ] #tdsdk157 Review/approve haiven-sdk #157 (#cligoshell)\n",
                     "- [ ] [#tdwebui] Decide the SDK web UI shape (#cligoshell)\n",
-                    "- [ ] [#cligoshell] Re-run haiven-cli #2 CI, then review it (#cligoshell)\n",
+                    "- [ ] [#{}] Re-run haiven-cli #2 CI, then review it (#cligoshell)\n",
                     "- [ ] [#{}] Optional: delete the clean inspection worktrees\n",
                     "- [x] [#{}] Already done by me (#httpsdocsgoogle)\n",
                     "  - [ ] [#{}] Nested follow-up with no id\n",
                     "- [ ] Call the vendor\n",
                     "- [ ] Call the vendor\n",
                 ),
-                ids[2].0, ids[3].0, ids[4].0
+                ids[0], ids[1], ids[2], ids[3], ids[4]
             ),
             "only the id token is inserted; owned rows and duplicate copies are untouched"
         );
@@ -3443,13 +3479,14 @@ mod tests {
         assert_ne!(optional.id, first);
     }
 
-    /// `#todoidbackfill`: once the row owns the id, the existing completion
-    /// paths reach it — the operator's check reports the prerequisite done, and
-    /// resolving the backlog item checks the row off.
+    /// `#todoidbackfill`: once the row owns a (minted) id and preflight's
+    /// locator pass links it, the existing completion paths reach it — the
+    /// operator's check reports the prerequisite done, and resolving the
+    /// backlog item checks the row off.
     #[test]
     fn todoidbackfill_rows_join_the_todoids_completion_paths() {
         let content = docs_todo_doc();
-        let outcome = assign_missing_todo_ids(
+        let assigned = assign_missing_todo_ids(
             &content,
             &test_id,
             &std::collections::HashSet::new(),
@@ -3457,22 +3494,34 @@ mod tests {
             &|_| true,
         )
         .unwrap();
-        let resolved = links(&[("cligoshell", "review")], &["httpsdocsgoogle"]);
-        let done = auto_complete_linked_todos(&outcome.content, &resolved).unwrap();
-        assert!(done.completed.contains(&"httpsdocsgoogle".to_string()));
-        assert!(todo_body(&done.content).starts_with("- [x] [#httpsdocsgoogle] Re-authenticate"));
-        let checked = outcome.content.replace(
-            "- [ ] [#httpsdocsgoogle] Re-auth",
-            "- [x] [#httpsdocsgoogle] Re-auth",
+        let docs_id = assigned.assigned[0].id.clone();
+        let qualified =
+            qualify_todo_source_references(&assigned.content, &backfill_links(&content), &|_| true)
+                .unwrap();
+        let mut resolved = links(&[("cligoshell", "review")], &["httpsdocsgoogle"]);
+        resolved
+            .resolve_todo_backlinks_from_document(&qualified.content)
+            .unwrap();
+        let done = auto_complete_linked_todos(&qualified.content, &resolved).unwrap();
+        assert!(done.completed.contains(&docs_id), "{:?}", done.completed);
+        assert!(
+            todo_body(&done.content).starts_with(&format!("- [x] [#{docs_id}] Re-authenticate")),
+            "{}",
+            todo_body(&done.content)
+        );
+        let checked = qualified.content.replace(
+            &format!("- [ ] [#{docs_id}] Re-auth"),
+            &format!("- [x] [#{docs_id}] Re-auth"),
         );
         let findings = todo_link_findings(&checked, &backfill_links(&checked)).unwrap();
         assert!(
             findings
                 .iter()
                 .any(|f| f.kind == TodoLinkFindingKind::OperatorDoneBacklogOpen
-                    && f.selector == "httpsdocsgoogle"),
+                    && f.selector == docs_id),
             "{findings:?}"
         );
+        let outcome = assigned;
         // A snapshot holding the same todo body gets the ids carried over; one
         // with an unsnapshotted operator todo edit does not.
         let carried = carry_todo_body_into_snapshot(&content, &content, &outcome.content).unwrap();

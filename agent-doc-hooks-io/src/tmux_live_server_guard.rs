@@ -18,7 +18,8 @@
 //! its tmux client exited. The subagent's own `env.sh` did `unset TMUX`, but
 //! the cleanup command did not source it.
 //!
-//! The guard is narrow by design. It inspects `Bash` commands only, and only
+//! The guard is narrow by design. It inspects shell commands only (`Bash`, and
+//! Grok Build's `run_terminal_command`/`Shell`, see [`SHELL_TOOL_NAMES`]), and only
 //! the commands that destroy tmux state: any `kill*` command (`kill-server`,
 //! `kill-session`, `kill-window`, `kill-pane`, `killp`, `killw`), and
 //! `respawn*`/`unlink*` with `-k`. It also inspects `pkill`/`killall` patterns
@@ -180,13 +181,29 @@ const LIVE_PROCESS_NAMES: &[&str] = &[
 /// How deep `sh -c '...'` nesting is followed.
 const MAX_SHELL_DEPTH: usize = 4;
 
+/// Tool names a harness reports for its shell tool in a `PreToolUse` payload.
+///
+/// Claude Code and Codex report `Bash`. Grok Build loads the same Claude
+/// settings files (`~/.claude/settings.json` always, a project's
+/// `.claude/settings.json` once the folder is trusted) but reports its own tool
+/// name, `run_terminal_command`, or `Shell` under its Cursor preset; it maps
+/// Claude names only in a `matcher`, never in the payload. Matching `Bash`
+/// alone left the guard loaded and inert in every Grok pane
+/// (`#tmuxguardclaudeuser`).
+pub const SHELL_TOOL_NAMES: &[&str] = &["Bash", "run_terminal_command", "Shell"];
+
+/// Whether `tool_name` is a harness shell tool this guard inspects.
+pub fn is_shell_tool(tool_name: &str) -> bool {
+    SHELL_TOOL_NAMES.contains(&tool_name)
+}
+
 /// Decide whether a tool call may run, given the harness environment.
 pub fn tmux_live_server_decision(
     tool_name: &str,
     tool_input: &serde_json::Value,
     ambient: &TmuxAmbient,
 ) -> PreToolUseDecision {
-    if tool_name != "Bash" {
+    if !is_shell_tool(tool_name) {
         return PreToolUseDecision::Allow;
     }
     let command = match tool_input.get("command") {
@@ -862,6 +879,44 @@ mod tests {
             ),
             PreToolUseDecision::Deny { .. }
         ));
+    }
+
+    /// `#tmuxguardclaudeuser`: Grok Build runs the hooks in Claude settings
+    /// files but names its shell tool `run_terminal_command` (or `Shell` under
+    /// its Cursor preset). The guard must judge those exactly like `Bash`.
+    #[test]
+    fn grok_shell_tool_names_are_inspected_like_bash() {
+        let ambient = inside_tmux();
+        for tool in ["run_terminal_command", "Shell"] {
+            assert!(
+                matches!(
+                    tmux_live_server_decision(
+                        tool,
+                        &json!({ "command": "tmux kill-server" }),
+                        &ambient,
+                    ),
+                    PreToolUseDecision::Deny { .. }
+                ),
+                "{tool} must be refused like Bash"
+            );
+            assert_eq!(
+                tmux_live_server_decision(
+                    tool,
+                    &json!({ "command": "env -u TMUX tmux -L probe kill-server" }),
+                    &ambient,
+                ),
+                PreToolUseDecision::Allow,
+                "{tool} with a private socket must be allowed like Bash"
+            );
+        }
+        assert_eq!(
+            tmux_live_server_decision(
+                "search_replace",
+                &json!({ "command": "tmux kill-server" }),
+                &ambient,
+            ),
+            PreToolUseDecision::Allow
+        );
     }
 
     #[test]

@@ -50,7 +50,15 @@ where `agent-doc skill install --harness claude` never ran has no guard; the
 install does not write the operator's user-level `~/.claude/settings.json`.
 The guard behaves as follows:
 
-- **Scope.** Only `Bash` commands. The guard follows quote-aware segments,
+- **Scope.** Only shell commands: tool name `Bash` (Claude Code, Codex),
+  `run_terminal_command`, or `Shell` (`#tmuxguardclaudeuser`). Grok Build
+  runs the hooks in `~/.claude/settings.json` and, once a folder is trusted,
+  the project's `.claude/settings.json`, but its payload names its own shell
+  tool (`run_terminal_command`, `Shell` under its Cursor preset) in
+  `toolName`/`toolInput`, with `tool_name`/`tool_input` as aliases. Grok maps
+  Claude tool names only in a `matcher`. The handler reads both key spellings
+  and treats every shell tool name alike; otherwise the guard would load in a
+  Grok pane and allow everything. The guard follows quote-aware segments,
   prefix assignments, `env`/`sudo`/`command`/`exec`/`nohup`/`timeout`/`nice`/
   `rtk proxy` wrappers, and `sh -c`/`bash -lc` scripts. It inspects the tmux
   commands that destroy state: any `kill*` (`kill-server`, `kill-session`,

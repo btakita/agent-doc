@@ -459,6 +459,28 @@ pub fn document_ids(cwd: &Path, pane: Option<&str>) -> DocumentIds {
     }
 }
 
+/// The tool name and input of a `PreToolUse` payload.
+///
+/// Claude Code and Codex send `tool_name`/`tool_input`. Grok Build sends
+/// camelCase `toolName`/`toolInput` and documents the snake_case spelling as an
+/// alias; reading both keeps the guard from going inert on a payload that
+/// carries only the camelCase keys (`#tmuxguardclaudeuser`).
+pub fn tool_call_fields<'a>(
+    input: &'a serde_json::Value,
+    empty: &'a serde_json::Value,
+) -> (&'a str, &'a serde_json::Value) {
+    let tool_name = input
+        .get("tool_name")
+        .or_else(|| input.get("toolName"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let tool_input = input
+        .get("tool_input")
+        .or_else(|| input.get("toolInput"))
+        .unwrap_or(empty);
+    (tool_name, tool_input)
+}
+
 /// `PreToolUse` entry point: read the harness payload on stdin, decide, and
 /// report. Exit status 2 with the reason on stderr is how Claude Code blocks a
 /// tool call; every other path exits 0 so the guard can never wedge a turn.
@@ -476,12 +498,8 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
     let Ok(input) = serde_json::from_str::<serde_json::Value>(&payload) else {
         return Ok(());
     };
-    let tool_name = input
-        .get("tool_name")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
     let empty = serde_json::Value::Null;
-    let tool_input = input.get("tool_input").unwrap_or(&empty);
+    let (tool_name, tool_input) = tool_call_fields(&input, &empty);
     if let PreToolUseDecision::Deny { reason } =
         crate::tmux_live_server_guard::tmux_live_server_decision(
             tool_name,
@@ -516,6 +534,40 @@ mod tests {
 
     fn known(ids: &[&str]) -> BTreeSet<String> {
         ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    /// `#tmuxguardclaudeuser`: a Grok Build payload names the tool in camelCase
+    /// keys; the snake_case keys Claude and Codex send win when both exist.
+    #[test]
+    fn tool_call_fields_read_claude_and_grok_payload_keys() {
+        let empty = serde_json::Value::Null;
+        let claude = json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } });
+        assert_eq!(
+            tool_call_fields(&claude, &empty),
+            ("Bash", &json!({ "command": "ls" }))
+        );
+        let grok = json!({
+            "toolName": "run_terminal_command",
+            "toolInput": { "command": "tmux kill-server" }
+        });
+        assert_eq!(
+            tool_call_fields(&grok, &empty),
+            (
+                "run_terminal_command",
+                &json!({ "command": "tmux kill-server" })
+            )
+        );
+        let both = json!({
+            "tool_name": "run_terminal_command",
+            "toolName": "ignored",
+            "tool_input": { "command": "a" },
+            "toolInput": { "command": "b" }
+        });
+        assert_eq!(
+            tool_call_fields(&both, &empty),
+            ("run_terminal_command", &json!({ "command": "a" }))
+        );
+        assert_eq!(tool_call_fields(&json!({}), &empty), ("", &empty));
     }
 
     /// The durable case this exists for: writing a coined tag into source.

@@ -409,6 +409,105 @@ There is no Coder workspace or Zed remote host here, so each remote check ships 
 The two VS Code workers have split the extension's files between them, and I'll integrate them one at a time.
 
 **Still running from earlier:** `#replicadiffcost`, `#jbsessioncmdoutcome` and `#jbshellr1`.
+
+### Re: integration of the parallel batch — opus-5 · 2026-10-26T22:55-04:00
+
+**Incident first.** The previous session ended because the `vscoderemote` worker killed your real tmux server.
+- **What happened:** it cleaned up a local code-server test with `TMUX_TMPDIR=<scratch> tmux kill-server`, but `$TMUX` was still set from this pane. `$TMUX` overrides `TMUX_TMPDIR`, so tmux sessions 0, 1 and 2 all died.
+- **What you need to do:** restart any agent sessions that were running in those panes.
+- **What I changed:**
+  - I recorded the rule in operator memory: never run `kill-server` / `kill-session` without `-L <socket>` and `env -u TMUX`.
+  - I sent the rule to that worker.
+  - I'll put it in every brief that touches tmux.
+
+> **Queue prompt:** do [#jbsessioncmdoutcome]
+
+**Merged and installed** (`3e84bf5a49`, bump `8e9ace65b3`).
+- **What moved:** Clear/Restart output parsing and its messages are now the native `session_command_outcome` derivation.
+- **Tests:**
+  - A 51-case shared fixture checks the Rust code against the Kotlin fallback.
+  - No keystroke regression.
+  - Integrated checks: check-fast 5630 run, 5630 passed. Classic 990 JUnit, 0 failures. 2026.2 and 2026.3 checks pass.
+
+> **Queue prompt:** do [#replicadiffcost]
+
+**Merged and installed** (`dc8a670516`).
+- **Result:** the native replica flush now costs the same at every document size.
+
+  | Document | Flush (1 key) before | after |
+  |---|---|---|
+  | 125 KB | 21.7 ms | 59 µs |
+  | 500 KB | 305 ms | 203 µs |
+
+- **The three causes:**
+  - Each local edit re-ordered the whole document.
+  - `diff` scanned every element.
+  - The state vector was recomputed on every flush.
+- **The fix:** a chunked visible-order index, a journal of local edits that answers `diff`, and an in-place version vector.
+- **Safety:** it falls back to lazily's own path whenever its view disagrees with the CRDT, and the displayed text still always comes from lazily.
+- **Tests:** differential tests run against lazily's paths, and five mutation checks turn them red. check-fast 6278 run, 6278 passed. No IDE restart is needed.
+
+> **Queue prompt:** do [#jbshellr1]
+
+**First part merged and installed** (`42b99769da`, bump `1e918d5eea`).
+- **What landed:**
+  - All 27 actions are now shell forwarders.
+  - Services, settings and JNA are classified as shell.
+  - The shell and implementation digests are split.
+  - `agent_doc_activation_receipt/v1` is logged on both JVMs and sent in a schema-5 snapshot.
+- **Tests:** 1002 classic JUnit tests, 0 failures. 2026.2, 2026.3 and `verifyClassicArtifact` pass.
+- **The rest of R1** is queued as one sequential item, as you chose: `#jbshellr1rest`.
+
+**Reopen rule adopted** (`23411fcd7e`), as you chose.
+- **New point (1):** the 2026.3 rule now requires the module graph, descriptor and every registration to stay unchanged across a swap, and the retired classloader to be collected.
+- **Unchanged:** point (2), the activation receipts.
+- `ModularRestartBoundaryContractTest` now pins the adopted wording.
+
+> **Queue prompt:** do [#vscodeupgradelayout]
+
+**Merged and installed** (`46fea05daf`, VS Code 0.2.84 `019432c698`).
+- **Stale-version prompt:** the extension compares its running version with its own `extensions.json`. It offers Restart Extensions locally and Reload Window on remote.
+- **Measured layout:** every layout capture now uses `vscode.getEditorLayout`, so a vertical split becomes one stacked column. The grouping rules are the native `editor_group_layout` derivation, checked against an 18-case fixture.
+- **Merge note:** I resolved one conflict at integration (both derivations kept). `native.ts` `EDITOR_PLUGIN_VERSION` moved to 0.2.84 too, because the manifest guard pins it.
+- **Tests:** check-fast 6259 run, 6259 passed. VS Code `npm test` 216 of 216 passed.
+- **Not tried in a live VS Code window yet.**
+
+> **Queue prompt:** do [#zedparity]
+
+**Merged** (`379e4d97d6`, Zed extension 0.1.2 `e8a014620e`).
+- **Registration identity:** `zed-lsp` now sends editor kind, version, binary version, capabilities, and `layout_authority=document_only`.
+- **Binary pickup:** an in-place `execve` handoff keeps the same PID and stdio. The new binary must first validate the handoff; on refusal the old one keeps serving and shows a restart prompt. An end-to-end test swaps the binary mid-request.
+- **Document-only routing:** enforced in the controller.
+- **Remote qualification:** not done. `editors/zed/REMOTE.md` and `scripts/zed_remote_qualify.py` exist, but no Zed remote host was available.
+- **Tests:** check-fast 11775 run, 11775 passed.
+
+**Still running:** `#vscoderemoteparity`.
+- **Done in its branch:** `extensionKind`, the activation receipt, and an install path that reaches code-server and Remote-SSH.
+- **In progress:** merging main into its branch (no force-push).
+
+> **Queue prompt:** [#ahfe]: I believe it works now. verify
+
+**Partly verified. The todo stays open.**
+- **What the logs show:**
+  - IntelliJ 2026.3 hot-reloaded `libagent_doc` without a restart at 21:32, 22:13 and 22:53.
+  - Run Agent Doc routes after the 22:15 IDE start finished with exit 0 (02:27Z and 02:36Z).
+  - The IDE now runs plugin 0.2.853, so you did restart.
+- **What GH #267 needs and I can't confirm:** a route run while an *older* plugin is loaded against a newer binary. That should log `editor_route_superseded_editor_admitted` and end the route output with the advisory line. That case hasn't happened since the fix, and I can't press Run Agent Doc.
+- **The next JetBrains bump** (`#jbshellr1rest`) creates that case. After its install, don't restart. Wait for `[native] hot-reloaded libagent_doc` in `idea.log`, run Run Agent Doc once, and I'll check `ops.log`.
+
+> **Queue prompt:** Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+
+No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-proof`), #45 and #40.
+
+**Queued:**
+- `#jbshellr1rest`: the rest of R1, in one worker.
+- `#vscodesessionparsers`, `#replicaremoteflush`, `#kotlinflushprep`: your picks.
+- Two defects `vscoderemote` found on unmodified main:
+  - `#vscodekoffivsix`: the shipped VSIX has no koffi, so a VSIX install runs without the native library and never registers.
+  - `#vscodekoffisegv`: the extension host crashes with SIGSEGV in koffi's `free` under code-server.
+- **Dispatch order:** `#jbshellr1rest` and `#replicaremoteflush` now. The three VS Code items wait until `vscoderemote` lands, and `#kotlinflushprep` waits until `#jbshellr1rest` lands, so no two workers edit the same plugin files at once.
+
+**Needs you:** restart IntelliJ 2026.3 when convenient. VS Code now has 0.2.84 installed; reload the window to load it.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -416,19 +515,19 @@ The two VS Code workers have split the extension's files between them, and I'll 
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#jbshellr1rest]
+- do [#vscodesessionparsers]
+- do [#replicaremoteflush]
+- do [#kotlinflushprep]
+- do [#vscodekoffivsix]
+- do [#vscodekoffisegv]
 - 🚧 [#subagent:vscoderemote#1] do [#vscoderemoteparity]
-- 🚧 [#subagent:vscodeupgrade#1] do [#vscodeupgradelayout]
-- 🚧 [#subagent:zedparity#1] do [#zedparity]
-- 🚧 [#subagent:replicadiff#1] do [#replicadiffcost]
-- 🚧 [#subagent:jbsessioncmd#1] do [#jbsessioncmdoutcome]
-- 🚧 [#subagent:jbshellr1#1] do [#jbshellr1]
-- ~~do [#editorbackendparity]~~
-- ~~do [#todoaddidhijack]~~
-- ~~do [#jb339shelldesign]~~
-- ~~do [#jbshrinkrestarts]~~
-- ~~do [#cazn]~~
-- ~~do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.~~
-- ~~do [#jb263-feed-verify]~~
+- ~~do [#vscodeupgradelayout]~~
+- ~~do [#zedparity]~~
+- ~~do [#replicadiffcost]~~
+- ~~do [#jbsessioncmdoutcome]~~
+- ~~do [#jbshellr1]~~
+- ~~[#ahfe]: I believe it works now. verify~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -444,12 +543,13 @@ The two VS Code workers have split the extension's files between them, and I'll 
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#jbshellr1rest] Finish GH 339 shell stage R1 in one worker, one commit per step, in this order: (1) forward project lifecycle and the programmatic listeners through the shell and retarget generateModularLifecycle; (2) shell forwarders for the editor/language extensions; (3) GenerationContext.invokeLater with FencedTask plus per-generation executors and CoroutineScope for EDT and pooled work; (4) controller identity: the activation_receipt field on the Rust EditorRegistration (serde default) and the Kotlin Register op, landed together (VS Code already added an optional activation_receipt field on main); (5) shell-created Keys and shell-side Fleet RPC delegation, moving AuthenticatedSurfaceIngressState out of the service file. Implementation stays in the same classloader, frontend shell-only.
+- [ ] [#vscodesessionparsers] Point the VS Code extension clear/restart parsers (editors/vscode/src/sessionUi.ts) at the native session_command_outcome derivation behind agent_doc_editor_derive_json, with the TypeScript copy as the frozen fallback answering the shared session_command_outcome.json fixture identically.
+- [ ] [#replicaremoteflush] Fold remote CRDT ops into the replica visible-order index as they arrive (agent-doc-merge crdt_sync local_ops), so the first local flush after a remote update no longer pays a full index rebuild; keep the differential tests against lazily paths and gate on make jetbrains-keystroke-bench.
+- [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
+- [ ] [#vscodekoffivsix] Ship koffi in the VS Code VSIX: editors/vscode/.vscodeignore excludes node_modules, so a VSIX install has no koffi and the native library is off (nothing registers with the controller, including on Coder); bundle or include the koffi runtime for each target platform and add a packaging test that the VSIX contains it.
+- [ ] [#vscodekoffisegv] Investigate the VS Code extension-host SIGSEGV in free called from koffi into libagent_doc under code-server 4.143.1 (node v24.22.1), reproduced with the debug library on unmodified main by the vscoderemoteparity worker; find the ownership bug at the FFI boundary and add a regression test.
 - [ ] [#vscoderemoteparity] VS Code remote parity (editors/SPEC.md section 13): declare "extensionKind": ["workspace"] and test the extension loads in the remote extension host; add a single-role agent_doc_activation_receipt/v1 line (role=workspace) to the controller registration; make agent-doc plugin install vscode reach the workspace extension host (code-server and the Remote-SSH server extensions directory); add a Coder workspace smoke test (install, register, remoteName, tmux attach, layout sync). Update the section 13 matrix and its editor_contract test as gaps close.
-- [ ] [#vscodeupgradelayout] VS Code upgrade and layout parity (editors/SPEC.md section 13): detect an installed VSIX that differs from the running version (installed_plugin_version covers JetBrains only today) and prompt Restart Extensions locally or Reload Window remotely; capture orientation and group sizes with vscode.getEditorLayout and move the layout-grouping rules behind agent_doc_editor_derive_json so changing them needs no reload. Update the section 13 matrix and its editor_contract test as gaps close.
-- [ ] [#zedparity] Zed parity (editors/SPEC.md section 13): zed-lsp registration carries editor kind, version and capabilities; decide and test how zed-lsp picks up a new agent-doc binary without restarting Zed (in-place re-exec keeping the LSP session, or a language-server restart prompt); document and enforce document-only routing since Zed exposes no layout; qualify Zed remote development (agent-doc on the remote worktree PATH, dev-extension sync, controller locality). Update the section 13 matrix and its editor_contract test as gaps close.
-- [ ] [#replicadiffcost] Make the native agent_doc_replica_diff proportional to the edit, not the whole document: on a 125 KB session document a JetBrains replica flush costs about 50 ms whatever the burst size, about 48 ms of it in agent_doc_replica_diff, and the cost grows superlinearly (about 4.9 ms on a 32 KB copy). Native-only, so no IDE restart. Gate on make jetbrains-keystroke-bench (baseline report in the jbshrink worktree .bench/baseline.json) and prove no change to CRDT convergence or editor-truth semantics.
-- [ ] [#jbsessioncmdoutcome] Move the JetBrains TerminalUtil clear/restart refusal parsers (parseBusySessionClearRefusal, parseLiveTurnQueuedClear, the restart refusals) and their notification texts into a native session_command_outcome derivation, the same way route_outcome moved: exact port, shared fixture that the Rust derivation and the Kotlin fallback must answer identically, keystroke benchmark gate.
-- [ ] [#jbshellr1] Build GH 339 shell stage R1 from editors/jetbrains/SPEC.md "Restart-free implementation generations": the stable shell, the forwarders that own every IntelliJ registration, and the activation receipt fields, with the implementation still in the same classloader (no child loader yet). It costs one restart. Keep the frontend shell-only, keep the restart-required prompt as the fallback, and propose the restated Exact-263 reopen rule (module graph and registrations unchanged across the swap, retired implementation collectable) in the spec for operator agreement.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

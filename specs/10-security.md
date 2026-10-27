@@ -7,7 +7,7 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 ## Threat Model
 
 - **Trusted user, untrusted content.** The user is trusted; document content may contain prompt injection from external sources (pasted emails, web pages, chat logs).
-- **Local filesystem scope.** All data (documents, snapshots, exchange history, links cache) resides on the local filesystem. No network services are exposed.
+- **Local filesystem scope.** All data (documents, snapshots, exchange history, links cache) resides on the local filesystem. No network services are exposed unless the operator runs `agent-doc serve` (see [Browser editor writes](#browser-editor-writes-agent-doc-serve-servesavebypass)).
 - **Git as audit trail.** All agent responses are committed to git, providing a complete audit trail. However, git history may contain sensitive content if documents reference private data.
 
 ## Known Risks
@@ -25,6 +25,10 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 - If you are experimenting with shared/collaborative docs, mark the document with `agent_doc_collaboration: shared` and require an auditable `agent_doc_security_review: <review-id>` before cross-document `extract` / `transfer` or plan-backed `do #id` work that reads another `.md` file.
 - For broader shared/collaborative use cases, wait for the planned multi-user security model (access control, session isolation, content scanning).
 - Review agent responses before sharing or publishing document content.
+
+## Browser editor writes (`agent-doc serve`, `#servesavebypass`)
+
+`agent-doc serve` is the one network listener agent-doc exposes. It binds loopback by default and requires bearer tokens (edit and read-only) on any other bind. An edit token is a whole-document write capability, so `POST /save` is held to the editor authority rules: it never writes with a bare `std::fs::write`, it is refused with `409 Conflict` while an editor replica holds the document (so a remote or stale browser tab can never overwrite operator-typed editor text), and otherwise it writes through `atomic_write_through_authority`. See [Core Commands: serve](07-core-commands.md#serve).
 
 ## Live tmux server guard (`#tmuxkittyterminal`)
 

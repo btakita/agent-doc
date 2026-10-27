@@ -411,6 +411,18 @@ It is the complement of `admin dashboard`, not a replacement: `admin dashboard` 
 - **Never a session document.** The projection has no frontmatter, contains no `<!-- agent:` marker and no `agent_doc_*` token (free text is escaped; such links are percent-encoded), lives under the gitignored `.agent-doc/` by default, and its first-line marker makes `is_agent_doc_document`, the `board` / `serve` scans, and therefore the cross-document sweep and editor tab sync reject it even under `auto_session_for_all_md` or a `**/*.md` include glob.
 - Editor plugins expose it as the **Dashboard** action (`editors/SPEC.md` § 6c).
 
+## serve
+
+`agent-doc serve [FILE_OR_DIR] [--port 7333] [--host 127.0.0.1] [--auth-token T] [--read-only-token T] [--tls-cert C --tls-key K]` serves a minimal browser editor (a raw textarea) for one session document or for the project's session list. The route table and module contracts live in `src/serve.rs`.
+
+- **Binding and auth.** Loopback by default. A non-loopback bind requires bearer auth: an edit token and a read-only viewer token are generated and printed unless supplied. A read-only token can read but `POST /save` answers `403`. `--tls-cert`/`--tls-key` serve HTTPS.
+- **Reads.** `GET /doc[/<path-or-hash>]` returns the document text from disk; `GET /events` is an SSE stream (`ready`, `doc-changed`, `agent-response`, `doc-error`).
+- **`POST /save` is a whole-document write with no base** (`#servesavebypass`). The body is the browser's full textarea text, derived from a disk read. It never reaches the document through a bare `std::fs::write`:
+  - **An editor replica holds the document** (the CRDT authority for the file is `MultiReplica`, which includes an allocated controller model and a controller whose authority cannot be observed): the save is refused with `409 Conflict` and the remedy "edit the document in that editor, or close it there, reload this page, and save again". Nothing is written, nothing is committed, an open cycle stays open, and `ops.log` records `serve_save_refused reason=editor_replica_attached`. The editor's canonical is the authority and disk only its lagging projection, so a raw write would overwrite the editor's unsaved text on disk, and a rebase through the authority could only use disk as its merge base: over an editor cut that both sides changed it keeps the browser side and drops operator-typed lines (the `#retainedprojectionclobber` class). Routing the write through the authority without the refusal does not help either: the replica never acknowledges a whole-document replace it did not ask for, so the write is retained and would later apply the browser text into the editor.
+  - **No editor replica, open response cycle**: the body is written through `atomic_write_through_authority`, and `agent-doc write --commit --origin serve` closes the cycle. A nonzero exit surfaces its stderr.
+  - **No editor replica, no open cycle**: the body is written through `atomic_write_through_authority` (the serialized per-document write queue, the detached compare-and-swap, an atomic rename), then committed with a plain `agent-doc serve: web edit <ts>` git commit. The response JSON carries `commit_mode` (`git` or `agent-doc write --commit`) and the new short HEAD.
+- **Residual window.** The editor check runs once, before the write. An editor that attaches between the check and the write is handled by the authority's own attached-editor path (the retained-write rules above), not by the refusal.
+
 ## upgrade
 
 `lib-path` is a machine-only native bootstrap query: it prints exactly the

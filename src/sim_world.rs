@@ -16196,7 +16196,7 @@ enum CacheConflict {
 /// A deterministic editor-buffer actor that speaks the CRDT relay protocol
 /// against a real on-disk document, so SimWorld scenarios can drive the
 /// production read-authority reconcile without a live IDE.
-struct SimEditor {
+pub(crate) struct SimEditor {
     kind: EditorKind,
     path: PathBuf,
     liveness_tag: String,
@@ -16246,7 +16246,7 @@ impl SimEditor {
         })
     }
 
-    fn generic(path: &Path) -> Result<Self> {
+    pub(crate) fn generic(path: &Path) -> Result<Self> {
         Self::attach(EditorKind::Generic, path)
     }
 
@@ -16266,7 +16266,7 @@ impl SimEditor {
     /// the local edit through the CRDT relay so the production realtime feed
     /// surfaces it as a genuine unsaved edit (the `#queue-user-edit-overwrite`
     /// no-clobber hazard this whole plan exists to defend).
-    fn type_unsaved(&mut self, content: &str) -> Result<()> {
+    pub(crate) fn type_unsaved(&mut self, content: &str) -> Result<()> {
         self.publish_buffer_replace(content)?;
         self.dirty = true;
         self.generation += 1;
@@ -16403,7 +16403,7 @@ impl SimEditor {
     /// Resolve "current document" through the *production* realtime model
     /// (`try_resolve_current_doc_from_file`), the exact seam `preflight` / `write` /
     /// `session-check` source the current doc through.
-    fn resolve(&self) -> Result<Reconciliation> {
+    pub(crate) fn resolve(&self) -> Result<Reconciliation> {
         agent_doc_document_realtime_io::try_resolve_current_doc_from_file(&self.path)
     }
 

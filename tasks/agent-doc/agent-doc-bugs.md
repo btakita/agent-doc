@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -276,6 +276,18 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 - Backlog (go queue): `#jb263probeblind`.
 - Icebox: `#jbdocdrift`.
 
+### Re: Subagent completed: `subagent:automationapi` returned work for queue item “agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?” — agent-doc
+<!-- agent-doc-subagent-response sha256=fe1802ea6b3711a453c38f3e6d861f5d785427f42663d199a1f43934dd00b049 -->
+> **Subagent response:**
+>
+> Design only (no production code): branch design/automationapi, commit a1fff34641 "docs(proposal): language-agnostic automation API", new specs/proposals/automation-api.md (non-normative); make audit-docs exit 0.
+> Recommendation: No - keep the controller as the authority behind the API, but do not publish its internal RPC. Today: local socket <root>/.agent-doc/controller.sock (agent-doc-controller/src/paths.rs:5,15), one newline JSON request/reply per connection (rpc.rs:21659-21707), 106 commands (rpc.rs:21843-22575) with 236 pub(crate) ControllerRequest literals, typed payloads as JSON strings in diagnostic_payload, prose errors (rpc.rs:22720), 50 rpc.rs commits in 30 days, exact binary-version match for writes (rpc.rs:22695; omitting the version skips it, rpc.rs:21823), no auth (specs/10-security.md:5), start-on-use/idle-retire/install-handoff lifecycle (08b:729-760); Kotlin and TS clients hand-write the JSON. command-plane-v1 (editors/command-payloads.md:1-31) already has the right shape; queue add (specs/07-orchestration-commands.md:1048) is the write path to copy; MCP (src/mcp.rs:362-441) is turn-oriented; 50 CLI --json subcommands (~3 with schema_version); agent-doc serve is an HTTP server with bearer tokens/TLS/SSE (src/serve.rs:1-40).
+> Options: (a) versioned socket command (best authority fit, small socket client per language); (b) HTTP facade inside serve OK, gRPC conflicts with the no-async rule, a separate daemon would be a second authority; (c) CLI JSON (cheapest universal); (d) MCP should consume the API, not be it.
+> Plan: one versioned agent-doc/api/v1 op table + JSON Schema with stable error codes in a pure agent-doc-api crate; phase 1 agent-doc api <op> --json (capabilities, documents.list, document.read, document.status, queue.add); phase 2 the same bytes as one controller socket command checked against the API version, with socket/dir permissions + SO_PEERCRED and Python/TS reference clients; phase 3 events.subscribe with a resumable document_version cursor across handoff; phase 4 optional /api/v1 + SSE in serve and generated MCP tools. v1 excludes document-text writes and run-a-turn.
+> Open questions: first real caller; local-only vs remote/multi-user; is start-a-turn ever an API op; will automation write document text and which components; plain JSON vs Lazily CommandSubmit envelope; should API calls launch a controller and subscribers keep it alive; v1 stability/deprecation window; per-project endpoint vs user-level gateway.
+> Follow-ups: (1) agent-doc serve POST /save with no open cycle writes the whole body with std::fs::write and commits (src/serve.rs:1135-1150), bypassing atomic_write_through_authority while an editor may hold the document; (2) lock down the controller socket (permissions, peer uid) and stop a request without binary_version from skipping the stale-binary refusal (rpc.rs:21823-21833); (3) specs/10-security.md:10 says no network services are exposed, but serve can bind non-loopback with bearer tokens.
+<!-- agent-doc-subagent-completion key=8758a5a656d92cd060ca6e509199ab8fa4e3cf8858c793bf00fda3879a719e8e -->
+
 ### Re: Subagent completed: `subagent:jb263probeblind` returned work for queue item “do [#jb263probeblind]” — agent-doc
 <!-- agent-doc-subagent-response sha256=479aaf5cc92e197a53e461708e9d3ba4688182991ca8cbbba481dc01777eed9b -->
 > **Subagent response:**
@@ -401,24 +413,67 @@ v1 has no document-text writes and no "run a turn now": automation queues work a
 - session-check reports a refused write, with the remedy.
 
 **`#jb263probeblind` (`29911b1a9f`).** The 2026.3 IDE's module jars are now checked: a deleted or backup-path `lib/modules/agent.doc.*.jar` counts as a replaced plugin. Current module jars still allow the route through, so your live IDE gets no false advisory. The `#ahfe` live check should now show the full signal: the advisory plus `editor_route_superseded_editor_admitted`. `#ahfe` stays open for your check.
-<!-- agent:boundary:6e70aeb7 -->
+
+### Re: Subagent completed: `subagent:servesavebypass` returned work for queue item “do [#servesavebypass]” — agent-doc
+<!-- agent-doc-subagent-response sha256=244bac968f0234ee615a3bcca5536a39ccf15d10932a25f7321d80d5166829c6 -->
+> **Subagent response:**
+>
+> Branch fix/servesavebypass, commit 43734433ab on 1959c54f63 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11973 passed (186 skipped).
+> Root cause: src/serve.rs handle_save (~1135-1150) with no open cycle did std::fs::write(&doc, &body) then a plain git commit, never checking the editor authority or a live replica.
+> Fix: one save_document path. Editor replica holds the document (crdt_authority_for_file(..).editor_attached(), the same check the direct-disk-write guard uses; unobservable controller counts as held) -> 409 Conflict with remedy "edit the document in that editor, or close it there, reload this page, and save again", nothing written or committed, an open cycle stays open, ops.log serve_save_refused reason=editor_replica_attached. No replica + no cycle -> atomic_write_through_authority then git commit. No replica + open cycle -> unchanged (atomic_write_through_authority + agent-doc write --commit). Refuse rather than merge: the browser posts a whole document built from a disk read with no base, so a merge keeps the browser side and drops operator typing (#retainedprojectionclobber class); routing through the authority alone returns a retained write (500) that would later push the browser text into the editor. /save and /save/<doc> both go through handle_save.
+> Files: src/serve.rs, src/sim_world.rs (crate-visible SimEditor helpers), specs/07-core-commands.md (## serve), specs/10-security.md (browser editor writes; threat model now mentions agent-doc serve), SPEC.md.
+> Tests (in-process, ephemeral loopback, SimEditor real replica): serve_post_save_writes_through_commit_boundary; serve_post_save_refuses_while_editor_replica_holds_document; serve_post_save_refuses_open_cycle_while_editor_replica_holds_document; serve filter 81/81 passed; 5 mutations all caught (M5 = original bug returned 200 and committed over the attached editor).
+> Follow-ups: (1) serve GET /doc reads disk while an editor holds the document (should read the live document); (2) a based browser save that merges from the loaded text and refuses only on operator-line loss; (3) a small race between the editor check and the write/commit (recheck before committing).
+<!-- agent-doc-subagent-completion key=8c80beab72db6d8e1e5c9034f4ed5f65624f3f607d8a25726691aeb010999ed5 -->
+
+### Re: Subagent completed: `subagent:inflighttypinghold` returned work for queue item “do [#inflighttypinghold]” — agent-doc
+<!-- agent-doc-subagent-response sha256=478864591af0b730b59ebd4563bc5340d6bc2ccdd4ed77341526e15d55008b0e -->
+> **Subagent response:**
+>
+> Branch fix/inflighttypinghold, commit 66c136b4a9 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11977 passed (186 skipped); make tmux-ci exit 0, 207 passed. No Kotlin/TS (no plugin calls the crdt_commit_barrier RPC).
+> (1) apply_canonical_replace_if_attached (agent-doc-document-realtime-io/src/lib.rs ~3847; the single path to apply_cp_write_for_file_scoped for atomic writes, retained settles, projected captures, try_editor_converge) never read the editor's op-capture record. Now checks agent_doc_op_capture_io::editor_ops_in_flight_over before writing and waits in its retry loop (awaiting_editor_ops; {source}_crdt_write_held_for_editor_ops ... pending_from=K recovery=await_editor_delta_then_rebase once per burst); the existing rebase rolls forward once the delta lands; an unreadable record proceeds unheld (no deadlock).
+> (2) editor_ops_in_flight_over_visible_cut (project_controller.rs ~8785) held only when the epoch base hash equalled the visible text. Shared rule agent_doc_merge::crdt::editor_ops_in_flight_over_visible (controller + CLI): hold when some tail of the epoch's ops replays from the visible text to the reported tip (whole-epoch still requires the base hash); never for lineage-less epochs, tip == visible, or non-replaying ops; shortest tails first with a 256 MiB work budget.
+> (3) Relay barrier (agent-doc-crdt-relay-io/src/lib.rs ~5467) and RPC returned a bool. New agent_doc_turn::commit_barrier::CommitBarrierVerdict (ready | refused convergence_pending | quarantined_replica); RPC returns it only for {"verdict":true} requests (older clients get the bool; an older controller's bool reads as convergence_pending); live-buffer guard, flow-io closeout and finalize_commit render via live_buffer_guard::commit_barrier_refusal, printing state=crdt_commit_barrier_refused_quarantined_replica with quarantined_replica_commit_remedy.
+> Files (18): agent-doc-merge/src/crdt.rs, agent-doc-op-capture-io/src/lib.rs, agent-doc-document-realtime-io/src/lib.rs, agent-doc-controller-io/src/project_controller.rs, .../rpc.rs, agent-doc-crdt-relay-io/src/lib.rs, agent-doc-git-io/src/live_buffer_guard.rs, agent-doc-commit-io/src/lib.rs, agent-doc-flow-io/src/closeout.rs, agent-doc-write-runtime-io/src/lib.rs, agent-doc-turn/src/{commit_barrier.rs (new), lib.rs, write_ownership.rs}, agent-doc-flow-io/tests/flow_closeout.rs, tests/test_cli.rs (guard forbids commit_barrier_verdict_for_file( outside the controller), specs/14-realtime-workflow.md, specs/07-closeout-commands.md, SPEC.md.
+> Tests: deterministic hook-driven CLI hold+roll-forward (epoch base and mid-epoch), controller mid-epoch hold, 2 shared-rule units, verdict round-trip, RPC compat, relay verdict, guard quarantine message, flow-io closeout over a quarantined replica (quarantine message, HEAD unchanged); focused runs all pass; 8 mutations killed.
+> Follow-ups: (1) the CLI hold adds one controller round-trip (document_state_projection) to most CP writes; (2) possible 60 s stall when this path runs inside the controller (e.g. compaction) with the editor delta queued behind the same request (safe refusal, unreproduced); (3) session-check does not yet report a quarantined replica as its own state.
+<!-- agent-doc-subagent-completion key=bfeba7fa9d78b6656cfe2322c8d54de8027aa7ca92bbe11f706636ea7e9adb5c -->
+> **Queue prompt:** Add the questions as todo items. Use a nested list so each question is on its own line.
+
+### Re: questions as nested Todos; serve /save, in-flight typing hold — opus-5 · 2026-10-27T17:55-04:00
+
+**Done: both question sets are now Todos, with each question on its own nested line.**
+- `#pmsyncquestions`: the PM-sync design questions.
+- `#automationapiquestions`: the automation-API design questions.
+
+That first needed a binary change. `--todo-add` refused multi-line text, so `feat/nestedtodoadd` (`dd9971e80e`) added nested sub-items:
+- The first line is the Todo, and each `  - ` line is a sub-item, one level deep.
+- Malformed child lines are refused, and nothing is applied.
+- A replay is a no-op. `--todo-done` keeps the sub-items, and a multi-line `--todo-edit` replaces them.
+- It also fixed a replay bug where a multi-line `--backlog-add` or `--icebox-add` filed a second copy or tripped the duplicate-id guard.
+
+**Also on `main` and installed** (`1959c54f63..dd9971e80e`, not released). Every batch passed `make check` (last run 11987/11987) and `make tmux-ci` (207). Before each install I confirmed no editor was quarantined.
+
+| Item | Commit | Fix |
+|---|---|---|
+| `#servesavebypass` | `23b71bd99c` | `agent-doc serve` `POST /save` now refuses with **409** while an editor replica holds the document, and nothing is written or committed. Otherwise it writes through the document authority instead of a raw `fs::write`. A merge wasn't safe: the browser posts a whole document with no base, so a merge would drop your typing. |
+| `#inflighttypinghold` | `0154f75d3a` | The direct CLI write path now waits for editor typing that has been reported but not yet received. The hold also covers bursts after an earlier delta in the same epoch, using one rule shared by the CLI and the controller. A commit refused because an editor is quarantined now says so (`crdt_commit_barrier_refused_quarantined_replica`), instead of "convergence pending". |
+<!-- agent:boundary:f9b5eee1 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#servesavebypass]
-- do [#inflighttypinghold]
-- ~~do [#clobberfollowups]~~
-- ~~do [#jb263probeblind]~~
+- ~~do [#servesavebypass]~~
+- ~~do [#inflighttypinghold]~~
 - ☑️ [#subagent:ahfe#1] do [#ahfe]
 - ☑️ [#subagent:pmsync#1] I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
   - So this is the first subtask.
   - This is the second subtask.
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
-- ~~agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Add the questions as todo items. Use a nested list so each question is on its own line.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -435,11 +490,27 @@ v1 has no document-text writes and no "run a turn now": automation queues work a
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
 - [x] [#v829] Recover your lost tasks/software/lazily.md edits from JetBrains Local History: restore the version from before 13:09 EDT (2026-10-27), which has 'agent: grok', 'queue: go' and your queue edits. agent-doc wrote a stale copy over it at 13:10:19 EDT (see #retainedprojectionclobber); no copy survives in agent-doc's stores. (source: agent:backlog [#retainedprojectionclobber])
 - [ ] [#ena0] Retry Restart Agent on tasks/software/lazily.md (agent: grok) after restarting the 2026.3 IDE onto plugin 0.2.866: it should start Grok Build, or refuse and name both agent values if the controller copy still lags (#retainedprojectionclobber + the --expect-agent check are installed).
+- [ ] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
+  - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
+  - Do credential profiles live in project config or user-global config?
+  - What default refresh intervals, and should refresh pause when no editor has the document open?
+  - Should tracker refreshes be committed to git?
+  - When you edit a synced row: overwrite and log it, treat the edit as a command, or refuse visibly?
+  - What gesture sends a command (component `go`, a per-row marker, or both), and do destructive verbs need per-row confirmation?
+  - Can a tracker row feed `agent:run` automatically?
+  - Does "related to me" mean `involves:@me`, or only review-requested and assigned?
+- [ ] [#automationapiquestions] Answer the automation-API design questions (specs/proposals/automation-api.md on branch design/automationapi)
+  - Who is the first real caller: CI, a dashboard, another agent, or a bridge?
+  - Local-only, or remote and multi-user (which needs a security spec first)?
+  - Should "start a turn" ever be an API operation?
+  - Will automation ever write document text, and which components could it own?
+  - Plain JSON envelope, or the Lazily `CommandSubmit` envelope?
+  - Should API calls launch a controller, and should event subscribers keep it from retiring?
+  - What stability promise for v1, and how long a deprecation window?
+  - One endpoint per project, or a user-level gateway across projects?
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] ☑️ [#clobberfollowups] Data-safety follow-ups from #retainedprojectionclobber: (1) find why the 2026-10-27 16:07:52Z captured_finalize_resume_tracked_work_replay built its retained target from text without the operator's latest typing (length matched response-write target 3fc1e92, not live canonical ef39f88) - if the recorded base matched canonical while the target came from older text, the new OperatorTextWouldBeLost check cannot catch it; (2) refuse a commit while an editor replica is quarantined (the 16:31:34Z closeout committed 206af5eef3 via local_commit_then_composed_late_projection_proof while the editor held unmerged text); (3) derive diverged in realtime_doc_resolve from quarantined_live_replicas() instead of hard-coding false; (4) surface retained_transition_refused_operator_text_loss in session-check.
-- [ ] ☑️ [#jb263probeblind] On the exact-263 modular JetBrains package the superseded-plugin probe is blind: it matches versioned agent.doc-<v>.jar in /proc/<pid>/map_files, but the 263 IDE maps only unversioned lib/modules/agent.doc.{backend,frontend,shared}.jar, so it returns Unknown and silently admits (missed 2026-10-27 04:07:49Z and 04:11:32Z with restart_required pending=0.2.861). Also classify the module-jar mappings ((deleted)/backup-path targets) or fall back to live_plugin_generation_refresh stale=true / the .agent-doc-jetbrains-restart-required marker; keep Unknown failing open; regression test with a 263 maps fixture of module jars only.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->
@@ -449,6 +520,7 @@ v1 has no document-text writes and no "run a turn now": automation queues work a
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#controllersocketlock] From the automation-API design: lock down the controller socket (socket/dir permissions, SO_PEERCRED same-user check) and stop a request that omits binary_version from skipping the stale-binary refusal (agent-doc-controller-io rpc.rs:21823-21833); fix specs/10-security.md:10 ('no network services') now that agent-doc serve can bind non-loopback with bearer tokens. Also from nested sub-prompts: a do [#id] parent with nested free-text children still runs the children as separate heads.
 - [ ] [#jbdocdrift] JetBrains doc drift found by #movedsingleplugin: editors/PLUGIN-SPEC.md:33-35 says two disjoint packages (there are three); PLUGIN-SPEC.md:74-79 keeps the old full module-graph replacement wording that contradicts the restated Exact-263 reopen rule (editors/jetbrains/SPEC.md:286-294,701-720); editors/jetbrains-262/README.md:114-118 says the resolver must not choose the exact-262 ZIP (it now picks the ranged ZIP). Also pending operator decision: merge 262+263 into one 262-263.* modular ZIP (option B). And VS Code Restart Agent needs the same --expect-agent check as JetBrains.
 - [ ] [#cwdfallbacktail] Leftover cwd uses found by #cwdfallbackrest: (1) agent_doc_git_io::dirs::resolve_pane_cwd falls back to the process cwd for a document outside any git repo, and claim/route record it as the registry entry's cwd (should likely be the canonical parent); (2) agent-doc-sync ResyncTargetMatcher / resolve_absolute_file_path resolve relative registry entries against the process cwd (filter_registry_for_target, targeted prune) instead of the store; (3) terminal::run builds Tmux::default() instead of configured_tmux(), ignoring AGENT_DOC_TMUX_SOCKET and the configured tmux binary (also why terminal has no CLI test).
 - [ ] [#compactrequester] From #compactabsorbsedit: controller_compact_document does not log who requested the compact (editor action, CLI, agent); add a requester= field. Also review whether operator edits inside the exchange before the boundary marker should still be archived and committed by compaction.

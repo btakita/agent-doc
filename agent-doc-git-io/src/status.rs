@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
@@ -17,6 +17,43 @@ pub fn is_in_git_repo(file: &Path) -> bool {
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+/// `#commitoutsidegit`: refuse an explicit commit request for a document that is
+/// not inside a git work tree, before anything is staged or mutated.
+///
+/// Outside git the commit pipeline resolved its "git root" to the process cwd,
+/// every git step no-oped, and `agent-doc commit` exited 0 printing `nothing to
+/// commit: ... already matches HEAD` although there is no `HEAD` at all. It had
+/// already created a snapshot and repositioned the boundary in the working tree
+/// by then. `compact --commit` compacted the document first and then blamed a
+/// stale-supervisor CRDT replay for the missing `HEAD` image. Both are false
+/// diagnoses of a missing precondition, which `write --commit` / `finalize`
+/// already refuse by name; this is the same refusal for the remaining explicit
+/// commit commands.
+///
+/// `command` names the operator-visible command (`commit`, `compact --commit`)
+/// and `retry` the command to rerun once the document is in a repository. A
+/// relative `file` is resolved against the process cwd, the same base every
+/// later step resolves it against. A missing file is left to the command's own
+/// not-found error.
+pub fn require_git_repository_for_commit(file: &Path, command: &str, retry: &str) -> Result<()> {
+    let absolute = if file.is_absolute() {
+        file.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .context("failed to read the current directory")?
+            .join(file)
+    };
+    if !absolute.exists() || is_in_git_repo(&absolute) {
+        return Ok(());
+    }
+    let dir = absolute.parent().unwrap_or(Path::new("/"));
+    anyhow::bail!(
+        "{command} requires a git repository so the document can reach a committed state: {} is not inside a git work tree, so there is no HEAD to commit to and nothing was committed. agent-doc session documents must live in a git repository; run `git init` in {} (or move the document into an existing git repository), then rerun `{retry}`",
+        file.display(),
+        dir.display(),
+    )
 }
 
 pub fn is_tracked(file: &Path) -> Result<bool> {

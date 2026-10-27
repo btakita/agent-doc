@@ -2954,6 +2954,7 @@ pub fn mark_lifecycle(
     request: LifecycleRequest,
 ) -> Result<agent_doc_controller::actor::ActorRecord> {
     let stamp = level_update_send_stamp();
+    let fence_payload = LifecycleFencePayload::encode(request.expected_revision);
     #[cfg(any(test, feature = "test-support"))]
     {
         let bootstrap = ControllerBootstrap {
@@ -2984,7 +2985,7 @@ pub fn mark_lifecycle(
                 supervisor_pid: None,
                 supervisor_socket: None,
                 command_kind: None,
-                diagnostic_payload: None,
+                diagnostic_payload: fence_payload,
                 sequence: stamp,
             },
         )
@@ -3006,7 +3007,7 @@ pub fn mark_lifecycle(
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
-            diagnostic_payload: None,
+            diagnostic_payload: fence_payload,
             sequence: stamp,
         },
     )
@@ -24299,11 +24300,16 @@ fn store_actor_record_for_runtime(
 fn store_lifecycle_actor_record_for_runtime(
     project_root: &Path,
     expected_prior_generation: Option<u64>,
+    expected_prior_revision: Option<agent_doc_controller::actor::ActorRevision>,
     record: &agent_doc_controller::actor::ActorRecord,
     runtime: Option<&ControllerRuntime>,
 ) -> Result<(agent_doc_controller::actor::ActorRecord, usize)> {
-    let (write, released) =
-        store_actor_lifecycle_record_write(project_root, expected_prior_generation, record)?;
+    let (write, released) = store_actor_lifecycle_record_write(
+        project_root,
+        expected_prior_generation,
+        expected_prior_revision,
+        record,
+    )?;
     publish_runtime_after_actor_write(runtime, &write);
     Ok((write.record, released))
 }
@@ -27182,12 +27188,32 @@ pub(crate) fn handle_mark_lifecycle(
         .with_context(|| format!("unknown lifecycle state: {state_raw}"))?;
     let caller = request_string(&request.caller, "caller")?;
     let reason = request_string(&request.reason, "reason")?;
+    // `#bindingcallersaudit`: a projection-evidence writer names the exact
+    // record write it decided against.
+    let expected_revision = LifecycleFencePayload::decode(request.diagnostic_payload.as_deref())?;
     let document_id = agent_doc_session_actor_io::canonical_document_id_in(
         &bootstrap.project_root,
         &file.to_string_lossy(),
     );
     let current = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing authoritative actor record for {document_id}"))?;
+    // Refuse a lost fence before the sequence admission below records this
+    // request's stamp: a refused write must not make an older-sent owner update
+    // read as stale. The store transaction re-checks it atomically.
+    if let Some(expected) = expected_revision {
+        let conn = open_state_db(&bootstrap.project_root)?;
+        let (_, found) = state_store::load_actor_record_with_revision_from_db(&conn, &document_id)?;
+        if found != expected {
+            anyhow::bail!(
+                "controller actor generation compare-and-swap failed for {}: generation {} was rewritten after the {} decision (expected revision {:?}, found {:?})",
+                document_id,
+                current.generation,
+                caller,
+                expected.last_transition_id,
+                found.last_transition_id
+            );
+        }
+    }
     if current.session_id != session_id {
         anyhow::bail!(
             "stale actor transition for {}: session {} no longer owns generation {} (current session {})",
@@ -27253,6 +27279,7 @@ pub(crate) fn handle_mark_lifecycle(
     let (record, released_dispatches) = store_lifecycle_actor_record_for_runtime(
         &bootstrap.project_root,
         Some(current.generation),
+        expected_revision,
         &record,
         runtime,
     )?;

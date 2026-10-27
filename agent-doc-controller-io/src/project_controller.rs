@@ -10671,6 +10671,49 @@ pub struct LifecycleRequest {
     pub state: agent_doc_controller::actor::ActorState,
     pub caller: String,
     pub reason: String,
+    /// `#bindingcallersaudit`: the exact record write a projection-evidence
+    /// writer decided against. `Some` compare-and-swaps the transition on it, so
+    /// an owner commit after the decision that kept the generation (a `Busy`, a
+    /// `Ready`) fails the write instead of being overwritten. `None` keeps the
+    /// generation-only fence the owner's own transitions use.
+    #[serde(skip)]
+    pub expected_revision: Option<agent_doc_controller::actor::ActorRevision>,
+}
+
+/// `#bindingcallersaudit`: the wire form of
+/// [`LifecycleRequest::expected_revision`], carried in the `mark_lifecycle`
+/// request's structured `diagnostic_payload` (the channel other commands use
+/// for structured payloads). A controller that predates it ignores the payload
+/// and applies the generation-only fence, the pre-fix behaviour.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LifecycleFencePayload {
+    pub(crate) expected_last_transition_id: Option<i64>,
+}
+
+impl LifecycleFencePayload {
+    pub(crate) fn encode(
+        revision: Option<agent_doc_controller::actor::ActorRevision>,
+    ) -> Option<String> {
+        revision.map(|revision| {
+            serde_json::json!({
+                "expected_last_transition_id": revision.last_transition_id,
+            })
+            .to_string()
+        })
+    }
+
+    pub(crate) fn decode(
+        payload: Option<&str>,
+    ) -> Result<Option<agent_doc_controller::actor::ActorRevision>> {
+        let Some(payload) = payload else {
+            return Ok(None);
+        };
+        let decoded: Self =
+            serde_json::from_str(payload).context("parse mark_lifecycle fence payload")?;
+        Ok(Some(agent_doc_controller::actor::ActorRevision {
+            last_transition_id: decoded.expected_last_transition_id,
+        }))
+    }
 }
 
 /// Generation-fenced update of the transport harness owned by a live actor.
@@ -11809,21 +11852,37 @@ fn store_actor_record_write(
 /// transition; a `Ready` record releases its turn's dispatch receipt in the
 /// same transaction ([`state_store::store_actor_lifecycle_record_tx`]).
 /// Returns the write and the number of receipts released.
+///
+/// `#bindingcallersaudit`: with `expected_prior_revision`, the write is also
+/// compare-and-swapped on the exact record the requester decided against
+/// ([`state_store::store_actor_lifecycle_record_fenced_tx`]).
 fn store_actor_lifecycle_record_write(
     project_root: &Path,
     expected_prior_generation: Option<u64>,
+    expected_prior_revision: Option<agent_doc_controller::actor::ActorRevision>,
     record: &agent_doc_controller::actor::ActorRecord,
 ) -> Result<(agent_doc_controller::actor::ActorStoreWrite, usize)> {
     let mut conn = open_state_db(project_root)?;
     let (launch_mode, controller_epoch) = actor_document_bootstrap_columns(project_root)?;
-    state_store::store_actor_lifecycle_record_tx(
-        &mut conn,
-        expected_prior_generation,
-        record,
-        launch_mode,
-        controller_epoch,
-        timestamp_secs() as i64,
-    )
+    match (expected_prior_generation, expected_prior_revision) {
+        (Some(generation), Some(revision)) => state_store::store_actor_lifecycle_record_fenced_tx(
+            &mut conn,
+            generation,
+            revision,
+            record,
+            launch_mode,
+            controller_epoch,
+            timestamp_secs() as i64,
+        ),
+        _ => state_store::store_actor_lifecycle_record_tx(
+            &mut conn,
+            expected_prior_generation,
+            record,
+            launch_mode,
+            controller_epoch,
+            timestamp_secs() as i64,
+        ),
+    }
 }
 
 /// Default staleness window for the cross-document supervisor-lease guard

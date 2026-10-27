@@ -663,6 +663,24 @@ deterministic tests.
   generation must go through a transition-inserting path; the
   `every_actor_write_moves_the_revision_and_a_stale_revision_fence_fails` test
   pins the existing paths.
+- A lifecycle transition decided from projection evidence is fenced on the
+  revision too (`#bindingcallersaudit`). The route's `caller=route` lifecycle
+  writes (promoting a `Starting` actor it saw at a ready prompt, recovering a
+  starting-timeout `Blocked`, marking a `Starting` actor `Blocked` after its
+  ready wait timed out) read the record with its revision, write nothing when
+  the record no longer matches the one they decided against (same session,
+  pane, generation, state, and last transition), and otherwise send the
+  revision as `LifecycleRequest::expected_revision`. It travels in the
+  `mark_lifecycle` request's structured `diagnostic_payload`
+  (`{"expected_last_transition_id": N}`); the controller refuses a mismatch
+  before its sequence admission records the request's stamp, and the store
+  transaction re-checks it atomically
+  (`state_store::store_actor_lifecycle_record_fenced_tx`). A `Ready` landing
+  over an owner's same-generation `Busy` would otherwise also release that
+  running turn's dispatch receipt. The owner's own transitions (supervisor,
+  `start`, the `session` operator commands) keep the generation-only fence:
+  they are the evidence, not a decision about it. A controller that predates the
+  payload ignores it and applies the generation-only fence.
 - Every accepted command receives a durable dispatch receipt before external
   side effects such as tmux input, supervisor stdin, response write-back, or
   projection emission.

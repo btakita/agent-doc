@@ -2445,6 +2445,7 @@ fn force_close_actor_record(ctx: &SessionContext) -> bool {
             state: ActorState::Closed,
             caller: "session_interrupt_clear".to_string(),
             reason: "force_interrupt_clear".to_string(),
+            expected_revision: None,
         },
     ) {
         Ok(_) => true,
@@ -3655,6 +3656,7 @@ fn reconcile_idle_projection_from_evidence(
             state: ActorState::Ready,
             caller: "session_operator".to_string(),
             reason: "live_pane_idle".to_string(),
+            expected_revision: None,
         },
     )?;
     if let Some(lease) = ctx.operator_status.supervisor_lease.as_ref() {

@@ -1839,6 +1839,297 @@ fn write_todo_done_edit_reopen_remove_round_trip_preserves_operator_items() {
         .failure();
 }
 
+/// `#nestedtodoadd`: run one granular `write --backlog-only` mutation against a
+/// fixture project whose root search stops at the temp dir.
+fn nested_write(tmp: &TempDir, doc: &std::path::Path, args: &[&str]) -> std::process::Output {
+    let mut full = vec![
+        "write",
+        doc.to_str().unwrap(),
+        "--force-disk",
+        "--backlog-only",
+    ];
+    full.extend_from_slice(args);
+    agent_doc()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+            tmp.path().parent().unwrap(),
+        )
+        .args(&full)
+        .output()
+        .unwrap()
+}
+
+fn assert_nested_ok(output: &std::process::Output, what: &str) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    assert!(
+        output.status.success(),
+        "{what} failed: stdout={} stderr={stderr}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    stderr
+}
+
+const NESTED_TODO: &str = "id=pmsyncq Answer the PM-sync design questions\n  - Which provider ships first?\n  - Who owns a conflicting edit?\n  - Is the sync pull-only?";
+const NESTED_TODO_BODY: &str = "- [ ] [#pmsyncq] Answer the PM-sync design questions\n  - Which provider ships first?\n  - Who owns a conflicting edit?\n  - Is the sync pull-only?";
+
+/// `#nestedtodoadd`: `--todo-add` text whose later lines are `  - <text>`
+/// rows renders one todo item with those nested sub-items; a replay is a
+/// no-op; `--todo-done`, a single-line `--todo-edit`, and preflight keep the
+/// sub-items with their item, never as new items.
+#[test]
+fn write_todo_add_with_nested_sub_items_renders_replays_and_completes_with_them() {
+    let (tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let stderr = assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", NESTED_TODO]),
+        "nested todo-add",
+    );
+    assert!(
+        stderr.contains("appended operator action [#pmsyncq]"),
+        "{stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(component_body(&content, "todo"), NESTED_TODO_BODY);
+
+    // A replayed add (a captured closeout resumed) never duplicates the item or
+    // its sub-items.
+    let stderr = assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", NESTED_TODO]),
+        "replayed nested todo-add",
+    );
+    assert!(stderr.contains("already present in agent:todo"), "{stderr}");
+    assert!(!stderr.contains("were kept"), "{stderr}");
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+    // A minted-id add with sub-items, then its replay.
+    let minted =
+        "Answer the automation-API design questions\n  - REST or RPC?\n  - Which auth scheme?";
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", minted]),
+        "minted add",
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    let api_id = todo_item_id(&content, "Answer the automation-API design questions");
+    let api_body = format!(
+        "- [ ] [#{api_id}] Answer the automation-API design questions\n  - REST or RPC?\n  - Which auth scheme?"
+    );
+    assert_eq!(
+        component_body(&content, "todo"),
+        format!("{NESTED_TODO_BODY}\n{api_body}")
+    );
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", minted]),
+        "minted replay",
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+    // Preflight sees two todo rows: it mints no id for a sub-item line and
+    // leaves the component byte-for-byte.
+    let preflight = agent_doc()
+        .current_dir(tmp.path())
+        .env(
+            "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+            tmp.path().parent().unwrap(),
+        )
+        .args(["preflight", doc.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&preflight.stdout);
+    let pf_stderr = String::from_utf8_lossy(&preflight.stderr);
+    let _: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("preflight JSON ({err}):\n{stdout}\n{pf_stderr}"));
+    assert!(!pf_stderr.contains("(#todoidbackfill)"), "{pf_stderr}");
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(
+        component_body(&content, "todo"),
+        format!("{NESTED_TODO_BODY}\n{api_body}")
+    );
+
+    // Done keeps the sub-items under the checked item.
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-done", "pmsyncq"]),
+        "todo-done",
+    );
+    let done_body = NESTED_TODO_BODY.replacen("- [ ] [#pmsyncq]", "- [x] [#pmsyncq]", 1);
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!("{done_body}\n{api_body}")
+    );
+    // A replayed add of the checked item never resurrects it.
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", NESTED_TODO]),
+        "add after done",
+    );
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!("{done_body}\n{api_body}")
+    );
+    // A single-line edit keeps the sub-items; a multi-line edit replaces them.
+    assert_nested_ok(
+        &nested_write(
+            &tmp,
+            &doc,
+            &[
+                "--todo-edit",
+                &format!("{api_id}=Answer the automation-API questions"),
+            ],
+        ),
+        "single-line todo-edit",
+    );
+    assert_nested_ok(
+        &nested_write(
+            &tmp,
+            &doc,
+            &[
+                "--todo-edit",
+                "pmsyncq=Answer the PM-sync design questions\n  - GitHub first.",
+            ],
+        ),
+        "multi-line todo-edit",
+    );
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!(
+            "- [x] [#pmsyncq] Answer the PM-sync design questions\n  - GitHub first.\n- [ ] [#{api_id}] Answer the automation-API questions\n  - REST or RPC?\n  - Which auth scheme?"
+        )
+    );
+    // A replay of the original add now differs from the item's nested lines:
+    // still a no-op, and the receipt says the operator's lines were kept.
+    let stderr = assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-add", NESTED_TODO]),
+        "replay over edited sub-items",
+    );
+    assert!(stderr.contains("were kept"), "{stderr}");
+    // Remove deletes the item with its sub-items.
+    assert_nested_ok(
+        &nested_write(&tmp, &doc, &["--todo-remove", &api_id]),
+        "todo-remove",
+    );
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        "- [x] [#pmsyncq] Answer the PM-sync design questions\n  - GitHub first."
+    );
+}
+
+/// `#nestedtodoadd`: malformed sub-item text fails the write and applies
+/// nothing, so a bad line is never written outside the item.
+#[test]
+fn write_todo_add_rejects_malformed_nested_sub_items_and_applies_nothing() {
+    let (tmp, doc) = setup_doc("- [ ] [#open] backlog task");
+    let before = fs::read_to_string(&doc).unwrap();
+    for (text, why) in [
+        ("Item\n\n  - child", "is blank"),
+        ("Item\n- flush child", "is not a nested sub-item"),
+        ("Item\n  prose under it", "is not a nested sub-item"),
+        ("Item\n  - one\n    - deeper", "changes indentation"),
+        ("Item\n  - [ ] a checkbox child", "is a checkbox row"),
+        (
+            "Item\n  - <!-- /agent:todo -->",
+            "HTML comment or component marker",
+        ),
+    ] {
+        let output = nested_write(
+            &tmp,
+            &doc,
+            &[
+                "--backlog-add",
+                "id=sidework unrelated add",
+                "--todo-add",
+                text,
+            ],
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{text:?} must fail: {stderr}");
+        assert!(stderr.contains(why), "{text:?}: {stderr}");
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before,
+            "{text:?}: a rejected write applies nothing"
+        );
+    }
+}
+
+/// `#nestedtodoadd`: the backlog and icebox add flags take the same
+/// `  - <text>` sub-item lines; canonicalization files each one as a tracked
+/// subtask of its parent (`  - [ ] [#<parent>-<hash>] <text>`). A replayed add
+/// (auto id or explicit id) is a no-op: before the fix the auto-id replay filed
+/// the item a second time and the explicit-id replay failed the id guard,
+/// because the replay compared the plain `- child` lines against the subtasks
+/// canonicalization had made of them.
+#[test]
+fn write_backlog_and_icebox_add_with_nested_sub_items_replay_as_a_noop() {
+    let (tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "");
+    let explicit = "id=pmsync Sync PM state\n  - GitHub issues\n  - Jira tickets";
+    let minted = "Automate the release notes\n  - Collect merged PRs";
+    let icebox = "id=autoapi Automation API\n  - REST surface";
+    let mut first = String::new();
+    for pass in 0..2 {
+        assert_nested_ok(
+            &nested_write(
+                &tmp,
+                &doc,
+                &[
+                    "--backlog-add",
+                    explicit,
+                    "--backlog-add",
+                    minted,
+                    "--icebox-add",
+                    icebox,
+                ],
+            ),
+            &format!("nested backlog/icebox add, pass {pass}"),
+        );
+        let content = fs::read_to_string(&doc).unwrap();
+        if pass == 0 {
+            first = content;
+        } else {
+            assert_eq!(content, first, "a replayed add changes nothing");
+        }
+    }
+    // Shape: parent row, then one parent-prefixed tracked subtask per sub-item.
+    let shape = |body: &str| -> Vec<String> {
+        // The empty-icebox fixture leaves one blank line ahead of the item.
+        body.lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| match line.split_once("] [#") {
+                Some((head, rest)) => {
+                    let (id, text) = rest.split_once("] ").unwrap();
+                    let id = match id.rsplit_once('-') {
+                        Some((parent, _hash)) if head.starts_with("  ") => format!("{parent}-*"),
+                        _ => id.to_string(),
+                    };
+                    format!("{head}] [#{id}] {text}")
+                }
+                None => line.to_string(),
+            })
+            .collect()
+    };
+    let backlog = shape(component_body(&first, "backlog"));
+    let minted_id = backlog[3]
+        .strip_prefix("- [ ] [#")
+        .and_then(|rest| rest.split_once(']'))
+        .map(|(id, _)| id.to_string())
+        .unwrap_or_else(|| panic!("minted parent row expected: {backlog:#?}"));
+    assert_eq!(
+        backlog,
+        vec![
+            "- [ ] [#pmsync] Sync PM state".to_string(),
+            "  - [ ] [#pmsync-*] GitHub issues".to_string(),
+            "  - [ ] [#pmsync-*] Jira tickets".to_string(),
+            format!("- [ ] [#{minted_id}] Automate the release notes"),
+            format!("  - [ ] [#{minted_id}-*] Collect merged PRs"),
+            "- [ ] [#open] backlog task".to_string(),
+        ]
+    );
+    assert_eq!(
+        shape(component_body(&first, "icebox")),
+        vec![
+            "- [ ] [#autoapi] Automation API".to_string(),
+            "  - [ ] [#autoapi-*] REST surface".to_string(),
+        ]
+    );
+}
+
 /// `#tododone`: resolving tracked work that an open todo only CITES (its own
 /// id is a custom surrogate, because the todo spans two review items —
 /// `#todoidlayer`) prints a non-blocking advisory naming the `--todo-done`

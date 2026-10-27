@@ -1749,8 +1749,13 @@ pub fn todo_add_in_closeout(
         }
     } else {
         pending_receipt!(
-            "[todo] todo-add: operator action{} already present in agent:todo",
-            id_label
+            "[todo] todo-add: operator action{} already present in agent:todo{}",
+            id_label,
+            if outcome.sub_items_kept {
+                "; its nested lines differ from this add's sub-items and were kept (use --todo-edit with multi-line text to replace them)"
+            } else {
+                ""
+            }
         );
     }
     Ok(TodoAddReceipt {

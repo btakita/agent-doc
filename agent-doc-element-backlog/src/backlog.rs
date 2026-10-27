@@ -1458,10 +1458,55 @@ pub fn explicit_new_item_id_collision(
 
 /// Collapse an add's body text to the form two spellings of the same item share.
 ///
-/// Only whitespace: the replay compares a recorded add against the item that
-/// add already produced, and the only thing between them is line wrapping.
+/// The replay compares a recorded add against the item that add already
+/// produced. Between them are line wrapping and, for nested sub-items,
+/// canonicalization (`#nestedtodoadd`): an added `  - child` line is stored as
+/// the tracked subtask `  - [ ] [#<parent>-<hash>] child`, so each nested list
+/// line is compared with its checkbox and leading own id stripped
+/// ([`nested_line_identity`]). A replay that ignored that minted a second copy
+/// of the item (auto id) or failed the explicit-id guard.
 fn replayed_add_text_identity(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut lines = text.lines();
+    let mut normalized = lines.next().unwrap_or_default().to_string();
+    for line in lines {
+        normalized.push('\n');
+        normalized.push_str(&nested_line_identity(line));
+    }
+    normalized.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// One continuation line as replay identity: a nested list item
+/// (`- [s] [#id] text`) loses its checkbox and leading own id, so the plain
+/// `- text` an add carried equals the subtask canonicalization made of it, and
+/// a later operator check-off of that subtask does not make a replay look new.
+/// Other lines are returned unchanged.
+fn nested_line_identity(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let Some(rest) = trimmed.strip_prefix("- ") else {
+        return line.to_string();
+    };
+    let mut rest = rest.trim_start();
+    if let Some(after_open) = rest.strip_prefix('[')
+        && let Some(close) = after_open.find(']')
+        && close <= 32
+    {
+        let inner = &after_open[..close];
+        let tail = &after_open[close + 1..];
+        if (matches!(inner, " " | "x" | "X") || inner.starts_with('/'))
+            && (tail.is_empty() || tail.starts_with(' '))
+        {
+            rest = tail.trim_start();
+        }
+    }
+    if let Some(after_open) = rest.strip_prefix("[#")
+        && let Some(close) = after_open.find(']')
+    {
+        let tail = &after_open[close + 1..];
+        if tail.is_empty() || tail.starts_with(' ') {
+            rest = tail.trim_start();
+        }
+    }
+    format!("- {rest}")
 }
 
 /// Is this explicit-id add already satisfied — same id, same text, still active?
@@ -4394,9 +4439,19 @@ pub fn op_add_at_with_outcome_reserved(
     // closeout repair: a prior attempt may have captured the backlog item but
     // failed before committing the response, and the retry should satisfy the
     // capture guard without creating a duplicate row.
+    //
+    // `#nestedtodoadd`: the continuation is compared as replay identity, since
+    // canonicalization stored this add's nested `  - child` lines as tracked
+    // subtasks; a byte comparison filed a replayed add a second time.
+    let same_item = |item: &PendingItem| {
+        item.text == text
+            && (item.continuation == continuation
+                || replayed_add_text_identity(&format!("\n{}", item.continuation))
+                    == replayed_add_text_identity(&format!("\n{continuation}")))
+    };
     if let Some(existing) = items
         .iter()
-        .find(|i| i.state != PendingState::Done && i.text == text && i.continuation == continuation)
+        .find(|i| i.state != PendingState::Done && same_item(i))
     {
         return Ok(PendingAddOutcome {
             body: body.to_string(),
@@ -4405,10 +4460,7 @@ pub fn op_add_at_with_outcome_reserved(
             deduped_key: None,
         });
     }
-    if items
-        .iter()
-        .any(|i| i.text == text && i.continuation == continuation)
-    {
+    if items.iter().any(same_item) {
         bail!(
             "pending add: duplicate completed item text already exists: {}",
             text
@@ -7240,6 +7292,53 @@ mod tests {
     /// path, and filed `[#wallclockbudget] #loadbudgettests [agent-doc] ...` —
     /// a coined id with the given id left in the text. Four adds became eight
     /// backlog items and eight queue heads.
+    /// `#nestedtodoadd`: canonicalization turns an add's `  - child` lines
+    /// into tracked subtasks, so a replay compares them as replay identity.
+    #[test]
+    fn a_replayed_add_with_nested_sub_items_is_a_no_op_after_canonicalization() {
+        let text = "Sync PM state\n  - GitHub issues\n  - Jira tickets";
+        let first = op_add_with_outcome_reserved("", text, DOC_ID, false, &HashSet::new()).unwrap();
+        assert!(first.inserted);
+        let canonical = canonicalize_tracked_work_body(&first.body, DOC_ID);
+        assert!(
+            canonical.contains(&format!("  - [ ] [#{}-", first.id)),
+            "precondition: sub-items become tracked subtasks: {canonical}"
+        );
+        // The operator checks one subtask off; the replay is still the same item.
+        let checked = canonical.replacen("  - [ ] [#", "  - [x] [#", 1);
+        for body in [&canonical, &checked] {
+            let replay =
+                op_add_with_outcome_reserved(body, text, DOC_ID, false, &HashSet::new()).unwrap();
+            assert!(
+                !replay.inserted,
+                "the replay must not insert: {}",
+                replay.body
+            );
+            assert_eq!(replay.id, first.id);
+            assert_eq!(&replay.body, body);
+        }
+        // An explicit-id replay is satisfied by the canonical item.
+        let doc = format!(
+            "<!-- agent:backlog -->\n{}<!-- /agent:backlog -->\n",
+            canonicalize_tracked_work_body(
+                &op_add_with_outcome_reserved(
+                    "",
+                    "id=pmsync Sync\n  - one",
+                    DOC_ID,
+                    false,
+                    &HashSet::new()
+                )
+                .unwrap()
+                .body,
+                DOC_ID
+            )
+        );
+        assert!(doc.contains("  - [ ] [#pmsync-"), "{doc}");
+        assert!(explicit_add_already_satisfied(&doc, "id=pmsync Sync\n  - one").is_some());
+        // Different sub-items are a different add.
+        assert!(explicit_add_already_satisfied(&doc, "id=pmsync Sync\n  - two").is_none());
+    }
+
     #[test]
     fn a_replayed_bare_tag_add_is_a_no_op_not_a_coined_duplicate() {
         let text = "#loadbudgettests [agent-doc] Wall-clock budget tests fail under load";

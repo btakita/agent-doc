@@ -1120,6 +1120,9 @@ the dispatch actor and produce receipts.
   add a `queue_backpressure` row before any external input is sent. When a
   document is draining and the actor is not ready, dispatch must return
   `failed_stage=actor_busy_draining` through the same receipt/backpressure path.
+  "Ready" is the durable actor record, written by the owner: the gate accepts
+  no route-supplied pane evidence, and a stale `Busy` drains once the
+  supervisor's `idle_pane_reconcile` lands (`#drainbusymask`).
 - A redundant in-flight re-dispatch (an identical dispatch for the same cycle is
   already accepted and unconsumed) is coalesced: the controller records the
   `coalesced_in_flight` receipt and suppresses the re-send so the routed trigger is

@@ -2185,6 +2185,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 agent_doc_supervisor::idle_watch::QueueContinuationTriggers::new();
             let stale_busy_reconcile_effects =
                 agent_doc_supervisor::idle_reconcile::StaleBusyReconcileEffects::new();
+            let mut stale_busy_reconcile_unlanded_logged = false;
             let mut last_context_reset_head: Option<String> = None;
             let mut last_context_clear_at: Option<u64> = None;
             let mut context_reset_in_flight = false;
@@ -3256,15 +3257,44 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     idle_busy_ticks,
                     STALE_BUSY_RECONCILE_TICKS,
                 );
-                let stale_busy_reconcile_effect_due = stale_busy_reconcile_due
-                    && stale_busy_reconcile_effects
-                        .observe_and_take(shared.stale_busy_reconcile_effect_key());
-                if stale_busy_reconcile_effect_due {
-                    shared.transition_actor_state(
-                        agent_doc_controller::actor::ActorState::Ready,
-                        "supervisor",
-                        "idle_pane_reconcile",
-                    );
+                let stale_busy_reconcile_attempt = if stale_busy_reconcile_due {
+                    attempt_stale_busy_idle_reconcile(
+                        &shared,
+                        &stale_busy_reconcile_effects,
+                        |shared| {
+                            shared.transition_actor_state(
+                                agent_doc_controller::actor::ActorState::Ready,
+                                "supervisor",
+                                "idle_pane_reconcile",
+                            )
+                        },
+                    )
+                } else {
+                    agent_doc_supervisor::idle_reconcile::StaleBusyReconcileAttempt::NotLicensed
+                };
+                if stale_busy_reconcile_attempt
+                    == agent_doc_supervisor::idle_reconcile::StaleBusyReconcileAttempt::Unlanded
+                {
+                    // `#drainbusymask`: the repair write did not land, so the
+                    // actor is still `Busy` over the idle pane. The key stays
+                    // licensed; restart the debounce so the retry is paced, and
+                    // log the first unlanded attempt of the episode only.
+                    idle_busy_ticks = 0;
+                    if !stale_busy_reconcile_unlanded_logged {
+                        stale_busy_reconcile_unlanded_logged = true;
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "idle_queue_watch_stale_busy_reconcile_unlanded harness={} pane={} action=retry_after_debounce",
+                                harness.binary,
+                                shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                            ),
+                        );
+                    }
+                } else if stale_busy_reconcile_attempt
+                    == agent_doc_supervisor::idle_reconcile::StaleBusyReconcileAttempt::Landed
+                {
+                    stale_busy_reconcile_unlanded_logged = false;
                     // Reset the one-shot prompt latch so a later genuine
                     // busy→ready edge still fires normally. Preserve the
                     // dispatch dedup: if the injected command returned without

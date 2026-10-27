@@ -2,6 +2,8 @@ package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.ControlFlowException
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.editor.event.EditorFactoryEvent
@@ -11,12 +13,16 @@ import com.intellij.openapi.editor.event.EditorMouseListener
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.FocusChangeListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
+import com.intellij.util.messages.MessageBusConnection
 import java.awt.AWTEvent
 import java.awt.Component
 import java.awt.Container
@@ -72,6 +78,82 @@ internal class SettledEditorTreeFocusProbe<T>(
 }
 
 /**
+ * Reads the project's editor split tree, or `null` while the platform has not built it yet.
+ *
+ * `FileEditorManagerImpl.mainSplitters` is a `lateinit` assigned when the project frame's editor
+ * area is created. On IntelliJ 2026.3 (263) `ProjectManagerListener.projectOpened` can run before
+ * that, and `getSplitters()` then throws [UninitializedPropertyAccessException] from inside the
+ * dock-container lookup. That one exception is the platform's "not ready yet"
+ * answer, so it maps to `null`; every other failure still propagates.
+ */
+internal object EditorSplittersReadiness {
+    fun <T : Any> resolveOrNull(read: () -> T?): T? =
+        try {
+            read()
+        } catch (notReady: UninitializedPropertyAccessException) {
+            null
+        }
+}
+
+/**
+ * One-shot attachment of the editor-tree listener, deferred until the editor split tree exists.
+ *
+ * [tryAttach] is called once at install and again from each readiness signal. It attaches at most
+ * once, never throws for the not-yet-built split tree, and is inert after [close].
+ */
+internal class DeferredEditorTreeAttachment<R : Any>(
+    private val resolveRoot: () -> R?,
+    private val isActive: () -> Boolean,
+    private val attach: (R) -> Unit,
+) {
+    private val attached = AtomicBoolean(false)
+    private val closed = AtomicBoolean(false)
+
+    val isAttached: Boolean
+        get() = attached.get()
+
+    /** Returns true once the listener is attached, false while the split tree is not built yet. */
+    fun tryAttach(): Boolean {
+        if (attached.get()) return true
+        if (closed.get() || !isActive()) return false
+        val root = EditorSplittersReadiness.resolveOrNull(resolveRoot) ?: return false
+        if (!attached.compareAndSet(false, true)) return true
+        attach(root)
+        return true
+    }
+
+    fun close() {
+        closed.set(true)
+    }
+}
+
+/**
+ * Builds and starts one listener without letting its failure escape into the caller.
+ *
+ * `PluginLifecycleListener.projectOpened` installs focus sync in the middle of project startup.
+ * An exception from it aborted every later startup step. A failed start is
+ * discarded, reported, and not recorded, so a later install can try again. Platform control-flow
+ * exceptions (cancellation) still propagate.
+ */
+internal fun <T : Any> startIsolated(
+    create: () -> T,
+    start: (T) -> Unit,
+    discard: (T) -> Unit,
+    report: (Throwable) -> Unit,
+): T? {
+    val instance = create()
+    try {
+        start(instance)
+    } catch (failure: RuntimeException) {
+        discard(instance)
+        if (failure is ControlFlowException) throw failure
+        report(failure)
+        return null
+    }
+    return instance
+}
+
+/**
  * Drives tmux pane focus when the operator moves editor focus between split
  * editor windows (`#panefocussplit`).
  *
@@ -99,6 +181,14 @@ class EditorFocusSyncListener private constructor(
     private val disposed = AtomicBoolean(false)
     private val listenerInstalled = AtomicBoolean(false)
     private val editorsRoot = AtomicReference<Container?>(null)
+    private val readinessConnection = AtomicReference<MessageBusConnection?>(null)
+
+    private val editorTreeAttachment =
+        DeferredEditorTreeAttachment(
+            resolveRoot = { FileEditorManagerEx.getInstanceEx(project).splitters as? Container },
+            isActive = { !disposed.get() && !project.isDisposed },
+            attach = ::installEditorTreeListener,
+        )
 
     private val settledTreeFocusProbe =
         SettledEditorTreeFocusProbe<VirtualFile>(
@@ -136,7 +226,9 @@ class EditorFocusSyncListener private constructor(
         // Editor splitters can be replaced while restoring a layout or reloading the plugin.
         // Resolve the current tree at the event edge instead of trusting the startup component.
         val root =
-            (FileEditorManagerEx.getInstanceEx(project).splitters as? Container)
+            EditorSplittersReadiness.resolveOrNull {
+                FileEditorManagerEx.getInstanceEx(project).splitters as? Container
+            }
                 ?: editorsRoot.get()
                 ?: return@AWTEventListener
         editorsRoot.set(root)
@@ -156,7 +248,7 @@ class EditorFocusSyncListener private constructor(
         override fun mousePressed(event: EditorMouseEvent) = handleEditorActivated(event.editor)
     }
 
-    init {
+    private fun start() {
         val factory = EditorFactory.getInstance()
         // The event multicaster observes every current and future editor. A
         // per-editor mouse listener can miss a restored split when its editor
@@ -178,33 +270,67 @@ class EditorFocusSyncListener private constructor(
     }
 
     private fun attachEditorTreeMouseListener() {
-        val attach = Runnable {
-            if (disposed.get() || project.isDisposed) return@Runnable
-            val root = FileEditorManagerEx.getInstanceEx(project).splitters as? Container
-                ?: return@Runnable
-            editorsRoot.set(root)
-            if (listenerInstalled.compareAndSet(false, true)) {
-                Toolkit.getDefaultToolkit()
-                    .addAWTEventListener(
-                        editorTreeMouseListener,
-                        AWTEvent.MOUSE_EVENT_MASK or AWTEvent.FOCUS_EVENT_MASK,
-                    )
-            }
-            // Hot reload and project startup do not replay the focus event that established the
-            // already-selected split. Seed that existing focus through the same settled,
-            // generation-fenced ingress instead of waiting for the operator to click again.
-            val focusOwner =
-                KeyboardFocusManager.getCurrentKeyboardFocusManager().permanentFocusOwner
-            settledTreeFocusProbe.observeMousePress(
-                focusOwner != null &&
-                    (JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, focusOwner) ||
-                        focusOwner === root || SwingUtilities.isDescendingFrom(focusOwner, root)),
-            )
+        onEdt {
+            // `projectOpened` can run before the editor area exists. Wait for the
+            // first editor event instead of failing: a tab cannot open or change selection before
+            // the split tree is built, so either event proves it is ready.
+            if (!editorTreeAttachment.tryAttach()) awaitEditorSplitters()
         }
+    }
+
+    private fun awaitEditorSplitters() {
+        if (disposed.get() || project.isDisposed) return
+        val connection = project.messageBus.connect(this)
+        if (!readinessConnection.compareAndSet(null, connection)) {
+            connection.disconnect()
+            return
+        }
+        connection.subscribe(
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) =
+                    retryEditorTreeAttachment()
+
+                override fun selectionChanged(event: FileEditorManagerEvent) =
+                    retryEditorTreeAttachment()
+            },
+        )
+    }
+
+    private fun retryEditorTreeAttachment() {
+        onEdt {
+            if (editorTreeAttachment.tryAttach()) {
+                readinessConnection.getAndSet(null)?.disconnect()
+            }
+        }
+    }
+
+    private fun installEditorTreeListener(root: Container) {
+        editorsRoot.set(root)
+        if (listenerInstalled.compareAndSet(false, true)) {
+            Toolkit.getDefaultToolkit()
+                .addAWTEventListener(
+                    editorTreeMouseListener,
+                    AWTEvent.MOUSE_EVENT_MASK or AWTEvent.FOCUS_EVENT_MASK,
+                )
+        }
+        // Hot reload and project startup do not replay the focus event that established the
+        // already-selected split. Seed that existing focus through the same settled,
+        // generation-fenced ingress instead of waiting for the operator to click again.
+        val focusOwner =
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().permanentFocusOwner
+        settledTreeFocusProbe.observeMousePress(
+            focusOwner != null &&
+                (JetBrainsEditorSurfaces.belongsToAnyEditorSurface(project, focusOwner) ||
+                    focusOwner === root || SwingUtilities.isDescendingFrom(focusOwner, root)),
+        )
+    }
+
+    private fun onEdt(action: () -> Unit) {
         if (SwingUtilities.isEventDispatchThread()) {
-            attach.run()
+            action()
         } else {
-            ApplicationManager.getApplication().invokeLater(attach)
+            ApplicationManager.getApplication().invokeLater(Runnable(action))
         }
     }
 
@@ -225,6 +351,8 @@ class EditorFocusSyncListener private constructor(
     override fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         settledTreeFocusProbe.close()
+        editorTreeAttachment.close()
+        readinessConnection.getAndSet(null)?.disconnect()
         if (!listenerInstalled.compareAndSet(true, false)) {
             editorsRoot.set(null)
             return
@@ -244,10 +372,24 @@ class EditorFocusSyncListener private constructor(
     }
 
     companion object {
+        private val LOG = Logger.getInstance(EditorFocusSyncListener::class.java)
         private val instances = ConcurrentHashMap<Project, EditorFocusSyncListener>()
 
         fun install(project: Project, tabSync: EditorTabSyncListener) {
-            instances.computeIfAbsent(project) { EditorFocusSyncListener(project, tabSync) }
+            if (instances.containsKey(project)) return
+            val listener =
+                startIsolated(
+                    create = { EditorFocusSyncListener(project, tabSync) },
+                    start = { it.start() },
+                    discard = { Disposer.dispose(it) },
+                    report = { failure ->
+                        LOG.error(
+                            "editor focus sync did not start for ${project.name}; project startup continues",
+                            failure,
+                        )
+                    },
+                ) ?: return
+            if (instances.putIfAbsent(project, listener) != null) Disposer.dispose(listener)
         }
 
         /**

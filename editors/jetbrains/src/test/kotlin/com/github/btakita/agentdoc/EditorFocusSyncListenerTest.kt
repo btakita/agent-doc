@@ -1,6 +1,10 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.progress.ProcessCanceledException
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -132,6 +136,134 @@ class EditorFocusSyncListenerTest {
             "explicit notification focus must reuse the document-specific command-plane path",
             focusListener.contains("onEditorFocusGained(project, file)"),
         )
+    }
+
+    @Test
+    fun `install before the editor split tree exists defers attachment instead of throwing`() {
+        // On IntelliJ 263, projectOpened can run before
+        // FileEditorManagerImpl.mainSplitters is assigned, and getSplitters() throws this.
+        var splittersBuilt = false
+        val attached = mutableListOf<String>()
+        val attachment =
+            DeferredEditorTreeAttachment(
+                resolveRoot = {
+                    if (!splittersBuilt) {
+                        throw UninitializedPropertyAccessException(
+                            "lateinit property mainSplitters has not been initialized",
+                        )
+                    }
+                    "editor-splitters"
+                },
+                isActive = { true },
+                attach = attached::add,
+            )
+
+        assertFalse("install must not attach before the split tree exists", attachment.tryAttach())
+        assertFalse(attachment.isAttached)
+        assertTrue(attached.isEmpty())
+
+        // The first editor event (fileOpened / selectionChanged) arrives after the platform has
+        // built the split tree, and the retry attaches exactly once.
+        splittersBuilt = true
+        assertTrue(attachment.tryAttach())
+        assertTrue(attachment.tryAttach())
+        assertEquals(listOf("editor-splitters"), attached)
+    }
+
+    @Test
+    fun `deferred editor-tree attachment is inert after disposal or for an inactive project`() {
+        val attached = mutableListOf<String>()
+        var active = false
+        val attachment =
+            DeferredEditorTreeAttachment(
+                resolveRoot = { "editor-splitters" },
+                isActive = { active },
+                attach = attached::add,
+            )
+
+        assertFalse(attachment.tryAttach())
+        active = true
+        attachment.close()
+        assertFalse(attachment.tryAttach())
+        assertTrue(attached.isEmpty())
+    }
+
+    @Test
+    fun `split tree readiness maps only the not-yet-built state to null`() {
+        assertNull(
+            EditorSplittersReadiness.resolveOrNull<String> {
+                throw UninitializedPropertyAccessException("lateinit property mainSplitters has not been initialized")
+            },
+        )
+        assertEquals("root", EditorSplittersReadiness.resolveOrNull { "root" })
+        assertThrows(IllegalStateException::class.java) {
+            EditorSplittersReadiness.resolveOrNull<String> { throw IllegalStateException("real failure") }
+        }
+    }
+
+    @Test
+    fun `a failed focus-sync start is discarded and reported without escaping project startup`() {
+        val discarded = mutableListOf<String>()
+        val reported = mutableListOf<Throwable>()
+        val failure = IllegalStateException("start failed")
+
+        val started =
+            startIsolated(
+                create = { "listener" },
+                start = { throw failure },
+                discard = discarded::add,
+                report = reported::add,
+            )
+
+        assertNull("a failed start must not be recorded as installed", started)
+        assertEquals(listOf("listener"), discarded)
+        assertEquals(listOf<Throwable>(failure), reported)
+        assertEquals(
+            "listener",
+            startIsolated(create = { "listener" }, start = {}, discard = discarded::add, report = reported::add),
+        )
+    }
+
+    @Test
+    fun `platform cancellation still propagates out of an isolated start`() {
+        val discarded = mutableListOf<String>()
+        assertThrows(ProcessCanceledException::class.java) {
+            startIsolated(
+                create = { "listener" },
+                start = { throw ProcessCanceledException() },
+                discard = discarded::add,
+                report = { throw AssertionError("cancellation must not be reported as a failure") },
+            )
+        }
+        assertEquals(listOf("listener"), discarded)
+    }
+
+    @Test
+    fun `listener waits for an editor event before touching the split tree and isolates install`() {
+        val listenerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorFocusSyncListener.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/EditorFocusSyncListener.kt"),
+        ).first { Files.exists(it) }
+        val listener = Files.readString(listenerPath)
+        val body = listener.substringAfter("class EditorFocusSyncListener private constructor")
+
+        assertTrue(body.contains("if (!editorTreeAttachment.tryAttach()) awaitEditorSplitters()"))
+        assertTrue(body.contains("FileEditorManagerListener.FILE_EDITOR_MANAGER"))
+        assertTrue(body.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)"))
+        assertTrue(body.contains("override fun selectionChanged(event: FileEditorManagerEvent)"))
+        assertTrue(body.contains("readinessConnection.getAndSet(null)?.disconnect()"))
+        // Every read of the split tree goes through the readiness guard.
+        val unguardedReads = Regex("""\.splitters as\? Container""").findAll(body).count()
+        val guardedReads =
+            Regex("""EditorSplittersReadiness\.resolveOrNull \{\s*FileEditorManagerEx""").findAll(body).count() +
+                Regex("""resolveRoot = \{ FileEditorManagerEx""").findAll(body).count()
+        assertEquals("every splitters read must be readiness-guarded", unguardedReads, guardedReads)
+        // The constructor no longer registers anything; install starts it inside the isolation.
+        assertTrue(!body.contains("    init {"))
+        assertTrue(body.contains("startIsolated("))
+        assertTrue(body.contains("start = { it.start() }"))
+        assertTrue(body.contains("discard = { Disposer.dispose(it) }"))
+        assertTrue(body.contains("LOG.error("))
     }
 
     private fun focusProbe(

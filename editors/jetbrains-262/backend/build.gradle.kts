@@ -86,7 +86,11 @@ val generateModularLifecycle by tasks.registering {
         it.file("com/github/btakita/agentdoc/AgentDocProjectLifecycle262Generated.kt")
     }
     inputs.file(legacyLifecycle)
-    outputs.file(output)
+    // This task is the only writer of `generatedSources`, so it owns the whole
+    // directory. Declaring (and clearing) the directory, not just the one file,
+    // keeps a renamed or dropped generated file from surviving in an incremental
+    // build and redeclaring the classes it used to hold.
+    outputs.dir(generatedSources)
 
     doLast {
         val original = legacyLifecycle.asFile.readText()
@@ -134,6 +138,7 @@ val generateModularLifecycle by tasks.registering {
 """
         val transformed = original.substring(0, end) + fallback + original.substring(end)
         val target = output.get().asFile
+        generatedSources.get().asFile.deleteRecursively()
         Files.createDirectories(target.toPath().parent)
         target.writeText(transformed)
     }

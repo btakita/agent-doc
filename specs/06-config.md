@@ -88,6 +88,17 @@ exported by another checkout never replaces this one's; `#checktmpdirleak`) and 
 `TMPDIR` with an `.agent-doc` ancestor (`#testisolationtests`); a cargo test
 binary without it bounds in-process discovery at its temp root.
 
+## AGENT_DOC_LOG
+
+Optional `tracing` filter (for example `debug` or `agent_doc::preflight=debug`).
+Unset, nothing is logged to a file. Set, the log rolls daily as
+`debug.log.<date>` in `<root>/.agent-doc/logs/`. `<root>` is the nearest
+project root that ceiling-aware discovery resolves from the working directory,
+so `AGENT_DOC_ROOT_CEILING_DIRECTORIES` bounds it. `logs/` is created when it
+is missing. With no project root inside the ceiling, file logging is disabled
+with a stderr note. It never falls back to a user-level directory or to an
+ancestor project above the ceiling (`#tracingrootceiling`).
+
 ## Project prompt presets
 
 `.agent-doc/project.md` is the single project-wide source of inherited prompt

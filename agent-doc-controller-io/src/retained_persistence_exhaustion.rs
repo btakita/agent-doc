@@ -129,6 +129,31 @@ pub fn mark_roll_forward_refusal(
     Ok(true)
 }
 
+/// `#clobberfollowups` (4): mark a TERMINAL roll-forward refusal durably,
+/// whether or not the exhausted record for that content is already there.
+///
+/// [`mark_roll_forward_refusal`] marks only an existing record for the same
+/// content, so a terminal refusal that won the race with the exhaustion record
+/// (or followed a new refusal streak) logged `durable_state_marked=false` and
+/// `session-check` never rendered its terminal remedy. `fallback` describes the
+/// refused content from the caller's own observation and is recorded, with the
+/// refusal, when no matching record exists. Returns whether a record now
+/// carries the refusal.
+pub fn mark_terminal_roll_forward_refusal(
+    project_root: &Path,
+    file: &Path,
+    fallback: &RetainedPersistenceRebuildExhausted,
+    reason: &str,
+) -> Result<bool> {
+    if mark_roll_forward_refusal(project_root, file, &fallback.content_hash, reason)? {
+        return Ok(true);
+    }
+    let mut exhausted = fallback.clone();
+    exhausted.roll_forward_refusal = Some(reason.to_string());
+    record(project_root, file, &exhausted)?;
+    Ok(true)
+}
+
 /// Load the record for `file`. A malformed payload reads as absent.
 pub fn load(
     project_root: &Path,
@@ -282,5 +307,61 @@ mod tests {
         );
         assert!(clear_unless(project.path(), &file, Some("different-content")).unwrap());
         assert_eq!(load(project.path(), &file).unwrap(), None);
+    }
+
+    /// `#clobberfollowups` (4): a terminal roll-forward refusal is durable even
+    /// when no exhausted record for that content exists yet, so `session-check`
+    /// renders its terminal remedy instead of a pending wait.
+    #[test]
+    fn clobberfollowups_terminal_roll_forward_refusal_is_recorded_without_a_prior_record() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        let file = project.path().join("session.md");
+        std::fs::write(&file, "operator buffer\n").unwrap();
+        let refused = exhausted_for("retained closeout\n");
+        assert!(
+            !mark_roll_forward_refusal(project.path(), &file, &refused.content_hash, "x").unwrap(),
+            "the plain mark needs an existing record"
+        );
+        assert!(
+            mark_terminal_roll_forward_refusal(
+                project.path(),
+                &file,
+                &refused,
+                "editor_unreachable"
+            )
+            .unwrap()
+        );
+        let recorded = load(project.path(), &file).unwrap().unwrap();
+        assert_eq!(recorded.content_hash, refused.content_hash);
+        assert_eq!(
+            recorded.roll_forward_refusal.as_deref(),
+            Some("editor_unreachable")
+        );
+        assert!(
+            recorded
+                .facts()
+                .contains("roll_forward_refusal=editor_unreachable")
+        );
+
+        // A record for the same content keeps its own streak counters.
+        let mut existing = exhausted_for("retained closeout\n");
+        existing.refusals = 42;
+        record(project.path(), &file, &existing).unwrap();
+        assert!(
+            mark_terminal_roll_forward_refusal(
+                project.path(),
+                &file,
+                &refused,
+                "editor_endpoint_rejected"
+            )
+            .unwrap()
+        );
+        let marked = load(project.path(), &file).unwrap().unwrap();
+        assert_eq!(marked.refusals, 42);
+        assert_eq!(
+            marked.roll_forward_refusal.as_deref(),
+            Some("editor_endpoint_rejected")
+        );
     }
 }

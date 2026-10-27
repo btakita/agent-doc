@@ -3170,6 +3170,7 @@ mod tests {
                     delivery_converged: true,
                     delivery_version: 1,
                     semantics: None,
+                    quarantined_replicas: 0,
                 }
             ),
             None

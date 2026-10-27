@@ -1732,6 +1732,52 @@ a fresh-controller reseed and a full re-registration. It asserts the operator's
 text in the canonical (the projected disk), in the editor, and in the
 replacement replica.
 
+#### Follow-ups: in-flight typing, commits, divergence, visibility
+
+`#clobberfollowups`. Four gaps the same incident left open:
+
+- **Attested typing holds the retained target.** The 16:07:52Z
+  `captured_finalize_resume_tracked_work_replay` (`recovery=pending_only_no_commit`)
+  was not built from stale text. Its `pending_write` read the live canonical
+  (`ef39f88…`, which already held the operator's typing since the response
+  write `3fc1e92…`), staged it as the transaction's base, and derived the
+  queue consumption from it. Base and target were both true. The lost text was
+  a burst the editor typed over `ef39f88…` and reported before the CP write
+  (`editor_ops_recorded lineage_pre=ef39f88… lineage_post=b46c6bf…`), whose
+  CRDT delta reached the relay only after the write and was quarantined.
+  `OperatorTextWouldBeLost` could not see it, because no cut the controller
+  held contained it. The controller's retained-transition state now holds
+  every projection (`AwaitingEditorOps`, no effect) while the active
+  op-capture epoch is based on exactly the visible cut, carries a non-empty
+  attested tip that differs from it, and its ops replay over that cut to that
+  tip. The delta landing moves the cut off the epoch base and releases the
+  hold; the rebase then rolls the target forward onto the typing, or refuses
+  it. An epoch without lineage, or whose ops do not replay to its tip, is not
+  evidence and never holds a write.
+- **Commits refuse a quarantined replica.** See the closeout-commands rule
+  "No commit seals a cut a live editor holds text beyond". The relay commit
+  barrier refuses while `quarantined_live_replicas()` is non-empty, and the
+  live-buffer guard refuses while the editor holds unmerged visible text.
+- **`diverged` is derived, not hard-coded.** `CurrentText::Current` carries
+  `quarantined_replicas` (the controller wire field of the same name; an
+  older controller reads as `0`). Every `realtime_doc_resolve` answered by the
+  relay builds its reconciliation through `crdt_relay_reconciliation`, so
+  `diverged=true` exactly while a live replica is quarantined, and the log
+  line and `crdt_current_text` carry `quarantined_replicas=N`.
+- **`session-check` names both operator-owned states.** The controller writes
+  a `document_runtime_state` row (kind
+  `retained_transition_operator_text_conflict`) when it reports
+  `retained_transition_refused_operator_text_loss`, and clears it when it
+  projects a retained target. While the live canonical is still the refused
+  cut, `session-check` reports `INTERRUPTED ...
+  state=retained_transition_refused_operator_text_loss ...` with
+  `retained_operator_text_conflict_remedy` instead of the self-converging
+  "retained delivery remains unsettled" wait. A terminal roll-forward
+  refusal (`roll_forward_refusal=editor_endpoint_rejected|editor_unreachable`)
+  is now recorded even when no exhausted record for that content exists yet
+  (`mark_terminal_roll_forward_refusal`), so its `admin recycle` remedy always
+  renders.
+
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery
 acknowledgement is pending" — a self-converging wait — for a state only the

@@ -1060,6 +1060,16 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
         }
     }
 
+    fn editor_holds_unmerged_visible_text(&self, file: &Path) -> bool {
+        // The explicit `--force-disk` override and the controller's in-process
+        // commit (which must not query itself over its socket) keep their own
+        // gates; the controller already refuses a cut the editor will not save.
+        if force_disk_commit_resolution_enabled() || controller_commit_in_progress() {
+            return false;
+        }
+        agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file).is_some()
+    }
+
     fn retained_write_ownership(
         &self,
         file: &Path,
@@ -3780,6 +3790,7 @@ mod controller_commit_scope_tests {
             delivery_converged: true,
             delivery_version: 1,
             semantics: None,
+            quarantined_replicas: 0,
         };
         let content = controller_local_relay_text(current);
 

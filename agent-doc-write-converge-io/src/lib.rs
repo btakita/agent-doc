@@ -4998,6 +4998,7 @@ mod tests {
                 delivery_converged: false,
                 delivery_version: 7,
                 semantics: None,
+                quarantined_replicas: 0,
             },
         ];
         for authority in controller_owned_states {

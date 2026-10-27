@@ -1925,6 +1925,11 @@ pub enum CurrentText {
         /// Opt-in memoized semantics from the live per-node projection. `None`
         /// preserves the default-off/fallback behavior.
         semantics: Option<CurrentDocumentSemantics>,
+        /// `#clobberfollowups` (3): live members whose updates are quarantined
+        /// while they still owe the canonical projection
+        /// (`RelayHub::quarantined_live_replicas`). Nonzero means a live editor
+        /// holds text this canonical lacks: the cut is diverged.
+        quarantined_replicas: usize,
     },
 }
 
@@ -2174,6 +2179,7 @@ fn current_text_for_file_with_authority_inner_before_log(
 
     let text = hub.canonical_text();
     let live_editors = hub.live_count();
+    let quarantined_replicas = hub.quarantined_live_replicas().len();
     let semantics =
         hub.unresolved_prompt_counts()
             .map(
@@ -2197,13 +2203,14 @@ fn current_text_for_file_with_authority_inner_before_log(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} process_pid={}",
+            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} quarantined_replicas={} process_pid={}",
             file.display(),
             text.len(),
             agent_doc_hash::content_hash(&text),
             live_editors,
             delivery_converged,
             delivery.version,
+            quarantined_replicas,
             std::process::id(),
         ),
     );
@@ -2213,6 +2220,7 @@ fn current_text_for_file_with_authority_inner_before_log(
         delivery_converged,
         delivery_version: delivery.version,
         semantics,
+        quarantined_replicas,
     })
 }
 
@@ -5516,6 +5524,7 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                 hub.live_count(),
                 disk_fence,
                 structure_released,
+                hub.quarantined_live_replicas(),
             )
         })
     }) {
@@ -5525,6 +5534,7 @@ fn commit_barrier_for_file_with_authority_and_delivery(
             live_editors,
             disk_fence,
             structure_released,
+            quarantined_replicas,
         )))) => {
             if let Some(fence) = disk_fence {
                 fence.surface(file, "commit_barrier_disk_reconcile");
@@ -5539,15 +5549,38 @@ fn commit_barrier_for_file_with_authority_and_delivery(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{} file={} authority=multi_replica ready={} delivery_required={} visible_delivery_projected={} live_editors={}",
+                    "{} file={} authority=multi_replica ready={} delivery_required={} visible_delivery_projected={} live_editors={} quarantined_replicas={}",
                     OpsLogEvent::CrdtCommitBarrier,
                     file.display(),
                     ready,
                     require_delivery_convergence,
                     visible_delivery_projected,
                     live_editors,
+                    quarantined_replicas.len(),
                 ),
             );
+            // `#clobberfollowups` (2): a live editor whose updates are
+            // quarantined holds operator text the canonical lacks. Committing
+            // the canonical now publishes a cut without that text, which is what
+            // sealed `206af5eef3` on 2026-10-27 through the local late-projection
+            // fallback. Refuse until the editor rolls forward onto canonical (its
+            // projection receipt releases the quarantine) or departs.
+            if ready && !quarantined_replicas.is_empty() {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "crdt_commit_barrier_refused_quarantined_replica file={} authority=multi_replica quarantined_replicas={} live_editors={} recovery=await_editor_roll_forward_no_commit (#clobberfollowups)",
+                        file.display(),
+                        quarantined_replicas
+                            .iter()
+                            .map(u64::to_string)
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        live_editors,
+                    ),
+                );
+                return false;
+            }
             ready && (!require_delivery_convergence || visible_delivery_projected)
         }
         Ok(Some(Err(e))) => {
@@ -13554,6 +13587,7 @@ mod tests {
                     delivery_converged: true,
                     delivery_version: 1,
                     semantics: None,
+                    quarantined_replicas: 0,
                 })
             },
         )
@@ -14140,6 +14174,85 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    /// `#clobberfollowups` (2): a live editor whose updates are quarantined
+    /// holds operator text the canonical lacks. The commit barrier refuses, so
+    /// neither the controller's `commit_document` nor the local fallback commit
+    /// can seal the canonical without that text, and releases once the editor
+    /// rolls forward onto the canonical projection.
+    #[test]
+    fn clobberfollowups_commit_barrier_refuses_while_a_live_replica_is_quarantined() {
+        let (_dir, doc) = temp_doc("quarantined-commit.md");
+        let editor = mint_client_id("intellij:quarantined-commit");
+        let baseline = "# Session\n\nbody\n";
+        std::fs::write(&doc, baseline).unwrap();
+        with_hub(&doc, |hub| {
+            hub.register(editor).unwrap();
+            hub.apply_local(editor, 0, 0, baseline).unwrap();
+            hub.record_committed_baseline(baseline);
+            let canonical_hash = agent_doc_hash::content_hash(&hub.canonical_text());
+            hub.observe_delivery_projection(editor, &canonical_hash)
+                .unwrap();
+        })
+        .unwrap();
+        assert!(
+            commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "an unquarantined live editor does not block the commit"
+        );
+
+        with_hub(&doc, |hub| {
+            hub.fence_registered_document_op_origins([editor]).unwrap();
+            assert_eq!(hub.quarantined_live_replicas(), vec![editor]);
+        })
+        .unwrap();
+        assert!(
+            !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "a quarantined live editor must refuse the commit barrier"
+        );
+        // `#clobberfollowups` (3): the current-text read reports the
+        // quarantine, which `realtime_doc_resolve` renders as `diverged=true`.
+        assert!(matches!(
+            current_text_for_file_with_authority_nonblocking(&doc, CrdtAuthority::MultiReplica)
+                .unwrap(),
+            CurrentText::Current {
+                quarantined_replicas: 1,
+                ..
+            }
+        ));
+        assert!(
+            !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "the refusal is stable: it does not consume the quarantine"
+        );
+        let log = std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            log.contains("crdt_commit_barrier_refused_quarantined_replica")
+                && log.contains("recovery=await_editor_roll_forward_no_commit"),
+            "{log}"
+        );
+
+        with_hub(&doc, |hub| {
+            let canonical_hash = agent_doc_hash::content_hash(&hub.canonical_text());
+            assert!(
+                hub.observe_delivery_projection(editor, &canonical_hash)
+                    .unwrap()
+            );
+            assert!(hub.quarantined_live_replicas().is_empty());
+        })
+        .unwrap();
+        assert!(
+            commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            "the editor's roll-forward receipt releases the barrier"
+        );
+        assert!(matches!(
+            current_text_for_file_with_authority_nonblocking(&doc, CrdtAuthority::MultiReplica)
+                .unwrap(),
+            CurrentText::Current {
+                quarantined_replicas: 0,
+                ..
+            }
+        ));
     }
 
     #[test]

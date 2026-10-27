@@ -1105,13 +1105,8 @@ fn ensure_terminal_authority_disk_convergence(
     // refuses it. Scheduling another replica recycle cannot change a visible
     // buffer, and "settlement is scheduled automatically" is false here: name
     // the state and the operator action instead, and stay non-OK.
-    if let Some(exhausted) =
-        agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file)
-    {
-        anyhow::bail!(
-            "{}",
-            editor_holds_unmerged_visible_text_interruption(file, &exhausted)
-        );
+    if let Some(interruption) = operator_owned_retained_write_interruption(file) {
+        anyhow::bail!("{interruption}");
     }
     if operator_edit_lead_over_disk(
         file,
@@ -1368,6 +1363,38 @@ fn editor_holds_unmerged_visible_text_interruption(
             ),
         ),
     )
+}
+
+/// `#clobberfollowups` (4): the INTERRUPTED line for a retained write the
+/// controller holds because rolling it forward would delete operator text.
+/// Deliberately carries none of the `SELF_CONVERGING_INTERRUPTIONS` needles: no
+/// scheduled reconciliation ends it, only the operator's next edit.
+fn retained_operator_text_conflict_interruption(
+    file: &Path,
+    conflict: &agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord,
+) -> String {
+    format!(
+        "[session-check] INTERRUPTED: the controller is holding a retained write for {} because \
+         rolling it forward would delete operator text ({}). {}",
+        file.display(),
+        conflict.facts(),
+        agent_doc_turn::write_ownership::retained_operator_text_conflict_remedy(
+            &file.display().to_string(),
+        ),
+    )
+}
+
+/// The operator-owned retained-write interruption for `file`, if one holds:
+/// an operator-text refusal first (it is the more specific state), then the
+/// exhausted replica-rebuild record, whose roll-forward refusal is terminal.
+fn operator_owned_retained_write_interruption(file: &Path) -> Option<String> {
+    if let Some(conflict) = agent_doc_document_realtime_io::retained_operator_text_conflict(file) {
+        return Some(retained_operator_text_conflict_interruption(
+            file, &conflict,
+        ));
+    }
+    agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file)
+        .map(|exhausted| editor_holds_unmerged_visible_text_interruption(file, &exhausted))
 }
 
 /// Whether `message` reports a state the binary converges without the agent.
@@ -2891,12 +2918,8 @@ fn retained_write_gate_status(
         // `#splicesessionack`: the retained write is not "unsettled while
         // reconciliation is scheduled" when the editor refuses it after every
         // replica rebuild; that wording also made the settle window wait it out.
-        if let Some(exhausted) =
-            agent_doc_document_realtime_io::editor_holds_unmerged_visible_text(file)
-        {
-            return SessionCheckStatus::Interrupted(
-                editor_holds_unmerged_visible_text_interruption(file, &exhausted),
-            );
+        if let Some(interruption) = operator_owned_retained_write_interruption(file) {
+            return SessionCheckStatus::Interrupted(interruption);
         }
         SessionCheckStatus::Interrupted(format!(
             "[session-check] INTERRUPTED: retained document-write delivery remains unsettled for {}; automatic controller reconciliation remains scheduled. Refusing a false clean closeout because preflight would block the same effect. Run only `agent-doc session-check {}` after recovery settles; do not resubmit finalize/write, force disk, or replace the queued edit.",
@@ -5725,6 +5748,37 @@ mod settle_window_tests {
         assert!(!is_self_converging_interruption(
             "will resume automatically"
         ));
+    }
+
+    /// `#clobberfollowups` (4): a retained write held because it would delete
+    /// operator text names its state, its facts, and the remedy, and is never
+    /// read as a self-converging wait.
+    #[test]
+    fn clobberfollowups_operator_text_refusal_is_reported_with_its_remedy() {
+        let conflict = agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord {
+            intent_id: "1793117274094672983-1-f22b45".to_string(),
+            target_hash: "f22b45".to_string(),
+            visible_hash: "8d23a9e".to_string(),
+            delivery_version: 80,
+            lost_operator_lines: 2,
+            recorded_at_ms: 1,
+        };
+        let line = retained_operator_text_conflict_interruption(Path::new("doc-a.md"), &conflict);
+        for needle in [
+            "[session-check] INTERRUPTED: the controller is holding a retained write for doc-a.md",
+            "state=retained_transition_refused_operator_text_loss",
+            "intent_id=1793117274094672983-1-f22b45",
+            "visible_hash=8d23a9e",
+            "lost_operator_lines=2",
+            "applied=false",
+            "NOT lost",
+            "Do NOT re-send the response, force disk, or run `agent-doc commit doc-a.md`",
+            "resolve the conflicting line(s) in the editor of doc-a.md",
+            "agent-doc session-check doc-a.md",
+        ] {
+            assert!(line.contains(needle), "{needle}: {line}");
+        }
+        assert!(!is_self_converging_interruption(&line), "{line}");
     }
 
     /// `#splicesessionack` (GH #273 remainder): the exhausted replica-rebuild

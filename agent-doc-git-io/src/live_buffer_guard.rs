@@ -34,8 +34,34 @@ pub fn crdt_relay_pending_refusal(file: &Path, ownership: RetainedWriteOwnership
     )
 }
 
+/// `#clobberfollowups` (2): the refusal for a commit whose barrier is ready
+/// while the editor's VISIBLE buffer holds text the canonical lacks
+/// (`state=editor_holds_unmerged_visible_text`). The remedy is derived from the
+/// same ownership predicate every other retained-write reader uses.
+pub fn editor_holds_unmerged_visible_text_refusal(
+    file: &Path,
+    ownership: RetainedWriteOwnership,
+) -> String {
+    format!(
+        "editor is the current authority for {}, and its visible buffer holds text the canonical \
+         does not (state={}); committing the canonical now would publish a cut without that \
+         text, so the commit was refused and nothing was written. {}.",
+        file.display(),
+        agent_doc_turn::write_ownership::EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE,
+        retained_write_remedy(
+            ownership.with_editor_holds_unmerged_visible_text(true),
+            &file.display().to_string()
+        ),
+    )
+}
+
 pub trait LiveBufferGuardEffects {
     fn commit_barrier_ready(&self, file: &Path) -> bool;
+    /// Whether the editor holding `file` keeps visible text the canonical
+    /// lacks (the durable exhausted replica-rebuild record still describes the
+    /// document). Implementors read
+    /// `agent_doc_document_realtime_io::editor_holds_unmerged_visible_text`.
+    fn editor_holds_unmerged_visible_text(&self, file: &Path) -> bool;
     /// Whether anything durable owns a write this guard would retain.
     ///
     /// The guard cannot read `state.db` itself — `agent-doc-git-io` sits below
@@ -82,6 +108,27 @@ pub fn ensure_no_live_editor_buffer_ahead_of_disk(
             false
         }
     };
+    if commit_allowed && effects.editor_holds_unmerged_visible_text(file) {
+        let ownership = effects.retained_write_ownership(file);
+        effects.log_op(
+            file,
+            &format!(
+                "commit_blocked_editor_holds_unmerged_visible_text file={} basis={} state={} ownership={} (#clobberfollowups)",
+                file.display(),
+                basis,
+                agent_doc_turn::write_ownership::EDITOR_HOLDS_UNMERGED_VISIBLE_TEXT_STATE,
+                ownership
+                    .with_editor_holds_unmerged_visible_text(true)
+                    .verdict()
+                    .as_str(),
+            ),
+        );
+        effects.log_live_buffer_guard_blocked(file);
+        anyhow::bail!(
+            "{}",
+            editor_holds_unmerged_visible_text_refusal(file, ownership)
+        );
+    }
     if commit_allowed {
         effects.log_op(
             file,
@@ -124,6 +171,7 @@ mod tests {
 
     struct WedgedFinalizeSimWorld {
         barrier_ready: Cell<bool>,
+        unmerged_visible_text: Cell<bool>,
         ownership: Cell<RetainedWriteOwnership>,
         commits: Cell<usize>,
         logs: RefCell<Vec<String>>,
@@ -133,6 +181,7 @@ mod tests {
         fn wedged() -> Self {
             Self {
                 barrier_ready: Cell::new(false),
+                unmerged_visible_text: Cell::new(false),
                 // An open cycle owns the retained write: the historical shape
                 // this SimWorld was written for.
                 ownership: Cell::new(RetainedWriteOwnership::new(true, true)),
@@ -159,6 +208,10 @@ mod tests {
             self.barrier_ready.get()
         }
 
+        fn editor_holds_unmerged_visible_text(&self, _file: &Path) -> bool {
+            self.unmerged_visible_text.get()
+        }
+
         fn retained_write_ownership(&self, _file: &Path) -> RetainedWriteOwnership {
             self.ownership.get()
         }
@@ -168,6 +221,40 @@ mod tests {
         }
 
         fn log_live_buffer_guard_blocked(&self, _file: &Path) {}
+    }
+
+    /// `#clobberfollowups` (2): a ready relay barrier is not enough while the
+    /// editor's visible buffer holds text the canonical lacks. The commit is
+    /// refused with the operator-text remedy, and nothing is committed.
+    #[test]
+    fn clobberfollowups_commit_refuses_while_the_editor_holds_unmerged_visible_text() {
+        let world = WedgedFinalizeSimWorld::wedged();
+        world.barrier_ready.set(true);
+        world.unmerged_visible_text.set(true);
+        let err = world.direct_commit().unwrap_err().to_string();
+        assert_eq!(world.commits.get(), 0, "no commit may seal the canonical");
+        assert!(
+            err.contains("state=editor_holds_unmerged_visible_text")
+                && err.contains("nothing was written"),
+            "{err}"
+        );
+        assert!(
+            err.contains("Do NOT re-send it, force disk"),
+            "the remedy must rule out the recoveries that discard operator text: {err}"
+        );
+        assert!(
+            world
+                .logs
+                .borrow()
+                .iter()
+                .any(|line| line.contains("commit_blocked_editor_holds_unmerged_visible_text")),
+            "{:?}",
+            world.logs.borrow()
+        );
+
+        world.unmerged_visible_text.set(false);
+        world.direct_commit().unwrap();
+        assert_eq!(world.commits.get(), 1);
     }
 
     /// A fail-closed path that states only a fact is what makes an agent invent

@@ -5670,6 +5670,15 @@ enum RetainedTransitionState {
         intent_id: String,
         delivery_version: u64,
     },
+    /// `#clobberfollowups` (1): the editor attested operator typing over the
+    /// exact visible cut (its op-capture epoch is based on it) and that typing
+    /// has not reached the relay yet. Projecting now would write the retained
+    /// target over a cut that lacks it.
+    AwaitingEditorOps {
+        intent_id: String,
+        delivery_version: u64,
+        editor_tip_hash: String,
+    },
     AwaitingConvergence {
         intent_id: String,
         delivery_version: u64,
@@ -5733,6 +5742,7 @@ impl RetainedTransitionState {
             | Self::Idle
             | Self::AwaitingController { .. }
             | Self::AwaitingLiveEditor { .. }
+            | Self::AwaitingEditorOps { .. }
             | Self::Conflict { .. } => None,
         }
     }
@@ -6372,7 +6382,56 @@ impl RetainedWriteSettleSink {
             conflict.file.display(),
             conflict.lost_lines.len(),
         );
+        // `#clobberfollowups` (4): the log line alone is invisible to
+        // `session-check`, which kept reporting a self-converging wait. Carry
+        // the refusal durably; bookkeeping only, a failure never changes the
+        // refusal itself.
+        let recorded = crate::retained_operator_text_conflict::record(
+            &self.project_root,
+            &conflict.file,
+            &crate::retained_operator_text_conflict::RetainedOperatorTextConflictRecord {
+                intent_id: conflict.intent_id.clone(),
+                target_hash: conflict.target_hash.clone(),
+                visible_hash: conflict.visible_hash.clone(),
+                delivery_version: conflict.delivery_version,
+                lost_operator_lines: conflict.lost_lines.len(),
+                recorded_at_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis() as u64)
+                    .unwrap_or_default(),
+            },
+        );
+        if let Err(error) = recorded {
+            agent_doc_ops_log_io::log_op(
+                &conflict.file,
+                &format!(
+                    "retained_operator_text_conflict_state_failed document_hash={document_hash} intent_id={} error={error:#}",
+                    conflict.intent_id,
+                ),
+            );
+        }
         true
+    }
+
+    /// `#clobberfollowups` (4): a projected retained target supersedes any
+    /// recorded operator-text refusal for the document.
+    fn clear_retained_operator_text_conflict(&self, file: &Path) {
+        match crate::retained_operator_text_conflict::clear(&self.project_root, file) {
+            Ok(true) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_operator_text_conflict_state action=cleared_projected state={}",
+                    crate::retained_operator_text_conflict::STATE,
+                ),
+            ),
+            Ok(false) => {}
+            Err(error) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_operator_text_conflict_state_failed action=clear error={error:#}"
+                ),
+            ),
+        }
     }
 
     /// Materialize one derived retained target in the controller-owned CRDT
@@ -6434,6 +6493,7 @@ impl RetainedWriteSettleSink {
                         outcome.targets,
                     ),
                 );
+                self.clear_retained_operator_text_conflict(&transition.file);
                 true
             }
             Ok(None) => false,
@@ -6969,10 +7029,22 @@ impl ControllerDocumentGraphs {
                                     } else {
                                         "editor_unreachable"
                                     };
-                                    match crate::retained_persistence_exhaustion::mark_roll_forward_refusal(
+                                    match crate::retained_persistence_exhaustion::mark_terminal_roll_forward_refusal(
                                         &worker_sink.project_root,
                                         &file,
-                                        &content_hash,
+                                        &crate::retained_persistence_exhaustion::RetainedPersistenceRebuildExhausted {
+                                            content_hash: content_hash.clone(),
+                                            content_len,
+                                            epoch,
+                                            controller_generation: generation,
+                                            refusals: retry.refusals,
+                                            rebuilds: retry.rebuilds,
+                                            roll_forward_refusal: None,
+                                            recorded_at_ms: SystemTime::now()
+                                                .duration_since(UNIX_EPOCH)
+                                                .map(|elapsed| elapsed.as_millis() as u64)
+                                                .unwrap_or_default(),
+                                        },
                                         refusal,
                                     ) {
                                         Ok(marked) => agent_doc_ops_log_io::log_op(
@@ -8699,6 +8771,42 @@ fn operator_rearmed_queue_item_keys_from_projection(
     .unwrap_or_default()
 }
 
+/// `#clobberfollowups` (1): the editor's attested tip when its active
+/// op-capture epoch is based on exactly the visible cut and replays to a
+/// different text, i.e. operator typing the editor reported but whose delta
+/// the relay has not ingested.
+///
+/// Only an epoch with lineage evidence counts (`tip_hash` non-empty), and only
+/// when replaying its ops over the visible text reproduces that tip, so a
+/// misaligned or stale ledger can never hold a retained write. Once the delta
+/// lands the visible cut moves off the epoch base and the hold releases; a
+/// consumer clear or non-operator projection closes the epoch and releases it
+/// too.
+fn editor_ops_in_flight_over_visible_cut(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    delivery: &RetainedDeliveryObservation,
+) -> Option<String> {
+    let capture = projection.document.editor_op_capture.as_ref()?;
+    if capture.tip_hash.is_empty()
+        || capture
+            .tip_hash
+            .eq_ignore_ascii_case(&delivery.content_hash)
+        || !capture
+            .base_hash
+            .eq_ignore_ascii_case(&delivery.content_hash)
+    {
+        return None;
+    }
+    let ops: Vec<agent_doc_merge::crdt::EditorOp> = serde_json::from_str(&capture.ops_json).ok()?;
+    if ops.is_empty() {
+        return None;
+    }
+    let operator_cut = agent_doc_merge::crdt::replay_editor_ops(delivery.content.as_ref(), &ops)?;
+    agent_doc_hash::content_hash(&operator_cut)
+        .eq_ignore_ascii_case(&capture.tip_hash)
+        .then(|| capture.tip_hash.clone())
+}
+
 fn retained_transition_state(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
@@ -8799,6 +8907,22 @@ fn retained_transition_state(
             visible_hash: Some(delivery.content_hash.clone()),
             delivery_version: Some(delivery.delivery_version),
             reason: RetainedTransitionConflict::InvalidTargetHash,
+        };
+    }
+    // `#clobberfollowups` (1): on 2026-10-27 (lazily.md) a captured closeout's
+    // tracked-work replay recorded the live canonical as its base and derived
+    // its target from it, both correctly. But the editor had already reported
+    // an operator burst typed over that canonical (`editor_ops_recorded
+    // lineage_pre=ef39f88… lineage_post=b46c6bf…`) whose CRDT delta was still in
+    // flight. The CP write landed first, so the burst arrived over a replaced
+    // cut and was quarantined. Hold every projection of the retained target
+    // until the attested typing reaches the relay; the rebase below then rolls
+    // forward onto it, or `OperatorTextWouldBeLost` refuses.
+    if let Some(editor_tip_hash) = editor_ops_in_flight_over_visible_cut(projection, delivery) {
+        return RetainedTransitionState::AwaitingEditorOps {
+            intent_id: intent.intent_id.clone(),
+            delivery_version: delivery.delivery_version,
+            editor_tip_hash,
         };
     }
     if delivery.content.as_ref() == base_content {
@@ -23467,6 +23591,7 @@ agent:queue\n\
             RetainedTransitionState::AwaitingController { .. } => "awaiting_controller",
             RetainedTransitionState::AwaitingDelivery(_) => "awaiting_delivery",
             RetainedTransitionState::AwaitingLiveEditor { .. } => "awaiting_live_editor",
+            RetainedTransitionState::AwaitingEditorOps { .. } => "awaiting_editor_ops",
             RetainedTransitionState::AwaitingConvergence { .. } => "awaiting_convergence",
             RetainedTransitionState::ApplyTarget(_) => "apply_target",
             RetainedTransitionState::TargetVisible { .. } => "target_visible",
@@ -24516,7 +24641,7 @@ retained response body
             "doc",
             &RetainedOperatorTextConflict {
                 file: file.clone(),
-                ..conflict
+                ..conflict.clone()
             },
         ));
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -24526,6 +24651,107 @@ retained response body
                 && log.contains("applied=false"),
             "{log}"
         );
+        // `#clobberfollowups` (4): the refusal is durable, so `session-check`
+        // can name it instead of a self-converging wait.
+        let recorded = crate::retained_operator_text_conflict::load(dir.path(), &file)
+            .unwrap()
+            .expect("the refusal is carried durably");
+        assert_eq!(recorded.intent_id, conflict.intent_id);
+        assert_eq!(recorded.visible_hash, delivery.content_hash);
+        assert_eq!(recorded.lost_operator_lines, 1);
+        assert!(recorded.matches_authority(&cut));
+        sink.clear_retained_operator_text_conflict(&file);
+        assert_eq!(
+            crate::retained_operator_text_conflict::load(dir.path(), &file).unwrap(),
+            None
+        );
+    }
+
+    /// `#clobberfollowups` (1): operator typing lands between the response
+    /// write and the tracked-work replay. The replay's base and target are the
+    /// live canonical (true base), but the editor has already attested a burst
+    /// typed over that canonical whose delta has not reached the relay. The
+    /// retained target must not project over the cut that lacks the typing; it
+    /// rolls forward onto the typing once the delta lands.
+    #[test]
+    fn clobberfollowups_retained_target_waits_for_attested_editor_typing_then_rolls_forward() {
+        let mut projection = retained_resume_projection("doc-clobberfollowups-inflight");
+        // Canonical after the response write; the replay reads it as its base.
+        let canonical = "---\nagent_doc_session: s1\n---\n\n# Doc\n\n<!-- agent:queue -->\n- do [#first] first request\n<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo -->\n- [ ] [#t1] operator task\n<!-- /agent:todo -->\n";
+        // The tracked-work replay consumes the queue head, derived from canonical.
+        let target = canonical.replace("- do [#first] first request\n", "");
+        // The operator types a note into the todo, attested before the CP write.
+        let typed = " (typed while the replay ran)";
+        let offset = canonical.find("operator task").unwrap() + "operator task".len();
+        let ops = vec![agent_doc_merge::crdt::EditorOp::Insert {
+            offset,
+            text: typed.to_string(),
+        }];
+        let operator_cut = agent_doc_merge::crdt::replay_editor_ops(canonical, &ops).unwrap();
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(canonical.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(canonical);
+        intent.target_content = target.clone();
+        intent.target_hash = agent_doc_hash::content_hash(&target);
+        projection.document.editor_op_capture =
+            Some(agent_doc_state_backbone::EditorOpCaptureProjection {
+                epoch: 1,
+                canonical_path: "/work/session.md".to_string(),
+                base_hash: agent_doc_hash::content_hash(canonical),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                updated_ms: 1,
+                tip_hash: agent_doc_hash::content_hash(&operator_cut),
+            });
+        let observe = |text: &str, version: u64| RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(text),
+            content_hash: agent_doc_hash::content_hash(text),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: version,
+        };
+
+        // The relay still holds the canonical without the typing: hold.
+        let held = retained_transition_state(Some(&projection), Some(&observe(canonical, 5)), 1);
+        assert_eq!(retained_transition_state_tag(&held), "awaiting_editor_ops");
+        assert_eq!(retained_transition_effect_tag(&held), "none");
+
+        // The delta lands: the retained target rolls forward onto the typing.
+        let landed =
+            retained_transition_state(Some(&projection), Some(&observe(&operator_cut, 6)), 1);
+        let transition = landed
+            .transition_projection()
+            .expect("the retained target projects once the typing reached the relay");
+        assert_eq!(transition.base_content.as_ref(), operator_cut);
+        assert!(
+            transition.target_content.contains(typed),
+            "the projected target dropped the operator's typing:\n{}",
+            transition.target_content
+        );
+        assert!(
+            !transition
+                .target_content
+                .contains("- do [#first] first request"),
+            "the projected target lost the replay's queue consumption:\n{}",
+            transition.target_content
+        );
+
+        // A ledger whose ops do not replay to its attested tip is not evidence.
+        let mut lying = projection.clone();
+        lying.document.editor_op_capture.as_mut().unwrap().tip_hash =
+            agent_doc_hash::content_hash("some other text");
+        let unheld = retained_transition_state(Some(&lying), Some(&observe(canonical, 5)), 1);
+        assert_eq!(retained_transition_state_tag(&unheld), "apply_target");
+        // An epoch without lineage (no tip) is not evidence either.
+        let mut tipless = projection.clone();
+        tipless
+            .document
+            .editor_op_capture
+            .as_mut()
+            .unwrap()
+            .tip_hash = String::new();
+        let unheld = retained_transition_state(Some(&tipless), Some(&observe(canonical, 5)), 1);
+        assert_eq!(retained_transition_state_tag(&unheld), "apply_target");
     }
 
     #[test]

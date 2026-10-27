@@ -10703,12 +10703,19 @@ fn controller_current_text_from_data(
                 .map(serde_json::from_value)
                 .transpose()
                 .context("failed to parse controller current text semantics")?;
+            // Absent from a controller built before `#clobberfollowups`.
+            let quarantined_replicas = data
+                .get("quarantined_replicas")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok())
+                .unwrap_or(0);
             Ok(agent_doc_crdt_relay_io::CurrentText::Current {
                 text,
                 live_editors,
                 delivery_converged,
                 delivery_version,
                 semantics,
+                quarantined_replicas,
             })
         }
         Some(status) => anyhow::bail!("unknown controller current text status `{status}`"),
@@ -10735,6 +10742,7 @@ fn controller_current_text_response(
             delivery_converged,
             delivery_version,
             semantics,
+            quarantined_replicas,
         } => serde_json::json!({
             "status": "current",
             "text_len": text.len(),
@@ -10744,6 +10752,7 @@ fn controller_current_text_response(
             "delivery_converged": delivery_converged,
             "delivery_version": delivery_version,
             "semantics": semantics,
+            "quarantined_replicas": quarantined_replicas,
         }),
     }
 }
@@ -11963,6 +11972,7 @@ fn retained_delivery_observation_for_file(
                 delivery_converged: _,
                 delivery_version,
                 semantics: _,
+                quarantined_replicas: _,
             } => {
                 // Retained closeout is a durability boundary. The relay's
                 // ordinary convergence bit is intentionally availability-
@@ -35459,6 +35469,7 @@ mod current_document_session_tests {
             delivery_converged: true,
             delivery_version: 1,
             semantics: None,
+            quarantined_replicas: 0,
         }
     }
 
@@ -47808,12 +47819,45 @@ mod tests {
                 unresolved_prompts: 3,
                 queue_unresolved_prompts: 2,
             }),
+            quarantined_replicas: 0,
         };
         let encoded = controller_current_text_response(current.clone());
         assert_eq!(
             controller_current_text_from_data(&encoded).unwrap(),
             current
         );
+    }
+
+    /// `#clobberfollowups` (3): the quarantined-replica count crosses the
+    /// controller wire, so a CLI's `realtime_doc_resolve` can report the cut
+    /// diverged; a controller that predates the field reads as zero.
+    #[test]
+    fn clobberfollowups_current_text_round_trip_carries_quarantined_replicas() {
+        let current = agent_doc_crdt_relay_io::CurrentText::Current {
+            text: "document".to_string(),
+            live_editors: 1,
+            delivery_converged: false,
+            delivery_version: 9,
+            semantics: None,
+            quarantined_replicas: 1,
+        };
+        let mut encoded = controller_current_text_response(current.clone());
+        assert_eq!(encoded["quarantined_replicas"], 1);
+        assert_eq!(
+            controller_current_text_from_data(&encoded).unwrap(),
+            current
+        );
+        encoded
+            .as_object_mut()
+            .unwrap()
+            .remove("quarantined_replicas");
+        assert!(matches!(
+            controller_current_text_from_data(&encoded).unwrap(),
+            agent_doc_crdt_relay_io::CurrentText::Current {
+                quarantined_replicas: 0,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -65195,6 +65239,7 @@ body
             delivery_converged: true,
             delivery_version: 7,
             semantics: None,
+            quarantined_replicas: 0,
         };
         assert_eq!(
             decide_controller_commit_projection(
@@ -65224,6 +65269,7 @@ body
             delivery_converged: false,
             delivery_version: 8,
             semantics: None,
+            quarantined_replicas: 0,
         };
         assert_eq!(
             decide_controller_commit_projection(true, &pending, None),

@@ -165,6 +165,7 @@ mod tests {
             delivery_converged,
             delivery_version: 1,
             semantics: None,
+            quarantined_replicas: 0,
         }
     }
 
@@ -413,6 +414,7 @@ mod tests {
                     delivery_converged: hub.delivery_converged(),
                     delivery_version: 1,
                     semantics: None,
+                    quarantined_replicas: 0,
                 }))
             },
             // Fire-and-forget: record the request, deliver nothing yet.

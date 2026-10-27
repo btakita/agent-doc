@@ -669,6 +669,36 @@ pub fn editor_holds_unmerged_visible_text_remedy(file: &str) -> String {
     )
 }
 
+/// The state token every reader of the durable retained operator-text refusal
+/// names (`#clobberfollowups`). Mirrors the controller's
+/// `retained_transition_refused_operator_text_loss` log event.
+pub const RETAINED_OPERATOR_TEXT_CONFLICT_STATE: &str =
+    "retained_transition_refused_operator_text_loss";
+
+/// The one instruction for a retained write the controller holds because
+/// rolling it forward over the editor's text would delete operator-authored
+/// lines (`#retainedprojectionclobber`, surfaced by `#clobberfollowups`).
+///
+/// The controller re-derives the held write over every new editor cut, so the
+/// only edge that ends this state is the operator's next edit of the
+/// conflicting lines. Every recovery an agent reaches for publishes or reseeds a
+/// cut that drops one side, or re-derives the same refusal.
+pub fn retained_operator_text_conflict_remedy(file: &str) -> String {
+    format!(
+        "The controller refused to project a retained write onto {file}: rolling it forward over \
+         the editor's text would delete operator-authored line(s) \
+         (state={RETAINED_OPERATOR_TEXT_CONFLICT_STATE}). The editor keeps the operator's text, \
+         nothing was written, and the retained write is durable and held, NOT lost: the agent's \
+         write and the operator's edit changed the same line(s) and no merge keeps both. Do NOT \
+         re-send the response, force disk, or run `agent-doc commit {file}`, each of which \
+         publishes a cut without one side; `admin recycle` only re-derives the same refusal. \
+         Ask the operator to resolve the conflicting line(s) in the editor of {file}, keeping the \
+         text they want: the controller re-derives the retained write over every new editor cut \
+         and applies it on top once it no longer deletes their text. Then run `agent-doc \
+         session-check {file}`"
+    )
+}
+
 /// Terminal counterpart of [`editor_holds_unmerged_visible_text_remedy`].
 /// The editor answered the roll-forward request and proved waiting cannot help.
 pub fn editor_visible_roll_forward_refused_remedy(file: &str, refusal: &str) -> String {

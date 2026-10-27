@@ -249,6 +249,21 @@ process (CLI, recovery, or the project controller under a live editor) agrees.
 
 Location: `.agent-doc/config.toml` (relative to project root).
 
+A document's project config is its **store's** config, never the process cwd's
+project (`#loadprojectfordoccwd`). `load_project_for_doc` resolves the store with
+`project_store_for_doc`, which is `agent_doc_project_root_io::project_root_or_file_parent`:
+the nearest `.agent-doc` project of the canonical document, or for a document with
+no `.agent-doc` ancestor its canonical parent directory, the store start
+(`#startcwdfallback`), claim (`#claimwrongstore`), the route and sync's
+recovered-owner bind (`#syncnorootfallback`) bind it in. A path that cannot be
+canonicalized yet (a document not created) keeps the lexical project walk. A
+rootless document's store has no config until it is created, so the document
+reads defaults even when run from inside another configured project, and the
+read creates nothing. Only process-level reads with no document (`load_project`,
+`project_tmux_session`, `tmux_bin_resolution`, `agent-doc session`) and
+`describe-image` of an image outside any project (an image is not a session
+document and has no store) use the cwd's project.
+
 Fields:
 - `default_agent` — the default agent backend for documents in this project. It
   overrides the global `default_agent`; document frontmatter and an explicit

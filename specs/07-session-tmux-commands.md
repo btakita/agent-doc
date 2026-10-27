@@ -328,6 +328,13 @@ may republish the retained intent, but remains subject to the same rule.
   cwd's project. The cleanup and occupancy reads never create a store that does not exist yet.
   The bind keeps its semantics: it is an operator write that re-projects the actor record as
   `Ready` and records the document's nearest git root as the entry's `cwd` (`#tw4a`).
+- Claim's session policy (`tmux_sessions`) and the `tmux_session` pin its cross-session check
+  compares the pane with are the same store's config (`tmux_session_policy_for_root`,
+  `project_tmux_session_for_root`), never the process cwd project's (`#loadprojectfordoccwd`).
+  A claim run from inside another project is neither refused by that project's live pin nor
+  exempted from the document store's; a rootless document's store has no pin until it is
+  created. Every document-scoped config read (`load_project_for_doc`) resolves the same store
+  ([Config](06-config.md#project-config)).
 - `--new-pane` is a provisioning mode, not a force/reuse mode. It bypasses current-pane resolution and cross-session validation, provisions exactly one pane in the project's configured tmux session (or the normal auto-detected session when unconfigured), and binds the new document there. It conflicts with `--position`, `--window`, `--pane`, `--force`, and `--isolate`, so it cannot silently replace or migrate the operator's current pane/window.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.
 - The binding invariant is enforced **across project/submodule roots**, not just against the document's own store registry. A pane owned by a document rooted in another project/submodule does not appear in that store's rows, so `claim` also inspects the requested pane's live process tree: if it runs an agent-doc/codex owner session for a different document, `claim` provisions a new pane instead of commandeering it.

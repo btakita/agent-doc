@@ -34629,6 +34629,154 @@ fn test_cli_claim_from_another_project_sees_the_documents_store_pane_occupant() 
     );
 }
 
+/// `#loadprojectfordoccwd`: claim's cross-session check compares the pane's
+/// tmux session with the **document store's** `tmux_session` pin, never the
+/// process cwd project's. The cwd project here pins a live session the pane is
+/// not in (created after the pane's, so tmux's default current session is the
+/// cwd pin, not the pane's). Read from the cwd, the claim failed closed as a
+/// live cross-session mismatch; read from the document's store it accepts the
+/// pane, binds in that store, and leaves the cwd project's config untouched.
+fn assert_claim_from_foreign_cwd_ignores_the_cwd_tmux_pin(rooted: bool) {
+    let label = if rooted {
+        "claim-pin-rooted"
+    } else {
+        "claim-pin-rootless"
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new(label);
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let doc_store = tmp
+        .path()
+        .join(if rooted { "doc-project" } else { "loose" });
+    fs::create_dir_all(&doc_store).unwrap();
+    let doc = doc_store.join("doc.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: claim-pin-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    if rooted {
+        init_git_repo(&doc_store, &doc);
+    }
+    let (cwd_project, doc_store, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        doc_store.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    assert_eq!(
+        agent_doc_project_root_io::project_root_containing(&doc).is_some(),
+        rooted,
+        "fixture document root shape"
+    );
+    let pane_session = format!("{label}-doc");
+    let cwd_pin = format!("{label}-cwd");
+    let pane = claim_store_test_pane(&tmux, &doc_store, &pane_session);
+    let _cwd_pin_pane = claim_store_test_pane(&tmux, &cwd_project, &cwd_pin);
+    let cwd_config = cwd_project.join(".agent-doc/config.toml");
+    let cwd_config_text = format!("tmux_session = \"{cwd_pin}\"\n");
+    fs::write(&cwd_config, &cwd_config_text).unwrap();
+    if rooted {
+        fs::write(
+            doc_store.join(".agent-doc/config.toml"),
+            format!("tmux_session = \"{pane_session}\"\n"),
+        )
+        .unwrap();
+    }
+
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(&cwd_project)
+        .arg("claim")
+        .arg(&doc)
+        .args(["--pane", &pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "the cwd project's pin must not refuse the claim: {stderr}"
+    );
+    let record = agent_doc_session_actor_io::load_record_in(&doc_store, &doc.to_string_lossy())
+        .unwrap()
+        .unwrap_or_else(|| panic!("claim bound no actor in the document's store: {stderr}"));
+    assert_eq!(record.pane_id, pane);
+    assert_eq!(
+        fs::read_to_string(&cwd_config).unwrap(),
+        cwd_config_text,
+        "claim leaves the cwd project's config untouched: {stderr}"
+    );
+}
+
+#[test]
+fn test_cli_claim_from_another_project_checks_the_documents_tmux_pin() {
+    assert_claim_from_foreign_cwd_ignores_the_cwd_tmux_pin(true);
+}
+
+#[test]
+fn test_cli_claim_of_a_rootless_document_ignores_the_cwd_tmux_pin() {
+    assert_claim_from_foreign_cwd_ignores_the_cwd_tmux_pin(false);
+}
+
+/// `#loadprojectfordoccwd`: the converse. The document store pins a live
+/// session the pane is not in while the cwd project pins the pane's own
+/// session, so only the document store's pin can refuse the claim.
+#[test]
+fn test_cli_claim_from_another_project_enforces_the_documents_tmux_pin() {
+    let label = "claim-pin-enforced";
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new(label);
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let project = tmp.path().join("doc-project");
+    fs::create_dir_all(&project).unwrap();
+    let doc = project.join("doc.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: claim-pin-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    init_git_repo(&project, &doc);
+    let (cwd_project, project, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        project.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    let pane_session = format!("{label}-pane");
+    let doc_pin = format!("{label}-doc");
+    let pane = claim_store_test_pane(&tmux, &project, &pane_session);
+    let _doc_pin_pane = claim_store_test_pane(&tmux, &project, &doc_pin);
+    fs::write(
+        cwd_project.join(".agent-doc/config.toml"),
+        format!("tmux_session = \"{pane_session}\"\n"),
+    )
+    .unwrap();
+    fs::write(
+        project.join(".agent-doc/config.toml"),
+        format!("tmux_session = \"{doc_pin}\"\n"),
+    )
+    .unwrap();
+
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(&cwd_project)
+        .arg("claim")
+        .arg(&doc)
+        .args(["--pane", &pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success() && stderr.contains(&format!("configured={doc_pin}")),
+        "the document store's live pin refuses a cross-session claim: {stderr}"
+    );
+    assert_eq!(
+        agent_doc_session_actor_io::load_record_in(&project, &doc.to_string_lossy()).unwrap(),
+        None,
+        "a refused claim binds nothing: {stderr}"
+    );
+}
+
 #[test]
 fn test_cli_route_generates_session_for_bare_file() {
     let tmp = tempfile::TempDir::new().unwrap();

@@ -428,7 +428,13 @@ pub fn run(
     api_key: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<()> {
-    let project_config = agent_doc_project_config_io::load_project_for_doc(image);
+    // An image is not a session document and has no store: one inside a
+    // project reads that project's vision config, one outside any project the
+    // invoking (cwd) project's, a process-level read (`#loadprojectfordoccwd`).
+    let project_config = match agent_doc_project_config_io::project_root_for_doc(image) {
+        Some(root) => agent_doc_project_config_io::load_project_for_root(&root),
+        None => agent_doc_project_config_io::load_project(),
+    };
     let vision = &project_config.vision;
     let (provider, api_key, model) = resolve_vision_config(
         provider,

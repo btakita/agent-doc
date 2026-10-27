@@ -276,10 +276,11 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
                 .with_heads(&pending_queue_subagent_dispatch)
                 .with_heads(&queue_subagent_plan.held);
         }
-        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed(
+        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed_with_presets(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
             &out_of_loop,
+            &effective_prompt_presets,
         )
     } else {
         None

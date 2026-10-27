@@ -27,11 +27,12 @@ pub fn detect_required_continuation_with(
     // `#queueclaim`: a head claimed by a worker outside the in-session loop
     // (a dispatched subagent) is in flight, not drainable.
     let claimed = crate::subagent_dispatch::out_of_loop_items_for_content(file, &content);
-    queue_continuation::required_continuation_excluding_claimed_scoped(
+    queue_continuation::required_continuation_excluding_claimed_scoped_with_presets(
         &content,
         snapshot_content.as_deref(),
         &claimed,
         &head_echo_scope_for(file, &content),
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&content, file),
     )
 }
 
@@ -48,11 +49,12 @@ pub fn detect_required_continuation_for_content_with(
     }
     let snapshot_content = load_snapshot(file)?;
     let claimed = crate::subagent_dispatch::out_of_loop_items_for_content(file, content);
-    queue_continuation::required_continuation_excluding_claimed_scoped(
+    queue_continuation::required_continuation_excluding_claimed_scoped_with_presets(
         content,
         snapshot_content.as_deref(),
         &claimed,
         &head_echo_scope_for(file, content),
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
     )
 }
 

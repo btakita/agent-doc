@@ -144,6 +144,21 @@ pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<P
     Ok(local)
 }
 
+/// The effective preset map a queue drainability check consults (GH #381).
+///
+/// Queue drain policy (`agent_doc_queue::queue_continuation::*_with_presets`)
+/// and the preflight Todo-backlink audit treat a head whose leading `#name` is
+/// an effective preset (document OR inherited from `.agent-doc/project.md`) as
+/// a preset invocation, not a reference to tracked work. Those checks run on
+/// every idle-watch tick and closeout, so an unreadable or malformed project
+/// file falls back to an empty map here: the policy still reads the session
+/// document's own `presets`, which is exactly the pre-inheritance behavior.
+/// Expansion paths that must fail closed keep calling
+/// [`effective_prompt_presets_for_file`] directly.
+pub fn effective_prompt_presets_for_drain(content: &str, file: &Path) -> PromptPresets {
+    effective_prompt_presets_for_file(content, file).unwrap_or_default()
+}
+
 /// Resolve the document-local dogfood cycle switch.
 ///
 /// Dogfood routing is deliberately opt-in: the session document wins when it

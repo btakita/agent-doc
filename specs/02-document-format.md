@@ -526,7 +526,10 @@ queue head therefore resolves through its backlog/icebox source id; free-text
 queue work first joins the normal queue-to-backlog surrogate-id coining/mirror
 path. An id-backed head that directly names a Todo also satisfies the queue
 invariant. Any free-text head held from promotion, and any orphan id head, is
-reported rather than silently accepted.
+reported rather than silently accepted. A head whose leading token is an
+effective prompt preset (document-local or inherited from
+`.agent-doc/project.md`) that is not also open tracked work is a preset
+invocation, not tracked work, and owes no Todo backlink (GH #381).
 
 Preflight deterministically emits `tracked_work_missing_todo_backlink` for an
 open backlog/icebox source when neither source metadata, same-id layering, nor

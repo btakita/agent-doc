@@ -2599,8 +2599,9 @@ fn run_with_options_to_writer_in_pass(
         && !recycle_yield_pending
         && !exchange_prompt_preempts_queue
     {
-        agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text(
+        agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text_with_presets(
             &model_source_content,
+            &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&model_source_content, file),
         )
         .and_then(|head| {
             let readiness =

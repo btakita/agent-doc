@@ -534,7 +534,15 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
     match agent_doc_element::todo::todo_link_findings(content, &links) {
         Ok(findings) => {
             let mut signals = findings.iter().map(todo_signal_from_finding).collect::<Vec<_>>();
-            append_unlinked_queue_signals(content, &links, &mut signals);
+            // GH #381: project-inherited presets are invocations too; they are
+            // never copied into the document, so resolve the effective map here.
+            let presets =
+                agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
+            let preset_only =
+                agent_doc_queue::queue_continuation::preset_only_identity_ids_with_presets(
+                    content, &presets,
+                );
+            append_unlinked_queue_signals(content, &links, &preset_only, &mut signals);
             signals
         }
         Err(err) => {
@@ -549,9 +557,16 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
 /// maintenance. This audit catches any free-text head held from promotion (for
 /// example by pause/typing gates), plus orphan id heads, so no queue item can
 /// silently escape the backlink invariant.
+///
+/// GH #381: a head whose leading `#name` is an effective preset (`preset_only`:
+/// a document or `.agent-doc/project.md` preset that is not also open tracked
+/// work) is a preset invocation. It names no tracked work, free-text admission
+/// never promotes a `#`-led line, and the preset contract never asks for a
+/// backing item, so it owes no Todo backlink and is not reported.
 fn append_unlinked_queue_signals(
     content: &str,
     links: &agent_doc_element::todo::TodoLinkIndex,
+    preset_only: &std::collections::HashSet<String>,
     signals: &mut Vec<TodoSignal>,
 ) {
     let Ok(components) = agent_doc_element::element::parse(content) else {
@@ -562,6 +577,12 @@ fn append_unlinked_queue_signals(
             continue;
         };
         for prompt in agent_doc_queue::document_queue::prompts(&entries) {
+            if agent_doc_queue::queue_continuation::head_leads_with_preset(
+                &prompt.text,
+                preset_only,
+            ) {
+                continue;
+            }
             match agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text) {
                 agent_doc_element_queue::QueueItemIdentity::Id(id)
                     if links.knows(&id) || links.has_todo(&id) => {}
@@ -1369,8 +1390,13 @@ fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bo
 /// again by the very next completed cycle.
 /// `#presetargdedup`: normalized `#id`s whose ONLY active meaning in the
 /// document is a prompt preset (no backlog/review/icebox item carries them).
-fn preset_only_identity_ids(content: &str) -> std::collections::HashSet<String> {
-    agent_doc_queue::queue_continuation::preset_only_identity_ids(content)
+/// `presets` is the effective map, so project-inherited presets count too
+/// (GH #381).
+fn preset_only_identity_ids(
+    content: &str,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> std::collections::HashSet<String> {
+    agent_doc_queue::queue_continuation::preset_only_identity_ids_with_presets(content, presets)
 }
 
 /// The tracked id the prior cycle actually dispatched, if any
@@ -3738,20 +3764,26 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
+    // GH #381: a head naming a `.agent-doc/project.md` preset is a preset
+    // invocation, not a mirror of a missing backlog item.
+    let drain_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&content, file);
     let queue_drainable_head_count = if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed_with_presets(
             &drainability_content,
             &out_of_loop_queue_items,
+            &drain_presets,
         )
     } else {
         0
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
     let queue_supervisor_continuation_head = if activation.active {
-        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed_with_presets(
             &drainability_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
             &out_of_loop_queue_items,
+            &drain_presets,
         )
     } else {
         None
@@ -6887,7 +6919,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         // skipped every sibling invocation after the first (`⏭️`), so the drain
         // jumped past operator-queued work. Only ids that are not preset-only
         // take part in the skip set.
-        let preset_only = preset_only_identity_ids(&current_content);
+        let preset_only = preset_only_identity_ids(&current_content, &effective_prompt_presets);
         let current_live_ids: std::collections::HashSet<String> = activation
             .entries_after
             .iter()
@@ -7542,9 +7574,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     {
         0
     } else if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+        // GH #381: project-inherited presets count as preset invocations.
+        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed_with_presets(
             &current_content,
             &out_of_loop_queue_items,
+            &effective_prompt_presets,
         )
     } else {
         0
@@ -7560,10 +7594,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     // Run Agent Doc synthesize `+do [#id]` for the claimed head on every press,
     // opening a no-op cycle that tripped `expect_done_or_gate_guard`.
     let queue_supervisor_continuation_head = if activation.active {
-        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed(
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed_with_presets(
             &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
             &out_of_loop_queue_items,
+            &effective_prompt_presets,
         )
     } else {
         None
@@ -9295,6 +9330,69 @@ mod tests {
         let authoritative = state.authoritative_content.as_deref().unwrap();
         assert!(authoritative.contains("#upgrade"), "{authoritative}");
         assert!(!authoritative.contains("~~#upgrade~~"), "{authoritative}");
+    }
+
+    /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session
+    /// document has an empty `agent:backlog` and a go queue whose only live head
+    /// is `- #review`, and never carries the preset itself. Preflight reported
+    /// `queue_drainable_head_count: 0` and a `tracked_work_missing_todo_backlink`
+    /// signal naming `#review`. The head is a preset invocation: it drains and
+    /// needs neither a backlog item nor a Todo backlink.
+    #[test]
+    fn project_preset_queue_head_drains_without_backlog_item_or_todo_backlink() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#review': Review the change.\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior - test\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n- #review\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let inspected = inspect_queue_state(&doc, None).unwrap();
+        assert_eq!(inspected.queue_drainable_head_count, 1);
+        assert!(inspected.queue_continuation_required);
+        assert!(inspected.queue_supervisor_drainable);
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_prompts, vec!["#review".to_string()]);
+        assert_eq!(state.queue_drainable_head_count, 1);
+        assert!(state.queue_continuation_required);
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !current.contains("Review the change."),
+            "inherited presets are never copied into the session document:\n{current}"
+        );
+        let signals = todo_signals_for_document(&doc, &current);
+        assert!(
+            signals
+                .iter()
+                .all(|signal| signal.todo != "review" && !signal.action.contains("#review")),
+            "a project-preset head owes no Todo backlink: {signals:?}"
+        );
+
+        // Control: a head naming no preset and no tracked work is still flagged.
+        let orphan = current.replace("#review", "#ghostid");
+        let signals = todo_signals_for_document(&doc, &orphan);
+        assert!(
+            signals.iter().any(|signal| signal.todo == "ghostid"),
+            "an orphan id head keeps its Todo-backlink signal: {signals:?}\n{orphan}"
+        );
     }
 
     /// GH #161: downstream dispatch consumes maintenance's settled projection,

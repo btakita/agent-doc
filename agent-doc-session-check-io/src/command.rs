@@ -1551,10 +1551,11 @@ pub fn run_read_only_with_options(
 /// drain a head a subagent was already working on (agent-doc-bugs.md,
 /// 2026-10-03).
 fn supervisor_scope_unclaimed_head(file: &Path, content: &str) -> Option<String> {
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         &agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, content),
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
     )
 }
 
@@ -2122,9 +2123,13 @@ fn run_with_options_inner(
                     &continuation_content,
                 );
                 let recorded_drainable_head_count =
-                    agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed(
+                    agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed_with_presets(
                         &continuation_content,
                         &claimed,
+                        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                            &continuation_content,
+                            file,
+                        ),
                     );
                 if let Err(err) = agent_doc_controller_io::project_controller::record_queue_drain_stall_continuation_pending_for_file(
                     file,
@@ -2274,8 +2279,12 @@ fn run_with_options_inner(
                         // operator was a stall.
                         println!(
                             "queue_continuation_required=true next_queue_prompt={:?} supervisor_drain_readiness={}",
-                            agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text(
-                                content.as_deref().unwrap_or_default()
+                            agent_doc_queue::queue_continuation::supervisor_only_head_prompt_text_with_presets(
+                                content.as_deref().unwrap_or_default(),
+                                &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                                    content.as_deref().unwrap_or_default(),
+                                    file,
+                                ),
                             )
                             .unwrap_or_else(|| supervisor_head.clone()),
                             readiness.reason(),

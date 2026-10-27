@@ -23,6 +23,8 @@ agent-doc-document = { path = "../agent-doc-document", version = "0.35.556" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.556" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.556" }
 agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.556" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.556" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.556" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.556" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.556" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.556" }

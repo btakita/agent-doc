@@ -4984,7 +4984,10 @@ fn test_agent_doc_queue_owns_queue_continuation_policy() {
         "let snapshot_content = load_snapshot(file)?",
         "crate::subagent_dispatch::out_of_loop_items_for_content(file, &content)",
         "crate::subagent_dispatch::out_of_loop_items_for_content(file, content)",
-        "queue_continuation::required_continuation_excluding_claimed_scoped(",
+        // GH #381: the file-backed detector resolves the effective preset map
+        // so a project-preset head is a preset invocation, not a stale mirror.
+        "queue_continuation::required_continuation_excluding_claimed_scoped_with_presets(",
+        "agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(",
         "agent_doc_git_io::revision::head_echo_scope(file, queue_id, head, window, content)",
         "crate::queue_schedule::head_echo_window(file, content, queue_id)",
     ] {
@@ -32314,8 +32317,13 @@ fn test_agent_doc_route_io_owns_route_closeout_drain() {
             // `live_continuation_head` returned an `[operator-verify]` head that no
             // drainer acts on, so a blocked closeout dispatched a guaranteed no-op
             // cycle for it.
+            // GH #381: with the effective preset map, so a project-preset head
+            // counts as drainable here exactly as preflight counts it.
+            && closeout_drain.contains(
+                "agent_doc_queue::queue_continuation::live_drainable_continuation_head_with_presets(",
+            )
             && closeout_drain
-                .contains("agent_doc_queue::queue_continuation::live_drainable_continuation_head(")
+                .contains("agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(")
             && closeout_drain
                 .contains("agent_doc_queue::queue_continuation::DrainScope::Supervisor")
             && !closeout_drain
@@ -33398,6 +33406,70 @@ fn test_preflight_drainability_contract_true_with_real_drainable_head() {
     assert!(
         guidance.contains("CP editor delivery") && guidance.contains("NOT stop reasons"),
         "guidance must carry the proven-delivery no-stall contract: {guidance}"
+    );
+}
+
+/// GH #381 end to end: the issue's three-step repro through the real
+/// `agent-doc preflight` binary. `.agent-doc/project.md` declares `'#review'`,
+/// the session document (empty `agent:backlog`, no `presets` of its own) queues
+/// `- #review`. The head must count as drainable and draw no
+/// `tracked_work_missing_todo_backlink` signal, and the inherited preset must
+/// not be copied into the session document.
+#[test]
+fn test_preflight_project_preset_queue_head_is_drainable_without_todo_backlink() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path();
+    fs::create_dir_all(root.join(".agent-doc")).unwrap();
+    fs::write(
+        root.join(".agent-doc/project.md"),
+        "---\npresets:\n  '#review': Review the change.\n---\n",
+    )
+    .unwrap();
+    let doc = root.join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n\
+        ## Exchange\n\n\
+        <!-- agent:exchange patch=append -->\n\
+        ### Re: prior — gpt-5\n\nDone.\n\
+        <!-- agent:boundary:head-boundary -->\n\
+        <!-- /agent:exchange -->\n\n\
+        ## Backlog\n\n\
+        <!-- agent:backlog -->\n\
+        <!-- /agent:backlog -->\n\n\
+        ## Queue\n\n\
+        <!-- agent:queue go -->\n\
+        - #review\n\
+        <!-- /agent:queue -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(root, &doc);
+    seed_snapshot(root, &doc, content);
+
+    let parsed = preflight_json(root, &doc);
+    assert_eq!(
+        parsed["queue_drainable_head_count"], 1,
+        "a project-preset head drains as that preset: {parsed}"
+    );
+    assert_eq!(
+        parsed["queue_continuation_required"],
+        serde_json::Value::Bool(true),
+        "{parsed}"
+    );
+    let signals = parsed["todo_signals"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        signals.iter().all(|signal| {
+            signal["todo"] != "review"
+                && !signal["action"]
+                    .as_str()
+                    .is_some_and(|action| action.contains("#review"))
+        }),
+        "a project-preset head owes no Todo backlink: {signals:?}"
+    );
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !after.contains("Review the change."),
+        "inherited presets are never written into the session document:\n{after}"
     );
 }
 

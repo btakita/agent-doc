@@ -369,6 +369,8 @@ dependencies = [
  "agent-doc-document-realtime-io",
  "agent-doc-element",
  "agent-doc-flow-io",
+ "agent-doc-frontmatter",
+ "agent-doc-frontmatter-io",
  "agent-doc-fs",
  "agent-doc-git-io",
  "agent-doc-harness",

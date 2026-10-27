@@ -2457,18 +2457,27 @@ fn active_session_prompt_or_queue_head(file: &Path) -> Result<Option<String>> {
     // a post-commit coordinator exit from stranding a ☑️ row in the outbox.
     let in_flight =
         agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &content);
-    Ok(first_active_queue_prompt_in_content(&content, &in_flight))
+    // GH #381: a head naming a `.agent-doc/project.md` preset is prompt debt
+    // exactly like a document-local preset head.
+    let presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&content, file);
+    Ok(first_active_queue_prompt_in_content(
+        &content, &in_flight, &presets,
+    ))
 }
 
 fn first_active_queue_prompt_in_content(
     content: &str,
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Option<String> {
-    let prompt = agent_doc_queue::queue_continuation::pending_head_prompt_text_excluding_claimed(
-        content,
-        agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
-        claimed,
-    )?;
+    let prompt =
+        agent_doc_queue::queue_continuation::pending_head_prompt_text_excluding_claimed_with_presets(
+            content,
+            agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+            claimed,
+            presets,
+        )?;
     if agent_doc_codex_hook_io::is_context_clear_prompt(&prompt)
         || agent_doc_queue::queue_command::slash_command_text(&prompt).is_some()
     {
@@ -7493,6 +7502,7 @@ Reviewed the gated items.\n\
                 first_active_queue_prompt_in_content(
                     &document(queue),
                     &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+                    &Default::default(),
                 )
                 .as_deref(),
                 expected,

@@ -823,9 +823,10 @@ impl agent_doc_supervisor_process::route_owned_completion::RouteOwnedCompletionS
         let Some(content) = agent_doc_fs::read_optional_text(file).ok().flatten() else {
             return false;
         };
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head_with_presets(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&content, file),
         )
         .is_none()
     }

@@ -92,6 +92,31 @@ frontmatter remain byte-for-byte operator-owned, and editing `project.md` does
 not require restarting agent-doc. Structured `runbook` metadata remains attached
 to the preset that declares it; interpolation composes prompt text only.
 
+### Queue heads that invoke an inherited preset
+
+A queue head whose leading token is an effective preset (`- #review`,
+`- #gh-fix <url>`, `do [#review]`) is a preset invocation: free-text work the
+preset expands, not a reference to tracked work. This holds whether the preset
+is declared in the session document or only inherited from a
+`.agent-doc/project.md` (GH #381). Every queue drainability check (preflight's
+`queue_drainable_head_count` and supervisor head, `session-check` and the Codex
+Stop continuation gate, the supervisor idle watch and orphan drain, `plan`) and
+the preflight Todo-backlink audit therefore resolve the effective preset map,
+not the document's own `presets` alone. Such a head:
+
+- is drainable without a backing backlog/icebox item, so an `agent:backlog`
+  that lacks the name does not turn it into a stale mirror;
+- owes no Todo backlink, so preflight does not emit
+  `tracked_work_missing_todo_backlink` for it; and
+- routes by its invocation text, never by the bare preset name.
+
+A name that is also open tracked work (an open backlog, review, or icebox item)
+keeps tracked-item precedence, exactly as for a document-local preset. The
+inherited map is resolved on read for these checks and is never written into
+the session document. Because drainability grants no authorization, an
+unreadable or malformed project file degrades these checks to the document's
+own presets; preset expansion keeps failing closed on the same file.
+
 A missing project file means there are no project defaults. An existing file
 with malformed frontmatter must produce an actionable diagnostic and must not
 silently authorize an inherited preset. Document-local presets remain the
@@ -127,6 +152,10 @@ Integration coverage for the resolver must prove:
   inherited authorization;
 - consumers such as preflight expansion and queue subagent authorization use
   the same effective preset map;
+- a queue head naming a project-only preset is drainable with an
+  `agent:backlog` that lacks the name and draws no
+  `tracked_work_missing_todo_backlink` signal, while the same name as open
+  backlog work stays tracked (GH #381);
 - project presets interpolate document-local overrides recursively without
   rewriting either document; and
 - missing explicit references, unset declared values, and cycles fail closed,

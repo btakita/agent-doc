@@ -203,6 +203,16 @@ internal class KeystrokeBenchmark(
                 native = { RouteOutcome.derive(ROUTE_OUTPUT, "plan.md") },
                 frozen = { RouteOutcome.frozen(ROUTE_OUTPUT, "plan.md") },
             ),
+            // TerminalUtil: one finished Clear Session Context command's output, read once per press.
+            MovedRule(
+                "session_command_outcome",
+                native = {
+                    SessionCommandOutcome.derive(SessionCommandOutcome.Command.CLEAR, false, false, CLEAR_REFUSAL_OUTPUT, "plan.md")
+                },
+                frozen = {
+                    SessionCommandOutcome.frozen(SessionCommandOutcome.Command.CLEAR, false, false, CLEAR_REFUSAL_OUTPUT, "plan.md")
+                },
+            ),
             // PatchWatcher: the prefix repair of a patched document, once per patch that names
             // targets. The worst case: the whole document crosses both ways.
             MovedRule(
@@ -350,6 +360,13 @@ internal class KeystrokeBenchmark(
                 "Error: dispatch-only codex reopen for plan.md was accepted in pane %12 via direct_pane_submit " +
                 "(tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; " +
                 "treating this as not dispatched because no dispatch-start proof was recorded."
+
+        /** A representative clear output: a busy-pane refusal with its source, command, and quoted tail. */
+        val CLEAR_REFUSAL_OUTPUT: String =
+            "agent-doc command failed (exit 1): Error: session_clear refused for /repo/plan.md because pane %12 " +
+                "is alive-busy (source=authoritative_actor, current_command=agent-doc, " +
+                "tail=\"gpt-5.5 high \u00b7 ~/repo \u00b7 Context 15% used\"). Run `agent-doc session status /repo/plan.md` " +
+                "and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it."
 
         /** A keystroke case may grow by this much (or this fraction) before the gate fails. */
         const val GATE_ABSOLUTE_MICROS = 5.0

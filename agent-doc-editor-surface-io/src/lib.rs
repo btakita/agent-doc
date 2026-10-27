@@ -305,6 +305,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "attach_failure_diagnosis",
     "route_outcome",
     "exchange_prefix_repair",
+    "session_command_outcome",
 ];
 
 #[derive(serde::Deserialize)]
@@ -414,6 +415,18 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             let evidence: agent_doc_editor_surface::RouteOutcomeEvidence =
                 serde_json::from_value(input).context("parse route outcome evidence")?;
             serde_json::to_value(agent_doc_editor_surface::derive_route_outcome(&evidence))?
+        }
+        "session_command_outcome" => {
+            // `#jbsessioncmdoutcome`: what a Clear Session Context or Restart
+            // session command's output means for the operator
+            // (`TerminalUtil.clearSessionContext` / `runRestartCommand`): the
+            // outcome kind, the queued-clear and refusal details, and the
+            // notification text.
+            let evidence: agent_doc_editor_surface::SessionCommandOutcomeEvidence =
+                serde_json::from_value(input).context("parse session command outcome evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_session_command_outcome(
+                &evidence,
+            ))?
         }
         "exchange_prefix_repair" => {
             // `#jbshrinkrestarts`: the patch watcher's `❯ ` prompt-prefix repair
@@ -1099,6 +1112,36 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!("route_outcome"))
+        );
+    }
+
+    /// `#jbsessioncmdoutcome`: the native `session_command_outcome` derivation
+    /// answers every shared parity case through the derivation channel. The
+    /// plugin's frozen Kotlin floor answers the same file in
+    /// `SessionCommandOutcomeTest`, so the two cannot drift silently.
+    #[test]
+    fn session_command_outcome_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/session_command_outcome.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 30, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request = serde_json::json!({
+                "derivation": "session_command_outcome",
+                "input": case["input"].clone(),
+            });
+            let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
+            assert_eq!(output, case["expected"], "{name}");
+        }
+        let listed = derive_editor_from_json(r#"{"derivation":"capabilities"}"#).unwrap();
+        assert!(
+            listed["output"]["derivations"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("session_command_outcome"))
         );
     }
 

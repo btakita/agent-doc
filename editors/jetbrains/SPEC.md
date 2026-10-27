@@ -809,6 +809,34 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   `editor-derivations/exchange_prefix_repair.json` (named cases plus a seeded,
   generated mix including CRLF, no-break and other Kotlin whitespace, U+0085,
   dotted capital I, and astral text) is answered by both.
+- `session_command_outcome` (`#jbsessioncmdoutcome`): what a finished Clear
+  Session Context or Restart session command's output means for the operator
+  (`TerminalUtil.clearSessionContext` and `runRestartCommand`). Evidence is the
+  command (`clear` or `restart`; agent and supervisor share the wording),
+  whether it exited zero, whether a restart was forced, the trimmed output, and
+  the document's relative path. Native owns the outcome kind (`cleared`,
+  `clear_queued` behind a live turn, a settling prompt, or an accepted Run Agent
+  Doc dispatch, `clear_deferred` under a busy auto-loop, `clear_refused` for a
+  busy pane, protected prompt input, or a live turn no supervisor owns,
+  `restart_refused_editor_holds_pane`, `restart_refused_busy`,
+  `restart_refused_starting`, or `generic` for the adapter's own failure or
+  restart-success handling), the matching detail (exactly the one its kind
+  names), and the notification text. A forced restart reads only the
+  editor-holds-pane refusal, which `--force` cannot bypass; a successful restart
+  is always `generic` (its notice comes from the ops-log telemetry, which stays
+  in Kotlin). The command thread asks once per command and executes the answer:
+  the notification type, its actions (Refresh and retry only for a non-protected
+  clear refusal; no Interrupt and restart for an editor holding the pane), the
+  Copy details hint, and the clear-command bookkeeping stay in Kotlin.
+  `SessionCommandOutcome.frozen` composes the pre-move `TerminalUtil` rules and
+  is never extended. A kind token this plugin generation cannot execute, or a
+  refusal kind without readable details, takes the whole floor, so a new *kind*
+  needs a plugin generation; new wording, or a new output shape for an existing
+  kind, does not. The native rules reproduce `java.util.regex`'s ASCII `\s`,
+  `\S`, `\d`, and `\b` with DOT_MATCHES_ALL headers, Kotlin `trim`/`isBlank`
+  whitespace, `toLongOrNull`, `substringBefore`, `removeSuffix`, and
+  `removeSurrounding`. The parity file
+  `editor-derivations/session_command_outcome.json` is answered by both.
 - `capabilities`: the derivations the loaded library answers, and (phase 5c)
   `captured_splice_inputs`, the optional inputs its captured-splice calls accept.
 

@@ -110,7 +110,7 @@ const JAVA_SPACE: &str = r"[ \t\n\x0B\x0C\r]";
 /// `java.util.regex` `\S` (ASCII).
 const JAVA_NON_SPACE: &str = r"[^ \t\n\x0B\x0C\r]";
 
-fn java_regex(pattern: &str) -> Regex {
+pub(crate) fn java_regex(pattern: &str) -> Regex {
     let pattern = pattern
         .replace(r"\s", JAVA_SPACE)
         .replace(r"\S", JAVA_NON_SPACE)
@@ -136,7 +136,7 @@ static DRAFT_PREVIEW: LazyLock<Regex> =
 /// Character.isSpaceChar(c)`, i.e. the Zs/Zl/Zp separators plus the ASCII
 /// controls tab through carriage return and U+001C..U+001F. Unlike
 /// `char::is_whitespace` it excludes U+0085.
-fn kotlin_is_whitespace(c: char) -> bool {
+pub(crate) fn kotlin_is_whitespace(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n'
@@ -157,17 +157,17 @@ fn kotlin_is_whitespace(c: char) -> bool {
 }
 
 /// Kotlin `String.trim()`.
-fn kotlin_trim(value: &str) -> &str {
+pub(crate) fn kotlin_trim(value: &str) -> &str {
     value.trim_matches(kotlin_is_whitespace)
 }
 
 /// Kotlin `CharSequence.isBlank()`.
-fn kotlin_is_blank(value: &str) -> bool {
+pub(crate) fn kotlin_is_blank(value: &str) -> bool {
     value.chars().all(kotlin_is_whitespace)
 }
 
 /// Kotlin `String.lines()` / `lineSequence()`: split at CRLF, LF, and CR.
-fn kotlin_lines(value: &str) -> Vec<&str> {
+pub(crate) fn kotlin_lines(value: &str) -> Vec<&str> {
     let mut lines = Vec::new();
     let bytes = value.as_bytes();
     let mut start = 0;

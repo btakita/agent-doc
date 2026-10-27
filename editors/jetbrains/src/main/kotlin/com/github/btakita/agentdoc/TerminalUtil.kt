@@ -1417,23 +1417,36 @@ object TerminalUtil {
                 // #hj7s: an editor holding the pane refuses for BOTH Restart and
                 // --force Interrupt-and-Restart, so this handler runs for force too
                 // (the force path previously had no onFailure and failed silently).
-                val editorRefusal = parseEditorHoldsPaneRestartRefusal(output)
-                if (editorRefusal != null) {
-                    notifyEditorHoldsPaneRestartBlocked(project, file, relativePath, editorRefusal, output)
-                } else if (force) {
-                    notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
-                } else {
-                    val busyRefusal = parseBusySessionRestartRefusal(output)
-                    if (busyRefusal != null) {
-                        notifyBusySessionRestartBlocked(project, file, relativePath, target, busyRefusal, output)
-                    } else {
-                        val startingRefusal = parseStartingSessionRestartRefusal(output)
-                        if (startingRefusal != null) {
-                            notifyStartingSessionRestartBlocked(project, file, relativePath, target, startingRefusal, output)
-                        } else {
-                            notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
-                        }
+                // `#jbsessioncmdoutcome`: what the output means (which refusal, its
+                // details, its text) is the hot-reloaded native
+                // `session_command_outcome` derivation; this thread only executes it.
+                val outcome = SessionCommandOutcome.derive(
+                    SessionCommandOutcome.Command.RESTART,
+                    succeeded = false,
+                    force = force,
+                    output = output,
+                    relativePath = relativePath,
+                )
+                val editorRefusal = outcome.restartRefusedEditorHoldsPane
+                val busyRefusal = outcome.restartRefusedBusy
+                val startingRefusal = outcome.restartRefusedStarting
+                when {
+                    outcome.kind == SessionCommandOutcome.Kind.RESTART_REFUSED_EDITOR_HOLDS_PANE &&
+                        editorRefusal != null -> {
+                        val summary = outcome.summary
+                            ?: buildEditorHoldsPaneRestartBlockedMessage(relativePath, editorRefusal)
+                        notifyEditorHoldsPaneRestartBlocked(project, file, relativePath, summary, output)
                     }
+                    outcome.kind == SessionCommandOutcome.Kind.RESTART_REFUSED_BUSY && busyRefusal != null -> {
+                        val summary = outcome.summary ?: buildBusySessionRestartBlockedMessage(relativePath, busyRefusal)
+                        notifyBusySessionRestartBlocked(project, file, relativePath, target, summary, output)
+                    }
+                    outcome.kind == SessionCommandOutcome.Kind.RESTART_REFUSED_STARTING && startingRefusal != null -> {
+                        val summary = outcome.summary
+                            ?: buildStartingSessionRestartBlockedMessage(relativePath, startingRefusal)
+                        notifyStartingSessionRestartBlocked(project, file, relativePath, target, summary, output)
+                    }
+                    else -> notifyError(project, "agent-doc command failed (exit $exitCode):\n$output")
                 }
             },
             onComplete = onComplete,
@@ -1545,27 +1558,46 @@ object TerminalUtil {
                 // loop, deliver the clear at the next idle gap, resume) instead of
                 // hard-blocking. Surface that as a distinct "deferred" notice so
                 // the operator knows it will run shortly, not that it ran now.
-                val deferredClear = isDeferredQueuePreemptClear(output)
-                val liveTurnQueued = parseLiveTurnQueuedClear(output)
-                clearFinishedNow = !deferredClear && liveTurnQueued == null
-                if (liveTurnQueued != null) {
-                    notifyInfo(project, buildLiveTurnQueuedClearMessage(clearRelativePath, liveTurnQueued))
-                } else if (deferredClear) {
-                    notifyInfo(
-                        project,
-                        "Clear Session Context deferred for $clearRelativePath.\n" +
-                            "The pane is busy under an active queue auto-loop, so the loop was paused " +
-                            "and the clear will run automatically at the next idle gap, then the loop resumes. " +
-                            "Use Interrupt and clear to clear immediately instead.",
-                    )
-                } else {
-                    showHint(project, output.ifBlank { "Cleared session context for $clearRelativePath" })
+                // `#jbsessioncmdoutcome`: what the output means is the hot-reloaded
+                // native `session_command_outcome` derivation; this thread only executes it.
+                val outcome = SessionCommandOutcome.derive(
+                    SessionCommandOutcome.Command.CLEAR,
+                    succeeded = true,
+                    force = false,
+                    output = output,
+                    relativePath = clearRelativePath,
+                )
+                val liveTurnQueued = outcome.clearQueued
+                clearFinishedNow = false
+                when {
+                    outcome.kind == SessionCommandOutcome.Kind.CLEAR_QUEUED && liveTurnQueued != null ->
+                        notifyInfo(
+                            project,
+                            outcome.summary ?: buildLiveTurnQueuedClearMessage(clearRelativePath, liveTurnQueued),
+                        )
+                    outcome.kind == SessionCommandOutcome.Kind.CLEAR_DEFERRED ->
+                        notifyInfo(project, outcome.summary ?: buildDeferredQueuePreemptClearMessage(clearRelativePath))
+                    else -> {
+                        clearFinishedNow = true
+                        showHint(
+                            project,
+                            outcome.summary ?: output.ifBlank { "Cleared session context for $clearRelativePath" },
+                        )
+                    }
                 }
             },
             onFailure = { clearRelativePath, exitCode, output ->
-                val busyRefusal = parseBusySessionClearRefusal(output)
-                if (busyRefusal != null) {
-                    notifyBusySessionClearBlocked(project, file, clearRelativePath, busyRefusal, output)
+                val outcome = SessionCommandOutcome.derive(
+                    SessionCommandOutcome.Command.CLEAR,
+                    succeeded = false,
+                    force = false,
+                    output = output,
+                    relativePath = clearRelativePath,
+                )
+                val busyRefusal = outcome.clearRefused
+                if (outcome.kind == SessionCommandOutcome.Kind.CLEAR_REFUSED && busyRefusal != null) {
+                    val summary = outcome.summary ?: buildBusySessionClearBlockedMessage(clearRelativePath, busyRefusal)
+                    notifyBusySessionClearBlocked(project, file, clearRelativePath, busyRefusal, summary, output)
                 } else {
                     notifyError(
                         project,
@@ -1883,6 +1915,13 @@ object TerminalUtil {
     /// `session_clear deferred for ...` to stderr on that path.
     internal fun isDeferredQueuePreemptClear(output: String): Boolean =
         output.contains("session_clear deferred for")
+
+    /** The deferred-clear notice (`SessionCommandOutcome.frozen`). */
+    internal fun buildDeferredQueuePreemptClearMessage(relativePath: String): String =
+        "Clear Session Context deferred for $relativePath.\n" +
+            "The pane is busy under an active queue auto-loop, so the loop was paused " +
+            "and the clear will run automatically at the next idle gap, then the loop resumes. " +
+            "Use Interrupt and clear to clear immediately instead."
 
     /**
      * #clearqueuedliveturn: Clear Session Context during a live turn succeeds by
@@ -2500,9 +2539,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         file: VirtualFile,
         relativePath: String,
         refusal: BusySessionClearRefusal,
+        summary: String,
         rawOutput: String,
     ) {
-        val summary = buildBusySessionClearBlockedMessage(relativePath, refusal)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2534,10 +2573,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         file: VirtualFile,
         relativePath: String,
         target: RestartTarget,
-        refusal: BusySessionRestartRefusal,
+        summary: String,
         rawOutput: String,
     ) {
-        val summary = buildBusySessionRestartBlockedMessage(relativePath, refusal)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2564,10 +2602,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         file: VirtualFile,
         relativePath: String,
         target: RestartTarget,
-        refusal: StartingSessionRestartRefusal,
+        summary: String,
         rawOutput: String,
     ) {
-        val summary = buildStartingSessionRestartBlockedMessage(relativePath, refusal)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2593,10 +2630,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         project: Project,
         file: VirtualFile,
         relativePath: String,
-        refusal: EditorHoldsPaneRestartRefusal,
+        summary: String,
         rawOutput: String,
     ) {
-        val summary = buildEditorHoldsPaneRestartBlockedMessage(relativePath, refusal)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")

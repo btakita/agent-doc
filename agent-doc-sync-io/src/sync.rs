@@ -427,18 +427,48 @@ fn refresh_drifted_pane_window_binding_with_origin(
     caller: &str,
     reason: &str,
 ) -> Result<Option<String>> {
+    refresh_drifted_pane_window_binding_with_hook(
+        file,
+        caller,
+        reason,
+        |pane| agent_doc_tmux_io::target_window_id(tmux, pane),
+        &mut || {},
+    )
+}
+
+/// [`refresh_drifted_pane_window_binding_with_origin`] with the live-window
+/// observation injected and a hook between the decision read and the fenced
+/// actor write, so tests drive the race without a tmux server.
+///
+/// `#syncbindingfence`: the window correction keeps the observed pane, session,
+/// generation, and lifecycle state, and is compare-and-swapped on the observed
+/// record ([`agent_doc_session_actor_io::correct_binding_window_fenced_in`]).
+/// Re-binding through `project_binding_in` stamped an owner's `Busy` as `Ready`,
+/// and, because it re-reads the generation at write time, bound the observed
+/// pane back over an owner that moved the document between the read and the
+/// write. A record that changed after the read is left alone; the next pass
+/// re-observes it.
+fn refresh_drifted_pane_window_binding_with_hook(
+    file: &Path,
+    caller: &str,
+    reason: &str,
+    live_window_of: impl Fn(&str) -> Option<String>,
+    between_decision_and_write: &mut dyn FnMut(),
+) -> Result<Option<String>> {
     let base_dir = match agent_doc_fs::find_project_root_canonical(file) {
         Some(root) => root,
         None => return Ok(None),
     };
     let file_key = file.to_string_lossy().to_string();
-    let Some(record) = agent_doc_session_actor_io::load_record_in(&base_dir, &file_key)? else {
+    let (Some(record), revision) =
+        agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?
+    else {
         return Ok(None);
     };
     if record.pane_id.trim().is_empty() {
         return Ok(None);
     }
-    let Some(live_window) = agent_doc_tmux_io::target_window_id(tmux, &record.pane_id) else {
+    let Some(live_window) = live_window_of(&record.pane_id) else {
         return Ok(None);
     };
     let live_window = live_window.trim().to_string();
@@ -459,19 +489,37 @@ fn refresh_drifted_pane_window_binding_with_origin(
     }
 
     let recorded = record.window_id.clone();
+    between_decision_and_write();
+    let mut actor_rebound = false;
     if actor_drifted {
-        agent_doc_session_actor_io::project_binding_in(
+        match agent_doc_session_actor_io::correct_binding_window_fenced_in(
             &base_dir,
             &file_key,
-            &record.session_id,
-            &record.pane_id,
+            &record,
+            revision,
             &live_window,
             caller,
             reason,
-        )?;
+        ) {
+            Ok(_) => actor_rebound = true,
+            Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+                sync_log(&format!(
+                    "pane_window_binding_rebind_superseded file={} pane={} generation={} err={}",
+                    file.display(),
+                    record.pane_id,
+                    record.generation,
+                    err
+                ));
+            }
+            Err(err) => return Err(err),
+        }
     }
-    if registry_drifted {
-        rebind_registry_pane_window(&base_dir, &record.pane_id, &live_window)?;
+    // The registry half is a physical observation about the pane, not a
+    // binding decision: tmux says where the pane IS regardless of the record.
+    let registry_rebound =
+        registry_drifted && rebind_registry_pane_window(&base_dir, &record.pane_id, &live_window)?;
+    if !actor_rebound && !registry_rebound {
+        return Ok(None);
     }
 
     Ok(Some(format!(
@@ -526,7 +574,8 @@ fn registry_window_for_pane(base_dir: &Path, pane: &str) -> Result<Option<String
 }
 
 /// Point the registry entry for `pane` at `live_window`, under the registry lock.
-fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -> Result<()> {
+/// Returns whether an entry changed.
+fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -> Result<bool> {
     let registry_path = agent_doc_session_registry_io::registry_path_in(base_dir);
     let _lock = tmux_router::RegistryLock::acquire(&registry_path)?;
     let mut registry = agent_doc_session_registry_io::load_in(base_dir)?;
@@ -535,17 +584,17 @@ fn rebind_registry_pane_window(base_dir: &Path, pane: &str, live_window: &str) -
         .find(|(_, entry)| entry.pane == pane)
         .map(|(key, _)| key.clone())
     else {
-        return Ok(());
+        return Ok(false);
     };
     let Some(entry) = registry.get_mut(&key) else {
-        return Ok(());
+        return Ok(false);
     };
     if entry.window == live_window {
-        return Ok(());
+        return Ok(false);
     }
     entry.window = live_window.to_string();
     agent_doc_session_registry_io::save_in(base_dir, &registry)?;
-    Ok(())
+    Ok(true)
 }
 
 fn recover_jb_cache_conflict_cancel_commit_boundary(file: &Path) -> Result<Option<String>> {
@@ -1313,7 +1362,7 @@ fn refresh_durable_registry_for_actor_record(
         actor_pane,
         record.generation
     ));
-    if let Err(err) = reregister_recovered_owner(tmux, file, session_id, actor_pane) {
+    if let Err(err) = refresh_registry_for_actor_pane(tmux, file, session_id, actor_pane) {
         eprintln!(
             "[sync] warning: failed to refresh authoritative actor pane {} for {} in durable registry: {}",
             actor_pane,
@@ -2233,8 +2282,8 @@ fn pin_displaced_open_cycle_windows_as_stash(
     target_window: Option<&str>,
     pane_ids: &HashSet<String>,
 ) -> Result<()> {
-    let target_window_id = target_window
-        .and_then(|target| agent_doc_tmux_io::target_window_id(tmux, target));
+    let target_window_id =
+        target_window.and_then(|target| agent_doc_tmux_io::target_window_id(tmux, target));
     let mut pinned_windows = HashSet::new();
     for pane_id in pane_ids {
         let Some(window_id) = agent_doc_tmux_io::target_window_id(tmux, pane_id) else {
@@ -2248,9 +2297,7 @@ fn pin_displaced_open_cycle_windows_as_stash(
         for option in ["automatic-rename", "allow-rename"] {
             tmux.raw_cmd(&["set-window-option", "-t", &window_id, option, "off"])
                 .with_context(|| {
-                    format!(
-                        "failed to pin displaced open-cycle window {window_id} option {option}"
-                    )
+                    format!("failed to pin displaced open-cycle window {window_id} option {option}")
                 })?;
         }
         agent_doc_tmux_io::rename_window(tmux, &window_id, "stash").with_context(|| {
@@ -2461,10 +2508,7 @@ fn safe_passive_prune_cleanup_mode_at_root(
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
-fn exact_visible_safe_passive(
-    auto_start_mode: AutoStartMode,
-    exact_visible_target: bool,
-) -> bool {
+fn exact_visible_safe_passive(auto_start_mode: AutoStartMode, exact_visible_target: bool) -> bool {
     matches!(auto_start_mode, AutoStartMode::SafePassive) && exact_visible_target
 }
 
@@ -6771,11 +6815,40 @@ fn pane_contains_supervisor_pid(tmux: &Tmux, pane_id: &str, target_pid: u32) -> 
     agent_doc_process_owner_io::process_tree_contains_pid(&pane_pid.to_string(), target_pid)
 }
 
+/// Re-register `pane_id` as `file`'s owner after a sync or resync recovery
+/// proved the pane hosts it.
+///
+/// `#syncbindingfence`: the actor write is decided from one read of the actor
+/// record and compare-and-swapped on it
+/// ([`sessions::rebind_recovered_owner_in`]). A record that already binds the
+/// session to the pane is left to its owner (only the registry is refreshed),
+/// and a newer owner or operator commit for another pane is never bound over.
 pub fn reregister_recovered_owner(
     tmux: &Tmux,
     file: &Path,
     session_id: &str,
     pane_id: &str,
+) -> anyhow::Result<()> {
+    rebind_recovered_owner_pane(tmux, file, session_id, pane_id, true)
+}
+
+/// Refresh the durable registry entry for the pane the authoritative actor
+/// record already names, without writing the actor (`#syncbindingfence`).
+fn refresh_registry_for_actor_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> anyhow::Result<()> {
+    rebind_recovered_owner_pane(tmux, file, session_id, pane_id, false)
+}
+
+fn rebind_recovered_owner_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    may_write_actor: bool,
 ) -> anyhow::Result<()> {
     let Some((canonical_file, project_root, _registry_key)) = registry_location_for_file(file)
     else {
@@ -6783,46 +6856,66 @@ pub fn reregister_recovered_owner(
     };
     let file_str = registry_relative_file_path(&project_root, &canonical_file);
 
-    if let Some(entry) = lookup_registry_entry_for_file_session(file, session_id)
-        && entry.pane == pane_id
-        && entry.pid != 0
-        && !entry.supervisor_instance_id.is_empty()
-        && pane_contains_supervisor_pid(tmux, pane_id, entry.pid)
-    {
-        return sessions::register_supervisor_in(
-            &project_root,
-            session_id,
-            pane_id,
-            &file_str,
-            entry.pid,
-            &entry.supervisor_instance_id,
-        );
-    }
-
-    if let Some(identity) = query_supervisor_identity(file, session_id)
-        && pane_contains_supervisor_pid(tmux, pane_id, identity.pid)
-    {
-        return sessions::register_supervisor_in(
-            &project_root,
-            session_id,
-            pane_id,
-            &file_str,
-            identity.pid,
-            &identity.instance_id,
-        );
-    }
-
-    let pid = pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id());
+    let supervisor = lookup_registry_entry_for_file_session(file, session_id)
+        .filter(|entry| {
+            entry.pane == pane_id
+                && entry.pid != 0
+                && !entry.supervisor_instance_id.is_empty()
+                && pane_contains_supervisor_pid(tmux, pane_id, entry.pid)
+        })
+        .map(|entry| SupervisorIdentity {
+            pid: entry.pid,
+            instance_id: entry.supervisor_instance_id,
+        })
+        .or_else(|| {
+            query_supervisor_identity(file, session_id)
+                .filter(|identity| pane_contains_supervisor_pid(tmux, pane_id, identity.pid))
+        });
+    let pid = supervisor
+        .as_ref()
+        .map(|identity| identity.pid)
+        .unwrap_or_else(|| pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id()));
     let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
-    sessions::register_full_with_cwd_in(
+    let cwd = project_root.to_string_lossy();
+    let outcome = sessions::rebind_recovered_owner_in(
         &project_root,
-        session_id,
-        pane_id,
-        &file_str,
-        pid,
-        &window,
-        &project_root.to_string_lossy(),
-    )
+        sessions::RecoveredOwnerBinding {
+            session_id,
+            pane_id,
+            file: &file_str,
+            pid,
+            window: &window,
+            cwd: &cwd,
+            supervisor_instance_id: supervisor
+                .as_ref()
+                .map(|identity| identity.instance_id.as_str()),
+            may_write_actor,
+        },
+    )?;
+    match outcome {
+        sessions::RecoveredOwnerBind::OwnerSuperseded {
+            pane_id: owner_pane,
+            generation,
+            caller,
+            reason,
+        } => sync_log(&format!(
+            "recovered_owner_bind_superseded file={} pane={} owner_pane={} generation={} caller={} reason={}",
+            file.display(),
+            pane_id,
+            owner_pane,
+            generation,
+            caller,
+            reason
+        )),
+        sessions::RecoveredOwnerBind::ActorNotBound => sync_log(&format!(
+            "registry_refresh_skipped_actor_not_bound file={} pane={}",
+            file.display(),
+            pane_id
+        )),
+        sessions::RecoveredOwnerBind::RegistryRefreshed
+        | sessions::RecoveredOwnerBind::Bound { .. } => {}
+    }
+    Ok(())
 }
 
 fn find_registered_pane_via_path_provenance(
@@ -13856,6 +13949,152 @@ mod tests {
             refresh_drifted_pane_window_binding(&iso, &doc)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    /// A document bound on `%5` with a stale window, plus its key.
+    fn window_drift_fixture(root: &Path) -> (PathBuf, String) {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join("tasks")).unwrap();
+        let doc = root.join("tasks/bound.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: bound-session\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+        let file_key = doc.to_string_lossy().to_string();
+        agent_doc_session_actor_io::project_binding_in(
+            root,
+            &file_key,
+            "bound-session",
+            "%5",
+            STALE_WINDOW,
+            "test",
+            "seed_stale_binding",
+        )
+        .unwrap();
+        (doc, file_key)
+    }
+
+    fn owner_transition(
+        root: &Path,
+        file_key: &str,
+        state: agent_doc_controller::actor::ActorState,
+    ) {
+        agent_doc_session_actor_io::transition_state_in(
+            root,
+            file_key,
+            "bound-session",
+            "%5",
+            Some(1),
+            state,
+            "supervisor",
+            "turn_start",
+        )
+        .unwrap();
+    }
+
+    fn refresh_window(doc: &Path, hook: &mut dyn FnMut()) -> Option<String> {
+        refresh_drifted_pane_window_binding_with_hook(
+            doc,
+            "sync",
+            "post_layout_live_window_rebind",
+            |_| Some("@5".to_string()),
+            hook,
+        )
+        .unwrap()
+    }
+
+    /// `#syncbindingfence`: a window correction is a fact about where the pane
+    /// is, not a re-election. Routing it through `project_binding_in` stamped
+    /// the running owner's `Busy` record `Ready`.
+    #[test]
+    fn window_binding_refresh_keeps_the_owners_state_and_generation() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, file_key) = window_drift_fixture(root);
+        owner_transition(root, &file_key, ActorState::Busy);
+
+        let note = refresh_window(&doc, &mut || {}).expect("a drifted window is corrected");
+        assert!(note.contains(STALE_WINDOW), "{note}");
+
+        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.window_id, "@5");
+        assert_eq!(record.pane_id, "%5");
+        assert_eq!(record.generation, 1);
+        assert_eq!(
+            record.state,
+            ActorState::Busy,
+            "the correction must not re-project the owner as Ready"
+        );
+    }
+
+    /// The owner moves the document to another pane between the refresh's
+    /// read and its write. The old write re-read the generation and bound the
+    /// observed pane back over the new owner at generation + 1.
+    #[test]
+    fn window_binding_refresh_is_fenced_against_an_owner_rebind_after_its_read() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, file_key) = window_drift_fixture(root);
+        let mut moved = false;
+        let mut owner_moves = || {
+            if !moved {
+                moved = true;
+                agent_doc_session_actor_io::record_session_start_direct(
+                    &doc,
+                    "bound-session",
+                    "%9",
+                    "@7",
+                    2,
+                )
+                .unwrap();
+            }
+        };
+
+        assert_eq!(refresh_window(&doc, &mut owner_moves), None);
+
+        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.pane_id, "%9");
+        assert_eq!(record.generation, 2);
+        assert_eq!(record.state, ActorState::Starting);
+        assert_eq!(record.window_id, "@7");
+    }
+
+    /// A same-generation owner transition after the read: only the revision
+    /// fence sees it. A generation-only fence lands the correction with the
+    /// observed `Ready` state over the owner's `Busy`.
+    #[test]
+    fn window_binding_refresh_is_fenced_against_a_same_generation_owner_transition() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let (doc, file_key) = window_drift_fixture(root);
+        let mut transitioned = false;
+        let mut owner_goes_busy = || {
+            if !transitioned {
+                transitioned = true;
+                owner_transition(root, &file_key, ActorState::Busy);
+            }
+        };
+
+        // The registry half still records where the pane physically is.
+        let _ = refresh_window(&doc, &mut owner_goes_busy);
+
+        let record = agent_doc_session_actor_io::load_record_in(root, &file_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, ActorState::Busy);
+        assert_eq!(record.last_transition.caller, "supervisor");
+        assert_eq!(
+            record.window_id, STALE_WINDOW,
+            "the next pass re-observes; this one wrote nothing"
         );
     }
 

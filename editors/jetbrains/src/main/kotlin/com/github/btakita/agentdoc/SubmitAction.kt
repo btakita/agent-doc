@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 /**
@@ -49,7 +48,7 @@ class SubmitAction : ImplAction {
                 }
             }
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             if (project.isDisposed || !file.isValid) return@executeOnPooledThread
             val resolved =
                 try {
@@ -67,7 +66,7 @@ class SubmitAction : ImplAction {
                     focusedFile = file.path,
                 )
             attempt.recordIfCurrent(saveStage)
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 if (project.isDisposed || !file.isValid) {
                     attempt.finishIfCurrent(
                         "document_unavailable",

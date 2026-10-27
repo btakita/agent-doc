@@ -24,7 +24,6 @@ import io.github.lazily.MergePolicy
 import io.github.lazily.ThreadSafeContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -1302,9 +1301,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java)
     // Project-wide scheduling owns fan-out/backoff only. Every operation that
     // reads or mutates one replica runs on that document's serialized lane.
-    private val executor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-crdt-replica-control").apply { isDaemon = true }
-    }
+    private val executor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-crdt-replica-control")
     private val documentWorkers = DocumentReplicaWorkers()
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
     /** Paths held detached by a receipt-bearing focused-extract transaction. */
@@ -3194,7 +3191,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (disposed.get() || project.isDisposed) return
         if (!remoteEditorApplyScheduled.compareAndSet(false, true)) return
         try {
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 try {
                     if (disposed.get() || project.isDisposed) {
                         remoteEditorApplies.clear()
@@ -4720,7 +4717,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         // A diagnosis asked with a file name always carries its message.
         val message = diagnosis.holdMessage ?: AttachFailureDiagnosis.frozenHoldMessage(File(filePath).name, reason)
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (!project.isDisposed) TerminalUtil.notifyError(project, message)
         }
     }
@@ -5657,7 +5654,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 manager.log.debug("[crdt-replica] coalesced peer replica pull; reason=$reason")
                 return
             }
-            ApplicationManager.getApplication().executeOnPooledThread {
+            GenerationWork.executeOnPooledThread {
                 if (project.isDisposed) return@executeOnPooledThread
                 val pid = ProcessHandle.current().pid()
                 val json = PeerReplicaPull.missingRegistrationsJson(root, pid, emptyList())
@@ -5935,7 +5932,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             }
                         }
                         .toList()
-                ApplicationManager.getApplication().executeOnPooledThread {
+                GenerationWork.executeOnPooledThread {
                     if (project.isDisposed) return@executeOnPooledThread
                     openDocuments.forEach { (filePath, fileName, document) ->
                         manager.log.info("[crdt-replica] forcing open-document re-register for $fileName reason=$reason")
@@ -6006,7 +6003,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         ?: return@runOnEdtNonBlocking
                 val resolvedFilePath = file.path
                 val fileName = file.name
-                ApplicationManager.getApplication().executeOnPooledThread {
+                GenerationWork.executeOnPooledThread {
                     if (project.isDisposed) return@executeOnPooledThread
                     if (!manager.beginProjectionRecoveryReregister(resolvedFilePath)) {
                         manager.log.info(
@@ -6134,7 +6131,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             if (javax.swing.SwingUtilities.isEventDispatchThread()) {
                 block()
             } else {
-                ApplicationManager.getApplication().invokeLater(block)
+                GenerationWork.invokeLater(block)
             }
         }
 

@@ -55,7 +55,7 @@ internal class DocumentReplicaWorkers(
     private fun threadFactory(filePath: String): ThreadFactory {
         val pathKey = filePath.hashCode().toUInt().toString(16)
         return ThreadFactory { runnable ->
-            Thread(
+            GenerationWork.newThread(
                 runnable,
                 "agent-doc-crdt-replica-$pathKey-${threadSequence.incrementAndGet()}",
             ).apply {

@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -51,7 +50,7 @@ internal class ClaimDocumentFence private constructor(
         try {
             if (file.isValid) file.refresh(false, false)
         } finally {
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 editorsToRestore.forEach { editor ->
                     if (!editor.isDisposed) editor.isViewer = false
                 }
@@ -200,7 +199,7 @@ class ClaimAction : ImplAction {
             return
         }
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             var pendingReject: CrossSessionReject? = null
             try {
                 TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
@@ -290,7 +289,7 @@ class ClaimAction : ImplAction {
         position: String?,
         reject: CrossSessionReject,
     ) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val choice = Messages.showDialog(
                 project,
                 "Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's " +
@@ -335,9 +334,9 @@ class ClaimAction : ImplAction {
         newPane: Boolean,
     ) {
         if (switchTo != null) {
-            ApplicationManager.getApplication().executeOnPooledThread {
+            GenerationWork.executeOnPooledThread {
                 val (setExit, setOut) = runSessionSet(cwd, agentDoc, switchTo)
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                     if (setExit != 0) {
                         TerminalUtil.notifyError(
                             project,

@@ -1045,7 +1045,7 @@ class TypingTrackerEdtBudgetTest {
             "remote CRDT editor apply should use RelayCell backpressure and schedule bounded EDT work",
             source.contains("KeyedCoalescingRelay<String, PendingRemoteEditorApply>(REMOTE_EDITOR_APPLY_MERGE)") &&
                 remoteApplyBody.contains("scheduleRemoteEditorApply()") &&
-                source.contains("ApplicationManager.getApplication().invokeLater"),
+                source.contains("GenerationWork.invokeLater"),
         )
         assertFalse(
             "ordinary remote CRDT editor apply must never synchronously wait on the EDT",

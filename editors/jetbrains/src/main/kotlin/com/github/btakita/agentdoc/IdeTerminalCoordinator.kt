@@ -4,7 +4,6 @@ import com.google.gson.JsonParser
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import java.awt.datatransfer.StringSelection
@@ -68,7 +67,7 @@ internal object IdeTerminalCoordinator {
         onReady: () -> Unit,
         onFailure: (String) -> Unit,
     ) {
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             val result = try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
                 SyncLayoutAction.runCommandWithTimeout(
@@ -95,7 +94,7 @@ internal object IdeTerminalCoordinator {
                 return@executeOnPooledThread
             }
 
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 if (project.isDisposed) return@invokeLater
                 val terminalAvailable =
                     MarketplacePlatformBridge.pluginEnabled(TERMINAL_PLUGIN_ID)
@@ -149,7 +148,7 @@ internal object IdeTerminalCoordinator {
         )
 
     private fun dispatchFailure(project: Project, onFailure: (String) -> Unit, message: String) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (!project.isDisposed) onFailure(message)
         }
     }

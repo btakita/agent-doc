@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 
@@ -50,7 +49,7 @@ class ForceClaimAction : ImplAction {
             return
         }
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             try {
                 TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)

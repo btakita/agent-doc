@@ -5,7 +5,6 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.util.concurrency.AppExecutorUtil
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
@@ -171,7 +170,7 @@ internal object PluginRestartRequiredNotifier {
         val application = ApplicationManager.getApplication() ?: return
         if (application.isUnitTestMode || PluginGeneration.retired) return
         if (!started.compareAndSet(false, true)) return
-        val future = AppExecutorUtil.getAppScheduledExecutorService().scheduleWithFixedDelay(
+        val future = GenerationWork.scheduleWithFixedDelay(
             { poll() },
             POLL_SECONDS,
             POLL_SECONDS,
@@ -201,7 +200,7 @@ internal object PluginRestartRequiredNotifier {
             "[plugin-update] restart_required loaded=${verdict.loadedVersion} " +
                 "pending=${verdict.pendingVersion} source=${verdict.source} reason=${verdict.reason.orEmpty()}",
         )
-        ApplicationManager.getApplication().invokeLater { show(verdict) }
+        GenerationWork.invokeLater { show(verdict) }
     }
 
     private fun observe(): PluginRestartRequired? {

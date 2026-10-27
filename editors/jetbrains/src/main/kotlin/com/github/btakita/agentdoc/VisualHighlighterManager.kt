@@ -33,7 +33,6 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import java.awt.Color
 import java.awt.Font
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -113,9 +112,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
     /** Component boundaries consumed by folding, gutter markers, and the structure view. */
     internal val componentOutlines = ComponentOutlineStore()
 
-    private val refreshExecutor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-visual-highlighter-events").apply { isDaemon = true }
-    }
+    private val refreshExecutor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-visual-highlighter-events")
     private val pendingRefreshes = ConcurrentHashMap<Document, ScheduledFuture<*>>()
     private val disposed = AtomicBoolean(false)
     private val refreshLifecycleLock = Any()
@@ -172,7 +169,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
     private fun refreshMarkdownFileAfterEditorEvent(file: VirtualFile) {
         if (!file.name.endsWith(".md")) return
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (disposed.get() || project.isDisposed) return@invokeLater
             refreshFile(file)
         }
@@ -190,7 +187,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
                         if (disposed.get() || project.isDisposed) return@schedule
                         val snapshot = collectVisualTokens(document)
                         if (snapshot != null) {
-                            ApplicationManager.getApplication().invokeLater {
+                            GenerationWork.invokeLater {
                                 if (disposed.get() || project.isDisposed) return@invokeLater
                                 applyVisualTokens(document, snapshot)
                             }

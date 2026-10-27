@@ -13,7 +13,6 @@ import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -607,7 +606,7 @@ internal object CpRouteClient {
         val closed = AtomicBoolean(false)
         val activeChannel = AtomicReference<SocketChannel?>()
         val thread =
-            Thread({
+            GenerationWork.newThread({
                 var controllerGeneration: Long? = null
                 var planeVersion = 0L
                 var reconnectDelayMs = TURN_AUTHORITY_RECONNECT_MIN_MS
@@ -1543,9 +1542,7 @@ private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L
 private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
 
     private val socketWatchdog by lazy {
-        Executors.newSingleThreadScheduledExecutor { runnable ->
-            Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
-        }.also { executor ->
+        GenerationWork.newSingleThreadScheduledExecutor("agent-doc-cp-socket-watchdog").also { executor ->
             PluginGeneration.registerResource("cp-socket-watchdog") {
                 executor.shutdownNow()
             }

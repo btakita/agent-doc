@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.ControlFlowException
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
@@ -334,7 +333,7 @@ class EditorFocusSyncListener private constructor(
         if (SwingUtilities.isEventDispatchThread()) {
             action()
         } else {
-            ApplicationManager.getApplication().invokeLater(Runnable(action))
+            GenerationWork.invokeLater(Runnable(action))
         }
     }
 
@@ -371,7 +370,7 @@ class EditorFocusSyncListener private constructor(
         if (SwingUtilities.isEventDispatchThread()) {
             detach.run()
         } else {
-            ApplicationManager.getApplication().invokeLater(detach)
+            GenerationWork.invokeLater(detach)
         }
     }
 

@@ -3,14 +3,12 @@ package com.github.btakita.agentdoc
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 internal data class EditorFocusIntent(
@@ -42,9 +40,7 @@ internal enum class TmuxFocusMirrorDecision {
 class TmuxPaneFocusSync private constructor(
     private val project: Project,
 ) : Disposable {
-    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-tmux-pane-focus-sync").apply { isDaemon = true }
-    }
+    private val executor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-tmux-pane-focus-sync")
 
     @Volatile
     private var lastDocumentPath: String? = null
@@ -155,7 +151,7 @@ class TmuxPaneFocusSync private constructor(
         }
         if (!canonical.name.endsWith(".md")) return
 
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (project.isDisposed) return@invokeLater
             val file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(canonical)
                 ?: return@invokeLater

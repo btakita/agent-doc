@@ -15,7 +15,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.util.concurrency.AppExecutorUtil
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.time.Instant
@@ -557,7 +556,7 @@ object TerminalUtil {
             }
 
             val startedAt = System.currentTimeMillis()
-            Thread {
+            GenerationWork.newThread {
                 var finalStage: String? = null
                 var finalError: String? = null
                 var routeGeneration: Long? = null
@@ -963,7 +962,7 @@ object TerminalUtil {
 
             showHint(project, "Fixing $relativePath")
 
-            Thread {
+            GenerationWork.newThread {
                 try {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
@@ -1004,7 +1003,7 @@ object TerminalUtil {
             showHint(project, "Running with $agent: $relativePath")
 
             // Read output in background thread to avoid blocking EDT
-            Thread {
+            GenerationWork.newThread {
                 try {
                     val output = process.inputStream.bufferedReader().readText()
                     val exitCode = process.waitFor()
@@ -1330,7 +1329,7 @@ object TerminalUtil {
         val projectRoot = cleanupProjectRoot(project)
         val agentDoc = resolveAgentDoc(projectRoot)
         showHint(project, "$label: running agent-doc ${args.joinToString(" ")}…")
-        Thread {
+        GenerationWork.newThread {
             try {
                 val cmd = listOf(agentDoc) + args
                 val result = SyncLayoutAction.runCommandWithTimeout(cmd, projectRoot)
@@ -1459,7 +1458,7 @@ object TerminalUtil {
         target: RestartTarget,
         onComplete: (() -> Unit)? = null,
     ) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val decision = Messages.showYesNoDialog(
                 project,
                 "Interrupt the running agent-doc turn and restart its ${target.noun}? Unsaved work in the terminal session may be discarded.",
@@ -1636,7 +1635,7 @@ object TerminalUtil {
     }
 
     fun interruptAndClearSessionContext(project: Project, file: VirtualFile, onComplete: (() -> Unit)? = null) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val decision = Messages.showYesNoDialog(
                 project,
                 "Interrupt the running agent-doc turn and clear its session context? Unsaved work in the terminal session may be discarded.",
@@ -1720,7 +1719,7 @@ object TerminalUtil {
 
             showHint(project, startedMessage)
 
-            Thread {
+            GenerationWork.newThread {
                 try {
                 val output = process.inputStream.bufferedReader().readText().trim()
                 val exitCode = process.waitFor()
@@ -2403,7 +2402,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     }
 
     fun showHint(project: Project, message: String) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val editor = FileEditorManager.getInstance(project).selectedTextEditor ?: return@invokeLater
             HintManager.getInstance().showInformationHint(editor, message)
         }
@@ -2438,9 +2437,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         val (label, tooltip) = editorFailurePresentation(action, detail, editorText)
         val refresher = TurnStateBannerRefresher.getInstance(project)
         val token = refresher.showTransientStatus(filePath, label, tooltip)
-        AppExecutorUtil.getAppScheduledExecutorService().schedule(
+        GenerationWork.schedule(
             {
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                     if (!project.isDisposed) {
                         refresher.clearTransientStatus(filePath, token)
                     }
@@ -3311,7 +3310,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 .createNotification(notificationHtml(content), NotificationType.INFORMATION)
             notification.notify(project)
             // Auto-expire after 3 seconds
-            Thread {
+            GenerationWork.newThread {
                 Thread.sleep(3000)
                 notification.expire()
             }.start()
@@ -3353,7 +3352,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
 
     private fun openFile(project: Project, file: File, afterOpen: (() -> Unit)? = null) {
         if (!file.exists()) return
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val virtualFile = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(file) ?: return@invokeLater
             FileEditorManager.getInstance(project).openTextEditor(
                 OpenFileDescriptor(project, virtualFile),

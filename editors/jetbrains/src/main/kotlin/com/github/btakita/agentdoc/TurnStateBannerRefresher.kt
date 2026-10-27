@@ -5,7 +5,6 @@ import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -245,7 +244,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
         if (admission.newlyAdmitted) {
             LOG.info("[turn-state] tracking $filePath via $reason")
         }
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             if (project.isDisposed || !tracking.isDisplayed(filePath)) return@executeOnPooledThread
             tracking.ensureSubscription(filePath, reason)
             admission.replay?.let { applyAuthority(filePath, it, "$reason-replay") }
@@ -260,7 +259,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
      */
     fun reapplyLastAuthority(filePath: String, reason: String) {
         if (project.isDisposed || !tracking.isDisplayed(filePath)) return
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             if (project.isDisposed) return@executeOnPooledThread
             val authorityJson = lastAuthority[filePath] ?: return@executeOnPooledThread
             applyPresentation(filePath, authorityJson, reason, record = false)
@@ -280,7 +279,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     }
 
     fun requestSelectedRefresh(reason: String) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (project.isDisposed) return@invokeLater
             FileEditorManager.getInstance(project).selectedFiles.filter(::isMarkdown).forEach {
                 requestRefresh(it, reason)
@@ -289,7 +288,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     }
 
     private fun requestOpenMarkdownRefresh(reason: String) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (project.isDisposed) return@invokeLater
             FileEditorManager.getInstance(project).openFiles.filter(::isMarkdown).forEach {
                 observeDisplayed(it, reason)
@@ -422,7 +421,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
             "[turn-state] queued clear dropped for $filePath clear_epoch=${dropped.clearEpoch} " +
                 "pane=${dropped.pane} reason=${dropped.reason} (#clearsupersedenotice)",
         )
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (project.isDisposed) return@invokeLater
             val notification =
                 NotificationGroupManager.getInstance()
@@ -447,7 +446,7 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     }
 
     private fun notifyUi(filePath: String, reason: String) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (project.isDisposed) return@invokeLater
             LocalFileSystem.getInstance().findFileByPath(filePath)?.let {
                 EditorNotifications.getInstance(project).updateNotifications(it)

@@ -190,7 +190,7 @@ class ShellRegistrationOwnershipTest {
     }
 
     /**
-     * Programmatic listeners Tier A: implementation code stages every message-bus subscription and
+     * Tier A listeners and EDT/pooled work: implementation code stages every message-bus subscription and
      * editor-factory or multicaster listener through `GenerationListeners`, which hands it to the
      * shell's per-topic forwarder. Only that bridge, in the generation entry point, may call the
      * context directly.
@@ -211,6 +211,20 @@ class ShellRegistrationOwnershipTest {
             Regex("""GenerationListeners\.(?:subscribe|add\w+Listener)\(""").findAll(file.readText()).count()
         }
         assertEquals("listener registrations staged through GenerationListeners", STAGED_LISTENERS, staged)
+    }
+
+    /**
+     * EDT and pooled work: implementation code queues EDT tasks and pooled or scheduled work, and
+     * creates executors, threads and alarms, only through `GenerationWork`, which hands them to the
+     * generation's shell work owner (`GenerationContext.invokeLater` / `GenerationContext.work`).
+     * The direct patterns are enforced at zero by the test above; this pins the staged count.
+     */
+    @Test
+    fun `implementation work is staged through the generation`() {
+        val staged = manifest.implSources().filter { it.name != "AgentDocImplGeneration.kt" }.flatMap { file ->
+            Regex("""GenerationWork\.(\w+)\s*[({]""").findAll(file.readText()).map { it.groupValues[1] }.toList()
+        }.groupingBy { it }.eachCount().toSortedMap()
+        assertEquals("work staged through GenerationWork", STAGED_WORK, staged)
     }
 
     /**
@@ -237,10 +251,30 @@ class ShellRegistrationOwnershipTest {
             "message_bus_connect" to Regex("""messageBus\s*\.\s*connect\b"""),
             "document_or_vfs_listener" to Regex("""(?<!GenerationListeners)\.add(?:Document|VirtualFile|Bulk\w*)Listener\("""),
             "editor_factory_or_multicaster_listener" to Regex("""(?<!GenerationListeners)\.add(?:EditorFactory|EditorMouse\w*)Listener\("""),
+            // EDT and pooled work: `GenerationWork.` calls are the staged form.
+            "invoke_later" to Regex("""(?<!GenerationWork\.)invokeLater\s*[({]"""),
+            "pooled_thread" to Regex("""(?<!GenerationWork\.)executeOnPooledThread\s*[({]"""),
+            "app_executor_util" to Regex("""AppExecutorUtil\."""),
+            "raw_thread" to Regex("""(?<!\w)Thread\s*[({]"""),
+            "executors_new" to Regex("""Executors\.new"""),
+            "alarm" to Regex("""\bAlarm\("""),
         )
 
         /** Every Tier A registration the implementation stages (one per former direct call). */
         const val STAGED_LISTENERS = 17
+
+        /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
+        val STAGED_WORK: Map<String, Int> = sortedMapOf(
+            "executeOnPooledThread" to 20,
+            "invokeLater" to 43,
+            "newPooledAlarm" to 1,
+            "newSingleThreadExecutor" to 1,
+            "newSingleThreadScheduledExecutor" to 8,
+            "newThread" to 14,
+            "schedule" to 5,
+            "scheduleWithFixedDelay" to 1,
+            "submit" to 1,
+        )
 
         val PENDING: List<Pair<String, Regex>> = listOf(
             // AWT and per-editor component listeners are not Tier A topics; measured until moved.
@@ -248,12 +282,6 @@ class ShellRegistrationOwnershipTest {
             // Notification objects the platform keeps in its notification log (the groups
             // themselves are XML-only); measured until the shell builds them.
             "notification" to Regex("""\bNotification\(|createNotification\("""),
-            "invoke_later" to Regex("""invokeLater\s*[({]"""),
-            "pooled_thread" to Regex("""executeOnPooledThread\s*[({]"""),
-            "app_executor_util" to Regex("""AppExecutorUtil\."""),
-            "raw_thread" to Regex("""\bThread\s*[({]"""),
-            "executors_new" to Regex("""Executors\.new"""),
-            "alarm" to Regex("""\bAlarm\("""),
             "key_create" to Regex("""Key\.create\b"""),
             "put_user_data" to Regex("""putUserData\("""),
         )

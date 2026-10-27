@@ -7,7 +7,6 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileMoveEvent
 import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
-import com.intellij.util.concurrency.AppExecutorUtil
 import io.github.lazily.ThreadSafeContext
 import io.github.lazily.ThreadSafeSourceMap
 import java.io.File
@@ -105,7 +104,7 @@ class FileRenameListener(private val project: Project) : BulkFileListener {
     private fun schedule(transitionId: String, delayMs: Long) {
         if (project.isDisposed) return
         val task =
-            AppExecutorUtil.getAppScheduledExecutorService().schedule(
+            GenerationWork.schedule(
                 {
                     scheduled.remove(transitionId)
                     reconcile(transitionId)

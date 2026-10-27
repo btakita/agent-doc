@@ -145,3 +145,81 @@ internal object GenerationListeners {
         context("editor factory listener")?.addEditorFactoryListener(listener, parent)
     }
 }
+
+/**
+ * GH #339 R1, EDT and pooled work: implementation code queues EDT tasks, pooled and scheduled
+ * work, and creates executors, threads and alarms only here, never through `Application`,
+ * `AppExecutorUtil`, `Executors` or `Thread` directly. Each call goes to the active generation's
+ * shell work owner (`GenerationContext.invokeLater` / `GenerationContext.work`).
+ *
+ * With no generation (the plugin is unloading and the host already retired it), each call falls
+ * back to the platform call it replaced, so late work behaves exactly as it did before R1.
+ */
+internal object GenerationWork {
+    /** The active generation's context, activating it on first use; null without an application. */
+    private fun context(): GenerationContext? {
+        AgentDocImplGeneration.activeContext?.let { return it }
+        com.intellij.openapi.application.ApplicationManager.getApplication()
+            ?.getService(ShellGenerationHost::class.java)
+            ?.activate()
+        return AgentDocImplGeneration.activeContext
+    }
+
+    fun invokeLater(task: Runnable) {
+        val context = context()
+        if (context != null) {
+            context.invokeLater(task)
+        } else {
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(task)
+        }
+    }
+
+    fun executeOnPooledThread(task: Runnable): java.util.concurrent.Future<*> =
+        context()?.work?.executeOnPooledThread(task)
+            ?: com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(task)
+
+    fun schedule(task: Runnable, delay: Long, unit: java.util.concurrent.TimeUnit): java.util.concurrent.ScheduledFuture<*> =
+        context()?.work?.schedule(task, delay, unit)
+            ?: com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule(task, delay, unit)
+
+    fun scheduleWithFixedDelay(
+        task: Runnable,
+        initialDelay: Long,
+        delay: Long,
+        unit: java.util.concurrent.TimeUnit,
+    ): java.util.concurrent.ScheduledFuture<*> =
+        context()?.work?.scheduleWithFixedDelay(task, initialDelay, delay, unit)
+            ?: com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService()
+                .scheduleWithFixedDelay(task, initialDelay, delay, unit)
+
+    fun submit(task: Runnable): java.util.concurrent.Future<*> =
+        context()?.work?.submit(task)
+            ?: com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit(task)
+
+    fun newSingleThreadScheduledExecutor(threadName: String): java.util.concurrent.ScheduledExecutorService =
+        context()?.work?.newSingleThreadScheduledExecutor(threadName)
+            ?: java.util.concurrent.Executors.newSingleThreadScheduledExecutor(daemonThreads { threadName })
+
+    fun newSingleThreadExecutor(threadName: String): java.util.concurrent.ExecutorService =
+        context()?.work?.newSingleThreadExecutor(threadName)
+            ?: java.util.concurrent.Executors.newSingleThreadExecutor(daemonThreads { threadName })
+
+    fun threadFactory(threadName: () -> String): java.util.concurrent.ThreadFactory =
+        context()?.work?.threadFactory(threadName) ?: daemonThreads(threadName)
+
+    /** An unstarted thread, as `Thread(task)`. */
+    fun newThread(task: Runnable): java.lang.Thread =
+        context()?.work?.newThread(task) ?: java.lang.Thread(task)
+
+    /** An unstarted thread, as `Thread(task, threadName)`. */
+    fun newThread(task: Runnable, threadName: String): java.lang.Thread =
+        context()?.work?.newThread(task, threadName) ?: java.lang.Thread(task, threadName)
+
+    fun newPooledAlarm(parent: Disposable): com.intellij.util.Alarm =
+        context()?.work?.newPooledAlarm(parent)
+            ?: com.intellij.util.Alarm(com.intellij.util.Alarm.ThreadToUse.POOLED_THREAD, parent)
+
+    private fun daemonThreads(threadName: () -> String) = java.util.concurrent.ThreadFactory { runnable ->
+        java.lang.Thread(runnable, threadName()).apply { isDaemon = true }
+    }
+}

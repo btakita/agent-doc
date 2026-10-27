@@ -142,11 +142,7 @@ pub fn item_nodes_all(source: &str, component: &str) -> MutationResult<Vec<Mutat
         .enumerate()
         .filter(|(_, node)| node.name == component)
         .flat_map(|(component_index, component_node)| {
-            item_nodes_for_component(
-                component_index,
-                component_node.name,
-                component_node.items,
-            )
+            item_nodes_for_component(component_index, component_node.name, component_node.items)
         })
         .collect())
 }
@@ -538,7 +534,10 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
         out.replace_range(start..end, &render_multiline_item("---", &node.item.text));
         return Ok(out);
     }
-    let raw = &source[start..end];
+    // `#nestedsubprompts`: a struck parent keeps its sub-prompt block verbatim
+    // below the struck parent part; only the parent part carries the wrapper.
+    let (raw, subprompt_block) =
+        agent_doc_element_queue::subprompts::split_subprompt_block(&source[start..end]);
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
     // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
     // wrapper before the deterministic separator, so split there first.
@@ -559,7 +558,11 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
             node_key: patch.node_key.clone(),
         });
     };
-    let unstruck = unstruck.to_string();
+    let mut unstruck = unstruck.to_string();
+    if let Some(block) = subprompt_block {
+        unstruck.push('\n');
+        unstruck.push_str(block);
+    }
     let mut out = source.to_string();
     out.replace_range(start..end, &unstruck);
     Ok(out)

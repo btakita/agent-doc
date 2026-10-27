@@ -703,6 +703,38 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 **Also worth knowing:** this bump creates the `[#ahfe]` / GH #267 case. Before you restart IntelliJ, if you want to finish that check, wait for `[native] hot-reloaded libagent_doc` in `idea.log`, then run Run Agent Doc once. The old 0.2.853 plugin routing against the new binary should log `editor_route_superseded_editor_admitted`. Then restart to load 0.2.856.
 
 **Still running:** `#jbshellr1rest` and `#replicaremoteflush`. `#kotlinflushprep` waits for `#jbshellr1rest`.
+
+### Re: do [#jbshellr1rest] — opus-5 · 2026-10-27T00:03-04:00
+
+> **Queue prompt:** do [#jbshellr1rest]
+
+**GH #339 stage R1 is complete.** On `main` and installed: steps `7777ce8e60` → `df51b62d94` (rebased), bump `23ba8936a9`, generator fix `b9ceed571d`, re-bump `b62225007a`. JetBrains classic is 0.2.857, 2026.2 0.2.860, 2026.3 0.2.861. IntelliJ 2026.3 needs a restart to load it.
+
+**The five steps, one commit each:**
+1. Project lifecycle and all 17 programmatic listener registrations go through shell forwarders. The lifecycle body moved unchanged into `AgentDocProjectLifecycle`.
+2. The six editor and language extensions (completion, folding, gutter, structure view, status-bar widget, banner) are shell forwarders that build the platform objects from plain data.
+3. EDT work goes through `GenerationContext.invokeLater` → `FencedTask`. Each generation has its own executors, threads, alarm and `CoroutineScope`. On retirement, `CANCEL` is for the R3 swap and `DRAIN` is for plugin unload.
+4. The JetBrains `Register` op now sends the backend activation receipt, in the `activation_receipt` field VS Code already added. A shared fixture is checked from both Kotlin and Rust.
+5. User-data keys are created by the shell. The 2026.2/2026.3 Fleet RPC ingress only delegates, through `SurfaceIngressSpi`, and its state moved into the implementation.
+
+**Audit:**
+- `ShellRegistrationOwnershipTest` now enforces **zero** direct bus subscriptions, listeners, `invokeLater`, pooled or raw threads, executors, alarms or `Key.create` in implementation files.
+- Still to move, recorded as R2+ in the spec: AWT listeners (3), notifications (21) and `putUserData` values (4).
+- **Behaviour change:** one edge case. During plugin unload, a retired generation refuses new listener registrations and logs it.
+
+**A build defect I fixed while integrating:**
+- **Symptom:** in an existing build directory, `jetbrains-262-check` / `-263-check` failed with `Redeclaration`.
+- **Cause:** `generateModularLifecycle` declared only its one output file. The old `PluginLifecycleListener262Generated.kt` survived next to the new `AgentDocProjectLifecycle262Generated.kt`.
+- **Fix:** the task now owns and clears its output directory (`b9ceed571d`). Without it, every developer's incremental build and `make install` would have broken.
+
+**Integrated checks:**
+- check-fast (`env -u TMUX`): 4524 run, 4524 passed.
+- Classic: 1027 JUnit tests, 0 failures. `verifyClassicArtifact` passes.
+- `jetbrains-262-check` and `-263-check` pass, both on a dirty build directory and after the fix.
+
+**Dispatched:** `#kotlinflushprep` → `subagent:kotlinflush` (🚧), now that R1 has landed.
+
+**Also on main, from another session:** a PreToolUse guard that refuses agent commands that would kill your live tmux server (`edcfce58d0`, `bc3da0e033`, `e3b716ae8a`). It covers this morning's incident.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -710,10 +742,10 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:jbshellr1rest#1] do [#jbshellr1rest]
+- ~~do [#jbshellr1rest]~~
 - ~~do [#vscodesessionparsers]~~
 - 🚧 [#subagent:replicaremote#1] do [#replicaremoteflush]
-- 📥 do [#kotlinflushprep]
+- 🚧 [#subagent:kotlinflush#1] do [#kotlinflushprep]
 - ~~do [#vscodekoffivsix]~~
 - ~~do [#vscodekoffisegv]~~
 ~~~done
@@ -798,7 +830,6 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#jbshellr1rest] Finish GH 339 shell stage R1 in one worker, one commit per step, in this order: (1) forward project lifecycle and the programmatic listeners through the shell and retarget generateModularLifecycle; (2) shell forwarders for the editor/language extensions; (3) GenerationContext.invokeLater with FencedTask plus per-generation executors and CoroutineScope for EDT and pooled work; (4) controller identity: the activation_receipt field on the Rust EditorRegistration (serde default) and the Kotlin Register op, landed together (VS Code already added an optional activation_receipt field on main); (5) shell-created Keys and shell-side Fleet RPC delegation, moving AuthenticatedSurfaceIngressState out of the service file. Implementation stays in the same classloader, frontend shell-only.
 - [ ] [#replicaremoteflush] Fold remote CRDT ops into the replica visible-order index as they arrive (agent-doc-merge crdt_sync local_ops), so the first local flush after a remote update no longer pays a full index rebuild; keep the differential tests against lazily paths and gate on make jetbrains-keystroke-bench.
 - [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
 <!-- /agent:backlog -->

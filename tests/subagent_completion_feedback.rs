@@ -608,3 +608,314 @@ fn preflight_admits_a_document_wedged_by_old_format_completion_feedback() {
     assert_cells_committed(dir.path(), 4);
     assert_session_check_does_not_accuse_patchback(dir.path(), &doc);
 }
+
+/// A committed, baselined go-mode `agent:run` whose `agent:backlog` mirrors
+/// into it (`queue` attribute): the shape of the live `agent-doc-bugs.md`
+/// session in `#queuerowdup`.
+fn committed_run_session(dir: &std::path::Path, run_rows: &[&str]) -> std::path::PathBuf {
+    fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
+    let doc = dir.join("session.md");
+    let rows = run_rows
+        .iter()
+        .map(|row| format!("{row}\n"))
+        .collect::<String>();
+    let content = format!(
+        concat!(
+            "---\nagent_doc_session: queue-row-dup\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: dispatch — gpt-5 · 2026-10-27T08:00-04:00\n\nDispatched two subagents.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents priority go -->\n",
+            "{}",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog queue priority -->\n",
+            "- [ ] [#alpha] fix the alpha defect\n",
+            "- [ ] [#beta] fix the beta defect\n",
+            "<!-- /agent:backlog -->\n",
+        ),
+        rows,
+    );
+    fs::write(&doc, &content).unwrap();
+    git(dir, &["init", "-q"]);
+    git(dir, &["config", "user.email", "test@example.com"]);
+    git(dir, &["config", "user.name", "Test User"]);
+    git(dir, &["add", "session.md"]);
+    git(dir, &["commit", "-q", "--no-verify", "-m", "initial"]);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    doc
+}
+
+/// The `agent:run` rows of `doc`.
+fn run_rows(doc: &std::path::Path) -> Vec<String> {
+    let content = fs::read_to_string(doc).unwrap();
+    let start = content.find("<!-- agent:run ").unwrap();
+    let body_start = start + content[start..].find('\n').unwrap() + 1;
+    let end = content.find("<!-- /agent:run -->").unwrap();
+    content[body_start..end]
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn assert_ok(output: &std::process::Output, what: &str) {
+    assert!(
+        output.status.success(),
+        "{what} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn preflight_json(dir: &std::path::Path, doc: &std::path::Path) -> serde_json::Value {
+    let output = run_agent_doc(dir, &["preflight", doc.to_str().unwrap()]);
+    assert_ok(&output, "preflight");
+    serde_json::from_slice(&output.stdout).unwrap_or_else(|err| {
+        panic!(
+            "preflight stdout is not JSON ({err}): {}",
+            String::from_utf8_lossy(&output.stdout)
+        )
+    })
+}
+
+fn rows_naming(rows: &[String], id: &str) -> Vec<String> {
+    let tag = format!("[#{id}]");
+    rows.iter()
+        .filter(|row| row.contains(&tag))
+        .cloned()
+        .collect()
+}
+
+/// `#queuerowdup` (agent-doc-bugs.md, 2026-10-27): the live `agent:run` showed
+/// `- ☑️ [#subagent:clearqueuedciflake#1] do [#clearqueuedciflake]` beside a
+/// plain `- do [#clearqueuedciflake]`. The binary writers that touch an
+/// id-backed head across a subagent attempt (the backlog mirror, `queue
+/// claim` / `start` / `report-complete`, the preflight lifecycle projection,
+/// and a later mirror pass) must each key the head by its work identity, never
+/// by its rendered `do [#id]` prefix, so none of them adds a second row. A
+/// plain copy that is NOT committed is a re-emit, and preflight collapses it
+/// into the marked row.
+#[test]
+fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &[]);
+    let path = doc.to_str().unwrap();
+    let ids = ["alpha", "beta"];
+    let assert_single = |stage: &str, marker: Option<&str>| {
+        let rows = run_rows(&doc);
+        for id in ids {
+            let named = rows_naming(&rows, id);
+            assert_eq!(named.len(), 1, "{stage}: one row for #{id}: {rows:#?}");
+            if let Some(marker) = marker {
+                let expected = format!("- {marker} [#subagent:{id}#1] do [#{id}]");
+                assert_eq!(named[0], expected, "{stage}: {rows:#?}");
+            }
+        }
+    };
+
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "sync", path]),
+        "queue sync",
+    );
+    assert_single("mirrored", None);
+    for id in ids {
+        let item = format!("do [#{id}]");
+        let owner = format!("subagent:{id}");
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &["queue", "claim", path, "--item", &item, "--owner", &owner],
+            ),
+            "queue claim",
+        );
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "start",
+                    path,
+                    "--item",
+                    &item,
+                    "--owner",
+                    &owner,
+                    "--generation",
+                    "1",
+                    "--worker-id",
+                    &format!("worker:{id}"),
+                ],
+            ),
+            "queue start",
+        );
+    }
+    assert_single("started", Some("🚧"));
+    preflight_json(dir.path(), &doc);
+    assert_single("preflight while running", Some("🚧"));
+    for id in ids {
+        assert_ok(
+            &run_agent_doc(
+                dir.path(),
+                &[
+                    "queue",
+                    "report-complete",
+                    path,
+                    "--item",
+                    &format!("do [#{id}]"),
+                    "--generation",
+                    "1",
+                    "--response",
+                    &format!("Implemented and tested the {id} fix; branch fix/{id} is pushed."),
+                ],
+            ),
+            "queue report-complete",
+        );
+    }
+    assert_single("reported", Some("☑️"));
+    preflight_json(dir.path(), &doc);
+    assert_single("preflight after report", Some("☑️"));
+    assert_ok(
+        &run_agent_doc(dir.path(), &["queue", "sync", path]),
+        "queue sync after report",
+    );
+    assert_single("re-mirrored", Some("☑️"));
+
+    // An uncommitted plain copy of each marked head (the shape of a stale
+    // editor or CRDT re-emit) exceeds the committed multiplicity.
+    let content = fs::read_to_string(&doc).unwrap();
+    let with_copies = content.replacen(
+        "<!-- /agent:run -->",
+        "- do [#alpha]\n- do [#beta]\n<!-- /agent:run -->",
+        1,
+    );
+    assert_ne!(with_copies, content);
+    fs::write(&doc, &with_copies).unwrap();
+    preflight_json(dir.path(), &doc);
+    assert_single("preflight after an uncommitted plain copy", Some("☑️"));
+}
+
+/// `#queuerowdup`: the dangerous half of the report. A plain `do [#id]` twin
+/// the operator COMMITTED beside a row whose worker is still running is a
+/// lawful authored repeat, so it survives convergence. Preflight must still
+/// key it by work identity: the twin is neither an inline-drainable selected
+/// head nor a fresh subagent dispatch, because either would run the claimed
+/// work a second time while its worker is live.
+#[test]
+fn a_committed_plain_twin_of_a_running_claim_is_never_selected_or_dispatched() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_run_session(dir.path(), &["- do [#alpha]"]);
+    let path = doc.to_str().unwrap();
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+            ],
+        ),
+        "queue claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                "do [#alpha]",
+                "--owner",
+                "subagent:alpha",
+                "--generation",
+                "1",
+                "--worker-id",
+                "worker:alpha",
+            ],
+        ),
+        "queue start",
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains("- 🚧 [#subagent:alpha#1] do [#alpha]\n"),
+        "{content}"
+    );
+    let with_twin = content.replacen(
+        "<!-- /agent:run -->",
+        "- do [#alpha]\n<!-- /agent:run -->",
+        1,
+    );
+    fs::write(&doc, &with_twin).unwrap();
+    git(dir.path(), &["add", "session.md"]);
+    git(
+        dir.path(),
+        &["commit", "-q", "--no-verify", "-m", "operator twin"],
+    );
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &with_twin,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+
+    let state = preflight_json(dir.path(), &doc);
+    let named = rows_naming(&run_rows(&doc), "alpha");
+    assert_eq!(
+        named.len(),
+        2,
+        "the committed twin is an authored repeat and must survive, or this test proves nothing: {named:#?}"
+    );
+    let strings = |key: &str| -> Vec<String> {
+        state
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let selected = strings("selected_queue_prompts");
+    assert!(
+        selected
+            .iter()
+            .all(|prompt| !prompt.contains("do [#alpha]")),
+        "a twin of running work must never be an inline-drainable head: {selected:?}\n{state:#}"
+    );
+    let dispatch = strings("queue_subagent_dispatch");
+    // Preflight mirrored the unclaimed `#beta` and offers it for dispatch: the
+    // dispatch list is live in this fixture, so its silence on `#alpha` is
+    // evidence, not an omitted key.
+    assert!(
+        dispatch.iter().any(|entry| entry.contains("do [#beta]")),
+        "{state:#}"
+    );
+    assert!(
+        dispatch.iter().all(|entry| !entry.contains("do [#alpha]")),
+        "a twin of running work must never be dispatched again: {dispatch:?}"
+    );
+    assert_eq!(
+        strings("queue_prompts")
+            .iter()
+            .filter(|prompt| prompt.contains("do [#alpha]"))
+            .count(),
+        2,
+        "both alpha rows are queue prompts; only their identity keeps them out: {state:#}"
+    );
+    assert_eq!(
+        state.get("queue_drainable_head_count"),
+        Some(&serde_json::json!(0)),
+        "{state:#}"
+    );
+}

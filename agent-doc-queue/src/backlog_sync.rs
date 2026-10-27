@@ -1699,6 +1699,63 @@ mod tests {
         assert!(fresh < goal, "the follow-up goes to the head:\n{updated}");
     }
 
+    /// `#queuerowdup` (agent-doc-bugs.md, 2026-10-27): `agent:run` showed
+    /// `- ☑️ [#subagent:a#1] do [#a]` beside a plain `- do [#a]`. The mirror
+    /// was a suspect: it would re-add the id if it matched the rendered
+    /// `do [#id]` prefix instead of the row's work identity. Every lifecycle
+    /// marker and owner annotation a claim projects must count as "already
+    /// queued", for prepend, append, and a same-cycle closeout prepend alike.
+    #[test]
+    fn mirror_never_re_adds_an_id_queued_behind_a_lifecycle_marker() {
+        for row in [
+            "- \u{1f7e1} [#subagent:a#1] do [#a]",
+            "- \u{1f6a7} [#subagent:a#1] do [#a]",
+            "- \u{2611}\u{fe0f} [#subagent:a#1] do [#a]",
+            "- \u{26a0}\u{fe0f} [#subagent:a#2] do [#a]",
+            "- \u{1f504} do [#a]",
+            "- \u{2754} do [#a]",
+            "- \u{1f64b}\u{1f6a7} [#subagent:a#1] do [#a] [#subagent-operator-request-x]",
+        ] {
+            let content = format!(
+                concat!(
+                    "<!-- agent:run subagents priority go -->\n",
+                    "{}\n",
+                    "<!-- /agent:run -->\n\n",
+                    "<!-- agent:backlog priority queue -->\n",
+                    "- [ ] [#a] claimed work\n",
+                    "- [ ] [#b] fresh work\n",
+                    "<!-- /agent:backlog -->\n",
+                ),
+                row
+            );
+            for placement in [
+                FollowUpQueuePlacement::Prepend,
+                FollowUpQueuePlacement::Append,
+            ] {
+                assert_eq!(
+                    enqueue_actionable_ids_reporting(&content, &["a".into()], placement, &[],)
+                        .unwrap(),
+                    MirrorOutcome::Refused(MirrorRefusal::AlreadyQueued),
+                    "{placement:?}: {row}"
+                );
+                let mirrored = enqueue_actionable_ids_in_content(
+                    &content,
+                    &["a".into(), "b".into()],
+                    placement,
+                )
+                .unwrap()
+                .expect("the fresh id still enqueues");
+                assert_eq!(
+                    mirrored.matches("[#a]").count(),
+                    2,
+                    "{placement:?}: one backlog row plus the one marked queue row:\n{mirrored}"
+                );
+                assert!(mirrored.contains(&format!("{row}\n")), "{mirrored}");
+                assert!(mirrored.contains("- do [#b]\n"), "{mirrored}");
+            }
+        }
+    }
+
     /// `#loopnoinsert`: with an `agent:loop` above the `agent:run`, the backlog
     /// mirror, reopen, and requeue all write into `agent:run`; the loop stays
     /// byte-identical so no pass ever restores a mirrored id as a loop row.

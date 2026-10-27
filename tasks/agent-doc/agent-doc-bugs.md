@@ -18,7 +18,6 @@ presets:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
-queue: go
 ---
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->

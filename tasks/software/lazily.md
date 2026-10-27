@@ -1,9 +1,9 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
-  claude: 62d9849d-6ef7-44d3-9e33-c667b53bcbba
+  claude: c32bff77-9c01-48c0-bddf-f88206d145b9
   codex: 01a17636-406a-7b73-935e-8c09a7f7a445
-agent: claude
+agent: grok
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -24,6 +24,7 @@ prompt_presets:
 
 <!-- agent:status patch=replace -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -37,12 +38,42 @@ Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0
 Compacted content:
 - Archived 63 response topic(s): recovered response; recovered response; correction and Run A; 60 more
 - Prior summary/context: prior compacted content: Archived 22 response topic(s): release queue dispatch; #release; #lzcorecohort; 19 more
+
+### Re: Grok hook draft saved — grok-4.7 · 2026-10-27T14:09-04:00
+
+**Choice:** Should this session save the Grok hook-payload draft with send_feedback?
+
+- Parent calls send_feedback (Recommended): this session saves one local draft, and you send it from the Drafts tab of /feedback.
+- Stop: leave no draft.
+- Other: a different instruction.
+
+**Answer:** Parent calls send_feedback.
+
+The worker `subagent:grok-feedback` (generation 1) could not call `send_feedback`. Its packet, verbatim:
+
+[#subagent-operator-request-grok-feedback-send] subagent operator request
+- *queue_item:* do
+- *kind:* permission
+- *blocking:* true
+- *request:* Call native `send_feedback` once (do not send it) with title `Claude-compatible PreToolUse hooks fail open: payload uses Grok tool names/keys, not Claude's`, type `bug`, product_area `hooks`, task_category `shell`, and the What happened / Repro / Cause details already specified for this queue item.
+- *context:* This subagent cannot call `send_feedback`. It is a parent-session tool. No draft with this title existed. No repo files were edited, and there was no commit or push. The parent session can save the local draft; the operator still has to send it from the Drafts tab of /feedback.
+- *choices:*
+  - **Parent calls send_feedback**: The coordinator session saves exactly one local draft and reports the draft id. The operator sends it from /feedback Drafts.
+  - **Stop**: Leave no draft.
+
+That request is done. Draft `01a17e8b-fbd3-7c60-82cd-f055185904f9` is saved locally in this session. I did not send it. Open the Drafts tab of `/feedback` in this Grok CLI session and send it there. `xai-org/grok-build` still has GitHub issues disabled, so this draft is the report.
+
+Local History recovery is in progress under `subagent:lh-recover` generation 1, worker `01a17e8d-657b-7e90-8f4a-dd6631391528`. It is searching JetBrains Local History for the pre-13:09 EDT revision and will not write the live session document.
+
+**Deferred:** that recovery stays claimed until the worker reports the recovered revision.
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" -->
+- ☑️ [#subagent:grok-feedback#1] do [#subagent-operator-request-grok-issue-draft]
+- 🚧 [#subagent:lh-recover#1] Recover my lost tasks/software/lazily.md edits from JetBrains Local History. See agent-doc-bugs.md
 <!-- /agent:queue -->
 
 ## Todo
@@ -50,7 +81,9 @@ Compacted content:
 <!-- agent:todo -->
 - [ ] [#lzambienttokenresolve] Complete #lzambienttokenresolve quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification (source: agent:review [#lzambienttokenresolve])
 - [x] [#subagent-operator-request-tmuxguser-scope] Choose the user-level ~/.claude/settings.json tmux-guard scope for #tmuxguardclaudeuser: option A/B/C plus optional D/E, per the [#subagent-operator-request-tmuxguser-scope] packet in agent:exchange (source: agent:backlog [#tmuxguardclaudeuser])
-- [ ] [#subagent-operator-request-grok-issue-draft] Submit the Grok Build hook-payload report (draft in the [#subagent-operator-request-grok-issue-draft] packet in agent:exchange) through Grok's in-app /feedback: xai-org/grok-build has GitHub issues disabled
+- [x] [#subagent-operator-request-grok-issue-draft] Submit the Grok Build hook-payload report (draft in the [#subagent-operator-request-grok-issue-draft] packet in agent:exchange) through Grok's in-app /feedback: xai-org/grok-build has GitHub issues disabled
+- [x] [#subagent-operator-request-grok-feedback-send] Operator chose Parent calls send_feedback. Draft 01a17e8b-fbd3-7c60-82cd-f055185904f9 is saved locally.
+- [ ] [#knqq] Send feedback draft 01a17e8b-fbd3-7c60-82cd-f055185904f9 from the Drafts tab of /feedback in this Grok CLI session. Resume this session in the Grok CLI first if you are on another client.
 <!-- /agent:todo -->
 
 ## Backlog

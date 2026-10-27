@@ -473,15 +473,13 @@ I filed six follow-ups from this batch in the Icebox, and the Status sync block 
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#servesavebypass]~~
-- ~~do [#inflighttypinghold]~~
 - ☑️ [#subagent:ahfe#1] do [#ahfe]
 - ☑️ [#subagent:pmsync#1] I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
   - So this is the first subtask.
   - This is the second subtask.
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
-- ~~Add the questions as todo items. Use a nested list so each question is on its own line.~~ — auto-struck: answered this cycle (#ftstrike)
+- 📥 release + publish
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -430,7 +430,9 @@ when the relation cannot be resolved from same-id Todo layering or a canonical
 Todo `(source: ...)` locator. Id-backed queue heads inherit their source link;
 free-text heads acquire a stable source through normal backlog surrogate-id
 coining/mirroring. A direct id-backed Todo head is also valid. If promotion is
-held, the free-text head is explicitly flagged. `--done`
+held, the free-text head is explicitly flagged. A preset-invocation head (its
+leading token is an effective document or project preset that no open tracked
+item carries) is exempt: it is not tracked work (GH #381). `--done`
 and `--review-resolve` retain this metadata in done/archive text and check an
 open Todo only when every linked source is terminal. Checking a linked Todo
 while a source is open emits the normal operator-prerequisite signal so a gated

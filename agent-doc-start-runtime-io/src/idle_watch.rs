@@ -1630,10 +1630,13 @@ fn idle_watch_disk_queue_head(file: &Path) -> QueueHeadObservation {
 /// waking the idle parent for it is a double dispatch.
 fn supervisor_drainable_head(file: &Path, content: &str) -> Option<String> {
     let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content);
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    // GH #381: a head naming a `.agent-doc/project.md` preset wakes the idle
+    // supervisor exactly as a document-local preset head does.
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         &claimed,
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
     )
 }
 

@@ -5807,11 +5807,13 @@ struct SupervisorDrainHandoffRecord {
 fn supervisor_drain_head_sha256(
     content: &str,
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Option<String> {
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         claimed,
+        presets,
     )
     .map(|head| agent_doc_hash::content_hash(&head))
 }
@@ -5896,10 +5898,11 @@ pub fn record_supervisor_drain_handoff_for_content(
     content: &str,
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
 ) -> Option<String> {
-    match agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+    match agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         claimed,
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
     ) {
         Some(head) => {
             record_supervisor_drain_handoff(file, &head);
@@ -5940,7 +5943,11 @@ pub fn undrained_supervisor_drain_handoff_age(
     .and_then(|state| {
         serde_json::from_str::<SupervisorDrainHandoffRecord>(&state.payload_json).ok()
     })?;
-    let current = supervisor_drain_head_sha256(content, claimed);
+    let current = supervisor_drain_head_sha256(
+        content,
+        claimed,
+        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
+    );
     if current.as_deref() != Some(record.head_sha256.as_str()) {
         if let Err(err) = agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
             &conn,
@@ -19860,7 +19867,8 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
         // Tick N decides on an empty ledger: `#upgrade` is drainable.
         let snapshot = orphan_drain_claim_snapshot(&sweep, &file, now).unwrap();
         assert!(snapshot.is_empty());
-        let (_, drainable, skipped) = orphan_drain_head_for_content(&content, None, &snapshot);
+        let (_, drainable, skipped) =
+            orphan_drain_head_for_content(&content, None, &snapshot, &Default::default());
         // A preset head routes by its text, exactly as the GH #319 log shows
         // (`head=#upgrade`), so its identity matches the claim's.
         assert_eq!(drainable.as_deref(), Some("#upgrade"));
@@ -19884,7 +19892,8 @@ prompt_presets:\n  \"#upgrade\": \"upgrade agent-doc to the latest release\"\n--
         // Tick N+1 re-decides from the fresh ledger: the claim-aware selector
         // skips the claimed head, and the commit point has nothing new.
         let next = orphan_drain_claim_snapshot(&sweep, &file, now).unwrap();
-        let (_, drainable, skipped) = orphan_drain_head_for_content(&content, None, &next);
+        let (_, drainable, skipped) =
+            orphan_drain_head_for_content(&content, None, &next, &Default::default());
         assert_eq!(drainable, None, "the only head is claimed");
         assert!(skipped);
         assert_eq!(
@@ -20174,6 +20183,7 @@ fn orphan_drain_head_for_content(
     content: &str,
     queue_unresolved_prompts: Option<usize>,
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+    presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> (
     Option<agent_doc_queue::queue_continuation::DrainableContinuationHead>,
     Option<String>,
@@ -20183,12 +20193,14 @@ fn orphan_drain_head_for_content(
     let unfiltered = if queue_unresolved_prompts == Some(0) {
         None
     } else {
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head_entry(content, scope)
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head_entry_with_presets(
+            content, scope, presets,
+        )
     };
     let claimed_head_skipped = OrphanDrainHead(unfiltered.clone()).is_claimed_by(claimed);
     let drainable = if claimed_head_skipped {
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
-            content, scope, claimed,
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
+            content, scope, claimed, presets,
         )
     } else {
         unfiltered.as_ref().map(|entry| entry.head.clone())
@@ -20261,7 +20273,7 @@ mod orphan_drain_attempt_tests {
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first, &second]);
 
         let (unfiltered, drainable, skipped) =
-            orphan_drain_head_for_content(content, None, &first_claimed);
+            orphan_drain_head_for_content(content, None, &first_claimed, &Default::default());
         assert_eq!(
             unfiltered.as_ref().map(|entry| entry.head.as_str()),
             Some(first.as_str())
@@ -20269,7 +20281,8 @@ mod orphan_drain_attempt_tests {
         assert_eq!(drainable.as_deref(), Some(second.as_str()));
         assert!(skipped);
 
-        let (_, drainable, skipped) = orphan_drain_head_for_content(content, None, &all_claimed);
+        let (_, drainable, skipped) =
+            orphan_drain_head_for_content(content, None, &all_claimed, &Default::default());
         assert_eq!(drainable, None);
         assert!(skipped);
     }
@@ -20308,7 +20321,7 @@ mod orphan_drain_attempt_tests {
             );
 
             let (unfiltered, drainable, skipped) =
-                orphan_drain_head_for_content(&content, None, &claimed);
+                orphan_drain_head_for_content(&content, None, &claimed, &Default::default());
             let unfiltered = unfiltered.expect("claimed head is the unfiltered head");
             assert_eq!(unfiltered.head, "beyp", "{claimed_line}");
             assert_eq!(unfiltered.prompt_text, claimed_line);
@@ -20323,6 +20336,7 @@ mod orphan_drain_attempt_tests {
                 &content,
                 None,
                 &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+                &Default::default(),
             );
             assert!(!skipped);
             assert_eq!(drainable.as_deref(), Some("beyp"), "{claimed_line}");
@@ -20346,6 +20360,7 @@ mod orphan_drain_attempt_tests {
                 &content,
                 None,
                 &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+                &Default::default(),
             );
             orphan_drain_memoize_head(&file, revision.clone(), unfiltered);
             let memoized =
@@ -20565,7 +20580,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                     }
                 };
                 let (unfiltered, head, claimed_head_skipped) =
-                    orphan_drain_head_for_content(&content, queue_unresolved_prompts, &claimed);
+                    orphan_drain_head_for_content(
+                        &content,
+                        queue_unresolved_prompts,
+                        &claimed,
+                        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                            &content, &file,
+                        ),
+                    );
                 if let Some(revision) = gate_revision.clone() {
                     // Cache the document-derived answer, never the claim-filtered
                     // projection: claims change without moving the CRDT revision.
@@ -20586,7 +20608,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                     }
                 };
                 let (_, head, claimed_head_skipped) =
-                    orphan_drain_head_for_content(&content, queue_unresolved_prompts, &claimed);
+                    orphan_drain_head_for_content(
+                        &content,
+                        queue_unresolved_prompts,
+                        &claimed,
+                        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                            &content, &file,
+                        ),
+                    );
                 (head, claimed_head_skipped)
             }
         };
@@ -61076,7 +61105,7 @@ mod tests {
         let content = doc(head);
         std::fs::write(&file, &content).unwrap();
         assert!(
-            supervisor_drain_head_sha256(&content, &unclaimed).is_some(),
+            supervisor_drain_head_sha256(&content, &unclaimed, &Default::default()).is_some(),
             "fixture must have a supervisor head"
         );
 
@@ -61173,9 +61202,9 @@ mod tests {
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first]);
         let all_claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads([&first, &second]);
-        assert!(supervisor_drain_head_sha256(content, &none).is_some());
+        assert!(supervisor_drain_head_sha256(content, &none, &Default::default()).is_some());
         assert_eq!(
-            supervisor_drain_head_sha256(content, &all_claimed),
+            supervisor_drain_head_sha256(content, &all_claimed, &Default::default()),
             None,
             "an all-claimed queue has no supervisor head"
         );

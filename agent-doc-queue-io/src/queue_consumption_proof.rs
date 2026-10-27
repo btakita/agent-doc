@@ -215,9 +215,10 @@ fn record_next_queue_head_selected_state<E: QueueConsumptionProofEffects + ?Size
         agent_doc_queue::queue_projection::queue_worklist_hash_for_document(content)
             .unwrap_or_else(|| agent_doc_hash::content_hash(content));
     let drainable = !stop_fence_at_head
-        && agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        && agent_doc_queue::queue_continuation::live_drainable_continuation_head_with_presets(
             content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
         )
         .is_some();
     let selected_event = agent_doc_state_backbone::StateEvent::new(

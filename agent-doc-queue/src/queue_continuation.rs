@@ -251,6 +251,25 @@ pub fn required_continuation_excluding_claimed_scoped(
     claimed: &ClaimedQueueItems,
     head_echo_scope: &HeadEchoScopeFor<'_>,
 ) -> Result<Option<QueueContinuation>> {
+    required_continuation_excluding_claimed_scoped_with_presets(
+        content,
+        snapshot_content,
+        claimed,
+        head_echo_scope,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`required_continuation_excluding_claimed_scoped`] with the document's
+/// effective preset map, so a head naming a project-inherited preset is a
+/// preset invocation rather than a stale backlog mirror (GH #381).
+pub fn required_continuation_excluding_claimed_scoped_with_presets(
+    content: &str,
+    snapshot_content: Option<&str>,
+    claimed: &ClaimedQueueItems,
+    head_echo_scope: &HeadEchoScopeFor<'_>,
+    presets: &frontmatter::PromptPresets,
+) -> Result<Option<QueueContinuation>> {
     let (fm, _) = frontmatter::parse(content)?;
     let components = element::parse(content)?;
     let queue_set = crate::queue_set::QueueSet::parse(content, &components)?;
@@ -304,9 +323,13 @@ pub fn required_continuation_excluding_claimed_scoped(
         }
     }
 
-    let Some(head) =
-        continuation_head_skipping_answered_residue(content, &queue_id, claimed, head_echo_scope)
-    else {
+    let Some(head) = continuation_head_skipping_answered_residue(
+        content,
+        &queue_id,
+        claimed,
+        head_echo_scope,
+        presets,
+    ) else {
         return Ok(None);
     };
     // `🚧` is a transient UI projection, never part of queue identity or the
@@ -361,6 +384,7 @@ fn continuation_head_skipping_answered_residue(
     queue_id: &str,
     claimed: &ClaimedQueueItems,
     head_echo_scope: &HeadEchoScopeFor<'_>,
+    presets: &frontmatter::PromptPresets,
 ) -> Option<QueuePrompt> {
     let (queue_facts, activation) = active_queue_for_supervisor_start(content, false)?;
     let exchange_text = crate::queue_head_entry::exchange_component_text(content);
@@ -385,6 +409,7 @@ fn continuation_head_skipping_answered_residue(
         &entries,
         queue_facts.preset_supplies_directive,
         DrainScope::InSessionLoop,
+        &preset_only_identity_ids_with_presets(content, presets),
     )
 }
 
@@ -712,6 +737,20 @@ pub fn live_continuation_head(content: &str) -> Option<String> {
 
 /// First drainable active queue prompt for `scope`.
 pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Option<QueuePrompt> {
+    drainable_head_prompt_for_scope_with_presets(
+        content,
+        scope,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`drainable_head_prompt_for_scope`] with the document's effective preset
+/// map (GH #381).
+pub fn drainable_head_prompt_for_scope_with_presets(
+    content: &str,
+    scope: DrainScope,
+    presets: &frontmatter::PromptPresets,
+) -> Option<QueuePrompt> {
     let (queue_facts, activation) =
         active_queue_for_supervisor_start(content, matches!(scope, DrainScope::Supervisor))?;
     eligible_head_prompt_from_entries(
@@ -719,6 +758,7 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
         &activation.entries_after,
         queue_facts.preset_supplies_directive,
         scope,
+        &preset_only_identity_ids_with_presets(content, presets),
     )
 }
 
@@ -743,6 +783,22 @@ pub fn pending_head_prompt_text_excluding_claimed(
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
 ) -> Option<String> {
+    pending_head_prompt_text_excluding_claimed_with_presets(
+        content,
+        scope,
+        claimed,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`pending_head_prompt_text_excluding_claimed`] with the document's
+/// effective preset map (GH #381).
+pub fn pending_head_prompt_text_excluding_claimed_with_presets(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
     if crate::queue_heads::queue_is_explicitly_stopped(content) {
         return None;
     }
@@ -764,6 +820,7 @@ pub fn pending_head_prompt_text_excluding_claimed(
         &entries,
         queue_facts.preset_supplies_directive,
         scope,
+        &preset_only_identity_ids_with_presets(content, presets),
     )?;
     Some(strip_in_progress_marker(&head.text))
 }
@@ -773,6 +830,7 @@ fn eligible_head_prompt_from_entries(
     entries: &[QueueEntry],
     preset_supplies_directive: bool,
     scope: DrainScope,
+    preset_only: &HashSet<String>,
 ) -> Option<QueuePrompt> {
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids_split(content, scope);
@@ -781,7 +839,7 @@ fn eligible_head_prompt_from_entries(
         open_backlog.as_ref(),
         &deferred_ids,
         &after_deps_from_content(content),
-        &preset_only_identity_ids(content),
+        preset_only,
         preset_supplies_directive,
         scope,
     )
@@ -791,6 +849,17 @@ fn eligible_head_prompt_from_entries(
 /// Live drainable active queue head for `scope`.
 pub fn live_drainable_continuation_head(content: &str, scope: DrainScope) -> Option<String> {
     live_drainable_continuation_head_entry(content, scope).map(|entry| entry.head)
+}
+
+/// [`live_drainable_continuation_head`] with the document's effective preset
+/// map (GH #381).
+pub fn live_drainable_continuation_head_with_presets(
+    content: &str,
+    scope: DrainScope,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    live_drainable_continuation_head_entry_with_presets(content, scope, presets)
+        .map(|entry| entry.head)
 }
 
 /// One drainable queue head under both of its names (GH #319).
@@ -815,9 +884,23 @@ pub fn live_drainable_continuation_head_entry(
     content: &str,
     scope: DrainScope,
 ) -> Option<DrainableContinuationHead> {
-    let head = drainable_head_prompt_for_scope(content, scope)?;
+    live_drainable_continuation_head_entry_with_presets(
+        content,
+        scope,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`live_drainable_continuation_head_entry`] with the document's effective
+/// preset map (GH #381).
+pub fn live_drainable_continuation_head_entry_with_presets(
+    content: &str,
+    scope: DrainScope,
+    presets: &frontmatter::PromptPresets,
+) -> Option<DrainableContinuationHead> {
+    let head = drainable_head_prompt_for_scope_with_presets(content, scope, presets)?;
     let prompt_text = strip_in_progress_marker(&head.text);
-    let preset_only = preset_only_identity_ids(content);
+    let preset_only = preset_only_identity_ids_with_presets(content, presets);
     let head = tracked_head_id(&prompt_text, &preset_only).unwrap_or_else(|| prompt_text.clone());
     Some(DrainableContinuationHead { head, prompt_text })
 }
@@ -831,8 +914,27 @@ pub fn live_drainable_continuation_head_excluding_claimed(
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
 ) -> Option<String> {
-    let stripped = live_drainable_head_prompt_text_excluding_claimed(content, scope, claimed)?;
-    let preset_only = preset_only_identity_ids(content);
+    live_drainable_continuation_head_excluding_claimed_with_presets(
+        content,
+        scope,
+        claimed,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`live_drainable_continuation_head_excluding_claimed`] with the document's
+/// effective preset map (GH #381): the supervisor idle watch's wake decision
+/// must treat a project-preset head exactly as preflight does.
+pub fn live_drainable_continuation_head_excluding_claimed_with_presets(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    let stripped = live_drainable_head_prompt_text_excluding_claimed_with_presets(
+        content, scope, claimed, presets,
+    )?;
+    let preset_only = preset_only_identity_ids_with_presets(content, presets);
     Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
 }
 
@@ -850,6 +952,22 @@ pub fn live_drainable_head_prompt_text_excluding_claimed(
     content: &str,
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
+) -> Option<String> {
+    live_drainable_head_prompt_text_excluding_claimed_with_presets(
+        content,
+        scope,
+        claimed,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`live_drainable_head_prompt_text_excluding_claimed`] with the document's
+/// effective preset map (GH #381).
+pub fn live_drainable_head_prompt_text_excluding_claimed_with_presets(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
 ) -> Option<String> {
     let (queue_facts, activation) = active_queue_for_supervisor_start_excluding_claimed(
         content,
@@ -869,6 +987,7 @@ pub fn live_drainable_head_prompt_text_excluding_claimed(
         &entries,
         queue_facts.preset_supplies_directive,
         scope,
+        &preset_only_identity_ids_with_presets(content, presets),
     )?;
     Some(strip_in_progress_marker(&head.text))
 }
@@ -881,7 +1000,21 @@ pub fn live_drainable_head_prompt_text_excluding_claimed(
 /// returns the first head regardless of drainability, so a second caller using it
 /// can name an `[operator-verify]` head that preflight already deferred.
 pub fn live_drainable_head_prompt_text(content: &str, scope: DrainScope) -> Option<String> {
-    let head = drainable_head_prompt_for_scope(content, scope)?;
+    live_drainable_head_prompt_text_with_presets(
+        content,
+        scope,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`live_drainable_head_prompt_text`] with the document's effective preset
+/// map (GH #381).
+pub fn live_drainable_head_prompt_text_with_presets(
+    content: &str,
+    scope: DrainScope,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    let head = drainable_head_prompt_for_scope_with_presets(content, scope, presets)?;
     Some(strip_in_progress_marker(&head.text))
 }
 
@@ -893,10 +1026,21 @@ pub fn live_drainable_head_prompt_text(content: &str, scope: DrainScope) -> Opti
 /// stale heartbeat, or a stale binary), the caller hands this head back to the
 /// in-session loop instead of stalling the queue on the operator.
 pub fn supervisor_only_head_prompt_text(content: &str) -> Option<String> {
-    if live_drainable_head_prompt_text(content, DrainScope::InSessionLoop).is_some() {
+    supervisor_only_head_prompt_text_with_presets(content, &frontmatter::PromptPresets::default())
+}
+
+/// [`supervisor_only_head_prompt_text`] with the document's effective preset
+/// map (GH #381).
+pub fn supervisor_only_head_prompt_text_with_presets(
+    content: &str,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    if live_drainable_head_prompt_text_with_presets(content, DrainScope::InSessionLoop, presets)
+        .is_some()
+    {
         return None;
     }
-    live_drainable_head_prompt_text(content, DrainScope::Supervisor)
+    live_drainable_head_prompt_text_with_presets(content, DrainScope::Supervisor, presets)
 }
 
 /// Guidance printed when the in-session loop takes over a `[focused-cycle]` head
@@ -937,7 +1081,25 @@ pub fn dispatchable_head_prompt_text_excluding_claimed(
     scope: DrainScope,
     claimed: &ClaimedQueueItems,
 ) -> Option<String> {
-    if let Some(text) = live_drainable_head_prompt_text_excluding_claimed(content, scope, claimed) {
+    dispatchable_head_prompt_text_excluding_claimed_with_presets(
+        content,
+        scope,
+        claimed,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`dispatchable_head_prompt_text_excluding_claimed`] with the document's
+/// effective preset map (GH #381).
+pub fn dispatchable_head_prompt_text_excluding_claimed_with_presets(
+    content: &str,
+    scope: DrainScope,
+    claimed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    if let Some(text) = live_drainable_head_prompt_text_excluding_claimed_with_presets(
+        content, scope, claimed, presets,
+    ) {
         return Some(text);
     }
     let head = crate::queue_heads::active_queue_prompt(content)?;
@@ -959,6 +1121,22 @@ pub fn drainable_head_count(content: &str) -> usize {
 /// [`drainable_head_count`], not counting heads `claimed` by a worker outside
 /// the in-session loop (`#queueclaim`).
 pub fn drainable_head_count_excluding_claimed(content: &str, claimed: &ClaimedQueueItems) -> usize {
+    drainable_head_count_excluding_claimed_with_presets(
+        content,
+        claimed,
+        &frontmatter::PromptPresets::default(),
+    )
+}
+
+/// [`drainable_head_count_excluding_claimed`] with the document's effective
+/// preset map (GH #381). A head whose leading `#name` is a preset inherited
+/// from `.agent-doc/project.md`, and not also open tracked work, counts as a
+/// drainable preset invocation without a backlog item.
+pub fn drainable_head_count_excluding_claimed_with_presets(
+    content: &str,
+    claimed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> usize {
     let Some((queue_facts, activation)) =
         active_queue_for_supervisor_start_excluding_claimed(content, false, claimed)
     else {
@@ -967,7 +1145,7 @@ pub fn drainable_head_count_excluding_claimed(content: &str, claimed: &ClaimedQu
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids_split(content, DrainScope::InSessionLoop);
     let after_deps = after_deps_from_content(content);
-    let preset_only = preset_only_identity_ids(content);
+    let preset_only = preset_only_identity_ids_with_presets(content, presets);
     document_queue::prompts(&activation.entries_after)
         .into_iter()
         .filter(|prompt| !claimed.claims(&prompt.text))
@@ -1296,17 +1474,45 @@ fn head_is_drainable(
 /// registers them, and reading `#subagent: <url>` as a reference to a missing
 /// backlog item made every such head non-drainable.
 pub fn preset_only_identity_ids(content: &str) -> HashSet<String> {
+    preset_only_identity_ids_with_presets(content, &frontmatter::PromptPresets::default())
+}
+
+/// [`preset_only_identity_ids`] with a caller-resolved preset map.
+///
+/// GH #381: `presets` is the document's EFFECTIVE preset map (the session
+/// document's own `presets` overlaid on every `.agent-doc/project.md` layer,
+/// `effective_prompt_presets_for_file`). The document-only registry above sees
+/// just the session document's frontmatter, so a head naming a project preset
+/// (`- #review` with `'#review'` declared only in `.agent-doc/project.md`) was
+/// read as tracked id `review`: with an `agent:backlog` lacking it,
+/// `head_is_drainable` called it a stale mirror and preflight reported
+/// `queue_drainable_head_count: 0`. Inherited presets are never copied into the
+/// document (`specs/project-preset-inheritance.md`), so the drain check must
+/// take them from the caller. A name an open backlog/review/icebox item also
+/// carries stays tracked work, exactly as for a document-local preset.
+pub fn preset_only_identity_ids_with_presets(
+    content: &str,
+    presets: &frontmatter::PromptPresets,
+) -> HashSet<String> {
     let identities = backlog::document_active_identities(content);
+    let tracked = |id: &str| {
+        identities
+            .get(id)
+            .is_some_and(|sources| sources.iter().any(|source| source != "prompt_presets"))
+    };
     let mut ids: HashSet<String> = identities
         .iter()
         .filter(|(_, sources)| sources.iter().all(|source| source == "prompt_presets"))
         .map(|(id, _)| id.clone())
         .collect();
+    for key in presets.keys() {
+        let id = backlog::normalize_pending_id(key);
+        if !id.is_empty() && !tracked(&id) {
+            ids.insert(id);
+        }
+    }
     for tag in crate::subagent_intent::SUBAGENT_INTENT_TAGS {
-        let tracked = identities
-            .get(tag)
-            .is_some_and(|sources| sources.iter().any(|source| source != "prompt_presets"));
-        if !tracked {
+        if !tracked(tag) {
             ids.insert(tag.to_string());
         }
     }
@@ -1318,6 +1524,32 @@ pub fn preset_only_identity_ids(content: &str) -> HashSet<String> {
 /// head is free-text work the preset expands; judging it as a mirror of a
 /// missing backlog item made every sibling invocation non-drainable, so the
 /// loop reported `drainable_head_count: 0` over operator-queued work.
+/// GH #381: true when the head's LEADING token is a preset in `preset_only_ids`
+/// (`#review`, `#gh-fix <url>`, `do [#review]`, a marker-decorated copy).
+///
+/// The preflight Todo-backlink audit uses this to exempt preset invocations: a
+/// preset names reusable work, not a tracked item, so it never owes a backing
+/// backlog item or a Todo backlink. Only the leading token counts, so prose that
+/// merely mentions a preset later in the line is still audited as free text.
+pub fn head_leads_with_preset(text: &str, preset_only_ids: &HashSet<String>) -> bool {
+    let visible = agent_doc_document::queue_projection::strip_priority_markers(
+        &strip_in_progress_marker(text),
+    );
+    let trimmed = visible.trim();
+    let topic = trimmed
+        .get(..3)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("do "))
+        .map_or(trimmed, |_| trimmed[3..].trim_start());
+    let Some(rest) = topic.strip_prefix("[#").or_else(|| topic.strip_prefix('#')) else {
+        return false;
+    };
+    let name: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+        .collect();
+    !name.is_empty() && preset_only_ids.contains(&name.to_ascii_lowercase())
+}
+
 fn tracked_head_id(text: &str, preset_only_ids: &HashSet<String>) -> Option<String> {
     extract_head_id(text).filter(|id| !preset_only_ids.contains(&id.to_ascii_lowercase()))
 }
@@ -2459,6 +2691,138 @@ mod tests {
             tracked_head_id("#c3d4 do it", &preset_only_identity_ids(content)).as_deref(),
             Some("c3d4")
         );
+    }
+
+    /// The preset map a `.agent-doc/project.md` declaring `'#review'` resolves
+    /// to; the session document never carries it (GH #381).
+    fn project_review_presets() -> frontmatter::PromptPresets {
+        frontmatter::parse("---\npresets:\n  '#review': Review the change.\n---\n")
+            .unwrap()
+            .0
+            .prompt_presets
+    }
+
+    /// GH #381: a live head that is ONLY a project-inherited preset name drains
+    /// as that preset. The document has an `agent:backlog` without `#review`,
+    /// and no `presets` of its own. Document-only drainability called the head
+    /// a stale mirror of a missing backlog item (`drainable_head_count: 0`);
+    /// the effective preset map makes it a preset invocation.
+    #[test]
+    fn project_inherited_preset_head_is_drainable_with_effective_presets() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- #review\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let presets = project_review_presets();
+        let none = ClaimedQueueItems::none();
+        // The document-only reading is the reported failure.
+        assert_eq!(drainable_head_count(content), 0);
+        assert!(!preset_only_identity_ids(content).contains("review"));
+
+        assert!(preset_only_identity_ids_with_presets(content, &presets).contains("review"));
+        assert_eq!(
+            drainable_head_count_excluding_claimed_with_presets(content, &none, &presets),
+            1
+        );
+        for scope in [DrainScope::InSessionLoop, DrainScope::Supervisor] {
+            assert_eq!(
+                live_drainable_head_prompt_text_excluding_claimed_with_presets(
+                    content, scope, &none, &presets
+                )
+                .as_deref(),
+                Some("#review"),
+                "{scope:?}"
+            );
+            assert_eq!(
+                live_drainable_continuation_head_excluding_claimed_with_presets(
+                    content, scope, &none, &presets
+                )
+                .as_deref(),
+                Some("#review"),
+                "the head routes as the invocation text, never as tracked id `review`"
+            );
+        }
+        let continuation = required_continuation_excluding_claimed_scoped_with_presets(
+            content,
+            None,
+            &none,
+            &whole_exchange_head_entry,
+            &presets,
+        )
+        .unwrap()
+        .expect("a project-preset head requires continuation");
+        assert_eq!(continuation.head_prompt, "#review");
+        assert_eq!(
+            dispatchable_head_prompt_text_excluding_claimed_with_presets(
+                content,
+                DrainScope::InSessionLoop,
+                &none,
+                &presets
+            )
+            .as_deref(),
+            Some("#review")
+        );
+    }
+
+    /// GH #381: the Todo-backlink exemption reads only the head's LEADING token,
+    /// through markers and an optional `do`, so prose that merely mentions a
+    /// preset later in the line is still audited.
+    #[test]
+    fn head_leads_with_preset_reads_only_the_leading_token() {
+        let preset_only: HashSet<String> = ["review".to_string()].into_iter().collect();
+        for head in [
+            "#review",
+            "#review the release notes",
+            "#Review: now",
+            "🚧 #review",
+            "do [#review]",
+            "do #review",
+        ] {
+            assert!(head_leads_with_preset(head, &preset_only), "{head}");
+        }
+        for head in [
+            "Fix the #review thing",
+            "#reviewer",
+            "#ghost",
+            "release + publish",
+            "",
+        ] {
+            assert!(!head_leads_with_preset(head, &preset_only), "{head}");
+        }
+    }
+
+    /// GH #381: a name that is BOTH a project preset and open tracked work keeps
+    /// tracked-item precedence, exactly as a document-local preset does. A
+    /// done item does not make the name tracked.
+    #[test]
+    fn project_inherited_preset_name_that_is_open_backlog_work_stays_tracked() {
+        let presets = project_review_presets();
+        let tracked = concat!(
+            "<!-- agent:queue go -->\n",
+            "- #review\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#review] Review the release notes\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert!(!preset_only_identity_ids_with_presets(tracked, &presets).contains("review"));
+        assert_eq!(
+            live_drainable_continuation_head_excluding_claimed_with_presets(
+                tracked,
+                DrainScope::InSessionLoop,
+                &ClaimedQueueItems::none(),
+                &presets
+            )
+            .as_deref(),
+            Some("review"),
+            "an id-backed head routes by its tracked id"
+        );
+        let done = tracked.replace("- [ ] [#review]", "- [x] [#review]");
+        assert!(preset_only_identity_ids_with_presets(&done, &presets).contains("review"));
     }
 
     /// `#subagentintent` (live, agent-doc-bugs.md 2026-10-03): the document

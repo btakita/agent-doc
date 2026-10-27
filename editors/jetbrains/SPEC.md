@@ -287,6 +287,331 @@ logic may hot-reload. This boundary may change only with tests proving both
 backend/frontend activation receipts for the same verified artifact. A
 backend-only success is not acceptance evidence.
 
+The design that could eventually lift this boundary without unloading the
+plugin is in the next section. It is a design and a test-only spike, and
+nothing in it changes the decision above until its migration step R4 lands.
+
+### Restart-free implementation generations: shell plus child loader (GH #339 design)
+
+**Status.** This is a design plus a test-only proof of concept
+(`src/test/kotlin/com/github/btakita/agentdoc/shellspike/`). It ships nothing.
+The plugin version, the descriptors, and what users install are unchanged.
+Until migration step R4 below lands with the receipts it names, the
+"Exact-263 decision" above stays in force, and every JetBrains source-digest
+change stays restart-bound. The restart-required prompt remains the fallback
+for every case this design cannot cover.
+
+**Idea.** Stop asking IntelliJ to unload anything. The installed plugin keeps
+its plugin ID, its one package, and its module graph. It becomes a stable
+*shell* that IntelliJ loads once per IDE start, and there is no separately
+installed shell plugin. The shell loads the real implementation from a
+versioned jar into an agent-doc-owned child classloader. An upgrade then swaps
+that implementation *generation* in place. `DynamicPlugins.unloadPlugin` is
+never called, so the measured 263.7031.23 module-graph refusal does not apply:
+the descriptor, the content modules, and the IntelliJ `PluginClassLoader` never
+change while the IDE runs. This is the same move the native library already
+makes. `libagent_doc` hot-reloads under a plugin generation that does not
+change (`[native] hot-reloaded libagent_doc`). This design adds a second
+reloadable layer, in Kotlin, between the two.
+
+**Expected yield (estimate).** Path classification is used as a proxy. Between
+2026-09-26 and 2026-10-26, 82 of 139 tagged releases changed plugin main
+sources, and so restarted every 263 IDE. 50 of those 82 touched only files
+that this design classifies as implementation (classic `src/main/kotlin`
+except `NativeLib.kt` and `PluginLifecycleListener.kt`, and modular
+`backend/src/main`). The other 32 also touched shell-bound files: descriptors,
+resources, `NativeLib.kt`, the lifecycle listener, or the frontend, shared, or
+root modular modules. By commit, the split is 138 implementation-only and 49
+shell-touching, out of 187. The true yield depends on how small the shell
+stays, and R1 must measure it again.
+
+#### Packaging and verification
+
+- **Shell:** the root plugin jar (classic) or the `agent.doc.*` module jars
+  (262/263), as today. They hold only descriptors, forwarders, the generation
+  host, the shell SPI, the JNA binding (`NativeLib`, `NativeReloadCoordinator`),
+  `PersistentStateComponent` settings classes, the Fleet RPC contract in
+  `agent.doc.shared`, and the frontend module.
+- **Implementation:** `impl/agent-doc-impl-<implVersion>.jar` at the plugin
+  root. It must never sit under `lib/` or `lib/modules/`, because IntelliJ adds
+  those to the plugin classpath at startup. That would define the same classes
+  a second time in the `PluginClassLoader` and split class identity. The
+  manifest carries `Agent-Doc-Impl-Class`, `Agent-Doc-Impl-Version` and
+  `Agent-Doc-Shell-Spi-Version`. The installer writes the jar first, then
+  atomically renames an `impl/current` pointer into place, holding
+  `version=`, `sha256=` and `epoch=`.
+- **Digests:** `pluginShellDigest` covers the shell sources, the descriptors,
+  and the artifact-shaping build files. `pluginImplDigest` covers the
+  implementation. The plugin version is still allocated from their union, so
+  Marketplace and the custom repositories see a normal update. The installer
+  chooses between swap and restart from the shell digest alone.
+- **Verification:** the shell reads the jar once into memory, checks it
+  against the pointer's `sha256`, and defines classes from those same bytes.
+  Nothing reopens the path, there is no `JarFile`/`URLClassLoader` cache, and
+  no Windows file lock, for the same reason native reload loads a unique
+  per-mtime copy of the library. The shell refuses a jar that defines any class
+  outside the implementation package prefix, and treats a jar built for
+  another `Agent-Doc-Shell-Spi-Version` as restart-required. The plugin
+  verifier does not see a jar outside `lib/`, so R1 must add a
+  `verifyImplJar` Gradle task. That task runs the same
+  `INTERNAL_API_USAGES`/compatibility checks against a synthetic plugin that
+  wraps the implementation jar, plus an ASM scan for the forbidden calls listed
+  below.
+
+#### Classloader
+
+`ImplClassLoader` takes the shell's `PluginClassLoader` as its parent
+(`PluginManagerCore.getPlugin(PluginId)?.pluginClassLoader`). Delegation is
+parent-first for the JDK, the Kotlin stdlib, the IntelliJ platform, the bundled
+plugin dependencies (terminal, Markdown) and the shell SPI. That way every
+generation sees one `ImplGeneration` type. Delegation is **child-only** for the
+implementation prefix (`com.github.btakita.agentdoc.impl.`). An implementation
+class is defined from this generation's jar or not at all, and it is never
+resolved from the parent. Private libraries the implementation embeds, such
+as lazily-kt, go under a relocated child-only prefix, so two generations can
+carry different versions. Implementation code can read platform state and call
+IntelliJ APIs through the parent. What it may register is governed below.
+
+Classes this loader defines are not `PluginAwareClassLoader` classes, so
+IntelliJ cannot attribute an implementation exception or freeze to Agent Doc by
+itself. The shell catches every failure at the forwarder boundary. It converts
+the failure to a shell-owned throwable that holds only strings and a fresh copy
+of the stack frames, and wraps that as `com.intellij.diagnostic.PluginException`
+with the Agent Doc `PluginId` before it reaches `Logger.error`. This matters
+for the leak rule too: the IDE error pool (`MessagePool`) keeps reported
+throwables indefinitely, and an implementation-class throwable there would pin
+its loader.
+
+#### Who owns IntelliJ registrations and callbacks
+
+Rule: **the platform holds only shell objects.** An implementation generation
+stages handlers through the `GenerationContext` the shell lends it. A shell
+forwarder, registered once per IDE run, delivers to the handler of the
+generation that is currently active, through a generation slot. Retirement
+clears that slot, so after a swap no platform-held reference reaches the old
+loader.
+
+| Registration (today's count, by text search of `src/main/kotlin`) | IntelliJ API / extension point | Shell owner | Across a swap |
+|---|---|---|---|
+| Actions (27 `<action>` ids, shortcuts, groups) | `plugin.xml` `<action class=…>`, `AnAction.update`/`actionPerformed`, `getActionUpdateThread` | one forwarding `AnAction` per id, declared by the shell | unchanged; it dispatches by id to the active generation. A new id or default shortcut is a shell change. `ActionManager.registerAction(id, action, pluginId)` could add ids at runtime, but a default keymap shortcut cannot be declared that way. |
+| Services and settings (`applicationService` ×3, `projectService`, two `applicationConfigurable`) | `@Service`/XML services, `PersistentStateComponent`, `Configurable` | shell classes | the service owns the host. `XmlSerializer` binds settings state to its class, so settings stay in the shell. |
+| Project lifecycle (`<projectListeners>` `ProjectManagerListener`) | message-bus topic in XML | shell `PluginLifecycleListener` | forwards `projectOpened`/`projectClosing` |
+| Programmatic listeners (`FileEditorManagerListener.FILE_EDITOR_MANAGER`, `ApplicationActivationListener.TOPIC`, `EditorFactory.getInstance().eventMulticaster.addDocumentListener`, VFS events) | `MessageBus.connect(Disposable).subscribe(topic, …)`, `addDocumentListener(l, Disposable)` | **Tier A:** one shell forwarder per topic, connected under `ProjectPluginLifecycleService` | unchanged; it delivers to the slot. **Tier B (allowed):** registration under `GenerationContext.disposable`, which `Disposer.dispose` releases at retirement. |
+| Editor/language extensions (`completion.contributor`, `lang.foldingBuilder`, `codeInsight.lineMarkerProvider`, `lang.structureViewExtension`, `statusBarWidgetFactory`, `editorNotificationProvider`, two `notificationGroup`) | XML extension points | shell forwarder per extension | the shell refreshes what the platform cached from the old generation: `EditorNotifications.updateAllNotifications()`, `StatusBarWidgetsManager.updateWidget(factory)`, `DaemonCodeAnalyzer.restart()`. The implementation returns data such as text, icon keys and action ids. The shell builds the Swing components, because platform-held components of implementation classes would pin the loader. |
+| Modular extensions (`postStartupActivity`, `fileEditorProvider`, `platform.rpc.backend.remoteApiProvider`) and the Fleet `@Rpc` contract | XML; kotlinx-serialization class identity | shell (`agent.doc.shared`, frontend, backend shell) | new implementation features travel as version-neutral strings inside an RPC field, the way native derivations use `agent_doc_editor_derive_json`. |
+| EDT work (~45 `invokeLater` call sites) | `Application.invokeLater(Runnable, ModalityState, Condition expired)` | `GenerationContext.invokeLater` | the queued runnable is a shell `FencedTask`. Its `expired` condition is "the generation retired", and retirement clears its implementation reference, because the event queue may still hold it. |
+| Pooled work and threads (~46 `executeOnPooledThread`, 11 `AppExecutorUtil`, 15 `Thread(`, 10 `Executors.new*`, one `Alarm`) | `AppExecutorUtil.createBoundedApplicationPoolExecutor`, service `CoroutineScope` | executor and `CoroutineScope` for each generation, children of the shell service's injected scope | quiesce stops intake, cancels, and joins with a deadline. A generation with code still running on a thread is never retired. |
+| Native library (JNA) | `Native.load`, native callbacks | shell (`NativeLib`, `NativeReloadCoordinator`) | JNA caches interface proxies, and native code would retain implementation callbacks, so the binding stays in the shell. New native features go behind `*_json` entry points, so `NativeLib` stays frozen. |
+| Controller identity | editor registration (`editor_id`, `plugin_version`) | shell | the shell keeps one `editor_id` and adds `impl_sha256` and `epoch`. A quiesced or retired generation cannot register, because its context refuses, which closes the `#pluginunloadresurrect` class of stale endpoint. |
+| Per-platform-object state (4 `putUserData`, 3 `Key.create`) | `UserDataHolder`, `Key` | keys created by the shell | the implementation stores only shell or JDK values. The shell sweeps generation-owned keys at retirement. |
+
+**Forbidden in implementation code** (`verifyImplJar` scans for these): any
+`MessageBus.connect()` or listener registration without a generation
+disposable, `Disposer.register` under a platform parent, raw `Thread`
+creation, `ThreadLocal`, `Runtime.addShutdownHook`, `Native.load` or a JNA
+`Callback`, `Key.create`, static registries keyed by platform objects, and
+building `JComponent`s that the platform retains.
+
+#### Swap protocol inside one JVM
+
+1. **Notice.** The shell sees a new `impl/current` through the existing 30 s
+   plugin-tree poll of `PluginRestartRequiredNotifier`, or through a controller
+   `reload_impl` intent shaped like today's `reload_library`.
+2. **Verify** the bytes, the implementation prefix, and the SPI version (see
+   above). A failure is either `Refused` (the active generation never stopped)
+   or `RestartRequired`.
+3. **Load and instantiate** in a fresh `ImplClassLoader`, with no platform
+   contact.
+4. **Quiesce** the active generation. Forwarders stop delivering: editor and
+   document events are buffered and coalesced into a resync at activation,
+   and actions present as disabled ("Agent Doc is updating"). Executors and
+   coroutines are drained with a deadline. `quiesce()` exports version-neutral
+   state (JSON, with its own schema version).
+5. **Prepare** the new generation with that state. A state schema it does not
+   know imports as `null`, a cold start, and replicas re-register the way a
+   native reload's replica restart does. The controller stays the authority,
+   so the handoff never has to carry document text.
+6. **Activate.** Flip the slot, replay buffered events, refresh the platform
+   caches above, and publish the activation receipt.
+7. **Retire** the old generation. Clear its slot, `Disposer.dispose` its
+   generation disposable, cancel its queued `FencedTask`s, and drop the
+   loader. A `WeakReference` with a `ReferenceQueue` watches that loader under
+   natural GC. If it has not cleared by the next swap, the host logs
+   `impl_generation_leak` and disables hot swap until restart, so leaked
+   generations never pile up.
+8. **Roll back** when steps 3 to 5 fail. The old generation resumes (`resume()`),
+   the attempt is logged, and a pending generation that keeps failing falls
+   back to the restart prompt.
+
+#### Remote Dev: proving the JetBrains Client runs the same generation
+
+Each JVM runs its own shell and generation host. After every activation, each
+JVM emits one version-neutral receipt line:
+
+```text
+agent_doc_activation_receipt/v1 role=<backend|frontend> jvm=<instance-uuid> shell=<pluginShellDigest> spi=<n> impl_version=<v|none> impl_sha256=<hex|none> generation=<local-counter> epoch=<backend-assigned>
+```
+
+The backend reports its receipt in the controller registration. The frontend
+reports its receipt to the backend in a field of the existing Fleet RPC
+surface snapshot, added once in the R1 shell release. The backend assigns
+`epoch` for each swap, and a JVM that activates the swap echoes it. `generation`
+is local to one JVM and is never compared across JVMs. The **activation fence**
+admits work that depends on the frontend, meaning measured layout and
+pane-tagged surface authority, only when two things hold. First, the
+backend's receipt matches the expected shell digest, implementation sha, and
+epoch. Second, if a remote client is connected, a receipt from a different
+JVM reports the same shell digest and satisfies the frontend policy. Otherwise
+the backend keeps the existing
+`frontend_authority_absent_or_generation_mismatched` readiness, so it holds
+rather than acting on a half-upgraded pair.
+
+- **Recommended policy, `SHELL_ONLY`:** the frontend module is shell code and
+  hosts no implementation generation. The frontend's receipt reports
+  `impl_sha256=none`. Any frontend change is a shell change and restarts both
+  sides, as today. That cost is small: 11 of the 187 plugin commits in the
+  window above touched the frontend. In return, a Remote Dev backend never
+  executes new code inside the operator's local client JVM.
+- **Operator decision, `SAME_IMPL` (not adopted):** the frontend also loads
+  the implementation jar at the same epoch. The JetBrains Client usually runs
+  on another machine, and the agent-doc installer runs on the backend host, so
+  the jar would have to be pushed over the RPC and verified on the client. That
+  would let a Remote Dev backend run new code in the client without a plugin
+  install, which is a security-boundary change. Only the operator can make
+  that choice.
+- The fence proves that both JVMs reported the same verified artifacts at the
+  same epoch. It does not make the swap atomic across JVMs. Between the backend
+  activating and the client's receipt arriving, frontend-dependent work is held,
+  not wrong. Under `SHELL_ONLY`, that window is only the latency of the receipt.
+
+This design never replaces the module graph. Point (1) of the "Exact-263
+decision" reopen rule ("removal and replacement of the full modular graph")
+therefore has to be restated, when R4 lands, as "the module graph and every
+platform registration are unchanged across the swap, and the retired
+generation is collectable". Point (2), the generation-fenced receipts, applies
+as written. That restatement needs the operator's agreement in the R4 change
+and is not made here.
+
+#### When a restart is still required
+
+- A shell-digest change. That covers any descriptor change (action ids,
+  default shortcuts, extensions, listener topics, services, notification
+  groups, configurables, module dependencies), the forwarders, the host or the
+  SPI, the Fleet RPC types in `agent.doc.shared`, the frontend module (under
+  `SHELL_ONLY`), the settings state classes, a JNA signature in `NativeLib`,
+  and the classic attach launcher.
+- An implementation jar built for another `Agent-Doc-Shell-Spi-Version`.
+- A detected generation leak (`impl_generation_leak`), until the next IDE
+  start.
+- A pending generation that cannot quiesce within its deadline or keeps
+  failing to prepare.
+- R1 itself, because installing the shell is one more restart.
+- Updates driven by IntelliJ itself: Marketplace, custom repositories, Remote
+  Dev plugin sync. IntelliJ's updater compares plugin versions and goes through
+  `DynamicPlugins`, so on exact-263 it still asks for a restart. Only
+  agent-doc's own installer (`agent-doc plugin install` / `upgrade`) takes the
+  swap path. That could be avoided only by pinning the Marketplace version and
+  shipping implementation jars out of band, which is a distribution change
+  this design does not propose.
+
+The restart-required prompt remains the fallback: the
+`.agent-doc-jetbrains-restart-required` marker, the `declined_by=` diagnostics
+and the sticky `Agent Doc Plugin Update` balloon are unchanged. The notifier
+gains one rule: a pending plugin version does not prompt when its shell digest
+equals the loaded shell's and the host has already activated its
+implementation sha. The installer gains `plugin_dynamic_upgrade
+outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
+`declined_by=shell_changed`. Both names are proposed, not shipped.
+
+#### Where it cannot work, and what it costs
+
+- **Cost.** This is a rewrite of the plugin's ownership model, not a packaging
+  change. About 1.6 MB of Kotlin across 89 files is affected. Every callback
+  site counted in the table must go through a generation context, and every
+  application-global `object` registry (replica, patch-watch and route
+  orchestration) must become generation-scoped. The state handoff for each
+  subsystem needs its own schema and test.
+- **Platform caches with no unregister path** must stay in the shell: XML
+  extension classes, `PersistentStateComponent` state, Fleet RPC serializers,
+  `Key` instances, `ClientId`-scoped services, and Swing components held by the
+  IDE.
+- **Detecting a leak in production is late.** It relies on natural GC, and an
+  explicit `System.gc()` is not acceptable in an IDE. A leak costs one
+  generation's metaspace until restart, and it disables further swaps.
+- **Weaker error and freeze attribution**, because these are not
+  `PluginAwareClassLoader` classes. The `PluginException` wrapping helps only
+  where the shell catches.
+- **Marketplace policy has to be checked before R3.** The implementation jar
+  ships inside the reviewed plugin ZIP. The installer must only ever activate
+  bytes identical to a published ZIP's `impl/` entry, never code downloaded
+  separately.
+- **Every swap costs a brief pause and a re-attach** (quiesce plus replica
+  re-registration), comparable to a native reload.
+
+#### Migration plan, release by release
+
+- **R0 (this change):** this section and the test-only spike. No shipped
+  change and no version bump.
+- **R1, shell in place in the same loader (restart-bound):** add the SPI,
+  `GenerationHost`, forwarders for every XML registration, and the generation
+  context. Move the implementation behind the SPI, still compiled into the same
+  jar and loaded through the shell by the plugin loader. Add the receipt line
+  to the controller registration and to the RPC (snapshot schema 5). Split
+  `pluginShellDigest` from `pluginImplDigest`, and add `verifyImplJar`. The
+  acceptance test is an audit showing zero direct platform registrations from
+  implementation packages.
+- **R2, child loader at startup (restart-bound):** package the implementation
+  into `impl/` and load it with `ImplClassLoader` at IDE start only, with the
+  leak watcher on. This proves class-identity separation and attribution in the
+  field before any live swap.
+- **R3, live swap on the classic 242 to 261 line:** where the attach upgrader
+  still backs it up, the installer swaps when the shell digest is unchanged.
+  Soak on `impl_generation_leak` and on how long the quiesce takes.
+- **R4, live swap on the exact-262/263 backend with a `SHELL_ONLY` frontend:**
+  activation admitted only behind the receipt fence, plus the operator-agreed
+  restatement of the "Exact-263 decision" reopen rule.
+- **R5 and later:** move CrdtReplicaManager, PatchWatcher, EditorTabSyncListener
+  and route orchestration into the implementation one subsystem per release.
+  Each move brings its own handoff schema and a collectability test. Pure policy
+  keeps moving behind `agent_doc_editor_derive_json`, which stays the cheaper
+  lever.
+
+#### What the spike proves, and what it does not
+
+`ShellGenerationSwapSpikeTest` packs each spike generation's compiled classes
+into `agent-doc-impl-<version>.jar` on disk and loads it through
+`ImplClassLoader` into a `GenerationHost`. A `FakePlatform` stands in for the
+IDE and strongly retains its subscribers, its queued `invokeLater` tasks, and
+its reported errors. The test proves:
+
+- a verified versioned jar loads in a child-only loader that shares the SPI
+  type with the shell;
+- a swap moves the registration without re-registering. The platform holds one
+  shell forwarder across generations, and state crosses only as a string;
+- the retired loader is collected (`WeakReference` plus forced GC) even though
+  the platform still holds the forwarder, one of the retired generation's
+  queued tasks, and its reported failure. A stale queued task is inert. Two
+  mutations each turn this test red: keeping the task's implementation
+  reference, and keeping the original throwable as the failure's cause. A
+  third mutation, keeping the implementation reference inside a retired slot,
+  changes nothing, because no retained object reaches the slot;
+- the negative control: a generation that subscribes to the platform directly
+  pins its loader. The leak check reports it and further swaps return
+  `RestartRequired`, so the detector is not vacuous;
+- refusal and rollback: a sha256 mismatch and a jar defining a class outside
+  the implementation prefix are refused while the active generation keeps
+  running, an SPI mismatch is restart-required, and a replacement that fails
+  in `prepare` rolls back to the quiesced generation;
+- receipts round-trip as one line, and the fence admits only a backend plus a
+  different-JVM client on the expected shell, implementation and epoch, under
+  both frontend policies.
+
+It does not exercise real IntelliJ: no `Disposer`, EDT, `ModalityState`,
+`MessageBus`, Tier B registrations, Swing rebuilds, JNA, coroutine or thread
+draining, the Fleet RPC, Remote Dev, Marketplace, `PluginException`
+attribution, natural-GC leak timing, or metaspace cost. Those belong to R1
+through R4.
+
 ### Restart-free logic upgrades: native derivations (GH #326)
 
 The package swap above is closed on exact-263, but `libagent_doc` hot-reloads

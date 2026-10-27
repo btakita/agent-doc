@@ -25228,6 +25228,110 @@ fn test_database_only_gc_prunes_history_and_dry_run_preserves_bytes() {
     assert!(!missing.path().join(".agent-doc").exists());
 }
 
+/// `#livebuffergc`: `.agent-doc/live-buffer/` was retired in 0.34.160 and no
+/// current code writes or prunes it. `gc --retired-stores --dry-run` lists it
+/// with file count and bytes and deletes nothing; `gc --retired-stores` removes
+/// only that store, never follows a symlink out of it, and leaves every other
+/// `.agent-doc/` entry alone.
+#[test]
+fn test_gc_retired_stores_lists_then_removes_only_the_live_buffer_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent_doc = dir.path().join(".agent-doc");
+    let live_buffer = agent_doc.join("live-buffer");
+    fs::create_dir_all(&live_buffer).unwrap();
+    fs::write(
+        live_buffer.join("001f01473453546e.jetbrains-1-abc"),
+        "0123456789",
+    )
+    .unwrap();
+    fs::write(live_buffer.join("00e03c1ed796d7d9"), "abcde").unwrap();
+    fs::create_dir_all(agent_doc.join("snapshots")).unwrap();
+    fs::write(agent_doc.join("snapshots/keep.md"), "snapshot").unwrap();
+    fs::write(agent_doc.join("project.md"), "---\n---\n").unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("precious.md"), "operator data").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, live_buffer.join("escape")).unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let dry = agent_doc_cmd()
+        .args(["gc", "--root", root, "--retired-stores", "--dry-run"])
+        .assert()
+        .success();
+    let dry_err = String::from_utf8_lossy(&dry.get_output().stderr).to_string();
+    assert!(
+        dry_err.contains("retired store live-buffer: would remove")
+            && dry_err.contains(&live_buffer.display().to_string())
+            && dry_err.contains("15 bytes"),
+        "dry run must list the store path, file count, and bytes:\n{dry_err}"
+    );
+    #[cfg(unix)]
+    assert!(
+        dry_err.contains("3 files (1 symlinks, not followed)"),
+        "{dry_err}"
+    );
+    assert!(
+        live_buffer.join("00e03c1ed796d7d9").is_file(),
+        "dry run deleted"
+    );
+
+    agent_doc_cmd()
+        .args(["gc", "--root", root, "--retired-stores"])
+        .assert()
+        .success();
+    assert!(!live_buffer.exists(), "apply must remove the retired store");
+    assert_eq!(
+        fs::read_to_string(agent_doc.join("snapshots/keep.md")).unwrap(),
+        "snapshot"
+    );
+    assert!(agent_doc.join("project.md").is_file());
+    assert_eq!(
+        fs::read_to_string(outside.join("precious.md")).unwrap(),
+        "operator data"
+    );
+
+    agent_doc_cmd()
+        .args(["gc", "--root", root, "--retired-stores", "--database-only"])
+        .assert()
+        .failure();
+}
+
+/// `#livebuffergc`: retired stores are deleted only on the explicit
+/// `--retired-stores` command. Preflight auto-GC and the shared
+/// `run_with_controller_effects` pass never reach the remover, and plain
+/// `agent-doc gc` only reports the store.
+#[test]
+fn test_retired_store_removal_is_reachable_only_from_explicit_gc_flag() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let gc_lib = fs::read_to_string(manifest_dir.join("agent-doc-gc-io/src/lib.rs")).unwrap();
+    let run_body = gc_lib
+        .split("pub fn run_with_controller_effects(")
+        .nth(1)
+        .and_then(|rest| rest.split("\nfn collect_document_hashes(").next())
+        .unwrap();
+    assert!(
+        !run_body.contains("retired_store") && !run_body.contains("RetiredStoreMode"),
+        "the shared gc pass (and so preflight auto-gc) must not sweep retired stores"
+    );
+    let preflight_gc =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/gc.rs")).unwrap();
+    assert!(!preflight_gc.contains("retired_store") && !preflight_gc.contains("RetiredStore"));
+    let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
+    let gc_arm = main_source
+        .split("Commands::Gc {")
+        .nth(1)
+        .and_then(|rest| rest.split("Commands::Start {").next())
+        .unwrap();
+    let explicit = gc_arm.split("if retired_stores {").nth(1).unwrap();
+    let (explicit, plain) = explicit.split_once("return Ok(());").unwrap();
+    assert!(explicit.contains("RetiredStoreMode::Remove"));
+    assert!(
+        plain.contains("RetiredStoreMode::Report") && !plain.contains("RetiredStoreMode::Remove"),
+        "plain `agent-doc gc` must only report retired stores"
+    );
+}
+
 #[test]
 fn test_cross_root_sync_uses_owning_controller_effect_and_ephemeral_router_binding() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

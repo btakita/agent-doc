@@ -283,9 +283,15 @@ Accordingly, a release whose recorded JetBrains source digest changes allocates
 a new plugin version and requires an IDE restart on exact-263. A release whose
 digest does not change retains the installed plugin version, while native-only
 logic may hot-reload. This boundary may change only with tests proving both
-(1) removal and replacement of the full modular graph and (2) generation-fenced
-backend/frontend activation receipts for the same verified artifact. A
-backend-only success is not acceptance evidence.
+(1) that across an implementation swap the modular module graph, the plugin
+descriptor, and every platform registration (actions, extensions, listeners,
+services, RPC providers) are unchanged, and the retired implementation
+generation's classloader becomes unreachable and is collected; and (2)
+generation-fenced backend/frontend activation receipts for the same verified
+artifact. A backend-only success is not acceptance evidence. (Point (1) was
+restated with the operator's agreement on 2026-10-26; it previously required
+"removal and replacement of the full modular graph", which the shell design
+below never performs.)
 
 The design that could eventually lift this boundary without unloading the
 plugin is in the next section. It is a design and a test-only spike, and
@@ -488,12 +494,11 @@ rather than acting on a half-upgraded pair.
   activating and the client's receipt arriving, frontend-dependent work is held,
   not wrong. Under `SHELL_ONLY`, that window is only the latency of the receipt.
 
-This design never replaces the module graph. Point (1) of the "Exact-263
-decision" reopen rule ("removal and replacement of the full modular graph")
-therefore has to be restated before R4 can satisfy it. The proposed wording is
-in "Proposed restatement of the Exact-263 reopen rule" below. It is a proposal
-awaiting the operator's agreement and is not adopted; the rule as written above
-stays in force.
+This design never replaces the module graph, so point (1) of the "Exact-263
+decision" reopen rule was restated (operator-agreed 2026-10-26) to what the
+swap protocol asserts: graph, descriptor and registrations unchanged across the
+swap, and the retired generation collected. See "Restatement of the Exact-263
+reopen rule" below.
 
 #### When a restart is still required
 
@@ -573,7 +578,7 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
   Soak on `impl_generation_leak` and on how long the quiesce takes.
 - **R4, live swap on the exact-262/263 backend with a `SHELL_ONLY` frontend:**
   activation admitted only behind the receipt fence, plus the operator-agreed
-  restatement of the "Exact-263 decision" reopen rule.
+  restatement of the "Exact-263 decision" reopen rule (adopted 2026-10-26).
 - **R5 and later:** move CrdtReplicaManager, PatchWatcher, EditorTabSyncListener
   and route orchestration into the implementation one subsystem per release.
   Each move brings its own handoff schema and a collectability test. Pure policy
@@ -683,11 +688,12 @@ matters only once a child loader defines the implementation (R2).
 5. Per-platform-object `Key`s created by the shell, and the shell-side Fleet
    RPC delegation into the generation.
 
-#### Proposed restatement of the Exact-263 reopen rule (awaiting operator agreement; not adopted)
+#### Restatement of the Exact-263 reopen rule (adopted 2026-10-26)
 
-**Proposal, for the operator's agreement.** The "Exact-263 decision" rule
-above still applies as written. Under this design the module graph is never
-removed or replaced, so point (1) could never be met. The proposed wording:
+**Adopted with the operator's agreement on 2026-10-26.** Under this design the
+module graph is never removed or replaced, so the original point (1) ("removal
+and replacement of the full modular graph") could never be met. The
+"Exact-263 decision" rule above now reads:
 
 > This boundary may change only with tests proving both (1) that across an
 > implementation swap the modular module graph, the plugin descriptor, and
@@ -699,10 +705,9 @@ removed or replaced, so point (1) could never be met. The proposed wording:
 
 Point (2) is unchanged. The restated point (1) is what the swap protocol
 asserts: forwarders registered once per IDE run, retirement through the
-generation slot, and the `impl_generation_leak` watcher. Adopting it would
-change the rule's text only. The receipts, the fence, and the R4 tests it
-names would still have to exist before any exact-263 release skipped a
-restart.
+generation slot, and the `impl_generation_leak` watcher. Adopting it changed
+the rule's text only. The receipts, the fence, and the R4 tests it names must
+still exist before any exact-263 release skips a restart.
 
 #### What the spike proves, and what it does not
 

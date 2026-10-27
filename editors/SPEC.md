@@ -265,16 +265,17 @@ the last column below.
 | JetBrains split mode (exact 262 / exact 263) | Two JVMs with one ZIP installed on both. The Remote Dev backend runs `agent.doc.backend` and the native library. The JetBrains Client runs `agent.doc.frontend`, which measures the main window. `agent.doc.shared` holds the Fleet RPC contract. | Restart-only: the 263.7031.23 module-graph refusal (GH #299), and no cross-JVM handoff to the frontend (GH #333, GH #339 decision). Marketplace is the only stock channel that updates both peers. Native derivations hot-reload while the source digest is unchanged. The proposed path is the shell plus child loader (R1-R4) under the `SHELL_ONLY` frontend policy. | Shipped: the backend holds `frontend_authority_absent_or_generation_mismatched` readiness. Designed, with a test-only spike: one receipt per JVM plus the backend/frontend activation fence. | `client_measured_layout` (GH #320 option B), forwarded through `jetbrains-rd@<installation>`. Zero-column routes use it (GH #376). Flat backend evidence is focus/liveness-only. | supported; plugin restart-bound; receipts designed, not shipped |
 | VS Code local | One Node extension host on the local machine: the TypeScript extension and the koffi-loaded native library. The renderer belongs to VS Code itself. | VSIX through `agent-doc plugin install vscode` (`cursor`, `codium` or `code --install-extension`, plus any workspace host on the same machine, as in the next row). Since 1.88, VS Code offers to restart extensions instead of reloading the window after an update. The native library hot-reloads (per-mtime shadow copy and the `reload_library` intent). | Single process. Registration carries `EDITOR_PLUGIN_VERSION` and one `agent_doc_activation_receipt/v1` line with `role=workspace`: the sha256 of the loaded bundle as `shell`, the native library's version and sha256 as `impl_version` and `impl_sha256`, and the count of native loads as `generation` and `epoch`. A native reload re-sends the registration. `agent-doc reliable-sync-status` prints the parsed receipt. About shows the loaded native generation. The extension compares its running version with the agent-doc generation its own extensions directory's `extensions.json` lists (skipping `.obsolete` directories), on activation and on each change to that file, and offers the host's own reload: Restart Extensions on the extension page (VS Code has no command that loads the update in place), or Reload Window. `installed_plugin_version` in the binary still covers JetBrains only. | `vscode.getEditorLayout` measures the grid: orientation and nested group sizes give each group's origin, groups sharing a left edge stack in one column, and the claim position follows the root split (`left`/`right` or `top`/`bottom`). The rules are the native `editor_group_layout` derivation of `agent_doc_editor_derive_json`, so changing them needs no reload; `groupLayout.ts` is the frozen floor, answering the same shared fixture. Measured columns publish with order `editor`. A grid that does not match the tab groups (an auxiliary editor window) falls back to ordinal `viewColumn` columns with order `unknown`. | supported; native hot reload conditional |
 | VS Code on Coder / remote | UI on the operator's machine (VS Code Desktop through the Coder Remote extension over Remote-SSH) or in the browser (code-server, VS Code Web). agent-doc must run in the remote (workspace) extension host, beside the agent-doc binary, `libagent_doc.so`, tmux and the controller. `package.json` declares `"extensionKind": ["workspace"]`, so VS Code runs it there. | Install into the workspace host: Coder documents `code --extensions-dir ~/.vscode-server/extensions --install-extension` and `code-server --install-extension`. The 1.88 notes say a remote connection still needs a window reload to update extensions. `agent-doc plugin install vscode`, `plugin update` and `plugin list` reach the workspace host: `code-server` on `PATH`, and the newest Remote-SSH server under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. | As local: one `role=workspace` receipt, because there is no agent-doc frontend half and nothing has to be compared across processes. `vscode.env.remoteName` reaches the binary, and the `agent-doc` terminal the extension creates, as `AGENT_DOC_VSCODE_REMOTE_NAME`. The installed-versus-running check is the same as local, against the workspace host's extensions directory; a remote (`remoteName`) or web host is offered only Reload Window. | Same API as local. VS Code proxies tab and editor state, and the `vscode.getEditorLayout` command, from the UI into the workspace host, so no frontend forward is needed and the same measured derivation applies. | documented in the Coder runbook; remote smoke test scripted (`scripts/vscode-remote-smoke.py`); its install, register and remote-host steps passed against a local code-server 4.143.1 and the VS Code Server 1.143.1 CLI, and it has not yet run on a Coder workspace |
-| Zed local | A sandboxed WASM extension (`wasm32-wasip2`) inside Zed, which only resolves the `agent-doc zed-lsp` command. The language server is a separate agent-doc process speaking LSP over stdio. | Zed watches its installed-extensions directory and reloads a changed extension, removing and re-registering its language servers, without restarting Zed. agent-doc ships only as a dev extension. A new agent-doc binary takes effect only when Zed starts the language server again. `zed-lsp` has no native hot reload. | The LSP `serverInfo.version` field. `replica_register` carries only `editor_pid`: no editor kind, plugin version or capabilities. | None. Neither the extension API nor LSP exposes panes, splits or the focused editor. | staged (all capabilities); native hot reload staged |
-| Zed remote | Zed UI locally. A headless Zed server on the remote, which must exactly match the local Zed version, runs language servers, tasks and terminals. Locally installed extensions (dev extensions by content fingerprint) are synced to the remote. `zed-lsp` resolves from the remote worktree `PATH`, so it runs beside the controller. | Zed syncs extensions by id and version and loads them on the remote host. Zed replaces its own remote server to match the client. The agent-doc binary on the remote behaves as in local. | Zed's extension sync compares versions, not activation. agent-doc adds nothing beyond local. | None (as local). | staged; not qualified |
+| Zed local | A sandboxed WASM extension (`wasm32-wasip2`) inside Zed, which only resolves the `agent-doc zed-lsp` command. The language server is a separate agent-doc process speaking LSP over stdio. | Zed watches its installed-extensions directory and reloads a changed extension, removing and re-registering its language servers, without restarting Zed. agent-doc ships only as a dev extension. A replaced agent-doc binary is picked up by an in-place handoff: `zed-lsp` watches the binary it started from and, once a replacement settles, `execve`s into it with the same PID and stdio. It carries its unparsed input, CRDT replicas and request ids, after the replacement has validated that exact handoff as a child process. If validation or `execve` fails, it keeps serving and asks for `editor: restart language server`. `zed-lsp` has no native hot reload. | The LSP `serverInfo.version` field. The `replica_register` registration carries `editor_kind` (`zed`), `editor_version` (the extension version), `editor_binary_version`, `capabilities` (none: every Zed capability is staged) and `layout_authority`. The controller reports them against its paired generations (`controller_crdt_replica_editor_generation`) and keeps them off the liveness plane, because `zed-lsp` has no editor endpoint. After a handoff, the registration still names the binary that registered. | None. Neither the extension API nor LSP exposes panes, splits or the focused editor. The controller routes Zed by document only: an editor route from a Zed source loses any layout evidence and ensures only the routed document (`controller_editor_route_document_only`). | staged (all capabilities); native hot reload staged |
+| Zed remote | Zed UI locally. A headless Zed server on the remote, which must exactly match the local Zed version, runs language servers, tasks and terminals. Locally installed extensions (dev extensions by content fingerprint) are synced to the remote. `zed-lsp` resolves from the remote worktree `PATH`, so it runs beside the controller. | Zed syncs extensions by id and version and loads them on the remote host. Zed replaces its own remote server to match the client. The agent-doc binary on the remote behaves as in local, including the in-place handoff. | Zed's extension sync compares versions, not activation. The registration is the same as local and reaches the remote host's controller. | None (as local); document-only routing. | staged; not qualified: `editors/zed/REMOTE.md` and `scripts/zed_remote_qualify.py` exist, but no Zed remote host has run them |
 
 The VS Code facts are from `editors/vscode/package.json`,
 `editors/vscode/src/` (`groupLayout.ts`, `pluginUpgrade.ts`, `activationReceipt.ts`,
 `reliableSyncLiveness.ts`, `extension.ts`), and the VS Code install targets in
 `src/plugin.rs`. `agent-doc-document-realtime/src/editor_contract.rs`
 pins the adapter facts this matrix states as gaps, so closing a gap fails that
-test until the matrix is updated. The Zed facts are from `editors/zed` and
-`agent-doc-zed-lsp-io`.
+test until the matrix is updated. The Zed facts are from `editors/zed`,
+`agent-doc-zed-lsp-io`, and the controller's `replica_register` and
+`editor_route` handlers.
 
 ### Operator questions
 
@@ -305,12 +306,14 @@ an extension without restarting, so the WASM extension acts as the stable
 shell. Parity therefore depends on three things:
 
 - **The implementation it launches:** the `zed-lsp` process must notice a
-  replaced binary and hand over to it without losing its LSP session.
+  replaced binary and hand over to it without losing its LSP session. It now
+  does this with an in-place handoff (see "Zed binary pickup" below).
 - **Identity:** `zed-lsp` must register an editor kind, version and
-  capabilities so the controller can tell which generation is running.
+  capabilities so the controller can tell which generation is running. Its
+  registration now carries them.
 - **Layout:** measured-layout routing cannot be reached through any surface
   Zed exposes today. Zed routes by document only and cannot claim exact-layout
-  parity.
+  parity. The controller enforces this.
 
 ### What each editor needs for parity
 
@@ -333,15 +336,60 @@ shell. Parity therefore depends on three things:
     attach, `remoteName`, layout sync; procedure in
     `runbooks/coder-workspace.md`).
 - **Zed (local and remote):**
-  - register kind, version and capabilities;
-  - add a `zed-lsp` binary-generation swap, or a restart prompt;
-  - record and enforce document-only routing in place of layout routing;
-  - qualify the remote path (agent-doc on the remote `PATH`, dev-extension
-    sync).
+  - done: register kind, version, capabilities and layout authority;
+  - done: in-place binary handoff, with a restart prompt as the fallback;
+  - done: document-only routing, recorded here and enforced by the controller;
+  - open: run `editors/zed/REMOTE.md` on a real Zed remote host and record the
+    result. That covers agent-doc on the remote `PATH`, dev-extension sync, and
+    the controller on the remote host. The scripted check has run only on a
+    local host.
+  - open: graduate Zed capabilities in `plugin-parity.tsv` (all are staged).
+    `ZED_LSP_CAPABILITIES` must change in the same edit.
+
+### Zed binary pickup
+
+Decision: in-place `execve` handoff that keeps the LSP session, with the
+language-server restart prompt kept only as the fallback. Reasons:
+
+- **Zed never restarts the server on its own.** At the cited commit, Zed's
+  LSP client does not restart a language server that exits. A restart goes
+  through `restart_language_servers_for_buffers`, which the operator reaches
+  with `editor: restart language server`. So a prompt always costs the
+  operator an action, and exiting in the hope of a respawn would leave Zed
+  without a server.
+- **The handoff can be proved safe, not just made to work in practice.**
+  - `execve` keeps the PID, so the controller identity `zed-lsp:<pid>:<hash>`
+    and its process-exit watch are untouched.
+  - `execve` keeps the stdio pipes, so Zed's session is untouched.
+  - The server reads standard input only on its serving thread, into a
+    buffer it owns, and hands over only between handled messages. Every byte
+    Zed wrote is therefore still in the pipe or travels in the handoff file.
+  - Each document's replica travels as encoded state plus client id. The new
+    image continues the same CRDT peer, so no re-registration happens.
+  - Nothing is replaced until the replacement has parsed and validated that
+    exact file as a child process and answered
+    `agent_doc_zed_lsp_handoff/v1 ok`. An older binary answers nothing and is
+    refused.
+- **It reuses agent-doc's existing pattern.** The MCP server (`src/mcp.rs`)
+  and the supervisor `start` re-exec already swap images in place through
+  `execve`. The difference here is that the whole session state is carried
+  and validated first.
+
+Tests:
+
+- `agent-doc-zed-lsp-io` unit tests cover the framing and the round trip of
+  every handoff fact.
+- Further unit tests cover CRDT continuity across the handoff, the pid, schema
+  and text fences, settling and refusal of a replacement, and the restart
+  prompt.
+- `tests/cross_editor_simworld.rs`
+  `zed_lsp_hands_its_session_to_a_replaced_binary_in_place` replaces the
+  binary under a running `zed-lsp`. It checks that a request split across the
+  handoff is answered by the new image in the same process.
 
 ### Sources (checked 2026-10-26)
 
 - VS Code: [Supporting Remote Development](https://code.visualstudio.com/api/advanced-topics/remote-extensions) (UI versus workspace extensions; APIs "automatically run on the correct machine"; VS Code Server runs non-Electron Node), [Extension Host](https://code.visualstudio.com/api/advanced-topics/extension-host) (local, web and remote hosts; `extensionKind` preference order), [Extension Manifest](https://code.visualstudio.com/api/references/extension-manifest) (`extensionKind`), [1.88 release notes](https://code.visualstudio.com/updates/v1_88) ("restart extensions instead of having to reload the window"; a remote connection "still need[s] to reload the window"), [Built-in Commands](https://code.visualstudio.com/api/references/commands) (`vscode.getEditorLayout`).
 - Coder: [Access your workspace](https://coder.com/docs/user-guides/workspace-access), [VS Code](https://coder.com/docs/user-guides/workspace-access/vscode) (Coder Remote extension; installing extensions into `~/.vscode-server/extensions` or through `code-server`), [Web IDEs](https://coder.com/docs/user-guides/workspace-access/web-ides), [coder/vscode-coder](https://github.com/coder/vscode-coder) (builds on the editor's Remote-SSH, `ms-vscode-remote.remote-ssh`), [coder/code-server](https://github.com/coder/code-server).
 - JetBrains: [Split Mode and Remote Development](https://plugins.jetbrains.com/docs/intellij/split-mode-and-remote-development.html) (two processes; frontend, backend and shared modules; RPC through shared interfaces).
-- Zed: [Remote Development](https://zed.dev/docs/remote-development) (local UI, headless server, exact version match, extensions propagated), [Developing Extensions](https://zed.dev/docs/extensions/developing-extensions) (`wasm32-wasip2`; capability list), and `crates/extension_host/src/{extension_host,headless_host}.rs` at zed-industries/zed `e30095febcfd25ae81d52e59d7d80c2bd21830c6` (installed-directory watcher that reloads changed extensions; `ReloadExtensions`; `SyncExtensions` to the remote by id, version and dev fingerprint).
+- Zed: [Remote Development](https://zed.dev/docs/remote-development) (local UI, headless server, exact version match, extensions propagated), [Developing Extensions](https://zed.dev/docs/extensions/developing-extensions) (`wasm32-wasip2`; capability list), and `crates/extension_host/src/{extension_host,headless_host}.rs` at zed-industries/zed `e30095febcfd25ae81d52e59d7d80c2bd21830c6` (installed-directory watcher that reloads changed extensions; `ReloadExtensions`; `SyncExtensions` to the remote by id, version and dev fingerprint), plus `crates/project/src/lsp_store.rs` and `crates/lsp/src/lsp.rs` at the same commit (`ShowMessageRequest` surfaces as a prompt; restart only through `restart_language_servers_for_buffers`; no restart when a server exits).

@@ -3184,13 +3184,17 @@ name = "agent-doc-zed-lsp-io"
 version = "0.35.556"
 dependencies = [
  "agent-doc-controller-io",
+ "agent-doc-document-realtime",
  "agent-doc-frontmatter",
  "agent-doc-hash",
  "agent-doc-merge",
  "agent-doc-project-root-io",
  "anyhow",
  "base64 0.22.1",
+ "libc",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

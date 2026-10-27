@@ -70,6 +70,53 @@ pub fn has_capability(capabilities: &[String], required: &str) -> bool {
     capabilities.iter().any(|capability| capability == required)
 }
 
+/// Editor kind a Zed `agent-doc zed-lsp` replica registration names.
+///
+/// `expected_editor_plugin_version` keys plugin generations by kind; under this
+/// key it returns `AGENT_DOC_EXPECTED_ZED_PLUGIN_VERSION`, the version in
+/// `editors/zed/extension.toml`.
+pub const ZED_EDITOR_KIND: &str = "zed";
+
+/// Capabilities `zed-lsp` advertises in its registration.
+///
+/// It must equal the `supported`/`conditional` set of the `zed` column of
+/// `editors/plugin-parity.tsv`; today every Zed capability is `staged`, so the
+/// list is empty. The `editor_contract` test pins the two together, so a
+/// capability graduates in both places in one change.
+pub const ZED_LSP_CAPABILITIES: &[&str] = &[];
+
+/// Layout authority of an editor whose host exposes no pane, split, or
+/// focused-editor surface to an extension. Such an editor is routed by
+/// document only: the controller never derives tmux columns from it.
+pub const DOCUMENT_ONLY_LAYOUT_AUTHORITY: &str = "document_only";
+
+/// Why the controller routes a Zed request by document only
+/// (`editors/SPEC.md` section 13): neither the Zed extension API nor LSP
+/// exposes panes, splits, or the focused editor.
+pub const ZED_DOCUMENT_ONLY_ROUTING_REASON: &str = "zed_exposes_no_layout";
+
+/// Whether an editor request source or editor kind names Zed.
+///
+/// Accepts the editor kind (`zed`), the `zed-lsp` command name, and the
+/// `zed_lsp` request source, with or without a `:`/`_`/`-` suffix.
+pub fn is_zed_editor(source_or_kind: &str) -> bool {
+    let normalized = source_or_kind.trim().to_ascii_lowercase();
+    normalized == ZED_EDITOR_KIND
+        || ["zed_", "zed-", "zed:"]
+            .iter()
+            .any(|prefix| normalized.starts_with(prefix))
+}
+
+/// The reason an editor route from `source_or_kind` must be routed by
+/// document only, or `None` when the editor may supply layout evidence.
+///
+/// This is the single policy both the controller (which drops the layout
+/// evidence of such a route) and `zed-lsp` (which declares
+/// [`DOCUMENT_ONLY_LAYOUT_AUTHORITY`]) derive from.
+pub fn editor_route_document_only_reason(source_or_kind: &str) -> Option<&'static str> {
+    is_zed_editor(source_or_kind).then_some(ZED_DOCUMENT_ONLY_ROUTING_REASON)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,8 +157,19 @@ mod tests {
         include_str!("../../editors/vscode/src/groupLayout.ts"),
         include_str!("../../editors/vscode/src/pluginUpgrade.ts"),
     ];
-    const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
     const ZED_LSP_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/lib.rs");
+    const ZED_LSP_HANDOFF_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/handoff.rs");
+    const ZED_LSP_INPUT_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/input.rs");
+    const ZED_EXTENSION_SOURCE: &str = include_str!("../../editors/zed/src/agent_doc.rs");
+    /// The WASM extension and the `zed-lsp` server it launches: both halves of
+    /// the Zed adapter must keep staged capabilities unadvertised.
+    const ZED_SOURCES: &[&str] = &[
+        ZED_EXTENSION_SOURCE,
+        ZED_LSP_SOURCE,
+        ZED_LSP_HANDOFF_SOURCE,
+        ZED_LSP_INPUT_SOURCE,
+    ];
+    const ZED_REMOTE_RUNBOOK: &str = include_str!("../../editors/zed/REMOTE.md");
     const EDITORS_SPEC: &str = include_str!("../../editors/SPEC.md");
     const VSCODE_MANIFEST: &str = include_str!("../../editors/vscode/package.json");
     const PLUGIN_INSTALL_SOURCE: &str = include_str!("../../src/plugin.rs");
@@ -546,10 +604,97 @@ mod tests {
             detects_stale_vsix && offers_remote_reload,
             "the VS Code remote proof cell must match the remote reload prompt",
         );
+
+        // Zed (`#zedparity`). Identity: the registration names the editor.
+        let registers_identity = [
+            "\"editor_kind\": ZED_EDITOR_KIND,",
+            "\"editor_version\": extension_version,",
+            "\"editor_binary_version\": env!(\"CARGO_PKG_VERSION\"),",
+            "\"capabilities\": ZED_LSP_CAPABILITIES,",
+            "\"layout_authority\": DOCUMENT_ONLY_LAYOUT_AUTHORITY,",
+        ]
+        .iter()
+        .all(|field| ZED_LSP_SOURCE.contains(field));
         assert_eq!(
-            row("Zed local")[3].contains("`replica_register` carries only `editor_pid`"),
-            ZED_LSP_SOURCE.contains("json!({ \"editor_pid\": std::process::id() })"),
+            row("Zed local")[3].contains("registration carries `editor_kind` (`zed`)"),
+            registers_identity,
             "the Zed proof cell must match the zed-lsp registration payload",
+        );
+        assert!(
+            ZED_EXTENSION_SOURCE.contains("\"AGENT_DOC_ZED_EXTENSION_VERSION\"")
+                && ZED_LSP_SOURCE.contains(
+                    "ZED_EXTENSION_VERSION_ENV: &str = \"AGENT_DOC_ZED_EXTENSION_VERSION\""
+                ),
+            "the extension must hand zed-lsp the extension version it registers",
+        );
+        // The advertised capability list is the `zed` column of plugin-parity.tsv.
+        let zed_selected = parity_rows()
+            .into_iter()
+            .filter(|row| matches!(row.zed, "supported" | "conditional"))
+            .map(|row| row.feature)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ZED_LSP_CAPABILITIES, zed_selected,
+            "ZED_LSP_CAPABILITIES must graduate with the zed column of plugin-parity.tsv",
+        );
+        assert_eq!(
+            row("Zed local")[3].contains("`capabilities` (none: every Zed capability is staged)"),
+            zed_selected.is_empty(),
+            "the Zed proof cell must match the advertised capability list",
+        );
+
+        // Binary pickup: the in-place handoff and its restart-prompt fallback.
+        let hands_over = ZED_LSP_SOURCE.contains("fn pick_up_replaced_binary(")
+            && ZED_LSP_SOURCE.contains("handoff::exec_replacement(&candidate, &path)")
+            && ZED_LSP_SOURCE.contains("\"window/showMessage\"")
+            && ZED_LSP_HANDOFF_SOURCE.contains("pub(crate) fn probe_replacement(");
+        assert_eq!(
+            row("Zed local")[2].contains("picked up by an in-place handoff"),
+            hands_over,
+            "the Zed upgrade cell must match zed-lsp's binary pickup",
+        );
+        assert_eq!(
+            row("Zed remote")[2].contains("including the in-place handoff"),
+            hands_over,
+            "the Zed remote upgrade cell must match zed-lsp's binary pickup",
+        );
+
+        // Layout: the controller routes every Zed source by document only.
+        let document_only = ["zed", "zed_lsp", "zed-lsp"]
+            .iter()
+            .all(|source| editor_route_document_only_reason(source).is_some())
+            && ["jetbrains_plugin", "vscode", "zedless"]
+                .iter()
+                .all(|source| editor_route_document_only_reason(source).is_none());
+        assert!(
+            document_only,
+            "Zed sources, and only Zed sources, route by document only"
+        );
+        assert!(
+            row("Zed local")[4].contains("routes Zed by document only")
+                && row("Zed local")[4].contains("`controller_editor_route_document_only`")
+                && row("Zed remote")[4].contains("document-only routing"),
+            "both Zed layout cells must state document-only routing",
+        );
+        assert!(
+            ZED_LSP_SOURCE.contains("\"layout_authority\": DOCUMENT_ONLY_LAYOUT_AUTHORITY,"),
+            "zed-lsp must declare the document-only layout authority",
+        );
+
+        // Remote: qualified only once the runbook records a real remote run.
+        let remote_recorded = ZED_REMOTE_RUNBOOK
+            .lines()
+            .skip_while(|line| !line.starts_with("## Record"))
+            .any(|line| line.starts_with('|') && line.contains("remote **qualified**"));
+        assert_eq!(
+            row("Zed remote")[5].contains("not qualified"),
+            !remote_recorded,
+            "the Zed remote status must match the qualification record in editors/zed/REMOTE.md",
+        );
+        assert!(
+            row("Zed remote")[5].contains("`editors/zed/REMOTE.md`")
+                && row("Zed remote")[5].contains("`scripts/zed_remote_qualify.py`"),
+            "the Zed remote status must point at its runbook and scripted check",
         );
     }
 }

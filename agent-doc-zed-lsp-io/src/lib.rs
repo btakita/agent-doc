@@ -5,17 +5,28 @@
 //! mode only while its current text has parseable frontmatter with a non-empty
 //! `agent_doc_session`. Every other Markdown buffer is a strict no-op.
 
+mod handoff;
+mod input;
+
+use agent_doc_document_realtime::editor_contract::{
+    DOCUMENT_ONLY_LAYOUT_AUTHORITY, ZED_EDITOR_KIND, ZED_LSP_CAPABILITIES,
+};
 use agent_doc_merge::crdt_sync::ReplicaState;
 use anyhow::{Context, Result, anyhow};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use handoff::{BinaryObservation, BinaryWatch, HandoffDocument, HandoffState};
+use input::{LspInput, ReadOutcome, take_frame};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PULL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Set by the Zed extension: the version in `editors/zed/extension.toml` of
+/// the extension that launched this server.
+pub const ZED_EXTENSION_VERSION_ENV: &str = "AGENT_DOC_ZED_EXTENSION_VERSION";
 
 struct OpenDocument {
     uri: String,
@@ -28,81 +39,186 @@ struct OpenDocument {
     pending_apply_target: Option<String>,
 }
 
-#[derive(Debug)]
-enum InputEvent {
-    Message(Value),
-    Closed,
-    Failed(String),
-}
-
 pub fn run() -> Result<()> {
-    run_with_io(std::io::stdin(), std::io::stdout())
+    // The probe child of a binary handoff: validate the exact file the
+    // running server wrote, answer, and never touch stdin or the controller.
+    if let Some(path) = std::env::var_os(handoff::HANDOFF_CHECK_ENV) {
+        let verdict = handoff::check_handoff_file(Path::new(&path))?;
+        println!("{verdict}");
+        return Ok(());
+    }
+    let resumed = take_resumed_session();
+    let binary_watch = BinaryWatch::for_current_exe(Instant::now());
+    #[cfg(unix)]
+    let input = input::StdinFd;
+    #[cfg(not(unix))]
+    let input = input::ChunkInput::spawn_reader(std::io::stdin());
+    let mut server = Server::new(std::io::stdout(), input);
+    server.binary_watch = binary_watch;
+    if let Some(session) = resumed {
+        server.resume(session);
+    }
+    server.serve()
 }
 
-fn run_with_io<R, W>(reader: R, writer: W) -> Result<()>
-where
-    R: Read + Send + 'static,
-    W: Write,
-{
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let mut reader = BufReader::new(reader);
-        loop {
-            match read_lsp_message(&mut reader) {
-                Ok(Some(message)) => {
-                    if tx.send(InputEvent::Message(message)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {
-                    let _ = tx.send(InputEvent::Closed);
-                    break;
-                }
-                Err(error) => {
-                    let _ = tx.send(InputEvent::Failed(format!("{error:#}")));
-                    break;
-                }
-            }
+/// Adopt the session a previous image of this process handed over, if any.
+///
+/// Losing it is recoverable, not fatal: Zed re-sends each open buffer on its
+/// next change, and `did_change` attaches a buffer this server does not know.
+fn take_resumed_session() -> Option<handoff::ResumedSession> {
+    let path = std::env::var_os(handoff::HANDOFF_ENV)?;
+    // SAFETY: still single-threaded; nothing else reads the environment yet.
+    unsafe { std::env::remove_var(handoff::HANDOFF_ENV) };
+    let path = PathBuf::from(path);
+    let state = handoff::read_handoff_file(&path);
+    let _ = std::fs::remove_file(&path);
+    match state.and_then(|state| {
+        let from_version = state.from_version.clone();
+        state
+            .restore(Some(std::process::id()))
+            .map(|session| (from_version, session))
+    }) {
+        Ok((from_version, session)) => {
+            eprintln!(
+                "zed_lsp_binary_handoff status=resumed pid={} from_version={} to_version={} documents={} pending_input_bytes={}",
+                std::process::id(),
+                from_version,
+                env!("CARGO_PKG_VERSION"),
+                session.documents.len(),
+                session.pending_input.len(),
+            );
+            Some(session)
         }
-    });
-    Server::new(writer, rx).serve()
+        Err(error) => {
+            eprintln!(
+                "zed_lsp_binary_handoff status=resume_failed pid={} error={error:#} action=serve_fresh_and_reattach_on_next_change",
+                std::process::id(),
+            );
+            None
+        }
+    }
 }
 
-struct Server<W> {
+struct Server<W, I> {
     writer: W,
-    receiver: Receiver<InputEvent>,
+    input: I,
+    /// Bytes read from Zed that do not yet form a complete frame.
+    pending_input: Vec<u8>,
     documents: HashMap<String, OpenDocument>,
     next_request_id: u64,
     shutdown_requested: bool,
+    binary_watch: Option<BinaryWatch>,
 }
 
-impl<W: Write> Server<W> {
-    fn new(writer: W, receiver: Receiver<InputEvent>) -> Self {
+impl<W: Write, I: LspInput> Server<W, I> {
+    fn new(writer: W, input: I) -> Self {
         Self {
             writer,
-            receiver,
+            input,
+            pending_input: Vec::new(),
             documents: HashMap::new(),
             next_request_id: 1,
             shutdown_requested: false,
+            binary_watch: None,
+        }
+    }
+
+    fn resume(&mut self, session: handoff::ResumedSession) {
+        self.next_request_id = session.next_request_id;
+        self.shutdown_requested = session.shutdown_requested;
+        // Carried bytes precede anything Zed writes after the handoff.
+        let mut pending = session.pending_input;
+        pending.append(&mut self.pending_input);
+        self.pending_input = pending;
+        for document in session.documents {
+            self.documents.insert(document.uri.clone(), document);
         }
     }
 
     fn serve(mut self) -> Result<()> {
-        loop {
-            match self.receiver.recv_timeout(PULL_INTERVAL) {
-                Ok(InputEvent::Message(message)) => {
-                    if self.handle_message(message)? {
-                        break;
-                    }
+        'serve: loop {
+            while let Some(message) = take_frame(&mut self.pending_input)? {
+                if self.handle_message(message)? {
+                    break 'serve;
                 }
-                Ok(InputEvent::Closed) => break,
-                Ok(InputEvent::Failed(error)) => return Err(anyhow!(error)),
-                Err(RecvTimeoutError::Timeout) => self.poll_remote_updates(),
-                Err(RecvTimeoutError::Disconnected) => break,
+            }
+            match self
+                .input
+                .read_available(&mut self.pending_input, PULL_INTERVAL)?
+            {
+                ReadOutcome::Data => {}
+                ReadOutcome::Timeout => {
+                    self.poll_remote_updates();
+                    self.pick_up_replaced_binary(Instant::now());
+                }
+                ReadOutcome::Eof => break,
             }
         }
         self.detach_all();
         Ok(())
+    }
+
+    /// Hand the session to a replaced launch binary (`editors/SPEC.md`
+    /// section 13). Runs only between handled messages, so every byte Zed has
+    /// written is in the pipe or in `pending_input`.
+    fn pick_up_replaced_binary(&mut self, now: Instant) {
+        if self.shutdown_requested || !self.input.handoff_safe() {
+            return;
+        }
+        let Some(watch) = self.binary_watch.as_mut() else {
+            return;
+        };
+        let BinaryObservation::Replaced(identity) = watch.observe(now) else {
+            return;
+        };
+        let candidate = watch.path().to_path_buf();
+        let state = self.handoff_state();
+        let refusal = match handoff::write_handoff_file(&state) {
+            Err(error) => error,
+            Ok(path) => match handoff::probe_replacement(&candidate, &path) {
+                Err(error) => {
+                    let _ = std::fs::remove_file(&path);
+                    error
+                }
+                Ok(()) => {
+                    eprintln!(
+                        "zed_lsp_binary_handoff status=exec pid={} binary={} documents={} pending_input_bytes={}",
+                        std::process::id(),
+                        candidate.display(),
+                        state.documents.len(),
+                        self.pending_input.len(),
+                    );
+                    let error = handoff::exec_replacement(&candidate, &path);
+                    let _ = std::fs::remove_file(&path);
+                    error
+                }
+            },
+        };
+        if let Some(watch) = self.binary_watch.as_mut() {
+            watch.refuse(identity);
+        }
+        eprintln!(
+            "zed_lsp_binary_handoff status=refused pid={} binary={} error={refusal:#} action=restart_prompt",
+            std::process::id(),
+            candidate.display(),
+        );
+        let _ = self.send(restart_prompt(&candidate, &refusal));
+    }
+
+    fn handoff_state(&self) -> HandoffState {
+        HandoffState {
+            schema: handoff::HANDOFF_SCHEMA.to_string(),
+            from_pid: std::process::id(),
+            from_version: env!("CARGO_PKG_VERSION").to_string(),
+            next_request_id: self.next_request_id,
+            shutdown_requested: self.shutdown_requested,
+            pending_input_b64: BASE64_STANDARD.encode(&self.pending_input),
+            documents: self
+                .documents
+                .values()
+                .map(HandoffDocument::capture)
+                .collect(),
+        }
     }
 
     fn handle_message(&mut self, message: Value) -> Result<bool> {
@@ -284,7 +400,7 @@ impl<W: Write> Server<W> {
             &file,
             "replica_register",
             &identity,
-            json!({ "editor_pid": std::process::id() }),
+            registration_fields(),
         ) else {
             return;
         };
@@ -464,6 +580,47 @@ impl<W: Write> Server<W> {
     }
 }
 
+/// The `replica_register` payload: process identity plus the editor kind,
+/// generation, capabilities, and layout authority (`editors/SPEC.md`
+/// section 13).
+///
+/// `editor_version` is the Zed extension generation the controller compares
+/// with `editors/zed/extension.toml`; `editor_binary_version` is this image.
+/// The capability list is the `zed` column of `editors/plugin-parity.tsv`
+/// (every Zed capability is staged today), and Zed exposes no layout, so it
+/// is always routed by document only.
+fn registration_fields() -> Value {
+    let extension_version = std::env::var(ZED_EXTENSION_VERSION_ENV)
+        .ok()
+        .map(|version| version.trim().to_string())
+        .filter(|version| !version.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    json!({
+        "editor_pid": std::process::id(),
+        "editor_kind": ZED_EDITOR_KIND,
+        "editor_version": extension_version,
+        "editor_binary_version": env!("CARGO_PKG_VERSION"),
+        "capabilities": ZED_LSP_CAPABILITIES,
+        "layout_authority": DOCUMENT_ONLY_LAYOUT_AUTHORITY,
+    })
+}
+
+/// `window/showMessage` asking the operator to restart the language server
+/// when the replaced binary could not take the session over in place.
+fn restart_prompt(binary: &Path, refusal: &anyhow::Error) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "window/showMessage",
+        "params": {
+            "type": 2,
+            "message": format!(
+                "agent-doc: {} was replaced, but this language server could not hand its session to the new binary ({refusal:#}). Run `editor: restart language server` to load it.",
+                binary.display()
+            )
+        }
+    })
+}
+
 fn publish_replica_projection(document: &OpenDocument, disk_persisted: bool) {
     let _ = controller_replica_request(
         &document.project_root,
@@ -587,28 +744,6 @@ fn minimal_text_delta(before: &str, after: &str) -> Option<TextDelta> {
     })
 }
 
-fn read_lsp_message(reader: &mut impl BufRead) -> Result<Option<Value>> {
-    let mut content_length = None;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            return Ok(None);
-        }
-        if line == "\r\n" || line == "\n" {
-            break;
-        }
-        if let Some(value) = line.trim().strip_prefix("Content-Length:").map(str::trim) {
-            content_length = Some(value.parse::<usize>().context("invalid Content-Length")?);
-        }
-    }
-    let length = content_length.ok_or_else(|| anyhow!("missing Content-Length"))?;
-    let mut body = vec![0; length];
-    reader.read_exact(&mut body)?;
-    serde_json::from_slice(&body)
-        .map(Some)
-        .context("invalid LSP JSON payload")
-}
-
 fn write_lsp_message(writer: &mut impl Write, message: &Value) -> Result<()> {
     let body = serde_json::to_vec(message)?;
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
@@ -620,7 +755,6 @@ fn write_lsp_message(writer: &mut impl Write, message: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Cursor;
 
     #[test]
     fn agent_doc_mode_requires_a_nonempty_session_marker() {
@@ -705,9 +839,173 @@ mod tests {
         let message = json!({"jsonrpc": "2.0", "method": "initialized", "params": {}});
         let mut bytes = Vec::new();
         write_lsp_message(&mut bytes, &message).unwrap();
-        let decoded = read_lsp_message(&mut BufReader::new(Cursor::new(bytes)))
-            .unwrap()
-            .unwrap();
+        let decoded = take_frame(&mut bytes).unwrap().unwrap();
         assert_eq!(decoded, message);
+        assert!(bytes.is_empty());
+    }
+
+    #[test]
+    fn registration_names_kind_generation_capabilities_and_layout_authority() {
+        let fields = registration_fields();
+        assert_eq!(fields["editor_pid"], json!(std::process::id()));
+        assert_eq!(fields["editor_kind"], json!("zed"));
+        assert_eq!(
+            fields["editor_binary_version"],
+            json!(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(fields["capabilities"], json!(ZED_LSP_CAPABILITIES));
+        assert_eq!(fields["layout_authority"], json!("document_only"));
+        assert!(fields["editor_version"].is_string());
+    }
+
+    type ScriptedInput = std::sync::mpsc::Sender<std::io::Result<Vec<u8>>>;
+
+    fn scripted_server() -> (Server<Vec<u8>, input::ChunkInput>, ScriptedInput) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        (
+            Server::new(Vec::new(), input::ChunkInput::from_receiver(receiver)),
+            sender,
+        )
+    }
+
+    fn decode_output(mut bytes: Vec<u8>) -> Vec<Value> {
+        let mut messages = Vec::new();
+        while let Some(message) = take_frame(&mut bytes).unwrap() {
+            messages.push(message);
+        }
+        assert!(bytes.is_empty(), "output must be whole frames");
+        messages
+    }
+
+    /// A resumed image parses the bytes the old image had read but not yet
+    /// framed before anything Zed writes afterwards, and continues the
+    /// server request ids.
+    #[test]
+    fn a_resumed_session_serves_carried_partial_input_first() {
+        let request = json!({"jsonrpc": "2.0", "id": 9, "method": "shutdown"});
+        let mut framed = Vec::new();
+        write_lsp_message(&mut framed, &request).unwrap();
+        let (head, tail) = framed.split_at(framed.len() / 2);
+
+        let (mut server, sender) = scripted_server();
+        server.resume(handoff::ResumedSession {
+            next_request_id: 12,
+            shutdown_requested: false,
+            pending_input: head.to_vec(),
+            documents: Vec::new(),
+        });
+        let exit = json!({"jsonrpc": "2.0", "method": "exit"});
+        let mut rest = tail.to_vec();
+        write_lsp_message(&mut rest, &exit).unwrap();
+        sender.send(Ok(rest)).unwrap();
+        drop(sender);
+
+        assert_eq!(server.next_request_id, 12);
+        let output = run_to_completion(server);
+        assert_eq!(
+            output,
+            vec![json!({"jsonrpc": "2.0", "id": 9, "result": null})]
+        );
+    }
+
+    fn run_to_completion(mut server: Server<Vec<u8>, input::ChunkInput>) -> Vec<Value> {
+        // `serve` consumes the server; drive the same loop to keep the writer.
+        loop {
+            let mut done = false;
+            while let Some(message) = take_frame(&mut server.pending_input).unwrap() {
+                if server.handle_message(message).unwrap() {
+                    done = true;
+                    break;
+                }
+            }
+            if done {
+                break;
+            }
+            match server
+                .input
+                .read_available(&mut server.pending_input, PULL_INTERVAL)
+                .unwrap()
+            {
+                ReadOutcome::Data | ReadOutcome::Timeout => {}
+                ReadOutcome::Eof => break,
+            }
+        }
+        decode_output(std::mem::take(&mut server.writer))
+    }
+
+    #[test]
+    fn handoff_state_captures_unframed_input_and_request_ids() {
+        let (mut server, _sender) = scripted_server();
+        server.pending_input = b"Content-Length: 99\r\n".to_vec();
+        server.next_request_id = 5;
+        let state = server.handoff_state();
+        assert_eq!(state.schema, handoff::HANDOFF_SCHEMA);
+        assert_eq!(state.from_pid, std::process::id());
+        assert_eq!(state.next_request_id, 5);
+        let session = state.restore(Some(std::process::id())).unwrap();
+        assert_eq!(session.pending_input, b"Content-Length: 99\r\n");
+    }
+
+    /// Replace an executable launch path with a file that cannot validate a
+    /// handoff, then tick the server's binary pickup three times.
+    #[cfg(unix)]
+    fn pick_up_unloadable_replacement<I: LspInput>(server: &mut Server<Vec<u8>, I>) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let launch = dir.path().join("agent-doc");
+        let write = |path: &Path, bytes: &[u8]| {
+            std::fs::write(path, bytes).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write(&launch, b"#!/bin/sh\nexit 0\n");
+        let start = Instant::now();
+        server.binary_watch = Some(BinaryWatch::for_test(launch.clone(), start));
+        let next = dir.path().join("agent-doc.next");
+        // Exits 0 but never prints the handoff acceptance token.
+        write(&next, b"#!/bin/sh\nexit 0\n# replaced\n");
+        std::fs::rename(&next, &launch).unwrap();
+        for n in 0..3u32 {
+            server.pick_up_replaced_binary(start + handoff::BINARY_CHECK_INTERVAL * n);
+        }
+    }
+
+    /// A replacement that cannot prove it accepts the session is refused
+    /// once, the running image keeps serving, and the operator is told to
+    /// restart the language server.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_replacement_keeps_serving_and_prompts_a_restart_once() {
+        let (mut server, _sender) = scripted_server();
+        server.pending_input = b"Content-Length: 3".to_vec();
+        pick_up_unloadable_replacement(&mut server);
+        let output = decode_output(std::mem::take(&mut server.writer));
+        assert_eq!(output.len(), 1, "exactly one prompt: {output:?}");
+        assert_eq!(output[0]["method"], json!("window/showMessage"));
+        let message = output[0]["params"]["message"].as_str().unwrap();
+        assert!(message.contains("restart language server"), "{message}");
+        assert_eq!(server.pending_input, b"Content-Length: 3");
+    }
+
+    /// A reader thread may hold bytes the serving thread has not seen, so a
+    /// server reading through one never replaces its image.
+    #[cfg(unix)]
+    #[test]
+    fn a_threaded_reader_never_hands_over() {
+        let mut server = Server::new(
+            Vec::new(),
+            input::ChunkInput::spawn_reader(std::io::empty()),
+        );
+        pick_up_unloadable_replacement(&mut server);
+        assert!(server.writer.is_empty(), "no probe, no prompt");
+    }
+
+    #[test]
+    fn the_restart_prompt_names_the_binary_and_the_refusal() {
+        let prompt = restart_prompt(Path::new("/opt/agent-doc"), &anyhow!("probe refused"));
+        assert_eq!(prompt["method"], json!("window/showMessage"));
+        let message = prompt["params"]["message"].as_str().unwrap();
+        assert!(message.contains("/opt/agent-doc"));
+        assert!(message.contains("probe refused"));
+        assert!(message.contains("restart language server"));
     }
 }

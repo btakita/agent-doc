@@ -1075,49 +1075,6 @@ private enum class LocalEditorForwardResult {
 }
 
 /**
- * Validate and translate the editor's causal splice stream against the retained
- * CRDT shadow. Ordinary editor events already carry the changed UTF-16 range;
- * never widen them into a whole-buffer diff.
- */
-internal fun prepareLocalEditorEditsUtil(
-    before: String,
-    edits: List<CapturedLocalEditorEdit>,
-): PreparedLocalEditorBatch? {
-    val current = StringBuilder(before)
-    var anchorUtf16 = before.length
-    var anchorCodePoints = before.codePointCount(0, before.length)
-    val prepared = ArrayList<PreparedLocalEditorEdit>(edits.size)
-    for (edit in edits) {
-        val start = edit.offsetUtf16
-        val end = start + edit.oldFragment.length
-        // `#splicebaselength`: the splice was typed into a document of a
-        // different length, so its offset does not address this text.
-        if (edit.beforeLengthUtf16 >= 0 && edit.beforeLengthUtf16 != current.length) return null
-        if (start < 0 || start > current.length || end > current.length) return null
-        if (current.substring(start, end) != edit.oldFragment) return null
-        val deleteCodePoints = edit.oldFragment.codePointCount(0, edit.oldFragment.length)
-        val insertCodePoints = edit.newFragment.codePointCount(0, edit.newFragment.length)
-        val offsetCodePoints =
-            if (start >= anchorUtf16) {
-                anchorCodePoints + Character.codePointCount(current, anchorUtf16, start)
-            } else {
-                anchorCodePoints - Character.codePointCount(current, start, anchorUtf16)
-            }
-        prepared.add(
-            PreparedLocalEditorEdit(
-                offsetCodePoints = offsetCodePoints,
-                deleteCodePoints = deleteCodePoints,
-                insert = edit.newFragment,
-            ),
-        )
-        current.replace(start, end, edit.newFragment)
-        anchorUtf16 = start + edit.newFragment.length
-        anchorCodePoints = offsetCodePoints + insertCodePoints
-    }
-    return PreparedLocalEditorBatch(prepared, current.toString())
-}
-
-/**
  * The captured splice batches still owed to the replica: only those taken in the
  * current projection epoch. A whole-buffer publication (`PublishOperatorBuffer`,
  * `MergeForward`) advances the epoch because the published buffer already

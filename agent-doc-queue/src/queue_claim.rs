@@ -166,6 +166,17 @@ pub struct QueueClaim {
     /// worker was handed still find the claim after an operator edit.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub followed_from: Vec<String>,
+    /// The attempt generation that last recorded a `followed_from` entry
+    /// (`#claimfollowstruck`). A re-claim keeps the line history but starts a
+    /// new attempt on the row as it is now, so only this generation's own
+    /// follows are evidence against it. `0` for a claim stored before the
+    /// field existed: its follows are unattributable and never repaired.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub followed_generation: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Durable audit tombstone for one exact operator-cancelled claim attempt.
@@ -386,6 +397,13 @@ impl QueueClaimState {
 /// A claim's position in its queue (`#claimfollowedit`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimAnchor {
+    /// The resolved id of the queue that holds the claimed row
+    /// (`#claimfollowstruck`). A claim is aligned only against this queue's
+    /// rows, never against a sibling queue the document happens to select.
+    /// `None` for an anchor written before the field existed, or by the
+    /// single-list [`QueueClaimLedger::follow_edits`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<String>,
     /// The queue's live heads, normalized
     /// ([`crate::queue_head_alignment::normalize_queue_head_text`]), in order.
     pub heads: Vec<String>,
@@ -394,6 +412,89 @@ pub struct ClaimAnchor {
     /// made before effect annotations can temporarily contain every identical
     /// slot so migration deterministically follows the first descendant.
     pub slots: Vec<usize>,
+}
+
+/// One queue of a document, as the claim ledger's edit follow reads it
+/// (`#claimfollowstruck`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClaimQueueRows {
+    /// The queue's resolved id; `None` for the unnamed single-list view.
+    pub queue_id: Option<String>,
+    /// Live head rows in queue order, each still carrying its binary-owned
+    /// lifecycle and `[#owner#generation]` projection (`#claimrowmigrate`).
+    pub rows: Vec<String>,
+    /// Work texts of the queue's struck (completed) rows, markers and any
+    /// baked-in auto-struck note removed.
+    pub struck: Vec<String>,
+}
+
+/// Every queue of a document, for [`QueueClaimLedger::follow_edits_in_view`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClaimQueueView {
+    pub queues: Vec<ClaimQueueRows>,
+}
+
+impl ClaimQueueView {
+    /// One unnamed queue with no struck rows.
+    pub fn single(rows: &[String]) -> Self {
+        Self {
+            queues: vec![ClaimQueueRows {
+                queue_id: None,
+                rows: rows.to_vec(),
+                struck: Vec::new(),
+            }],
+        }
+    }
+
+    /// Every queue component of `content`, by resolved queue id. `None` when
+    /// the queue graph does not parse (the same condition under which
+    /// [`crate::queue_continuation::live_queue_head_rows`] is `None`).
+    pub fn from_content(content: &str) -> Option<Self> {
+        use crate::document_queue::{self, QueueEntry};
+        let components = agent_doc_element::element::parse(content).ok()?;
+        let graph = crate::queue_graph::QueueGraph::parse(content, &components).ok()?;
+        let queues = graph
+            .blocks()
+            .iter()
+            .map(|block| ClaimQueueRows {
+                queue_id: Some(block.id.clone()),
+                rows: document_queue::prompts(&block.entries)
+                    .into_iter()
+                    .map(|prompt| prompt.text.trim().to_string())
+                    .collect(),
+                struck: block
+                    .entries
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        QueueEntry::Completed(prompt) => {
+                            Some(crate::queue_consume::struck_row_work_text(&prompt.text))
+                        }
+                        _ => None,
+                    })
+                    .filter(|text| !text.is_empty())
+                    .collect(),
+            })
+            .collect();
+        Some(Self { queues })
+    }
+
+    /// Every queue's live rows, in document order.
+    pub fn rows(&self) -> Vec<String> {
+        self.queues
+            .iter()
+            .flat_map(|queue| queue.rows.iter().cloned())
+            .collect()
+    }
+}
+
+/// What [`QueueClaimLedger::follow_edits_in_view`] changed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClaimFollowOutcome {
+    /// `(previous item_text, new item_text)` per claim that followed an edit.
+    pub followed: Vec<(String, String)>,
+    /// `(live row text it held, struck predecessor it was restored to)` per
+    /// claim that had followed off a struck row (`#claimfollowstruck`).
+    pub unfollowed_struck: Vec<(String, String)>,
 }
 
 /// How many earlier texts a claim remembers in `followed_from`.
@@ -789,8 +890,8 @@ impl QueueClaimLedger {
             return Vec::new();
         };
         let mut ledger = self.clone();
-        if let Some(rows) = crate::queue_continuation::live_queue_head_rows(content) {
-            ledger.follow_edits(now_secs, &rows);
+        if let Some(view) = ClaimQueueView::from_content(content) {
+            ledger.follow_edits_in_view(now_secs, &view);
         }
         let live = crate::queue_continuation::live_queue_head_identities(content);
         let claimed = ledger.claimed_items(now_secs, live.as_ref());
@@ -885,8 +986,7 @@ impl QueueClaimLedger {
         generation_floor: u64,
     ) -> ClaimOutcome {
         let identity = claim_identity(item);
-        let generation_floor =
-            generation_floor.max(self.cancellation_generation_floor(&identity));
+        let generation_floor = generation_floor.max(self.cancellation_generation_floor(&identity));
         let expires_at_secs = now_secs.saturating_add(ttl_secs.max(1));
         let mut fresh = QueueClaim {
             identity: identity.clone(),
@@ -902,6 +1002,7 @@ impl QueueClaimLedger {
             owner_session,
             anchor: None,
             followed_from: Vec::new(),
+            followed_generation: 0,
         };
         match self
             .claims
@@ -1373,13 +1474,217 @@ impl QueueClaimLedger {
     /// on-load [`Self::rekey`] keeps it) and its previous text is remembered
     /// in `followed_from`. Returns `(previous item_text, new item_text)` per
     /// followed claim.
+    ///
+    /// This single-list form treats `live_heads` as one unnamed queue with no
+    /// struck rows; document readers use [`Self::follow_edits_in_view`], which
+    /// keeps every claim inside its own queue and never carries a claim off a
+    /// struck row (`#claimfollowstruck`).
     pub fn follow_edits(&mut self, now_secs: u64, live_heads: &[String]) -> Vec<(String, String)> {
+        self.follow_edits_in_view(now_secs, &ClaimQueueView::single(live_heads))
+            .followed
+    }
+
+    /// [`Self::follow_edits`] over every queue of a document
+    /// (`#claimfollowstruck`).
+    ///
+    /// A claim is bound to a row of ONE queue. Each claim is aligned only
+    /// against the queue that holds it: the queue where its identity is a live
+    /// row, else the queue its anchor recorded ([`ClaimAnchor::queue_id`]),
+    /// else (a legacy anchor without a queue id) the one queue its anchored
+    /// heads or its struck row identify. A claim no queue identifies is not in
+    /// view and keeps its anchor. Before this, every reader aligned the anchor
+    /// with the document's *selected* queue, so once a strike drained
+    /// `agent:run` the selection moved to `agent:loop` and the claim's one-row
+    /// anchor paired structurally with the loop's one row; when new `agent:run`
+    /// heads arrived the claim jumped again (observed 2026-10-27,
+    /// `subagent:kotlinflush` gen 1 on `#gh-fix …/issues/380`).
+    ///
+    /// A struck row is completed work, never an edit: a claim whose identity
+    /// is a struck row of any queue and no live row never follows a successor
+    /// head, however the structural alignment pairs them. Its row closed; the
+    /// existing strike policy then applies ([`Self::retire_struck`] ends a
+    /// finished attempt, a still-running one reopens its struck row as `❔`).
+    ///
+    /// Durable state that already followed off a struck row is surfaced, not
+    /// kept: a claim sitting on a live row whose `followed_from` names a text
+    /// that is now a struck row (and no live row) is restored onto that struck
+    /// predecessor, so the unrelated live row stops carrying its marker and
+    /// the strike policy above judges the attempt.
+    pub fn follow_edits_in_view(
+        &mut self,
+        now_secs: u64,
+        view: &ClaimQueueView,
+    ) -> ClaimFollowOutcome {
+        let queue_live: Vec<Vec<QueueItemIdentity>> = view
+            .queues
+            .iter()
+            .map(|queue| {
+                queue
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        claim_identity(
+                            &agent_doc_document::queue_projection::strip_in_progress_marker(
+                                row.trim(),
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let queue_struck: Vec<HashSet<QueueItemIdentity>> = view
+            .queues
+            .iter()
+            .map(|queue| {
+                queue
+                    .struck
+                    .iter()
+                    .map(|text| claim_identity(text))
+                    .collect()
+            })
+            .collect();
+        let all_live: HashSet<&QueueItemIdentity> = queue_live.iter().flatten().collect();
+        let closed_by_strike = |identity: &QueueItemIdentity| {
+            !all_live.contains(identity) && queue_struck.iter().any(|set| set.contains(identity))
+        };
+
+        let mut outcome = ClaimFollowOutcome::default();
+        for claim in &mut self.claims {
+            // Only this attempt's own follows are evidence against it: a
+            // re-claim (`Reassigned`) inherits the line history but was made on
+            // the row as it is, and a legacy follow is unattributable.
+            if !all_live.contains(&claim.identity)
+                || claim.followed_generation == 0
+                || claim.followed_generation != claim.generation
+            {
+                continue;
+            }
+            let Some(position) = claim
+                .followed_from
+                .iter()
+                .rposition(|text| closed_by_strike(&claim_identity(text)))
+            else {
+                continue;
+            };
+            let restored = claim.followed_from[position].clone();
+            let current = std::mem::replace(&mut claim.item_text, restored.clone());
+            claim.identity = claim_identity(&restored);
+            claim.followed_from.truncate(position);
+            claim.anchor = None;
+            outcome.unfollowed_struck.push((current, restored));
+        }
+
+        // Which queue each claim belongs to (`None`: not in view).
+        let assigned: Vec<Option<usize>> =
+            self.claims
+                .iter()
+                .map(|claim| {
+                    let anchor_queue = claim.anchor.as_ref().map(|anchor| &anchor.queue_id);
+                    let live_in: Vec<usize> = (0..view.queues.len())
+                        .filter(|&q| queue_live[q].contains(&claim.identity))
+                        .collect();
+                    if let Some(&first) = live_in.first() {
+                        return Some(
+                            live_in
+                                .iter()
+                                .copied()
+                                .find(|&q| anchor_queue == Some(&view.queues[q].queue_id))
+                                .unwrap_or(first),
+                        );
+                    }
+                    if let Some(Some(queue_id)) = anchor_queue {
+                        return view.queues.iter().position(|queue| {
+                            queue.queue_id.as_deref() == Some(queue_id.as_str())
+                        });
+                    }
+                    if let Some(q) =
+                        (0..view.queues.len()).find(|&q| queue_struck[q].contains(&claim.identity))
+                    {
+                        return Some(q);
+                    }
+                    if view.queues.len() == 1 {
+                        return Some(0);
+                    }
+                    let single = |matches: &dyn Fn(usize) -> bool| -> Option<usize> {
+                        let found: Vec<usize> =
+                            (0..view.queues.len()).filter(|&q| matches(q)).collect();
+                        match found.as_slice() {
+                            [only] => Some(*only),
+                            _ => None,
+                        }
+                    };
+                    if claim.identity.is_id_backed() && !claim.tracked_item_aliases.is_empty() {
+                        let aliases: HashSet<QueueItemIdentity> = claim
+                            .tracked_item_aliases
+                            .iter()
+                            .map(|alias| claim_identity(alias))
+                            .collect();
+                        if let Some(q) =
+                            single(&|q| queue_live[q].iter().any(|id| aliases.contains(id)))
+                        {
+                            return Some(q);
+                        }
+                    }
+                    match &claim.anchor {
+                        Some(anchor) => {
+                            let anchored: HashSet<QueueItemIdentity> = anchor
+                                .heads
+                                .iter()
+                                .map(|head| claim_identity(head))
+                                .collect();
+                            single(&|q| {
+                                queue_live[q].iter().any(|id| anchored.contains(id))
+                                    || queue_struck[q].iter().any(|id| anchored.contains(id))
+                            })
+                        }
+                        None => single(&|q| {
+                            queue_live[q]
+                                .iter()
+                                .any(|id| is_edit_continuation(&claim.identity, id))
+                        }),
+                    }
+                })
+                .collect();
+
+        let held: HashSet<QueueItemIdentity> = self
+            .claims
+            .iter()
+            .filter(|claim| claim.blocks_dispatch(now_secs))
+            .map(|claim| claim.identity.clone())
+            .collect();
+        for (q, queue) in view.queues.iter().enumerate() {
+            let members: Vec<bool> = assigned.iter().map(|a| *a == Some(q)).collect();
+            if !members.iter().any(|member| *member) {
+                continue;
+            }
+            outcome.followed.extend(self.follow_queue_edits(
+                now_secs,
+                queue,
+                &members,
+                &held,
+                &closed_by_strike,
+            ));
+        }
+        outcome
+    }
+
+    /// The single-queue body of [`Self::follow_edits_in_view`]: aligns the
+    /// claims in `members` with `queue`'s live rows and re-anchors them on it.
+    fn follow_queue_edits(
+        &mut self,
+        now_secs: u64,
+        queue: &ClaimQueueRows,
+        members: &[bool],
+        held: &HashSet<QueueItemIdentity>,
+        closed_by_strike: &dyn Fn(&QueueItemIdentity) -> bool,
+    ) -> Vec<(String, String)> {
         use crate::queue_head_alignment::{
             QueueHeadPairing, normalize_queue_head_text, pair_queue_heads,
         };
         use agent_doc_document::queue_projection::{
             QueueOwnerProjection, owner_projection, strip_in_progress_marker,
         };
+        let live_heads = &queue.rows;
         // Rows may carry the binary-owned lifecycle projection. Work text and
         // identity never include it; the exact owner annotation is kept apart
         // as row evidence (`#claimrowmigrate`).
@@ -1400,12 +1705,6 @@ impl QueueClaimLedger {
             .iter()
             .map(|head| effect_family_identity(head))
             .collect();
-        let held: HashSet<QueueItemIdentity> = self
-            .claims
-            .iter()
-            .filter(|claim| claim.blocks_dispatch(now_secs))
-            .map(|claim| claim.identity.clone())
-            .collect();
 
         // Per claim: the live lines it holds, and whether they are exclusive.
         // Exclusive lines were identified as THIS claim's row (by its anchor or
@@ -1416,8 +1715,8 @@ impl QueueClaimLedger {
         let mut pairings: Vec<(&Vec<String>, QueueHeadPairing)> = Vec::new();
         let mut descendants: Vec<Vec<usize>> = Vec::with_capacity(self.claims.len());
         let mut exclusive: Vec<bool> = Vec::with_capacity(self.claims.len());
-        for claim in &self.claims {
-            if !claim.blocks_dispatch(now_secs) {
+        for (claim_idx, claim) in self.claims.iter().enumerate() {
+            if !members[claim_idx] || !claim.blocks_dispatch(now_secs) {
                 descendants.push(Vec::new());
                 exclusive.push(false);
                 continue;
@@ -1488,12 +1787,18 @@ impl QueueClaimLedger {
 
         let mut proposals: Vec<(usize, usize)> = Vec::new();
         for (claim_idx, claim) in self.claims.iter().enumerate() {
-            if !claim.blocks_dispatch(now_secs) {
+            if !members[claim_idx] || !claim.blocks_dispatch(now_secs) {
                 continue;
             }
             let lines = &descendants[claim_idx];
             if lines.iter().any(|&n| live[n] == claim.identity) {
                 // Still on (one of) its own line(s).
+                continue;
+            }
+            if closed_by_strike(&claim.identity) {
+                // `#claimfollowstruck`: its row was struck (completed). A strike
+                // is never an edit, so no successor head inherits the claim,
+                // whatever the structural alignment paired it with.
                 continue;
             }
             if let Some(&first) = lines.first() {
@@ -1564,6 +1869,7 @@ impl QueueClaimLedger {
                     .saturating_sub(FOLLOWED_FROM_LIMIT);
                 claim.followed_from.drain(..excess);
             }
+            claim.followed_generation = claim.generation;
             followed.push((previous, text));
         }
 
@@ -1573,7 +1879,8 @@ impl QueueClaimLedger {
         // exclusive claim keeps exactly its located lines; only an unlocated
         // claim holds every line with its identity.
         for (claim_idx, claim) in self.claims.iter_mut().enumerate() {
-            if claim.is_expired(now_secs) || !live.contains(&claim.identity) {
+            if !members[claim_idx] || claim.is_expired(now_secs) || !live.contains(&claim.identity)
+            {
                 continue;
             }
             let mut slots = descendants[claim_idx].clone();
@@ -1588,6 +1895,7 @@ impl QueueClaimLedger {
             slots.sort_unstable();
             slots.dedup();
             claim.anchor = Some(ClaimAnchor {
+                queue_id: queue.queue_id.clone(),
                 heads: norms.clone(),
                 slots,
             });
@@ -1655,6 +1963,7 @@ impl QueueClaimLedger {
                     if !source.followed_from.contains(&source.item_text) {
                         source.followed_from.push(source.item_text.clone());
                     }
+                    source.followed_generation = source.generation;
                     source.identity = target_identity;
                     source.item_text = target_text;
                     source.anchor = None;
@@ -2653,6 +2962,7 @@ mod tests {
                     owner_session: None,
                     anchor: None,
                     followed_from: Vec::new(),
+                    followed_generation: 0,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -2668,6 +2978,7 @@ mod tests {
                     owner_session: None,
                     anchor: None,
                     followed_from: Vec::new(),
+                    followed_generation: 0,
                 },
             ],
             cancellations: Vec::new(),
@@ -3655,5 +3966,239 @@ mod tests {
             !ClaimedQueueItems::none().gained_since(&ClaimedQueueItems::none()),
             "two empty reads gained nothing"
         );
+    }
+
+    /// A session document with an `agent:run` queue and an `agent:loop`
+    /// queue, the shape of agent-doc-bugs.md on 2026-10-27.
+    fn run_loop_doc(run: &[&str], loop_rows: &[&str]) -> String {
+        let rows =
+            |items: &[&str]| -> String { items.iter().map(|item| format!("- {item}\n")).collect() };
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Run <!-- agent:run subagents go -->\n{}<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop interval=\"1h\" -->\n{}<!-- /agent:loop -->\n",
+            rows(run),
+            rows(loop_rows),
+        )
+    }
+
+    fn view_of(content: &str) -> ClaimQueueView {
+        let view = ClaimQueueView::from_content(content).expect("queue graph parses");
+        assert_eq!(view.queues.len(), 2, "{view:?}");
+        view
+    }
+
+    const KOTLINFLUSH: &str = "do [#kotlinflushprep]";
+    const LOOP_WATCH: &str = "Watch https://github.com/btakita/agent-doc/issues for new issues. \
+Add new issues into the backlog + queue except issue #40 + #45.";
+    const GH380: &str = "#gh-fix https://github.com/btakita/agent-doc/issues/380";
+    const GH381: &str = "#gh-fix https://github.com/btakita/agent-doc/issues/381";
+
+    fn running_kotlinflush(now: u64) -> QueueClaimLedger {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(KOTLINFLUSH, "subagent:kotlinflush", now, 3600);
+        let generation = ledger.claims[0].generation;
+        ledger
+            .start(
+                KOTLINFLUSH,
+                "subagent:kotlinflush",
+                "a200708c59007b127",
+                now,
+                3600,
+                Some(generation),
+            )
+            .unwrap();
+        ledger
+    }
+
+    /// `#claimfollowstruck` (agent-doc-bugs.md, 2026-10-27): the claim for
+    /// `subagent:kotlinflush` gen 1, dispatched for `do [#kotlinflushprep]`,
+    /// moved onto the `agent:loop` watch row once `#kotlinflushprep` was
+    /// struck (the strike drained `agent:run`, so the document's selected
+    /// queue became `agent:loop`, and a one-row anchor paired structurally
+    /// with its one row), then onto the `#gh-fix …/issues/380` row when new
+    /// `agent:run` heads arrived. #380 showed `🚧` with no worker and was never
+    /// dispatched. A strike ends the row's claim; no successor head, in the
+    /// same queue or a sibling queue, inherits it.
+    #[test]
+    fn a_struck_row_claim_never_follows_onto_the_next_head_in_any_queue() {
+        let now = 1_000;
+        let mut ledger = running_kotlinflush(now);
+        let claimed = run_loop_doc(&[KOTLINFLUSH], &[LOOP_WATCH]);
+        let outcome = ledger.follow_edits_in_view(now, &view_of(&claimed));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        let run_id = view_of(&claimed).queues[0].queue_id.clone();
+        assert!(run_id.is_some());
+        assert_eq!(
+            ledger.claims[0].anchor.as_ref().unwrap().queue_id,
+            run_id,
+            "the anchor names the queue that holds the claimed row"
+        );
+
+        // The coordinator strikes the finished row: `agent:run` is drained.
+        let struck_text = format!("~~{KOTLINFLUSH}~~");
+        let struck = run_loop_doc(&[&struck_text], &[LOOP_WATCH]);
+        let outcome = ledger.follow_edits_in_view(now + 1, &view_of(&struck));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        assert_eq!(ledger.claims[0].identity, claim_identity(KOTLINFLUSH));
+
+        // The loop pass adds new issues to `agent:run`.
+        let next = run_loop_doc(&[&struck_text, GH380, GH381], &[LOOP_WATCH]);
+        let outcome = ledger.follow_edits_in_view(now + 2, &view_of(&next));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        let claim = &ledger.claims[0];
+        assert_eq!(claim.identity, claim_identity(KOTLINFLUSH));
+        assert_eq!(claim.item_text, KOTLINFLUSH);
+        assert!(claim.followed_from.is_empty(), "{:?}", claim.followed_from);
+        let live: HashSet<_> = view_of(&next)
+            .rows()
+            .iter()
+            .map(|row| claim_identity(row))
+            .collect();
+        let claimed_items = ledger.claimed_items(now + 2, Some(&live));
+        for head in [GH380, GH381, LOOP_WATCH] {
+            assert!(!claimed_items.claims(head), "{head} must stay dispatchable");
+        }
+        // The running attempt contradicts the strike: its own row reopens `❔`.
+        assert!(struck_row_reopened_by_claim(Some(claim)));
+    }
+
+    /// `#claimfollowstruck`: the same-queue form. The claimed row is struck
+    /// and a new head is added in the same successor, so the one-row anchor
+    /// and the one live row form an equal-cardinality replace hunk, which the
+    /// structural fallback pairs as an in-place edit. A strike is completion,
+    /// not an edit: the new head stays unclaimed.
+    #[test]
+    fn strike_then_next_head_in_the_same_queue_does_not_inherit_the_claim() {
+        let now = 2_000;
+        let mut ledger = running_kotlinflush(now);
+        ledger.follow_edits_in_view(now, &view_of(&run_loop_doc(&[KOTLINFLUSH], &[])));
+        let struck_text = format!("~~{KOTLINFLUSH}~~");
+        let successor = run_loop_doc(&[&struck_text, GH380], &[]);
+        let outcome = ledger.follow_edits_in_view(now + 1, &view_of(&successor));
+        assert!(outcome.followed.is_empty(), "{outcome:?}");
+        assert_eq!(ledger.claims[0].identity, claim_identity(KOTLINFLUSH));
+
+        // A finished attempt is then retired by the strike policy.
+        let generation = ledger.claims[0].generation;
+        ledger.report(KOTLINFLUSH, Some(generation)).unwrap();
+        let struck: HashSet<_> = [claim_identity(KOTLINFLUSH)].into_iter().collect();
+        let live: HashSet<_> = [claim_identity(GH380)].into_iter().collect();
+        assert_eq!(ledger.retire_struck(now + 2, &struck, &live).len(), 1);
+        assert!(ledger.claims.is_empty());
+    }
+
+    /// `#claimfollowstruck` keeps `#claimfollowedit`: an in-place edit of a
+    /// claimed row still carries the claim, and stays inside its queue while a
+    /// sibling queue's row sits at the same structural offset.
+    #[test]
+    fn an_in_place_edit_still_follows_within_its_own_queue() {
+        let now = 3_000;
+        let original = "#gh-fix https://github.com/btakita/agent-foc/issues/272";
+        let edited = "#gh-fix https://github.com/btakita/agent-doc/issues/272";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(original, "subagent:gh272", now, 3600);
+        ledger.follow_edits_in_view(now, &view_of(&run_loop_doc(&[original], &[LOOP_WATCH])));
+        let outcome =
+            ledger.follow_edits_in_view(now + 1, &view_of(&run_loop_doc(&[edited], &[LOOP_WATCH])));
+        assert_eq!(
+            outcome.followed,
+            vec![(original.to_string(), edited.to_string())]
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(edited));
+
+        // The row moves out of view of its queue (a drained `agent:run` while
+        // the loop is selected): the claim keeps its anchor, never the loop row.
+        let drained = run_loop_doc(&[], &[LOOP_WATCH]);
+        let outcome = ledger.follow_edits_in_view(now + 2, &view_of(&drained));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        assert_eq!(ledger.claims[0].identity, claim_identity(edited));
+    }
+
+    /// `#claimfollowstruck` repair: a ledger that already followed off a
+    /// struck row (the 2026-10-27 durable state: on `#gh-fix …/380`,
+    /// `followed_from` = [`do [#kotlinflushprep]`, the loop watch row], a
+    /// legacy anchor without a queue id) is restored onto its struck row, so
+    /// #380 is dispatchable again and the strike policy judges the attempt.
+    #[test]
+    fn a_claim_that_already_followed_off_a_struck_row_is_restored_onto_it() {
+        let now = 4_000;
+        let mut ledger = running_kotlinflush(now);
+        {
+            let claim = &mut ledger.claims[0];
+            claim.identity = claim_identity(GH380);
+            claim.item_text = GH380.to_string();
+            claim.followed_from = vec![KOTLINFLUSH.to_string(), LOOP_WATCH.to_string()];
+            claim.followed_generation = claim.generation;
+            claim.anchor = Some(ClaimAnchor {
+                queue_id: None,
+                heads: strings(&[GH380, GH381]),
+                slots: vec![0],
+            });
+        }
+        let struck_text = format!("~~{KOTLINFLUSH}~~");
+        let content = run_loop_doc(&[&struck_text, GH380, GH381], &[LOOP_WATCH]);
+        let outcome = ledger.follow_edits_in_view(now + 1, &view_of(&content));
+        assert_eq!(
+            outcome.unfollowed_struck,
+            vec![(GH380.to_string(), KOTLINFLUSH.to_string())]
+        );
+        assert!(outcome.followed.is_empty(), "{outcome:?}");
+        let claim = &ledger.claims[0];
+        assert_eq!(claim.identity, claim_identity(KOTLINFLUSH));
+        assert_eq!(claim.item_text, KOTLINFLUSH);
+        assert!(claim.followed_from.is_empty());
+        assert!(struck_row_reopened_by_claim(Some(claim)));
+        let live: HashSet<_> = view_of(&content)
+            .rows()
+            .iter()
+            .map(|row| claim_identity(row))
+            .collect();
+        assert!(!ledger.claimed_items(now + 1, Some(&live)).claims(GH380));
+
+        // Stable: the next read neither re-follows nor re-reports.
+        let outcome = ledger.follow_edits_in_view(now + 2, &view_of(&content));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        assert_eq!(ledger.claims[0].identity, claim_identity(KOTLINFLUSH));
+    }
+
+    /// `#claimfollowstruck` repair is fenced to the attempt that followed.
+    /// After the mis-follow the coordinator re-claimed `#gh-fix …/380` for a
+    /// new worker (`Reassigned`, gen 2): that attempt inherits the line
+    /// history but was made on #380 as it is, so it is never yanked back onto
+    /// the struck row. A legacy follow (no recorded generation) is likewise
+    /// unattributable and left alone.
+    #[test]
+    fn a_reclaimed_or_legacy_attempt_is_not_restored_onto_a_struck_predecessor() {
+        let now = 5_000;
+        let mut ledger = running_kotlinflush(now);
+        {
+            let claim = &mut ledger.claims[0];
+            claim.identity = claim_identity(GH380);
+            claim.item_text = GH380.to_string();
+            claim.followed_from = vec![KOTLINFLUSH.to_string(), LOOP_WATCH.to_string()];
+            claim.followed_generation = claim.generation;
+        }
+        // The gen-1 attempt expires (its owner session ended); gen 2 is claimed.
+        let later = now + 3601;
+        assert_eq!(
+            ledger.claim(GH380, "subagent:gh380", later, 3600),
+            ClaimOutcome::Reassigned
+        );
+        assert_eq!(ledger.claims[0].generation, 2);
+        let now = later;
+        let struck_text = format!("~~{KOTLINFLUSH}~~");
+        let content = run_loop_doc(&[&struck_text, GH380, GH381], &[LOOP_WATCH]);
+        let mut legacy = ledger.clone();
+        let outcome = ledger.follow_edits_in_view(now + 2, &view_of(&content));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        assert_eq!(ledger.claims[0].identity, claim_identity(GH380));
+        assert_eq!(ledger.claims[0].owner, "subagent:gh380");
+
+        legacy.claims[0].followed_generation = 0;
+        legacy.claims[0].generation = 1;
+        let outcome = legacy.follow_edits_in_view(now + 2, &view_of(&content));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        assert_eq!(legacy.claims[0].identity, claim_identity(GH380));
     }
 }

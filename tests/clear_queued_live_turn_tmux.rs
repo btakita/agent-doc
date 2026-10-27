@@ -24,7 +24,9 @@
 //! (once, after the first item's committed closeout), and `disable-auto-clear`
 //! drains both items without one. A supervisor re-`execve` that adopts the
 //! live harness between the items keeps that pending clear
-//! (`#autoclearbaseline`).
+//! (`#autoclearbaseline`), and a controller orphan drain that lands inside that
+//! re-exec yields to the restarting supervisor instead of typing the next item
+//! past the clear (`#autoclearorphandrain`).
 //!
 //! A fake Codex harness (`FAKE_CODEX`) covers the Codex delivery: the queued
 //! clear fires after the turn even though Codex's post-turn placeholder is on
@@ -262,6 +264,15 @@ const QUEUE_OBSERVATION_RELEASE: &str = "release_queue_observation";
 /// releases the held tick.
 const RECEIPT_PROBE_HOLD: &str = "hold_receipt_probe";
 
+/// The file whose creation opens the controller's orphan-drain sweep
+/// (`AGENT_DOC_TEST_ORPHAN_DRAIN_GATE`).
+const ORPHAN_DRAIN_GATE: &str = "open_orphan_drain";
+
+/// The file whose existence holds a preserved-child re-exec reentry before it
+/// registers (`AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY`); removing it
+/// releases the replacement image.
+const REENTRY_HOLD: &str = "hold_reentry";
+
 const PLAIN_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c1\nagent: claude\n---\n\n# Session\n\n## User\n\nhello\n";
 
 const CODEX_DOC: &str = "---\nagent_doc_session: 00000000-0000-4000-8000-0000000000c2\nagent: codex\n---\n\n# Session\n\n## User\n\nhello\n";
@@ -286,6 +297,7 @@ impl LiveClearScenario {
             hold_queue_observation,
             false,
             false,
+            false,
             FakeHarness::Claude,
         )
     }
@@ -293,18 +305,58 @@ impl LiveClearScenario {
     /// The supervisor's idle watch honors the deferred-clear receipt-probe
     /// hold ([`Self::arm_receipt_probe_hold`]).
     fn start_with_receipt_probe_hold(label: &str) -> Self {
-        Self::start_inner(label, PLAIN_DOC, false, false, true, FakeHarness::Claude)
+        Self::start_inner(
+            label,
+            PLAIN_DOC,
+            false,
+            false,
+            true,
+            false,
+            FakeHarness::Claude,
+        )
     }
 
     /// The fake harness renders the unsubmitted composer line (see
     /// `FAKE_CLAUDE_COMPOSER` in [`FAKE_CLAUDE`]).
     fn start_with_composer(label: &str) -> Self {
-        Self::start_inner(label, PLAIN_DOC, false, true, false, FakeHarness::Claude)
+        Self::start_inner(
+            label,
+            PLAIN_DOC,
+            false,
+            true,
+            false,
+            false,
+            FakeHarness::Claude,
+        )
+    }
+
+    /// The queue observation is held (as [`Self::start_with`]), the
+    /// controller's orphan drain stays closed until
+    /// [`Self::open_orphan_drain`], and a preserved-child re-exec reentry
+    /// honors [`Self::arm_reentry_hold`].
+    fn start_with_reexec_orphan_handshake(label: &str, document: &str) -> Self {
+        Self::start_inner(
+            label,
+            document,
+            true,
+            false,
+            false,
+            true,
+            FakeHarness::Claude,
+        )
     }
 
     /// The supervisor launches the fake Codex harness ([`FAKE_CODEX`]).
     fn start_codex(label: &str) -> Self {
-        Self::start_inner(label, CODEX_DOC, false, false, false, FakeHarness::Codex)
+        Self::start_inner(
+            label,
+            CODEX_DOC,
+            false,
+            false,
+            false,
+            false,
+            FakeHarness::Codex,
+        )
     }
 
     fn start_inner(
@@ -313,6 +365,7 @@ impl LiveClearScenario {
         hold_queue_observation: bool,
         composer: bool,
         hold_receipt_probe: bool,
+        reexec_orphan_handshake: bool,
         harness: FakeHarness,
     ) -> Self {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -390,6 +443,16 @@ impl LiveClearScenario {
             format!(
                 "{hold}export AGENT_DOC_TEST_HOLD_DEFERRED_CLEAR_RECEIPT_PROBE={}\n",
                 shell_quote(&fake.join(RECEIPT_PROBE_HOLD).to_string_lossy())
+            )
+        } else {
+            hold
+        };
+        // The controller is spawned by this supervisor and inherits these.
+        let hold = if reexec_orphan_handshake {
+            format!(
+                "{hold}export AGENT_DOC_TEST_ORPHAN_DRAIN_GATE={}\nexport AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY={}\n",
+                shell_quote(&fake.join(ORPHAN_DRAIN_GATE).to_string_lossy()),
+                shell_quote(&fake.join(REENTRY_HOLD).to_string_lossy()),
             )
         } else {
             hold
@@ -665,6 +728,28 @@ impl LiveClearScenario {
 
     fn release_receipt_probe_hold(&self) {
         std::fs::remove_file(self.fake.join(RECEIPT_PROBE_HOLD)).unwrap();
+    }
+
+    /// Open the controller's orphan-drain sweep.
+    fn open_orphan_drain(&self) {
+        std::fs::write(self.fake.join(ORPHAN_DRAIN_GATE), "").unwrap();
+    }
+
+    /// Arm the reentry hold: the next preserved-child re-exec image stops
+    /// before registering until [`Self::release_reentry_hold`].
+    fn arm_reentry_hold(&self) {
+        std::fs::write(self.fake.join(REENTRY_HOLD), "").unwrap();
+    }
+
+    fn wait_reentry_held(&self) {
+        let held = self.fake.join(format!("{REENTRY_HOLD}.held"));
+        self.wait_until("the replacement image is held before registering", || {
+            held.exists()
+        });
+    }
+
+    fn release_reentry_hold(&self) {
+        std::fs::remove_file(self.fake.join(REENTRY_HOLD)).unwrap();
     }
 
     /// The harness finishes its turn: `Stop` hook, then the idle frame.
@@ -1624,6 +1709,92 @@ fn queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec() {
         scenario.triggers() == 2
     });
     scenario.assert_one_auto_clear_between_items(&harness, &background);
+}
+
+/// `#autoclearorphandrain` (`make tmux-ci` under load, 1 in 3 whole-file
+/// runs): item one commits and the supervisor re-`execve`s itself, adopting
+/// the live harness. While the replacement image is still in its re-exec window
+/// (recycle `InFlight`, no IPC listener, not registered) the controller's
+/// orphan drain dispatches item two (`reason=no_supervisor_idle_watch`). Its
+/// route read the restarting supervisor as degraded (`supervisor_health_is_
+/// unreachable`), waited out the recycle, and typed item two straight into the
+/// pane, skipping the queue auto-clear the replacement image carried
+/// (`#autoclearbaseline`). A restarting supervisor is not an orphan: the
+/// route yields to its idle watch, which clears and then dispatches item two.
+///
+/// Ordered by handshake: the orphan drain is closed until the replacement
+/// image is held before registering, and the image is released only once the
+/// drain's route for item two has decided.
+#[test]
+#[ignore = "live tmux integration test; run `make tmux-ci`"]
+fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supervisor() {
+    let scenario = LiveClearScenario::start_with_reexec_orphan_handshake(
+        "queue-auto-clear-reexec-orphan",
+        &auto_clear_queue_doc("<!-- agent:queue go -->"),
+    );
+    scenario.route_dispatch_turn();
+    let harness = scenario.harness_pids();
+    let background = scenario.background_pids();
+    scenario.answer_head("answer item one");
+    assert_eq!(
+        (scenario.triggers(), scenario.clears()),
+        (1, 0),
+        "the held watch has dispatched nothing: {:?}",
+        scenario.inputs()
+    );
+
+    scenario.arm_reentry_hold();
+    agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
+        &scenario.doc,
+        "test_reexec_orphan_drain",
+    )
+    .unwrap();
+    scenario.wait_reentry_held();
+
+    // The supervisor is restarting. Let the orphan drain take its first look.
+    scenario.open_orphan_drain();
+    let orphan_dispatched = |ops: &str| {
+        ops.lines().any(|line| {
+            line.contains("] controller_orphan_drain_dispatch ")
+                && line.contains("head=answer item two")
+        })
+    };
+    scenario.wait_until(
+        "the orphan drain's route for item two decided against the restarting supervisor",
+        || {
+            let ops = scenario.ops_log();
+            orphan_dispatched(&ops)
+                && ops.lines().any(|line| {
+                    (line.contains("] route_background_existing_pane_guard ")
+                        && line.contains("outcome=deferred"))
+                        || line.contains("] route_dispatch_only_recycle_inflight_wait ")
+                        || line.contains("] controller_orphan_drain_worker_")
+                })
+        },
+    );
+    scenario.release_reentry_hold();
+    scenario.wait_until(
+        "the replacement image continued the outgoing auto-clear baseline",
+        || {
+            scenario.ops_log().lines().any(|line| {
+                line.contains("] queue_auto_clear_generation_baseline ")
+                    && line.contains("source=carried_across_reexec")
+            })
+        },
+    );
+
+    scenario.release_queue_observation();
+    scenario.wait_until("item two was dispatched", || scenario.triggers() == 2);
+    scenario.assert_one_auto_clear_between_items(&harness, &background);
+    let ops = scenario.ops_log();
+    assert!(
+        ops.lines().any(|line| {
+            line.contains("] route_background_existing_pane_guard ")
+                && line.contains("outcome=deferred reason=supervisor_restarting")
+        }),
+        "the orphan route yielded to the restarting supervisor: {}",
+        scenario.ops_log_tail()
+    );
 }
 
 impl LiveClearScenario {

@@ -27,6 +27,34 @@ use agent_doc_supervisor_process_io::{
     supervisor_stderr_log_path, supervisor_stderr_redirect_needed,
 };
 
+/// `#autoclearorphandrain` debug-build seam. While
+/// `AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY` names a file that EXISTS, a
+/// preserved-child re-exec reentry, before it starts its IPC listener and
+/// registers with the project controller, writes `<file>.held` and waits until
+/// the test removes `<file>`. The outgoing image published the recycle
+/// `InFlight` before its `execve`, so for the whole hold the supervisor is
+/// restarting: alive, unreachable, and about to resume its idle watch. Bounded;
+/// unavailable in optimized production builds.
+fn hold_preserved_child_reentry_for_test() {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    let Some(gate) = std::env::var_os("AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY")
+        .map(std::path::PathBuf::from)
+        .filter(|gate| gate.exists())
+    else {
+        return;
+    };
+    let _ = std::fs::write(
+        format!("{}.held", gate.display()),
+        format!("pid={}\n", std::process::id()),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while gate.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
 fn deferred_restart_ready_to_replace_child(
     deferred_until_boundary: bool,
     cycle_open: bool,
@@ -1349,6 +1377,14 @@ pub fn run_with_reap_policy_resume_and_harness(
         preserved_proof_contract.as_deref(),
         &mut session_log,
     );
+
+    // `#autoclearorphandrain` debug-build seam: hold a preserved-child reentry
+    // in its re-exec window (`InFlight` published, no IPC listener, not yet
+    // registered) so the live suite can run the controller orphan drain against
+    // a restarting supervisor by handshake.
+    if preserved_child_survived {
+        hold_preserved_child_reentry_for_test();
+    }
 
     // Start IPC listener
     let shared_for_ipc = shared.clone();

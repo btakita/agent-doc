@@ -20387,6 +20387,19 @@ mod orphan_drain_attempt_tests {
     }
 }
 
+/// `#autoclearorphandrain` debug-build seam. While
+/// `AGENT_DOC_TEST_ORPHAN_DRAIN_GATE` names a file that does NOT exist, the
+/// orphan-drain sweep does nothing; creating the file opens it. The live tmux
+/// suite opens it at a chosen moment (a supervisor held mid re-exec), so the
+/// sweep's first attempt for the head lands there by handshake instead of on
+/// whatever 10 s tick and 90 s backoff a loaded runner happens to produce.
+/// Unavailable in optimized production builds.
+fn orphan_drain_closed_for_test() -> bool {
+    cfg!(debug_assertions)
+        && std::env::var_os("AGENT_DOC_TEST_ORPHAN_DRAIN_GATE")
+            .is_some_and(|gate| !Path::new(&gate).exists())
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainEvent,
@@ -20395,6 +20408,9 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
 
     // `#drainingpredecessor` (GH #261): a promoted predecessor never routes.
     if runtime.successor_promoted() {
+        return;
+    }
+    if orphan_drain_closed_for_test() {
         return;
     }
 

@@ -1,0 +1,870 @@
+{
+  "derivation": "editor_group_layout",
+  "about": "#vscodeupgradelayout parity cases. The Rust `editor_group_layout` derivation (agent-doc-editor-surface group_layout.rs, answered through agent_doc_editor_derive_json) and the VS Code extension's frozen TypeScript floor (groupLayout.ts, groupLayout.test.ts) both answer every case. A native rule change updates `expected`; the floor may then diverge only through an explicit per-case `floor_expected`.",
+  "cases": [
+    {
+      "name": "two side-by-side groups are two measured columns",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 600
+            },
+            {
+              "size": 600
+            }
+          ]
+        },
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "tasks/a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "tasks/b.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "tasks/a.md"
+          ],
+          [
+            "tasks/b.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "left",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=2 source=measured orientation=h columns=2 [tasks/a.md | tasks/b.md] order=editor"
+      }
+    },
+    {
+      "name": "a vertical split is one column stacked top to bottom",
+      "input": {
+        "layout": {
+          "orientation": 1,
+          "groups": [
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            }
+          ]
+        },
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": 2,
+            "file": "tasks/b.md"
+          },
+          {
+            "view_column": 1,
+            "file": "tasks/a.md"
+          }
+        ],
+        "focused_group": 1
+      },
+      "expected": {
+        "columns": [
+          [
+            "tasks/a.md",
+            "tasks/b.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "v",
+        "position": "bottom",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=2 source=measured orientation=v columns=1 [tasks/a.md,tasks/b.md] order=editor"
+      }
+    },
+    {
+      "name": "a group split below the right column stacks in that column",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 500
+            },
+            {
+              "size": 500,
+              "groups": [
+                {
+                  "size": 300
+                },
+                {
+                  "size": 300
+                }
+              ]
+            }
+          ]
+        },
+        "group_count": 3,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          }
+        ],
+        "focused_group": 2
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md",
+            "c.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "right",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=3 layout_groups=3 source=measured orientation=h columns=2 [a.md | b.md,c.md] order=editor"
+      }
+    },
+    {
+      "name": "an even two-by-two grid built from rows is two columns",
+      "input": {
+        "layout": {
+          "orientation": 1,
+          "groups": [
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 500
+                },
+                {
+                  "size": 500
+                }
+              ]
+            },
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 500
+                },
+                {
+                  "size": 500
+                }
+              ]
+            }
+          ]
+        },
+        "group_count": 4,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          },
+          {
+            "view_column": 4,
+            "file": "d.md"
+          }
+        ],
+        "focused_group": 1
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md",
+            "c.md"
+          ],
+          [
+            "b.md",
+            "d.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "v",
+        "position": "top",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=4 layout_groups=4 source=measured orientation=v columns=2 [a.md,c.md | b.md,d.md] order=editor"
+      }
+    },
+    {
+      "name": "rows whose splitters were dragged apart are separate columns",
+      "input": {
+        "layout": {
+          "orientation": 1,
+          "groups": [
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 300
+                },
+                {
+                  "size": 500
+                }
+              ]
+            },
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 400
+                },
+                {
+                  "size": 400
+                }
+              ]
+            }
+          ]
+        },
+        "group_count": 4,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          },
+          {
+            "view_column": 4,
+            "file": "d.md"
+          }
+        ],
+        "focused_group": 3
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md",
+            "c.md"
+          ],
+          [
+            "b.md"
+          ],
+          [
+            "d.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "v",
+        "position": "bottom",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=4 layout_groups=4 source=measured orientation=v columns=3 [a.md,c.md | b.md | d.md] order=editor"
+      }
+    },
+    {
+      "name": "splitters within the tolerance stay one column",
+      "input": {
+        "layout": {
+          "orientation": 1,
+          "groups": [
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 500
+                },
+                {
+                  "size": 500
+                }
+              ]
+            },
+            {
+              "size": 400,
+              "groups": [
+                {
+                  "size": 504
+                },
+                {
+                  "size": 496
+                }
+              ]
+            }
+          ]
+        },
+        "group_count": 4,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          },
+          {
+            "view_column": 4,
+            "file": "d.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md",
+            "c.md"
+          ],
+          [
+            "b.md",
+            "d.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "v",
+        "position": "top",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=4 layout_groups=4 source=measured orientation=v columns=2 [a.md,c.md | b.md,d.md] order=editor"
+      }
+    },
+    {
+      "name": "a group showing no project markdown keeps its column empty",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            }
+          ]
+        },
+        "group_count": 3,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": null
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          }
+        ],
+        "focused_group": 2
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [],
+          [
+            "c.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "right",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=3 layout_groups=3 source=measured orientation=h columns=3 [a.md | <empty> | c.md] order=editor"
+      }
+    },
+    {
+      "name": "an empty trailing group is a measured placeholder column",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            }
+          ]
+        },
+        "group_count": 3,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md"
+          ],
+          []
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "left",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=3 layout_groups=3 source=measured orientation=h columns=3 [a.md | b.md | <empty>] order=editor"
+      }
+    },
+    {
+      "name": "one group is a known single column with no orientation or position",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 1200
+            }
+          ]
+        },
+        "group_count": 1,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": null,
+        "position": null,
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=1 layout_groups=1 source=measured orientation=none columns=1 [a.md] order=editor"
+      }
+    },
+    {
+      "name": "missing sizes split evenly and duplicate editors collapse",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {},
+            {
+              "groups": [
+                {},
+                {
+                  "size": null
+                }
+              ]
+            }
+          ]
+        },
+        "group_count": 3,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md",
+            "c.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "left",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=3 layout_groups=3 source=measured orientation=h columns=2 [a.md | b.md,c.md] order=editor"
+      }
+    },
+    {
+      "name": "a null groups field is a leaf",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 1,
+              "groups": null
+            },
+            {
+              "size": 1,
+              "groups": []
+            }
+          ]
+        },
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": 1
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": "right",
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=2 source=measured orientation=h columns=2 [a.md | b.md] order=editor"
+      }
+    },
+    {
+      "name": "without getEditorLayout the view-column order keeps its pre-measurement meaning",
+      "input": {
+        "layout": null,
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "ordinal",
+        "orientation": null,
+        "position": "left",
+        "reason": "layout_unavailable",
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=none source=ordinal orientation=none columns=2 [a.md | b.md] order=editor reason=layout_unavailable"
+      }
+    },
+    {
+      "name": "without getEditorLayout a middle group with no markdown is an empty column and a trailing one is dropped",
+      "input": {
+        "layout": null,
+        "group_count": 4,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          },
+          {
+            "view_column": 2,
+            "file": null
+          }
+        ],
+        "focused_group": 2
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [],
+          [
+            "c.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "ordinal",
+        "orientation": null,
+        "position": "right",
+        "reason": "layout_unavailable",
+        "observed_line": "[layout-detect] vscode groups=4 layout_groups=none source=ordinal orientation=none columns=3 [a.md | <empty> | c.md] order=editor reason=layout_unavailable"
+      }
+    },
+    {
+      "name": "another editor window makes the view-column order unknown",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 600
+            },
+            {
+              "size": 600
+            }
+          ]
+        },
+        "group_count": 3,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          }
+        ],
+        "focused_group": 2
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [],
+          [
+            "c.md"
+          ]
+        ],
+        "column_order": "unknown",
+        "source": "ordinal",
+        "orientation": null,
+        "position": "right",
+        "reason": "layout_group_count_mismatch",
+        "observed_line": "[layout-detect] vscode groups=3 layout_groups=2 source=ordinal orientation=none columns=3 [a.md | <empty> | c.md] order=unknown reason=layout_group_count_mismatch"
+      }
+    },
+    {
+      "name": "a visible editor beyond the measured groups makes the order unknown",
+      "input": {
+        "layout": {
+          "orientation": 1,
+          "groups": [
+            {
+              "size": 400
+            },
+            {
+              "size": 400
+            }
+          ]
+        },
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 3,
+            "file": "c.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [],
+          [
+            "c.md"
+          ]
+        ],
+        "column_order": "unknown",
+        "source": "ordinal",
+        "orientation": null,
+        "position": "left",
+        "reason": "layout_misses_visible_column",
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=2 source=ordinal orientation=none columns=3 [a.md | <empty> | c.md] order=unknown reason=layout_misses_visible_column"
+      }
+    },
+    {
+      "name": "an unknown group count cannot map the geometry",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 600
+            },
+            {
+              "size": 600
+            }
+          ]
+        },
+        "group_count": null,
+        "editors": [
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": 0
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md"
+          ]
+        ],
+        "column_order": "unknown",
+        "source": "ordinal",
+        "orientation": null,
+        "position": null,
+        "reason": "layout_group_count_mismatch",
+        "observed_line": "[layout-detect] vscode groups=unknown layout_groups=2 source=ordinal orientation=none columns=2 [a.md | b.md] order=unknown reason=layout_group_count_mismatch"
+      }
+    },
+    {
+      "name": "no visible editor and no layout is no layout",
+      "input": {
+        "layout": null,
+        "group_count": 1,
+        "editors": [],
+        "focused_group": null
+      },
+      "expected": {
+        "columns": [],
+        "column_order": "editor",
+        "source": "ordinal",
+        "orientation": null,
+        "position": null,
+        "reason": "layout_unavailable",
+        "observed_line": "[layout-detect] vscode groups=1 layout_groups=none source=ordinal orientation=none columns=0 [] order=editor reason=layout_unavailable"
+      }
+    },
+    {
+      "name": "an editor with no view column is ignored",
+      "input": {
+        "layout": {
+          "orientation": 0,
+          "groups": [
+            {
+              "size": 600
+            },
+            {
+              "size": 600
+            }
+          ]
+        },
+        "group_count": 2,
+        "editors": [
+          {
+            "view_column": null,
+            "file": "x.md"
+          },
+          {
+            "view_column": 1,
+            "file": "a.md"
+          },
+          {
+            "view_column": 2,
+            "file": "b.md"
+          }
+        ],
+        "focused_group": null
+      },
+      "expected": {
+        "columns": [
+          [
+            "a.md"
+          ],
+          [
+            "b.md"
+          ]
+        ],
+        "column_order": "editor",
+        "source": "measured",
+        "orientation": "h",
+        "position": null,
+        "reason": null,
+        "observed_line": "[layout-detect] vscode groups=2 layout_groups=2 source=measured orientation=h columns=2 [a.md | b.md] order=editor"
+      }
+    }
+  ]
+}

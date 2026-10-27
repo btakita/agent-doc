@@ -7,3 +7,4 @@ node_modules/**
 out/**/*.test.js
 out/**/*.test.js.map
 out/**/*.map
+test-fixtures/**

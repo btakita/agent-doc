@@ -22,6 +22,8 @@ export interface EditorSurface {
     visible: string[];
     open: string[];
     columns: SurfaceColumn[];
+    /** Provenance of `columns`' order (GH #320); absent means `editor`. */
+    column_order?: 'editor' | 'unknown' | 'retained';
     force_reconcile: boolean;
 }
 
@@ -90,6 +92,8 @@ export interface EditorSurfaceInput {
     visibleMd: string[];
     openMd?: string[];
     visibleColumns?: string[][];
+    /** The derived column order; omitted keeps the wire's `editor` default. */
+    columnOrder?: 'editor' | 'unknown' | 'retained';
     forceReconcile?: boolean;
 }
 
@@ -120,6 +124,7 @@ export function buildEditorSurface(input: EditorSurfaceInput): EditorSurface | n
         visible,
         open: prioritizeDocuments(input.activeFile, input.openMd ?? [], visible, []),
         columns: columns.map((files) => ({ files })),
+        ...(input.columnOrder && input.columnOrder !== 'editor' ? { column_order: input.columnOrder } : {}),
         force_reconcile: input.forceReconcile === true,
     };
 }

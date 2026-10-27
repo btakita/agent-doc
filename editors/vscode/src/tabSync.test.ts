@@ -36,6 +36,27 @@ describe('editor surface reporting wiring', () => {
         assert.ok(tabChangedBody.includes('requestSurfaceObservation()'));
     });
 
+    it('measures the grid with getEditorLayout and lets the native derivation group it', () => {
+        const start = source.indexOf('async function captureGroupLayout');
+        assert.ok(start >= 0, 'extension.ts must define captureGroupLayout');
+        const body = source.slice(start, source.indexOf('async function collectVisibleMarkdownColumns', start));
+        assert.ok(source.includes("executeCommand<EditorGroupLayout>('vscode.getEditorLayout')"));
+        assert.ok(body.includes('group_count: vscode.window.tabGroups.all.length'));
+        assert.ok(body.includes('native.editorDeriveJson(request, root)'));
+        assert.ok(!source.includes("const orientation: 'h' | 'v' = 'h';"), 'the orientation is measured');
+        assert.ok(source.includes('vscode.window.tabGroups.onDidChangeTabGroups(() => onTabChanged())'));
+
+        const report = source.slice(
+            source.indexOf('async function reportCurrentSurface'),
+            source.indexOf('function forgetObservedSurfaces'),
+        );
+        assert.ok(
+            report.indexOf('await captureCurrentSurface(false)')
+                < report.indexOf('requestedGeneration !== latestSurfaceGeneration || !surfaceProjectionActive'),
+            'a measurement superseded while awaiting the renderer must not publish',
+        );
+    });
+
     it('projects the latest editor event without a polling timer', () => {
         const start = source.indexOf('function requestSurfaceObservation');
         assert.ok(start >= 0);
@@ -75,7 +96,9 @@ describe('editor surface reporting wiring', () => {
         const start = source.indexOf('function captureCurrentSurface');
         assert.ok(start >= 0, 'extension.ts must define captureCurrentSurface');
         const body = source.slice(start, source.indexOf('function requestSurfaceObservation', start));
-        assert.ok(body.includes('absolutizeColumns(root, collectVisibleMarkdownColumns(root))'));
+        assert.ok(body.includes('absolutizeColumns(root, resolutionColumns(groupLayout))'));
+        assert.ok(body.includes('await captureGroupLayout(root, editor.document.uri)'));
+        assert.ok(body.includes('columnOrder: groupLayout.column_order'));
         assert.ok(body.includes('activeFile: activeFsPath'));
         assert.ok(body.includes('openMarkdownDocumentsByPriority('));
         assert.ok(source.includes('vscode.window.tabGroups.activeTabGroup'));
@@ -140,6 +163,17 @@ describe('buildEditorSurface', () => {
             forceReconcile: true,
         });
         assert.strictEqual(forced?.force_reconcile, true);
+    });
+
+    it('carries a derived non-editor column order and omits the editor default', () => {
+        const input = {
+            activeFile: '/repo/a.md',
+            visibleMd: ['/repo/a.md', '/repo/b.md'],
+            visibleColumns: [['/repo/a.md'], ['/repo/b.md']],
+        };
+        assert.strictEqual(buildEditorSurface({ ...input, columnOrder: 'unknown' })?.column_order, 'unknown');
+        assert.ok(!('column_order' in buildEditorSurface({ ...input, columnOrder: 'editor' })!));
+        assert.ok(!('column_order' in buildEditorSurface(input)!));
     });
 
     it('returns null only when there is nothing visible to observe', () => {

@@ -18,6 +18,7 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
+queue: go
 ---
 
 ## Status
@@ -66,6 +67,20 @@ That request is done. Draft `01a17e8b-fbd3-7c60-82cd-f055185904f9` is saved loca
 Local History recovery is in progress under `subagent:lh-recover` generation 1, worker `01a17e8d-657b-7e90-8f4a-dd6631391528`. It is searching JetBrains Local History for the pre-13:09 EDT revision and will not write the live session document.
 
 **Deferred:** that recovery stays claimed until the worker reports the recovered revision.
+
+### Re: Local History snapshot archived — grok-4.7 · 2026-10-27T14:22-04:00
+
+> **Queue prompt:** Recover my lost tasks/software/lazily.md edits from JetBrains Local History. See agent-doc-bugs.md
+
+The pre-clobber revision is saved. The live session document was not replaced.
+
+JetBrains Local History record 1747 in `~/.cache/JetBrains/IntelliJIdea2026.3/LocalHistory/changes.storageData` is the text that was current from 12:35:03 until the 13:09:05 EDT overwrite. It is 129,075 bytes, sha256 `8d23a9e29b5c2f20c0d198a018a18911b556b0f7ea6542bd7c3e9692bcd06fad`. Frontmatter has `agent: grok` and `queue: go`. The queue line in that snapshot is the tmux-guard question, which the live todo already has checked off. The next Local History record, at 13:10:19, is the stale projection: 128,777 bytes, sha256 prefix `f22b45bd4a49`, `agent: claude`.
+
+A byte-identical copy is at `.agent-doc/archives/lazily-recovered-20261027T130905-8d23a9e29b5c.md`. That directory is gitignored, same as the other session archives. The worker worktree copy is `recovered-lazily.md` under `subagent-01a17e8d-657b-7e90-8f4a-dd6631391528`.
+
+The live file stays as it is. It is the later compacted session: `agent: grok` is already set, the 14:09 feedback closeout is in the exchange, and the tmux-scope todo is checked. Writing the 13:09 snapshot over it would drop that later text and turn `queue: go` back on. The 17:53 compact archive does not contain this recovered body, so the archive copy above is the kept copy of the lost revision.
+
+Say if you want the live `tasks/software/lazily.md` replaced with that snapshot.
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
@@ -73,7 +88,7 @@ Local History recovery is in progress under `subagent:lh-recover` generation 1, 
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" -->
 - ☑️ [#subagent:grok-feedback#1] do [#subagent-operator-request-grok-issue-draft]
-- 🚧 [#subagent:lh-recover#1] Recover my lost tasks/software/lazily.md edits from JetBrains Local History. See agent-doc-bugs.md
+- ~~Recover my lost tasks/software/lazily.md edits from JetBrains Local History. See agent-doc-bugs.md~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Todo

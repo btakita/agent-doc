@@ -744,6 +744,35 @@ loop row), then moved onto the newly added `#gh-fix …/issues/380` row in
 `a_reclaimed_or_legacy_attempt_is_not_restored_onto_a_struck_predecessor`, and
 `agent-doc-queue-io` `queue_claim::tests::a_struck_claim_stays_off_the_loop_row_and_the_next_run_head`.
 
+**A claim's closure is judged against its own queue, never the selected one
+(`#claimclosureallqueues`).** Closure follows the same queue scope as edit
+following: a claim's row is live exactly when its identity is a live row of
+the queue that holds it, and since a claim belongs to the queue where its
+identity is a live row, that is a live row of *any* queue component. The
+claim-closure set (`queue_continuation::live_queue_head_identities`) is
+therefore the live rows of every queue in the queue graph, and every
+closure judgement reads it: `QueueClaimLedger::prune`/`prune_detailed`,
+`active()`, `owners()`, `claimed_items`, `claimed_live_head_texts`, the
+queue-io claim readers (`active_claims_for_content`,
+`ledger_claimed_items_for_content`, `claim_states_for_content`,
+`prune_closed_claims`), the release-receipt readers and `prune_closed`, and
+the controller's orphan-drain claim filter. A struck row is in no queue's
+live set, so a struck row's claim still closes (the strike policy above then
+judges a still-running attempt). A legacy anchor without a queue id needs no
+special case: closure never consults the anchor. The set is `None` only when
+the queue graph does not parse, and then closure is not judged (expiry
+only); it is no longer `None` merely because no queue is ready (idle,
+blocked, or in flight), so a row that left every queue closes its claim
+then too. Drain and dispatch callers that want only the scheduler-selected
+queue keep reading `live_queue_head_texts` / `live_queue_head_rows`. Before
+this, the closure set read only the selected queue, so a claim on a live
+`agent:loop` row was judged closed whenever `agent:run` had work: closeout
+pruned it, and dispatch filtering stopped holding the claimed loop row.
+Regressions:
+`queue_claim::tests::a_live_loop_row_claim_is_not_closed_by_the_selected_run_queue`
+and `agent-doc-queue-io`
+`queue_claim::tests::a_live_loop_row_claim_survives_while_agent_run_is_selected`.
+
 **Every queue that displays a claimed identity shows its attempt
 (`#queuemirrormarkers`).** A claim, report receipt, and completion cell are
 keyed by work identity, never by queue id, and a claimed identity is already

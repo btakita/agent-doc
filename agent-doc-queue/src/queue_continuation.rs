@@ -1179,16 +1179,34 @@ pub fn claimed_head_count(content: &str, claimed: &ClaimedQueueItems) -> usize {
         .count()
 }
 
-/// Identities of every live (unstruck, executable) queue head. A claim whose
-/// identity is absent here belongs to an item that has closed (`#queueclaim`).
-/// `None` when the document has no parseable queue.
+/// Identities of every live (unstruck, executable) row of EVERY queue
+/// component, the claim-closure set: a claim whose identity is absent here
+/// belongs to an item that has closed (`#queueclaim`). `None` when the
+/// document has no parseable queue graph, in which case closure cannot be
+/// judged and only expiry applies. (It is not `None` merely because no queue
+/// is ready: idle, blocked and in-flight queues still list their live rows.)
+///
+/// A claim is judged against its own queue (`#claimclosureallqueues`), never
+/// against the queue the scheduler happens to select: a claim's queue is the
+/// queue where its identity is a live row
+/// ([`crate::queue_claim::QueueClaimLedger::follow_edits_in_view`]), so its
+/// row is live exactly when its identity is a live row of some queue. Reading
+/// only the selected queue judged a claim on a live `agent:loop` row closed
+/// while `agent:run` had work, and prune / `active()` / `claimed_items`
+/// dropped it, re-offering the claimed row. A struck row is in no queue's
+/// live set, so its claim still closes (the strike policy then applies).
+/// Drain and dispatch callers that want only the selected queue read
+/// [`live_queue_head_texts`] / [`live_queue_head_rows`] instead.
 pub fn live_queue_head_identities(
     content: &str,
 ) -> Option<HashSet<agent_doc_element_queue::QueueItemIdentity>> {
-    let (_, entries) = queue_component_entries(content)?;
+    let components = element::parse(content).ok()?;
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
     Some(
-        document_queue::prompts(&entries)
-            .into_iter()
+        queue_set
+            .blocks()
+            .iter()
+            .flat_map(|block| document_queue::prompts(&block.entries))
             .map(|prompt| crate::queue_claim::claim_identity(&prompt.text))
             .collect(),
     )

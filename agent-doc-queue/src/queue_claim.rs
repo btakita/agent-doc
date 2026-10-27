@@ -4063,6 +4063,46 @@ Add new issues into the backlog + queue except issue #40 + #45.";
         assert!(struck_row_reopened_by_claim(Some(claim)));
     }
 
+    /// `#claimclosureallqueues`: closure is judged against the claim's own
+    /// queue. A running claim on the live `agent:loop` watch row stays
+    /// active, claimed and unpruned while `agent:run` is the selected queue
+    /// with its own live heads; reading only the selected queue judged it
+    /// closed and re-offered the loop row. A struck loop row still closes.
+    #[test]
+    fn a_live_loop_row_claim_is_not_closed_by_the_selected_run_queue() {
+        let now = 1_500;
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(LOOP_WATCH, "subagent:loopwatch", now, 3600);
+        let selected_loop = run_loop_doc(&[], &[LOOP_WATCH]);
+        ledger.follow_edits_in_view(now, &view_of(&selected_loop));
+
+        let arrived = run_loop_doc(&[GH380, GH381], &[LOOP_WATCH]);
+        assert_eq!(
+            crate::queue_continuation::live_queue_head_texts(&arrived).unwrap(),
+            vec![GH380.to_string(), GH381.to_string()],
+            "precondition: agent:run is the selected queue"
+        );
+        let outcome = ledger.follow_edits_in_view(now + 1, &view_of(&arrived));
+        assert_eq!(outcome, ClaimFollowOutcome::default());
+        let live = crate::queue_continuation::live_queue_head_identities(&arrived).unwrap();
+        assert_eq!(ledger.active(now + 1, Some(&live)).len(), 1);
+        let claimed = ledger.claimed_items(now + 1, Some(&live));
+        assert!(claimed.claims(LOOP_WATCH), "the claimed loop row is held");
+        assert!(!claimed.claims(GH380) && !claimed.claims(GH381));
+        assert_eq!(ledger.prune(now + 1, Some(&live)), 0);
+        assert_eq!(ledger.claims.len(), 1);
+
+        let struck_watch = format!("~~{LOOP_WATCH}~~");
+        let struck = run_loop_doc(&[GH380, GH381], &[&struck_watch]);
+        ledger.follow_edits_in_view(now + 2, &view_of(&struck));
+        let live = crate::queue_continuation::live_queue_head_identities(&struck).unwrap();
+        assert!(ledger.active(now + 2, Some(&live)).is_empty());
+        let pruned = ledger.prune_detailed(now + 2, Some(&live));
+        assert_eq!(pruned.len(), 1);
+        assert_eq!(pruned[0].1, ClaimPruneCause::Closed);
+        assert!(ledger.claims.is_empty());
+    }
+
     /// `#claimfollowstruck`: the same-queue form. The claimed row is struck
     /// and a new head is added in the same successor, so the one-row anchor
     /// and the one live row form an equal-cardinality replace hunk, which the

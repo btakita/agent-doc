@@ -2214,6 +2214,59 @@ mod tests {
         assert!(ledger.claims.is_empty(), "{:?}", ledger.claims);
     }
 
+    /// `#claimclosureallqueues`: a claim's closure is judged against its own
+    /// queue, never the selected one. A loop row is claimed while
+    /// `agent:loop` is the selected queue; then `agent:run` gains work and
+    /// becomes the selection. The loop row is still live, so every durable
+    /// reader keeps its claim and closeout prune leaves it. Striking the loop
+    /// row still closes it.
+    #[test]
+    fn a_live_loop_row_claim_survives_while_agent_run_is_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        let write = |run: &str, loop_rows: &str| {
+            std::fs::write(
+                &doc,
+                format!(
+                    "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Run <!-- agent:run go -->\n{run}<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop interval=\"1h\" -->\n{loop_rows}<!-- /agent:loop -->\n"
+                ),
+            )
+            .unwrap();
+            std::fs::read_to_string(&doc).unwrap()
+        };
+        let watch = "Watch https://x.test/issues for new issues";
+        let next = "#gh-fix https://x.test/issues/380";
+        write("", &format!("- {watch}\n"));
+        claim(&doc, watch, "subagent:loopwatch", 3600).unwrap();
+
+        let arrived = write(&format!("- {next}\n"), &format!("- {watch}\n"));
+        assert_eq!(
+            live_queue_head_texts(&arrived).unwrap(),
+            vec![next.to_string()],
+            "precondition: agent:run is the selected queue"
+        );
+        assert!(
+            ledger_claimed_items_for_content(&doc, &arrived).claims(watch),
+            "the claimed loop row is never re-offered"
+        );
+        assert!(!ledger_claimed_items_for_content(&doc, &arrived).claims(next));
+        let active = active_claims_for_content(&doc, &arrived).unwrap();
+        assert_eq!(active.len(), 1, "{active:?}");
+        assert_eq!(active[0].item_text, watch);
+        assert_eq!(claim_states_for_content(&doc, &arrived).unwrap().len(), 1);
+        assert_eq!(prune_closed_claims(&doc, &arrived).unwrap(), 0);
+        assert_eq!(load_ledger(&doc).unwrap().claims.len(), 1);
+
+        // The inverse: a struck loop row closes its claim, run still selected.
+        let struck = write(&format!("- {next}\n"), &format!("- ~~{watch}~~\n"));
+        assert!(active_claims_for_content(&doc, &struck).unwrap().is_empty());
+        assert_eq!(prune_closed_claims(&doc, &struck).unwrap(), 1);
+        assert!(load_ledger(&doc).unwrap().claims.is_empty());
+    }
+
     #[test]
     fn followed_claim_target_does_not_fall_back_to_stale_disk_when_authority_is_live() {
         let dir = tempfile::tempdir().unwrap();

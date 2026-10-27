@@ -26,10 +26,13 @@
 //! This is a byte-for-byte port of the pre-move Kotlin rules: `java.util.regex`
 //! ASCII `\s`, `\S`, `\d`, and `\b`, Kotlin `trim`/`isBlank` whitespace, and
 //! Kotlin's `substringBefore`, `removeSuffix`, and `removeSurrounding`. The
-//! plugin keeps a frozen Kotlin copy for a library that cannot answer. One
-//! parity fixture
+//! plugin keeps a frozen Kotlin copy for a library that cannot answer. The
+//! VS Code extension asks the same derivation for Clear Session Context and
+//! Restart Supervisor and keeps a frozen TypeScript port of these rules
+//! (`editors/vscode/src/sessionCommandOutcome.ts`, `#vscodesessionparsers`).
+//! One parity fixture
 //! (`editors/jetbrains/src/test/resources/editor-derivations/session_command_outcome.json`)
-//! is answered by both. New rules land here, never there.
+//! is answered by all three. New rules land here, never there.
 
 use std::sync::LazyLock;
 

@@ -459,6 +459,26 @@ a closed actor record is replaceable through the stale-authority path.
   fallback. Neither outcome may return a successful no-op (GH #307). The
   recovered route remains background-only: it neither rescues a stashed pane
   nor changes tmux focus or layout.
+- A supervisor mid re-`execve` is restarting, not orphaned
+  (`#autoclearorphandrain`). Between the outgoing image's `execve` and the
+  replacement's registration the supervisor is unreachable, so the actor reads
+  exactly like a dead one, but the outgoing image publishes the recycle
+  `InFlight` before the `execve` and the replacement settles it only when its
+  idle watch starts. An orphan-drain route that finds the actor not
+  dispatch-eligible therefore reads the recycle projection: `InFlight` is the
+  restarting case, and it is treated like the recovered one above. The first
+  attempt logs `route_background_existing_pane_guard outcome=deferred
+  reason=supervisor_restarting action=await_idle_watch`, records a route
+  deferral, records no dispatch receipt, and types nothing; the replacement's
+  watch, which carries the queue auto-clear baseline across the re-exec
+  (`#autoclearbaseline`), clears and then dispatches the next item. Without
+  this the route took the degraded direct-pane path, waited out the recycle,
+  and typed item two past the pending clear (`make tmux-ci` under load). A
+  restart that never settles still drains: the next attempt for the same head
+  logs `outcome=allowed reason=restarting_supervisor_missed_backoff
+  action=continue_orphan_route` and continues, with the pre-input recycle gate
+  deciding as before. No `InFlight` recycle (or an unreadable projection)
+  keeps the genuine-orphan path unchanged.
 - The orphan drain's claim check is a snapshot, so it is re-read at every
   irreversible step (GH #319 claim visibility). The sweep reads the document's claim
   ledger before its selector's claim reads, then re-reads it at the commit

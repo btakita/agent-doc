@@ -104,6 +104,36 @@ const fn recovered_supervisor_orphan_action(
     }
 }
 
+/// What a background orphan-drain route finds behind the document when it
+/// runs, which can be well after the sweep that queued it decided.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BackgroundSupervisorPresence {
+    /// The authoritative supervisor is reachable and dispatch-eligible: it
+    /// recovered after the sweep (GH #307).
+    Recovered,
+    /// Not reachable, but its recycle is `InFlight`: the supervisor is
+    /// mid re-`execve` and the replacement image resumes the same idle watch,
+    /// carrying the queue auto-clear baseline (`#autoclearorphandrain`).
+    Restarting,
+    /// Neither: a genuine orphan, which the drain exists for.
+    Absent,
+}
+
+/// `None` lets a genuine orphan's route continue. A recovered or restarting
+/// supervisor owns the idle watch, and with it the between-items queue
+/// auto-clear, so the route yields one bounded interval before its fallback.
+const fn background_supervisor_orphan_action(
+    presence: BackgroundSupervisorPresence,
+    same_attempt_already_deferred: bool,
+) -> Option<RecoveredSupervisorOrphanAction> {
+    match presence {
+        BackgroundSupervisorPresence::Absent => None,
+        BackgroundSupervisorPresence::Recovered | BackgroundSupervisorPresence::Restarting => Some(
+            recovered_supervisor_orphan_action(same_attempt_already_deferred),
+        ),
+    }
+}
+
 /// Pure policy used by the route and SimWorld. A background recovery route must
 /// fail closed instead of searching, rescuing, or provisioning when its target
 /// changed after the watchdog observation.
@@ -500,36 +530,83 @@ pub fn resolve_or_create_pane_dispatch_only(
                 decision.reason(),
             );
         }
-        if authoritative_actor.as_ref().is_some_and(|actor| {
+        // `#autoclearorphandrain`: a supervisor mid re-`execve` reads as
+        // unreachable, exactly like a dead one, and the degraded path below
+        // would type the head straight into the pane after the recycle settles,
+        // skipping the between-items auto-clear the replacement image's idle
+        // watch carries. Its `InFlight` recycle says it is coming back, so it
+        // is treated as recovered, not orphaned. Asked only when the actor is
+        // not eligible; a read failure keeps the orphan path.
+        let presence = if authoritative_actor.as_ref().is_some_and(|actor| {
             supervisor_authoritative_actor_dispatch_target_eligible(&actor.runtime)
         }) {
-            let existing_pane = pane.expect("background pane policy proved an explicit pane");
-            if recovered_supervisor_orphan_action(
+            BackgroundSupervisorPresence::Recovered
+        } else if agent_doc_controller_io::project_controller::supervisor_recycle_pending_for_file(
+            Path::new(file_path),
+        ) {
+            BackgroundSupervisorPresence::Restarting
+        } else {
+            BackgroundSupervisorPresence::Absent
+        };
+        let existing_pane = pane.expect("background pane policy proved an explicit pane");
+        match (
+            presence,
+            background_supervisor_orphan_action(
+                presence,
                 crate::invocation::background_recovered_actor_fallback(),
-            ) == RecoveredSupervisorOrphanAction::DeferToIdleWatch
-            {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "route_background_existing_pane_guard file={} pane={} outcome=deferred reason=supervisor_recovered action=await_idle_watch focus_effect=preserved pane_effect=none",
-                        file.display(),
-                        existing_pane,
-                    ),
-                );
+            ),
+        ) {
+            (_, None) => {}
+            (presence, Some(RecoveredSupervisorOrphanAction::DeferToIdleWatch)) => {
+                let (event, which) = if presence == BackgroundSupervisorPresence::Restarting {
+                    (
+                        format!(
+                            "route_background_existing_pane_guard file={} pane={} outcome=deferred reason=supervisor_restarting action=await_idle_watch focus_effect=preserved pane_effect=none",
+                            file.display(),
+                            existing_pane,
+                        ),
+                        "restarting",
+                    )
+                } else {
+                    (
+                        format!(
+                            "route_background_existing_pane_guard file={} pane={} outcome=deferred reason=supervisor_recovered action=await_idle_watch focus_effect=preserved pane_effect=none",
+                            file.display(),
+                            existing_pane,
+                        ),
+                        "recovered",
+                    )
+                };
+                agent_doc_ops_log_io::log_op(file, &event);
                 crate::invocation::record_route_deferral(format!(
-                    "[route] background recovery for {} yielded one bounded interval to the recovered supervisor idle watch",
+                    "[route] background recovery for {} yielded one bounded interval to the {which} supervisor idle watch",
                     file.display(),
                 ));
                 return Ok(existing_pane.to_string());
             }
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=recovered_supervisor_missed_backoff action=dispatch_via_authoritative_actor focus_effect=preserved pane_effect=none",
-                    file.display(),
-                    existing_pane,
-                ),
-            );
+            (
+                BackgroundSupervisorPresence::Restarting,
+                Some(RecoveredSupervisorOrphanAction::DispatchBoundedFallback),
+            ) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=restarting_supervisor_missed_backoff action=continue_orphan_route focus_effect=preserved pane_effect=none",
+                        file.display(),
+                        existing_pane,
+                    ),
+                );
+            }
+            (_, Some(RecoveredSupervisorOrphanAction::DispatchBoundedFallback)) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_background_existing_pane_guard file={} pane={} outcome=allowed reason=recovered_supervisor_missed_backoff action=dispatch_via_authoritative_actor focus_effect=preserved pane_effect=none",
+                        file.display(),
+                        existing_pane,
+                    ),
+                );
+            }
         }
     }
     if let Some(actor) = authoritative_actor
@@ -2099,7 +2176,8 @@ pub fn controller_dispatch_actor_state(
 #[cfg(test)]
 mod gh82_route_occupant_messages {
     use super::{
-        RecoveredSupervisorOrphanAction, foreign_harness_pane_release_note,
+        BackgroundSupervisorPresence, RecoveredSupervisorOrphanAction,
+        background_supervisor_orphan_action, foreign_harness_pane_release_note,
         other_document_route_refusal, recovered_supervisor_orphan_action,
     };
     use std::path::Path;
@@ -2130,6 +2208,30 @@ mod gh82_route_occupant_messages {
         assert!(note.contains("owns no document"), "{note}");
         assert!(note.contains("routing to a new pane"), "{note}");
         assert!(note.contains("leaving %53 untouched"), "{note}");
+    }
+
+    /// `#autoclearorphandrain`: a supervisor mid re-exec owns the idle watch
+    /// (and its queue auto-clear) like a recovered one, so it gets the same one
+    /// bounded interval; only a genuine orphan's route continues at once, and a
+    /// restart that never settles still drains on the fallback attempt.
+    #[test]
+    fn a_restarting_supervisor_gets_the_recovered_grace_and_a_true_orphan_none() {
+        use BackgroundSupervisorPresence::*;
+        for presence in [Recovered, Restarting] {
+            assert_eq!(
+                background_supervisor_orphan_action(presence, false),
+                Some(RecoveredSupervisorOrphanAction::DeferToIdleWatch),
+                "{presence:?}"
+            );
+            assert_eq!(
+                background_supervisor_orphan_action(presence, true),
+                Some(RecoveredSupervisorOrphanAction::DispatchBoundedFallback),
+                "{presence:?}"
+            );
+        }
+        for fallback in [false, true] {
+            assert_eq!(background_supervisor_orphan_action(Absent, fallback), None);
+        }
     }
 
     #[test]

@@ -171,7 +171,12 @@ classifier returns `DeferAutomatedBehindLiveTurn` before the plain-trigger
 pass-through is considered. Route then submits nothing, leaves tmux focus and
 layout unchanged, logs `route_automated_dispatch_deferred_live_turn ...
 action=retry_after_backoff`, and records a route deferral (exit `75`), so the
-orphan drain retries after its durable per-document backoff. The pre-submit
+orphan drain retries after its durable per-document backoff. The same
+automated origin also yields to a supervisor that is restarting rather than
+gone: an actor that is not dispatch-eligible while its recycle is `InFlight`
+defers the first attempt (`reason=supervisor_restarting`,
+`#autoclearorphandrain`), so a re-`execve` never lets the drain type the next
+item past the replacement idle watch's queue auto-clear. The pre-submit
 pane check in the dispatch-only path is a second fence: an automated origin whose
 capture classifies as an active-turn plain-trigger submit
 (`SubmitPlainTrigger`) defers the same way instead of logging

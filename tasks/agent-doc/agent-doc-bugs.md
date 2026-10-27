@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 6bd4c579-6308-4846-b5b6-af24bb0c65f8
+  claude: 5c496cf2-d923-4cdb-bff1-73ad7c75c246
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
 agent: claude
 claude_model: opus
@@ -18,6 +18,7 @@ presets:
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
+queue: go
 ---
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
@@ -810,6 +811,19 @@ Applying the remote update itself is unchanged (≈64–71 ms), because lazily's
 - Before restarting IntelliJ, run **Run Agent Doc** once to finish `[#ahfe]` / GH #267. Then restart to load 0.2.864.
 - Reload VS Code to load 0.2.88.
 - Run `#vscodecodersmoke` and `#gh379-remotedev-proof` on the remote hosts.
+
+### Re: #gh-fix GH #380 + #381 — opus-5 · 2026-10-27T00:34-04:00
+
+I dispatched both issues to background subagents. Each works in its own worktree outside agent-loop and pushes its own branch. When they report back, I'll integrate both into `main`, run one `make install`, push, and close both issues.
+
+| Row | Worker | Worktree / branch | Issue |
+|---|---|---|---|
+| #380 | `subagent:gh380` gen 2 | `agent-doc-wt/gh380` · `fix/gh380-supervisor-spawn-path` | Supervisor can't spawn bare `claude` when the inherited PATH is the Coder default (no user-local bin) |
+| #381 | `subagent:gh381` gen 1 | `agent-doc-wt/gh381` · `fix/gh381-project-preset-queue-head` | A queue head that is only a project preset (from `.agent-doc/project.md`) is undrainable and gets a missing-Todo warning |
+
+**The #380 row's 🚧 marker had no worker behind it.** `queue claims` showed the row held by `subagent:kotlinflush` gen 1, carrying the `#kotlinflushprep` alias, with `followed_from: [do [#kotlinflushprep], Watch …]`. That worker was the `#kotlinflushprep` job, and it finished at 00:21. When that row was struck, its claim moved to the next head instead of ending. Earlier it had also moved onto the Loop watch row. So #380 had never been dispatched. I released the stray claim (`queue release --requeue --generation 1`), then claimed and started a real worker (gen 2). I filed the claim-move bug as backlog `#claimfollowstruck`.
+
+The exchange is 778 lines over 22 sections. The queue is draining, so I'm not compacting.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -817,82 +831,13 @@ Applying the remote update itself is unchanged (≈64–71 ms), because lazily's
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#jbshellr1rest]~~
-- ~~do [#vscodesessionparsers]~~
-- ~~do [#replicaremoteflush]~~
-- ~~do [#kotlinflushprep]~~
-- ~~do [#vscodekoffivsix]~~
-- ~~do [#vscodekoffisegv]~~
-~~~done
-Run Agent Doc on sdk-demo.md error
-```
-kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has not been initialized
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getMainSplitters(FileEditorManagerImpl.kt:231)
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.dockable$lambda$0(FileEditorManagerImpl.kt:239)
-	at kotlin.SynchronizedLazyImpl.getValue(LazyJVM.kt:86)
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getDockContainer(FileEditorManagerImpl.kt:313)
-	at com.intellij.ui.docking.impl.DockManagerImpl.getFileManagerContainer(DockManagerImpl.kt:558)
-	at com.intellij.ui.docking.impl.DockManagerImpl.getAllContainers(DockManagerImpl.kt:554)
-	at com.intellij.ui.docking.impl.DockManagerImpl.getContainerFor(DockManagerImpl.kt:175)
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getDockContainer(FileEditorManagerImpl.kt:697)
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getActiveSplitterSync(FileEditorManagerImpl.kt:690)
-	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getSplitters(FileEditorManagerImpl.kt:1939)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener.attachEditorTreeMouseListener$lambda$0(EditorFocusSyncListener.kt:183)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener.attachEditorTreeMouseListener(EditorFocusSyncListener.kt:205)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener.<init>(EditorFocusSyncListener.kt:177)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener.<init>(EditorFocusSyncListener.kt)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install$lambda$0(EditorFocusSyncListener.kt:250)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install$lambda$1(EditorFocusSyncListener.kt:250)
-	at java.base/java.util.concurrent.ConcurrentHashMap.computeIfAbsent(ConcurrentHashMap.java:1724)
-	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install(EditorFocusSyncListener.kt:250)
-	at com.github.btakita.agentdoc.PluginLifecycleListener.projectOpened(PluginLifecycleListener262Generated.kt:87)
-	at com.intellij.util.messages.impl.MessageBusImplKt.invokeMethod(MessageBusImpl.kt:848)
-	at com.intellij.util.messages.impl.MessageBusImplKt.invokeListener(MessageBusImpl.kt:789)
-	at com.intellij.util.messages.impl.MessageBusImplKt.executeOrAddToQueue(MessageBusImpl.kt:610)
-	at com.intellij.util.messages.impl.ToDirectChildrenMessagePublisher.publish$intellij_platform_core(CompositeMessageBus.kt:193)
-	at com.intellij.util.messages.impl.MessagePublisher.invoke(MessageBusImpl.kt:558)
-	at jdk.proxy2/jdk.proxy2.$Proxy91.projectOpened(Unknown Source)
-	at com.intellij.openapi.project.impl.ProjectManagerImplKt$runInitProjectActivities$2.invokeSuspend(ProjectManagerImpl.kt:1636)
-	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
-	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
-	at com.intellij.openapi.application.impl.DispatchedRunnable.run(DispatchedRunnable.kt:42)
-	at com.intellij.openapi.application.TransactionGuardImpl.runWithWritingAllowed(TransactionGuardImpl.java:246)
-	at com.intellij.openapi.application.TransactionGuardImpl.access$100(TransactionGuardImpl.java:22)
-	at com.intellij.openapi.application.TransactionGuardImpl$2.run(TransactionGuardImpl.java:228)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1$0(NonBlockingFlushQueue.kt:329)
-	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1(NonBlockingFlushQueue.kt:328)
-	at com.intellij.concurrency.ThreadContext.resetThreadContext(threadContext.kt:295)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1(NonBlockingFlushQueue.kt:325)
-	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.tryRunWriteIntentReadAction(NestedLocksThreadingSupport.kt:786)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent(NonBlockingFlushQueue.kt:321)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.flushNow(NonBlockingFlushQueue.kt:299)
-	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.FLUSH_NOW$lambda$0(NonBlockingFlushQueue.kt:158)
-	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:323)
-	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:732)
-	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:711)
-	at com.intellij.ide.IdeEventQueue.defaultDispatchEvent(IdeEventQueue.kt:749)
-	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:602)
-	at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:401)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399)
-	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136)
-	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:106)
-	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136)
-	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399)
-	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440)
-	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
-	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
-	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
-	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
-	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
-	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
-```
-~~~
+- do [#claimfollowstruck]
+- 🚧 [#subagent:gh380#2] #gh-fix https://github.com/btakita/agent-doc/issues/380
+- 🚧 [#subagent:gh381#1] #gh-fix https://github.com/btakita/agent-doc/issues/381
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 🚧 [#subagent:kotlinflush#1] Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->
@@ -905,6 +850,7 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#claimfollowstruck] Queue claim followed a struck row onto unrelated work: the claim for subagent:kotlinflush gen 1 (dispatched for do [#kotlinflushprep]) moved onto the #gh-fix .../issues/380 row after #kotlinflushprep was struck, and before that onto the Loop watch row (followed_from lists both). It kept the kotlinflushprep alias and showed a 🚧 marker with no worker on #380, so the row was never dispatched. A claim must end when its row is struck/completed; row migration (#claimrowmigrate) may follow only a text edit of the same work, never a different successor head. Add a regression test for strike-then-next-head.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

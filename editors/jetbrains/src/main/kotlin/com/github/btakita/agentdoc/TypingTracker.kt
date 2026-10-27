@@ -18,7 +18,6 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import io.github.lazily.DebounceCore
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.UUID
@@ -484,9 +483,7 @@ object TypingTracker : DocumentListener {
     private const val CONTENT_REPORT_DELAY_MS = 75L
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(TypingTracker::class.java)
     private val contentReportExecutor by lazy {
-        Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "agent-doc-current-document-report").apply { isDaemon = true }
-        }.also { executor ->
+        GenerationWork.newSingleThreadScheduledExecutor("agent-doc-current-document-report").also { executor ->
             PluginGeneration.registerResource("current-document-reporter") {
                 executor.shutdownNow()
             }
@@ -648,7 +645,7 @@ object TypingTracker : DocumentListener {
             }
         if (!check.changesDiagnostic) return
         val warn = editorOpMarkerWarnings.observe(filePath, check)
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             for (project in ProjectManager.getInstance().openProjects) {
                 if (project.isDisposed) continue
                 TurnStateBannerRefresher.getInstance(project)

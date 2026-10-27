@@ -109,6 +109,15 @@ interface GenerationContext {
 
     /** Tier A: `EditorFactory.addEditorFactoryListener`. */
     fun addEditorFactoryListener(listener: EditorFactoryListener, parent: Disposable)
+
+    /**
+     * EDT work: queue [task] as a shell `FencedTask` with the default modality state (what
+     * `Application.invokeLater(Runnable)` used), fenced by this generation's retirement.
+     */
+    fun invokeLater(task: Runnable)
+
+    /** Pooled work, executors, threads and the coroutine scope of this generation. */
+    val work: ShellGenerationWork
 }
 
 /**

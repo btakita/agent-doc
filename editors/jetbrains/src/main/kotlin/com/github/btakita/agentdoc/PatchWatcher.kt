@@ -13,7 +13,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.VcsDirtyScopeManager
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.util.Alarm
 import java.io.File
 import java.security.MessageDigest
 import java.time.Instant
@@ -210,7 +209,7 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (running) return
         running = true
         val basePath = project.basePath ?: return
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             if (!running || project.isDisposed) return@executeOnPooledThread
             registerRoot(basePath)
         }
@@ -234,7 +233,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
         }
         if (javax.swing.SwingUtilities.isEventDispatchThread()) {
-            ApplicationManager.getApplication().executeOnPooledThread(startListener)
+            GenerationWork.executeOnPooledThread(startListener)
         } else {
             startListener.run()
         }
@@ -406,7 +405,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 "reason=$reason failure_count=$failureCount delay_ms=$delayMs",
         )
         try {
-            com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule(
+            GenerationWork.schedule(
                 {
                     state.listenerRetryScheduled.set(false)
                     if (socketListenerCanStart(state) &&
@@ -916,7 +915,7 @@ class PatchWatcher(private val project: Project) : Disposable {
             LOG.warn("[socket] reposition retained because native op-capture fencing failed for $filePath")
             return false
         }
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             val reposStart = System.nanoTime()
             val targetFile = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return@invokeLater
             val fdm = FileDocumentManager.getInstance()
@@ -939,7 +938,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                 } else {
                     content
                 }
-            ApplicationManager.getApplication().executeOnPooledThread {
+            GenerationWork.executeOnPooledThread {
                 val result = if (preserveHead) {
                     NativePatching.repositionBoundaryToEndPreserveHead(sourceContent, boundaryId)
                         ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId, preserveHead = true)
@@ -947,7 +946,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     NativePatching.repositionBoundaryToEnd(sourceContent, boundaryId)
                         ?: repositionBoundaryToEnd(sourceContent, "exchange", boundaryId)
                 } ?: return@executeOnPooledThread
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                     WriteCommandAction.runWriteCommandAction(project, "Agent Doc Reposition", null, {
                         if (
                             result != content &&
@@ -1031,7 +1030,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun scheduleRepositionRetry(filePath: String, boundaryId: String?, preserveHead: Boolean) {
         val key = "$filePath|${boundaryId ?: ""}|$preserveHead"
         if (!scheduledRepositionRetries.add(key)) return
-        com.intellij.util.concurrency.AppExecutorUtil.getAppExecutorService().submit {
+        GenerationWork.submit {
             try {
                 Thread.sleep(PATCH_RETRY_DELAY_MS)
                 if (running) {
@@ -1474,7 +1473,7 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     private fun runNativeSideEffectOffEdt(block: () -> Unit) {
         if (SwingUtilities.isEventDispatchThread()) {
-            ApplicationManager.getApplication().executeOnPooledThread(block)
+            GenerationWork.executeOnPooledThread(block)
         } else {
             block()
         }
@@ -1823,7 +1822,7 @@ class PatchWatcher(private val project: Project) : Disposable {
     private fun findCodeBlockRanges(doc: String) = findCodeBlockRangesUtil(doc)
 
     /** Debounce window for VCS refresh signals (ms). Multiple commits within this window coalesce into one refresh. */
-    private val vcsRefreshAlarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
+    private val vcsRefreshAlarm = GenerationWork.newPooledAlarm(this)
     private val pendingVcsRefreshFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val VCS_REFRESH_DEBOUNCE_MS = 500
 

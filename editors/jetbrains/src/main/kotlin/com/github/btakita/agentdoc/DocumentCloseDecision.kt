@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.util.concurrency.AppExecutorUtil
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -147,9 +146,9 @@ internal object DocumentCloseDecision {
                 )
                 onKeep()
                 val scheduled = AtomicReference<ScheduledFuture<*>?>()
-                val future = AppExecutorUtil.getAppScheduledExecutorService().schedule(
+                val future = GenerationWork.schedule(
                     {
-                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                        GenerationWork.invokeLater {
                             // Only the latest re-observation for this key may release.
                             val current = scheduled.get() ?: return@invokeLater
                             if (!pendingRechecks.remove(key, current)) return@invokeLater

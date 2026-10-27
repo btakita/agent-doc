@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.diagnostic.Logger
 import java.io.File
 import java.time.Instant
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 internal object RunAgentDocAttemptLedger {
@@ -21,9 +20,7 @@ internal object RunAgentDocAttemptLedger {
     /// concurrent writers would interleave events and corrupt the ordering the
     /// diagnostics exist to show. Daemon so it never holds IDE shutdown.
     private val ledgerWriter by lazy {
-        Executors.newSingleThreadExecutor { runnable ->
-            Thread(runnable, "agent-doc-run-attempt-ledger").apply { isDaemon = true }
-        }.also { executor ->
+        GenerationWork.newSingleThreadExecutor("agent-doc-run-attempt-ledger").also { executor ->
             PluginGeneration.registerResource("run-attempt-ledger") {
                 executor.shutdownNow()
             }

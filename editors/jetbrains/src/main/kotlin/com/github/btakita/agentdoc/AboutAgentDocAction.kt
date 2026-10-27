@@ -5,7 +5,6 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
@@ -175,12 +174,12 @@ class AboutAgentDocAction : ImplAction {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val projectRoot = TerminalUtil.cleanupProjectRoot(project)
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             val facts = gatherFacts(projectRoot)
             val mismatches = aboutMismatches(facts)
             val report = renderAboutReport(facts, mismatches)
             LOG.info("[about] ${report.replace("\n", " | ")}")
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 show(project, report, mismatches.isNotEmpty())
             }
         }

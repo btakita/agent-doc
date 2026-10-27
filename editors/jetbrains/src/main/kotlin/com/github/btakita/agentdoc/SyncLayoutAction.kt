@@ -5,7 +5,6 @@ import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -401,7 +400,7 @@ class SyncLayoutAction : ImplAction {
         allowSurfaceReference: Boolean = true,
     ) {
             if (!SwingUtilities.isEventDispatchThread()) {
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                 syncLayout(project, notify, noAutostart, callerKind, terminalPrepared, allowSurfaceReference)
                 }
                 return
@@ -556,9 +555,9 @@ class SyncLayoutAction : ImplAction {
         request: SyncRequest,
         layoutEvidence: LayoutDetector.EditorLayoutEvidence?,
     ) {
-        Thread {
+        GenerationWork.newThread {
             try {
-                if (request.project.isDisposed) return@Thread
+                if (request.project.isDisposed) return@newThread
                 val snapshot = deriveSyncLayout(
                     request,
                     layoutEvidence?.let { LayoutDetector.detectEditorLayout(it) },
@@ -570,7 +569,7 @@ class SyncLayoutAction : ImplAction {
                         ExactVisibleSyncDecision.RefuseUnknownLayout -> {
                             LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
                             request.notifyFailure(SurfaceCommandReference.UNKNOWN_LAYOUT_MESSAGE)
-                            return@Thread
+                            return@newThread
                         }
                         ExactVisibleSyncDecision.RefuseStaleFocusProjection -> {
                             LOG.warn(
@@ -582,11 +581,11 @@ class SyncLayoutAction : ImplAction {
                                 "Editor focus changed while the split layout was being read; " +
                                     "retry after the selection settles.",
                             )
-                            return@Thread
+                            return@newThread
                         }
                     }
-                if (prepareTerminalFirst(request, projectRoot)) return@Thread
-                if (!awaitNativeGeneration(request)) return@Thread
+                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                if (!awaitNativeGeneration(request)) return@newThread
                 val receipt = CpRouteClient.submitSyncTmuxLayout(
                     projectRoot = projectRoot,
                     columnsJson = GSON.toJson(exactVisibleColumns),
@@ -626,12 +625,12 @@ class SyncLayoutAction : ImplAction {
     ) {
         val project = request.project
         val focusedFile = request.focusedFile
-        Thread {
+        GenerationWork.newThread {
             try {
-                if (project.isDisposed) return@Thread
+                if (project.isDisposed) return@newThread
                 val projectRoot = deriveSyncLayout(request, editorLayout = null).projectRoot
-                if (prepareTerminalFirst(request, projectRoot)) return@Thread
-                if (!awaitNativeGeneration(request)) return@Thread
+                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                if (!awaitNativeGeneration(request)) return@newThread
                 when (
                     val publication = listener.publishCommandSurface(
                         commandSurface,
@@ -644,7 +643,7 @@ class SyncLayoutAction : ImplAction {
                             "[sync] surface reference unavailable reason=${publication.reason}; " +
                                 "sending the --col snapshot",
                         )
-                        ApplicationManager.getApplication().invokeLater {
+                        GenerationWork.invokeLater {
                             if (!project.isDisposed) {
                                 // GH #334: keep the first pass's client-scoped focus. Re-entering
                                 // syncLayout here runs under the backend ClientId in Remote Dev and

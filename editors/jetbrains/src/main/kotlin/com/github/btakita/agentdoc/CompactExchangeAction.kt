@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 class CompactExchangeAction : ImplAction {
@@ -18,7 +17,7 @@ class CompactExchangeAction : ImplAction {
             COMPACTING_EXCHANGE_LABEL,
             "Compacting the exchange and committing the authoritative document state",
         )
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             try {
                 // Compact Exchange is document-scoped. Saving every open
                 // document can synchronously wake a retained ACK recovery for
@@ -51,7 +50,7 @@ class CompactExchangeAction : ImplAction {
                 // proven, fail before launching the command; the binary must not
                 // infer detached disk authority behind an open IntelliJ buffer.
                 val editorText = document.text
-                ApplicationManager.getApplication().executeOnPooledThread {
+                GenerationWork.executeOnPooledThread {
                     val reloadReady = NativeReloadCoordinator.awaitReady()
                     val attached = reloadReady &&
                         CrdtReplicaManager.ensureReplicaForOpenDocument(
@@ -92,7 +91,7 @@ class CompactExchangeAction : ImplAction {
                         } else {
                             attachRefusalMessage(attachFailureReason, attachFailureDiagnosis?.remedy)
                         }
-                    ApplicationManager.getApplication().invokeLater {
+                    GenerationWork.invokeLater {
                         if (project.isDisposed) {
                             refresher.clearTransientStatus(file.path, statusToken)
                             return@invokeLater

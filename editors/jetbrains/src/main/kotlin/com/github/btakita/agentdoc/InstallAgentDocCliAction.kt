@@ -2,7 +2,6 @@ package com.github.btakita.agentdoc
 
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -44,7 +43,7 @@ class InstallAgentDocCliAction : ImplAction {
         internal fun install(project: Project) {
             val projectRoot = TerminalUtil.cleanupProjectRoot(project)
             TerminalUtil.showHint(project, "Installing agent-doc CLI…")
-            ApplicationManager.getApplication().executeOnPooledThread {
+            GenerationWork.executeOnPooledThread {
                 try {
                     val result =
                         SyncLayoutAction.runCommandWithTimeout(

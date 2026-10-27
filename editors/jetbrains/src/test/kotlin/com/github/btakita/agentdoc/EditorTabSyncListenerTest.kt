@@ -1521,7 +1521,7 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         assertTrue(layoutChange.contains("latestSurfaceObservation.get()"))
         assertTrue(layoutChange.contains("it.preferredFile != null"))
         assertFalse(layoutChange.contains("delayMs"))
-        assertTrue(report.contains("ApplicationManager.getApplication().invokeLater"))
+        assertTrue(report.contains("GenerationWork.invokeLater"))
         assertTrue(report.contains("SelectionProjectionSettling.shouldReproject"))
         assertTrue(report.contains("remainingSelectionPasses - 1"))
         assertTrue(report.contains("ObservationDeliveryOwnership.releaseForDelivery"))

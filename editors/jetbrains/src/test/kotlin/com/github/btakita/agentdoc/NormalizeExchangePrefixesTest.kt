@@ -298,7 +298,7 @@ One.
         )
         val fileFullContentGuard = source.indexOf("[patch-watcher] full-content IPC is disabled; deleting stale/foreign patch file")
         val fileApplyStart = source.indexOf(
-            "ApplicationManager.getApplication().invokeLater",
+            "GenerationWork.invokeLater",
             if (fileFullContentGuard >= 0) fileFullContentGuard else 0,
         )
         val fullContent = requireNotNull(patch.fullContent)
@@ -433,7 +433,7 @@ One.
         assertTrue(visualHighlighter.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)"))
         assertTrue(visualHighlighter.contains("override fun selectionChanged(event: FileEditorManagerEvent)"))
         assertTrue(visualHighlighter.contains("private fun refreshMarkdownFileAfterEditorEvent(file: VirtualFile)"))
-        assertTrue(visualHighlighter.contains("ApplicationManager.getApplication().invokeLater"))
+        assertTrue(visualHighlighter.contains("GenerationWork.invokeLater"))
         assertTrue(visualHighlighter.contains("refreshFile(file)"))
     }
 

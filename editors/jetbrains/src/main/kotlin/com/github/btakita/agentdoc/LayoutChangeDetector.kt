@@ -1,6 +1,5 @@
 package com.github.btakita.agentdoc
 
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.Project
@@ -10,7 +9,6 @@ import java.awt.Toolkit
 import java.awt.event.AWTEventListener
 import java.awt.event.ContainerEvent
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -32,9 +30,7 @@ class LayoutChangeDetector(private val project: Project) {
     private val listenerInstalled = AtomicBoolean(false)
     private val containerEventCount = java.util.concurrent.atomic.AtomicLong(0)
     private val editorsRoot = AtomicReference<Container?>(null)
-    private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-layout-events").apply { isDaemon = true }
-    }
+    private val executor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-layout-events")
 
     fun start() {
         // Resolve the splitters root before installing the filtered process listener.
@@ -57,7 +53,7 @@ class LayoutChangeDetector(private val project: Project) {
 
     private fun attachContainerListener() {
         // Must access Swing components on EDT
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (disposed.get() || project.isDisposed) return@invokeLater
             try {
                 val managerEx = FileEditorManagerEx.getInstanceEx(project)
@@ -120,7 +116,7 @@ class LayoutChangeDetector(private val project: Project) {
         if (SwingUtilities.isEventDispatchThread()) {
             detach.run()
         } else {
-            ApplicationManager.getApplication().invokeLater(detach)
+            GenerationWork.invokeLater(detach)
         }
     }
 
@@ -147,7 +143,7 @@ class LayoutChangeDetector(private val project: Project) {
     private fun checkAndSync(source: String, requestedGeneration: Long) {
         if (disposed.get()) return
         // Read Swing component tree on EDT (thread-safe), then sync on background thread
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (disposed.get() || project.isDisposed || !isCurrentGeneration(requestedGeneration))
                 return@invokeLater
             try {

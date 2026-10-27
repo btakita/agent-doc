@@ -2,7 +2,6 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -12,7 +11,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -127,12 +125,8 @@ class EditorTabSyncListener : FileEditorManagerListener {
             !closed && !projectionRetired
         }
 
-    private val surfaceDeliveryExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-surface-delivery").apply { isDaemon = true }
-    }
-    private val focusProjectionExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-editor-focus-projection").apply { isDaemon = true }
-    }
+    private val surfaceDeliveryExecutor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-editor-surface-delivery")
+    private val focusProjectionExecutor = GenerationWork.newSingleThreadScheduledExecutor("agent-doc-editor-focus-projection")
 
     internal enum class FocusProjectionReceiptDecision {
         Applied,
@@ -977,7 +971,7 @@ internal data class CapturedSurface(
         requestedGeneration: Long,
         remainingSelectionPasses: Int,
     ) {
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             try {
                 if (generation.get() != requestedGeneration) {
                     log("editor projection: superseded gen=$requestedGeneration")
@@ -1211,7 +1205,7 @@ internal data class CapturedSurface(
                     endpoint.surfaceId,
                 )
             if (focusRetirement.exitCode != 0) continue
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 if (!project.isDisposed) {
                     IdeTerminalHost.applySurfaceDecision(project, focusRetirement.output)
                 }
@@ -1661,7 +1655,7 @@ internal data class CapturedSurface(
                                         // controller proves that this exact retained projection selected
                                         // the pane. A missing actor must not install a stale lease.
                                         TmuxPaneFocusSync.recordEditorFocusIntent(project, request.filePath)
-                                        ApplicationManager.getApplication().invokeLater {
+                                        GenerationWork.invokeLater {
                                             if (!project.isDisposed) {
                                                 IdeTerminalHost.applySurfaceDecision(
                                                     project,
@@ -1760,7 +1754,7 @@ internal data class CapturedSurface(
             projectionAuthorityEpoch.incrementAndGet()
             surfaceRoots.drain() to surfaceEndpoints.drain()
         }
-        Thread(
+        GenerationWork.newThread(
                 {
                     roots.forEach { root ->
                         CpRouteClient.forgetEditorSurface(root)
@@ -1812,7 +1806,7 @@ internal data class CapturedSurface(
             // superseding it without an idle/null interval in tmux layout auto-sync.
             return
         }
-        Thread(
+        GenerationWork.newThread(
                 {
                     for (root in roots) {
                         CpRouteClient.forgetEditorSurface(root)

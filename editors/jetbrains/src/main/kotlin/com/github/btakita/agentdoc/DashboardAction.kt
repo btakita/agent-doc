@@ -2,7 +2,6 @@ package com.github.btakita.agentdoc
 
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
@@ -41,7 +40,7 @@ class DashboardAction : ImplAction {
             val projectRoot = TerminalUtil.cleanupProjectRoot(project)
             val agentDoc = TerminalUtil.resolveAgentDoc(projectRoot)
             TerminalUtil.showHint(project, "Dashboard: rendering agent-doc dashboard…")
-            Thread {
+            GenerationWork.newThread {
                 try {
                     val cmd = listOf(agentDoc) + DASHBOARD_COMMAND_ARGS
                     val result = SyncLayoutAction.runCommandWithTimeout(cmd, projectRoot)
@@ -49,7 +48,7 @@ class DashboardAction : ImplAction {
                     if (result.exitCode != 0) {
                         val reason = if (result.timedOut) "timed out" else "failed (exit ${result.exitCode})"
                         TerminalUtil.notifyError(project, "Dashboard $reason:\n${result.output}")
-                        return@Thread
+                        return@newThread
                     }
                     openDashboard(project, dashboardPath(projectRoot))
                 } catch (e: Exception) {
@@ -59,7 +58,7 @@ class DashboardAction : ImplAction {
         }
 
         private fun openDashboard(project: Project, path: String) {
-            ApplicationManager.getApplication().invokeLater {
+            GenerationWork.invokeLater {
                 if (project.isDisposed) return@invokeLater
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(File(path))
                 if (file == null) {

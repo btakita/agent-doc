@@ -36,7 +36,11 @@ class ShellGenerationHost : Disposable {
     /** Set once the active generation has been retired; it then stages no more handlers. */
     @Volatile private var retired = false
 
-    private class ActiveGeneration(val impl: ImplGeneration, val receipt: ActivationReceipt)
+    private class ActiveGeneration(
+        val impl: ImplGeneration,
+        val receipt: ActivationReceipt,
+        val work: ShellGenerationWork,
+    )
 
     /**
      * Application-level Tier A forwarders: the application message bus, the editor event
@@ -46,6 +50,10 @@ class ShellGenerationHost : Disposable {
         ShellListenerHub(this, "application") { ApplicationManager.getApplication().messageBus }
 
     private inner class HostContext(override val generation: Long, override val epoch: Long) : GenerationContext {
+        override val work = ShellGenerationWork(generation)
+
+        override fun invokeLater(task: Runnable) = work.invokeLater(task)
+
         private fun admits(what: String): Boolean {
             if (!retired) return true
             LOG.info("[shell] retired generation $generation staged $what after retirement; ignored")
@@ -116,7 +124,8 @@ class ShellGenerationHost : Disposable {
         val impl = Class.forName(IMPL_GENERATION_CLASS, true, loader)
             .getDeclaredConstructor()
             .newInstance() as ImplGeneration
-        impl.prepare(HostContext(generation, epoch), importedState = null)
+        val context = HostContext(generation, epoch)
+        impl.prepare(context, importedState = null)
         val receipt = ActivationReceipt(
             role = ActivationReceipt.ROLE_BACKEND,
             jvmInstanceId = ShellIdentity.jvmInstanceId,
@@ -128,7 +137,7 @@ class ShellGenerationHost : Disposable {
             generation = generation,
             epoch = epoch,
         )
-        return ActiveGeneration(impl, receipt)
+        return ActiveGeneration(impl, receipt, context.work)
     }
 
     private fun inactiveReceipt(): ActivationReceipt =
@@ -156,6 +165,9 @@ class ShellGenerationHost : Disposable {
         } catch (failure: Throwable) {
             LOG.warn("[shell] implementation generation ${leaving.receipt.generation} failed to retire", failure)
         }
+        // R1 retires only at plugin unload, whose own teardown queues EDT work: drain, as before R1.
+        val report = leaving.work.retire(ShellGenerationWork.Retirement.DRAIN)
+        LOG.info("[shell] implementation generation ${leaving.receipt.generation} retired ${report.encode()}")
     }
 
     override fun dispose() {

@@ -3,7 +3,6 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -102,7 +101,7 @@ class RefreshEnvironmentAction : ImplAction {
     private fun bindSession(project: Project, sessionName: String) {
         val basePath = project.basePath ?: return
         val agentDoc = TerminalUtil.resolveAgentDoc(basePath)
-        Thread {
+        GenerationWork.newThread {
             try {
                 val process = ProcessBuilder(agentDoc, "session", "set", sessionName)
                     .directory(File(basePath))
@@ -110,7 +109,7 @@ class RefreshEnvironmentAction : ImplAction {
                     .start()
                 val output = process.inputStream.bufferedReader().readText()
                 val exit = process.waitFor()
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                     if (exit == 0) {
                         TerminalUtil.showHint(project, "Bound to tmux session: $sessionName")
                     } else {
@@ -121,7 +120,7 @@ class RefreshEnvironmentAction : ImplAction {
                     }
                 }
             } catch (ex: Exception) {
-                ApplicationManager.getApplication().invokeLater {
+                GenerationWork.invokeLater {
                     TerminalUtil.notifyError(project, "Failed to bind tmux session: ${ex.message}")
                 }
             }

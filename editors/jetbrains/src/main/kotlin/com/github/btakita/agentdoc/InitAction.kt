@@ -4,7 +4,6 @@ import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileDocumentManager
 
 class InitSessionAction : ImplAction {
@@ -31,7 +30,7 @@ class InitSessionAction : ImplAction {
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
         val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
 
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             try {
                 val cmd = buildCommand(agentDoc, relativePath)
                 LOG.debug("init-session: ${cmd.joinToString(" ")}")

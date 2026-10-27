@@ -48,7 +48,7 @@ class CompactExchangeActionTest {
         assertTrue(
             "the attach cause must be captured before returning to the EDT",
             source.indexOf("val attachFailureReason") in (attachIdx + 1) until source.indexOf(
-                "ApplicationManager.getApplication().invokeLater {",
+                "GenerationWork.invokeLater {",
                 attachIdx,
             ),
         )

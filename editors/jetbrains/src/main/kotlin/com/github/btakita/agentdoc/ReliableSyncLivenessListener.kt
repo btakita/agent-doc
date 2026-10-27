@@ -52,7 +52,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     init {
         // Project listeners can be created after the IDE restored its editor tabs;
         // seed that existing open set because no new fileOpened event is guaranteed.
-        ApplicationManager.getApplication().invokeLater {
+        GenerationWork.invokeLater {
             if (!project.isDisposed) {
                 EditorOpenFileSurface.snapshot(project).forEach(::reportOpen)
             }
@@ -76,14 +76,14 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
      */
     private fun reportOpenWithRetry(filePath: String, attempt: Int) {
         val fallbackRoot = project.basePath ?: return
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             if (project.isDisposed || PluginGeneration.retired) return@executeOnPooledThread
             val lib = AgentDocLib.get()
             val outcome =
                 if (lib == null) LivenessReportOutcome.Retry
                 else reportOpenNow(lib, fallbackRoot, filePath, republish = attempt > 0)
             val delayMs = livenessReportRetryDelayMsUtil(outcome, attempt) ?: return@executeOnPooledThread
-            com.intellij.util.concurrency.AppExecutorUtil.getAppScheduledExecutorService().schedule(
+            GenerationWork.schedule(
                 { reportOpenWithRetry(filePath, attempt + 1) },
                 delayMs,
                 java.util.concurrent.TimeUnit.MILLISECONDS,
@@ -170,7 +170,7 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
     private fun publishClose(file: VirtualFile) {
         val fallbackRoot = project.basePath ?: return
         val filePath = file.path
-        ApplicationManager.getApplication().executeOnPooledThread {
+        GenerationWork.executeOnPooledThread {
             val lib = AgentDocLib.get() ?: return@executeOnPooledThread
             val documentHash = resolveDocumentHash(lib, filePath) ?: return@executeOnPooledThread
             val root =

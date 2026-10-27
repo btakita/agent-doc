@@ -1700,6 +1700,12 @@ pub fn run_with_reap_policy_resume_and_harness(
             });
             match restart_fm {
                 Some(mut restart_fm) => {
+                    // `#restartagentharness`: keep the value the authority text
+                    // actually declared. `restart_fm.agent` is overwritten below
+                    // with the resolved actor, and logging that overwritten value
+                    // as `resolved_from=frontmatter:<x>` hid whether the document
+                    // named the harness at all.
+                    let declared_agent = restart_fm.agent.clone();
                     let authority_harness = shared.resolve_document_harness(
                         restart_fm.agent.as_deref(),
                         global_config.default_agent.as_deref(),
@@ -1900,8 +1906,7 @@ pub fn run_with_reap_policy_resume_and_harness(
                                     file.display(),
                                     harness.binary,
                                     restart_spec.harness.binary,
-                                    restart_fm
-                                        .agent
+                                    declared_agent
                                         .as_deref()
                                         .map(|agent| format!("frontmatter:{agent}"))
                                         .unwrap_or_else(|| "frontmatter:<unset>".to_string()),

@@ -5033,6 +5033,12 @@ enum SessionAction {
         /// Bypass stale busy-state refusal and request supervisor-mediated restart
         #[arg(long)]
         force: bool,
+        /// The `agent:` value the caller sees in the document (editor plugins pass
+        /// their visible frontmatter). The restart is refused when the controller's
+        /// document authority still declares a different agent, instead of
+        /// relaunching the harness the operator already changed away from.
+        #[arg(long, value_name = "AGENT")]
+        expect_agent: Option<String>,
     },
     /// Stop the harness agent child while keeping the supervisor alive at its
     /// restart-or-quit keepalive prompt (the operator can then restart the agent)
@@ -7122,17 +7128,21 @@ fn try_main() -> anyhow::Result<()> {
                 },
                 force,
             ),
-            Some(SessionAction::RestartAgent { file, fresh, force }) => {
-                session_actor_cmd::restart_agent(
-                    &file,
-                    if fresh {
-                        session_actor_cmd::RestartMode::Fresh
-                    } else {
-                        session_actor_cmd::RestartMode::Continue
-                    },
-                    force,
-                )
-            }
+            Some(SessionAction::RestartAgent {
+                file,
+                fresh,
+                force,
+                expect_agent,
+            }) => session_actor_cmd::restart_agent(
+                &file,
+                if fresh {
+                    session_actor_cmd::RestartMode::Fresh
+                } else {
+                    session_actor_cmd::RestartMode::Continue
+                },
+                force,
+                expect_agent.as_deref(),
+            ),
             Some(SessionAction::StopAgent { file, reason }) => {
                 session_actor_cmd::stop_agent(&file, reason)
             }

@@ -195,6 +195,11 @@ struct SessionContext {
     log_status: Option<SessionLogStatus>,
     supervisor_runtime: SupervisorRuntime,
     supervisor_socket: PathBuf,
+    /// The `agent:` the controller's document authority declares, normalized by
+    /// `agent_doc_harness::normalize_harness_name` (`None` = no `agent:` key).
+    /// Restart Agent compares it with the editor-visible value
+    /// (`#restartagentharness`).
+    document_agent: Option<String>,
     /// The window the bound pane actually lives in *right now*, read from tmux.
     ///
     /// The actor record and the registry both carry a `window` captured at bind
@@ -512,7 +517,7 @@ fn restart_targets_the_calling_pane(owner_pane: Option<&str>) -> bool {
 }
 
 pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
-    restart_with_target(file, mode, force, false)
+    restart_with_target(file, mode, force, false, None)
 }
 
 /// Replace the harness child while keeping the session supervisor as the owner.
@@ -521,8 +526,20 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
 /// inferred from pane/process state. That keeps the operator's "Restart Agent"
 /// intent durable across controller transport and distinct from a controller
 /// recycle, including when the running supervisor notices build skew.
-pub fn restart_agent(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
-    restart_with_target(file, mode, force, true)
+///
+/// `expect_agent` is the `agent:` value the caller sees (`--expect-agent`, which
+/// editor plugins fill from their visible buffer). The supervisor re-resolves the
+/// harness from the controller's document authority, so when that authority has
+/// not caught up to the operator's edit the restart would relaunch the harness
+/// the operator just changed away from (`#restartagentharness`). That case is
+/// refused here, before any child is replaced, with both values named.
+pub fn restart_agent(
+    file: &Path,
+    mode: RestartMode,
+    force: bool,
+    expect_agent: Option<&str>,
+) -> Result<()> {
+    restart_with_target(file, mode, force, true, expect_agent)
 }
 
 fn restart_with_target(
@@ -530,8 +547,12 @@ fn restart_with_target(
     mode: RestartMode,
     force: bool,
     restart_agent: bool,
+    expect_agent: Option<&str>,
 ) -> Result<()> {
     let ctx = build_context(file)?;
+    if restart_agent {
+        refuse_restart_agent_when_authority_lags_editor(&ctx, expect_agent)?;
+    }
     let tmux = agent_doc_tmux_io::configured_tmux();
     let owner_pane = ctx
         .actor_record
@@ -584,6 +605,40 @@ fn restart_with_target(
     );
     report_supervisor_replacement_outcome(&ctx.canonical_file, receipt.background_started);
     Ok(())
+}
+
+/// `#restartagentharness`: refuse a Restart Agent whose caller sees a different
+/// `agent:` than the document authority the supervisor will re-read.
+fn refuse_restart_agent_when_authority_lags_editor(
+    ctx: &SessionContext,
+    expect_agent: Option<&str>,
+) -> Result<()> {
+    let agent_doc_supervisor::harness_authority::RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+        editor_agent,
+        authority_agent,
+    } = agent_doc_supervisor::harness_authority::restart_agent_frontmatter_agreement(
+        expect_agent,
+        ctx.document_agent.as_deref(),
+    )
+    else {
+        return Ok(());
+    };
+    let authority_label = authority_agent.as_deref().unwrap_or("<unset>");
+    agent_doc_ops_log_io::log_op(
+        &ctx.canonical_file,
+        &format!(
+            "restart_agent_refused file={} reason=authority_lags_editor editor_agent={} authority_agent={} #restartagentharness",
+            ctx.canonical_file.display(),
+            editor_agent,
+            authority_label,
+        ),
+    );
+    anyhow::bail!(
+        "refusing to restart the agent for {}: the editor shows `agent: {}` but the document authority the supervisor re-reads still declares `agent: {}`. The editor's edits have not reached the controller yet, so restarting now would relaunch the old harness. Retry Restart Agent once editor sync converges; if it stays stuck, the editor replica is wedged — report it rather than reopening the tab, which can discard the unsynced edits.",
+        ctx.canonical_file.display(),
+        editor_agent,
+        authority_label,
+    )
 }
 
 /// `#superviserrsilent`: `background_started=true` only means the worker THREAD
@@ -3853,6 +3908,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         operator_status,
         &supervisor_runtime,
     )?;
+    let document_agent = explicit_document_harness.clone();
     let harness = status_harness(
         explicit_document_harness,
         operator_status
@@ -3881,6 +3937,7 @@ fn build_context(file: &Path) -> Result<SessionContext> {
         log_status,
         supervisor_runtime,
         supervisor_socket,
+        document_agent,
         live_pane_window,
     })
 }
@@ -5586,6 +5643,7 @@ mod tests {
             log_status: None,
             supervisor_runtime: runtime,
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+            document_agent: None,
             live_pane_window: None,
         }
     }
@@ -6805,6 +6863,108 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         assert!(message.contains("cooldown_written=true"));
     }
 
+    fn restart_agent_context_in(dir: &Path, document_agent: Option<&str>) -> SessionContext {
+        std::fs::create_dir_all(dir.join(".agent-doc/logs")).unwrap();
+        let doc = dir.join("lazily.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-1\nagent: grok\n---\n",
+        )
+        .unwrap();
+        let mut ctx = test_session_context(
+            test_actor_record(ActorState::Ready),
+            test_supervisor_runtime(Some(ActorState::Ready)),
+            None,
+        );
+        ctx.canonical_file = doc.canonicalize().unwrap();
+        ctx.base_dir = dir.canonicalize().unwrap();
+        ctx.document_agent = document_agent.map(agent_doc_harness::normalize_harness_name);
+        ctx
+    }
+
+    #[test]
+    fn restart_agent_refuses_when_authority_still_declares_the_old_agent() {
+        // `#restartagentharness`, 2026-10-27: the editor showed `agent: grok`,
+        // the controller authority still declared `agent: claude`, and Restart
+        // Agent relaunched Claude Code five times. The editor-visible value now
+        // refuses that relaunch before any child is replaced.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = restart_agent_context_in(dir.path(), Some("claude"));
+        let error = refuse_restart_agent_when_authority_lags_editor(&ctx, Some("grok"))
+            .expect_err("a lagging authority must refuse the restart")
+            .to_string();
+        assert!(error.contains("the editor shows `agent: grok`"), "{error}");
+        assert!(
+            error.contains("still declares `agent: claude-code`"),
+            "{error}"
+        );
+        assert!(error.contains("relaunch the old harness"), "{error}");
+        let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("restart_agent_refused file=",)
+                && ops.contains(
+                    "reason=authority_lags_editor editor_agent=grok authority_agent=claude-code"
+                ),
+            "{ops}"
+        );
+
+        // No `agent:` key in the authority is also not the operator's grok.
+        let unset = restart_agent_context_in(dir.path(), None);
+        let error = refuse_restart_agent_when_authority_lags_editor(&unset, Some("grok"))
+            .expect_err("an authority without `agent:` has not seen the edit")
+            .to_string();
+        assert!(error.contains("`agent: <unset>`"), "{error}");
+    }
+
+    /// Source-shape guard: the refusal is worthless unless Restart Agent runs it
+    /// BEFORE the replacement request leaves for the controller — a behavioural
+    /// test of the helper cannot see a missing call site.
+    #[test]
+    fn restart_agent_checks_editor_agent_before_requesting_replacement() {
+        let source = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/session_actor_cmd.rs"
+        ))
+        .unwrap();
+        let body_start = source
+            .find("fn restart_with_target(")
+            .expect("restart_with_target");
+        let body = &source[body_start..];
+        let body = &body[..body.find("\n}\n").expect("restart_with_target end")];
+        let check = body
+            .find("refuse_restart_agent_when_authority_lags_editor(&ctx, expect_agent)?")
+            .expect("Restart Agent must check the editor-visible agent");
+        let request = body
+            .find("request_supervisor_replacement(")
+            .expect("replacement request");
+        assert!(
+            check < request,
+            "the editor-visible agent check must run before the replacement request"
+        );
+        assert!(
+            source.contains("restart_with_target(file, mode, force, true, expect_agent)"),
+            "restart_agent must forward the caller's expect_agent"
+        );
+    }
+
+    #[test]
+    fn restart_agent_proceeds_when_authority_matches_or_no_editor_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let caught_up = restart_agent_context_in(dir.path(), Some("grok"));
+        refuse_restart_agent_when_authority_lags_editor(&caught_up, Some("grok-build"))
+            .expect("an authority that declares the editor's agent restarts normally");
+        let lagging = restart_agent_context_in(dir.path(), Some("claude"));
+        refuse_restart_agent_when_authority_lags_editor(&lagging, None)
+            .expect("a CLI caller without editor evidence keeps the historical behaviour");
+        assert!(
+            !dir.path().join(".agent-doc/logs/ops.log").exists()
+                || !std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log"))
+                    .unwrap()
+                    .contains("restart_agent_refused"),
+            "an admitted restart must not log a refusal",
+        );
+    }
+
     #[test]
     fn restart_busy_refusal_points_to_force() {
         let message = restart_busy_refusal_message(
@@ -7523,6 +7683,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 current_harness: None,
             },
             supervisor_socket: PathBuf::from("/tmp/supervisor.sock"),
+            document_agent: None,
             live_pane_window: None,
         };
         let evidence = LivePaneEvidence {
@@ -7727,6 +7888,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             log_status: None,
             supervisor_runtime: runtime,
             supervisor_socket: PathBuf::from("/tmp/missing.sock"),
+            document_agent: None,
             live_pane_window: None,
         };
         let issues = collect_doctor_issues(&ctx);
@@ -7992,6 +8154,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 current_harness: None,
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
+            document_agent: None,
             live_pane_window: None,
         };
 
@@ -8060,6 +8223,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
                 current_harness: None,
             },
             supervisor_socket: dir.path().join("session-clear.sock"),
+            document_agent: None,
             live_pane_window: None,
         };
 

@@ -370,6 +370,9 @@ interface AgentDocLib : Library {
         yaml_fields: String,
     ): FfiPatchResult.ByValue
 
+    /** Read the `agent:` value a document's frontmatter declares ("" when absent). */
+    fun agent_doc_frontmatter_agent(doc: String): FfiPatchResult.ByValue
+
     fun agent_doc_rebase_captured_splices(
         base: String,
         canonical: String,
@@ -2615,6 +2618,32 @@ object NativePatching {
                 return RegistrationSpliceShaping.Answer(null)
             }
             return RegistrationSpliceShaping.Answer(result.text?.readNativeUtf8())
+        } finally {
+            lib.agent_doc_free_string(result.error)
+            lib.agent_doc_free_string(result.text)
+        }
+    }
+
+    /**
+     * `#restartagentharness`: the `agent:` value [doc]'s frontmatter declares, read with the
+     * binary's own frontmatter parser. Null when the frontmatter names no agent, does not
+     * parse, or the native library predates the export — callers then send no
+     * editor-visible evidence and keep the previous Restart Agent behaviour.
+     */
+    fun frontmatterAgent(doc: String): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_frontmatter_agent(doc)
+        } catch (error: UnsatisfiedLinkError) {
+            LOG.warn("[native] frontmatter agent read requires the updated native library", error)
+            return null
+        }
+        try {
+            if (result.error != null) {
+                LOG.warn("[native] frontmatter agent unavailable: ${result.error!!.readNativeUtf8()}")
+                return null
+            }
+            return result.text?.readNativeUtf8()?.trim()?.takeIf { it.isNotEmpty() }
         } finally {
             lib.agent_doc_free_string(result.error)
             lib.agent_doc_free_string(result.text)

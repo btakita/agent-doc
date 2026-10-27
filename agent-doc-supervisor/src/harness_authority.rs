@@ -51,6 +51,58 @@ pub fn resolve_harness_authority(facts: &HarnessAuthorityFacts) -> HarnessAuthor
     }
 }
 
+/// Whether the document authority a Restart Agent will re-read has caught up to
+/// the `agent:` value the operator sees (`#restartagentharness`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestartAgentFrontmatterAgreement {
+    /// The authority declares the same harness the editor shows (or the caller
+    /// supplied no explicit editor-visible value), so the supervisor's re-read
+    /// resolves what the operator asked for.
+    Agrees,
+    /// The editor shows `editor_agent` but the authority still declares
+    /// `authority_agent` (`None` = no `agent:` key). Restarting now would
+    /// relaunch from frontmatter the operator already changed.
+    AuthorityLagsEditor {
+        editor_agent: String,
+        authority_agent: Option<String>,
+    },
+}
+
+/// Compare the editor-visible `agent:` against the authority's declared one.
+///
+/// Restart Agent re-resolves the harness from the controller's document
+/// authority, never from the editor buffer. When the editor's edits have not
+/// reached that authority (a debounce race, or a fenced/quarantined editor
+/// replica), the re-read silently relaunches the OLD harness: on 2026-10-27 the
+/// operator changed `lazily.md` to `agent: grok`, and five Restart Agent
+/// invocations each relaunched Claude Code because the authority still read
+/// `agent: claude`. Both sides are compared as *declared* values after
+/// [`agent_doc_harness::normalize_harness_name`] (so `claude`/`claude-code` and
+/// `grok`/`grok-build` agree), not as resolved binaries, because the question is
+/// whether the authority has seen the operator's edit — an unknown name must
+/// not agree with `claude` just because both would fall back to it.
+pub fn restart_agent_frontmatter_agreement(
+    editor_agent: Option<&str>,
+    authority_agent: Option<&str>,
+) -> RestartAgentFrontmatterAgreement {
+    let normalize = |value: &str| {
+        let value = agent_doc_harness::normalize_harness_name(value);
+        (value != "default").then_some(value)
+    };
+    let Some(editor) = editor_agent.and_then(normalize) else {
+        return RestartAgentFrontmatterAgreement::Agrees;
+    };
+    let authority = authority_agent.and_then(normalize);
+    if authority.as_deref() == Some(editor.as_str()) {
+        RestartAgentFrontmatterAgreement::Agrees
+    } else {
+        RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+            editor_agent: editor,
+            authority_agent: authority,
+        }
+    }
+}
+
 /// Process-lifetime reactive authority used by restart and idle-watch paths.
 /// Updating an unchanged observation is inert in Lazily; an explicit document
 /// edge overrides the active actor, while an absent edge keeps that actor.
@@ -165,6 +217,51 @@ mod tests {
                 source: HarnessAuthoritySource::ConfiguredDefault,
             }
         );
+    }
+
+    #[test]
+    fn restart_agent_agreement_refuses_an_authority_that_lags_the_editor_agent() {
+        // The 2026-10-27 lazily.md shape: editor shows grok, authority still claude.
+        assert_eq!(
+            restart_agent_frontmatter_agreement(Some("grok"), Some("claude-code")),
+            RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+                editor_agent: "grok".to_string(),
+                authority_agent: Some("claude-code".to_string()),
+            }
+        );
+        assert_eq!(
+            restart_agent_frontmatter_agreement(Some("codex"), None),
+            RestartAgentFrontmatterAgreement::AuthorityLagsEditor {
+                editor_agent: "codex".to_string(),
+                authority_agent: None,
+            }
+        );
+        // An unknown name resolves to claude at launch, but it is still a
+        // different declared value: the authority has not seen the edit.
+        assert!(matches!(
+            restart_agent_frontmatter_agreement(Some("groc"), Some("claude")),
+            RestartAgentFrontmatterAgreement::AuthorityLagsEditor { .. }
+        ));
+    }
+
+    #[test]
+    fn restart_agent_agreement_accepts_aliases_and_absent_editor_evidence() {
+        for (editor, authority) in [
+            (Some("grok"), Some("grok")),
+            (Some("grok-build"), Some("grok")),
+            (Some("claude"), Some("claude-code")),
+            (Some(" codex "), Some("codex")),
+            (None, Some("claude-code")),
+            (None, None),
+            (Some(""), Some("codex")),
+            (Some("default"), None),
+        ] {
+            assert_eq!(
+                restart_agent_frontmatter_agreement(editor, authority),
+                RestartAgentFrontmatterAgreement::Agrees,
+                "editor={editor:?} authority={authority:?}",
+            );
+        }
     }
 
     #[test]

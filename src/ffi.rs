@@ -4124,11 +4124,11 @@ fn force_link_core_ffi_symbols() {
         FfiComponentList, FfiMergeResult, FfiPatchResult, agent_doc_apply_node_patches,
         agent_doc_apply_patch, agent_doc_apply_patch_with_boundary,
         agent_doc_apply_patch_with_caret, agent_doc_converge_queue_auto, agent_doc_crdt_merge,
-        agent_doc_free_state, agent_doc_free_string, agent_doc_lossless_tree_capability,
-        agent_doc_lossless_tree_project, agent_doc_lossless_tree_projection_current,
-        agent_doc_lossless_tree_render, agent_doc_merge_crdt, agent_doc_merge_frontmatter,
-        agent_doc_normalize_template_structure, agent_doc_parse_components,
-        agent_doc_rebase_captured_splices, agent_doc_reconcile_text,
+        agent_doc_free_state, agent_doc_free_string, agent_doc_frontmatter_agent,
+        agent_doc_lossless_tree_capability, agent_doc_lossless_tree_project,
+        agent_doc_lossless_tree_projection_current, agent_doc_lossless_tree_render,
+        agent_doc_merge_crdt, agent_doc_merge_frontmatter, agent_doc_normalize_template_structure,
+        agent_doc_parse_components, agent_doc_rebase_captured_splices, agent_doc_reconcile_text,
         agent_doc_reposition_boundary_to_end, agent_doc_reposition_boundary_to_end_preserve_head,
         agent_doc_reposition_boundary_to_end_preserve_head_with_id,
         agent_doc_reposition_boundary_to_end_with_id, agent_doc_visual_tokens_json,
@@ -4168,6 +4168,7 @@ fn force_link_core_ffi_symbols() {
         agent_doc_merge_frontmatter;
     let _: unsafe extern "C" fn(*const c_char, std::os::raw::c_int) -> FfiPatchResult =
         agent_doc_converge_queue_auto;
+    let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult = agent_doc_frontmatter_agent;
     let _: unsafe extern "C" fn(*const c_char) -> FfiPatchResult =
         agent_doc_normalize_template_structure;
     let _: unsafe extern "C" fn(*const u8, usize, *const c_char, *const c_char) -> FfiMergeResult =

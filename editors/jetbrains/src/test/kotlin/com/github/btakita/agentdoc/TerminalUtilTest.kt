@@ -1427,6 +1427,26 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `restart agent carries the editor visible agent and supervisor restart does not`() {
+        assertEquals(
+            listOf("restart-agent", "--expect-agent", "grok"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.AGENT, force = false, expectAgent = "grok"),
+        )
+        assertEquals(
+            listOf("restart-agent", "--force", "--expect-agent", "grok"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.AGENT, force = true, expectAgent = " grok "),
+        )
+        assertEquals(
+            listOf("restart-agent"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.AGENT, force = false, expectAgent = " "),
+        )
+        assertEquals(
+            listOf("restart-supervisor"),
+            TerminalUtil.restartCommandArgs(TerminalUtil.RestartTarget.SUPERVISOR, force = false, expectAgent = "grok"),
+        )
+    }
+
+    @Test
     fun `busy restart refusal parses force guidance details`() {
         val output = """
             agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail="gpt-5 high - ~/repo - Context 20% used"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.

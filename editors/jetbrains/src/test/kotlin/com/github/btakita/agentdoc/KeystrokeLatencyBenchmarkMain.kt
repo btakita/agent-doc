@@ -30,8 +30,8 @@ import java.util.concurrent.TimeUnit
  *   leaving the EDT for any native call.
  * - `boundary.derive_capabilities`: the smallest `agent_doc_editor_derive_json` round trip
  *   (request JSON, JNA, native JSON parse, answer JSON, Gson parse).
- * - `move.*`: a moved rule asked through the derivation channel (`native`) beside its frozen
- *   Kotlin floor (`frozen`) on the same input.
+ * - `move.*`: a moved rule as production asks it (`native`: the derivation channel, its answer
+ *   parsed over the frozen floor) beside the frozen Kotlin floor alone (`frozen`), on one input.
  *
  * Environment:
  * - `AGENT_DOC_BENCH_FIXTURE`: a session document to type into (a copy, never a live document).
@@ -127,7 +127,10 @@ internal class KeystrokeBenchmark(
                             "move.${rule.name}.native",
                             iterations,
                             warmup,
-                            prepare = { check(rule.native() != null) { "native ${rule.name} gave no answer" } },
+                            prepare = {
+                                val listed = NativeAdminControls.deriveEditor("capabilities", "{}").orEmpty()
+                                check(listed.contains("\"${rule.name}\"")) { "the library does not answer ${rule.name}" }
+                            },
                         ) { rule.native() },
                     )
                     add(Case("move.${rule.name}.frozen", iterations, warmup) { rule.frozen() })
@@ -183,7 +186,16 @@ internal class KeystrokeBenchmark(
     }
 
     /** The rules moved behind the native boundary; each one adds its case here. */
-    private fun movedRules(): List<MovedRule> = emptyList()
+    private fun movedRules(): List<MovedRule> =
+        listOf(
+            // TerminalUtil: one finished Run Agent Doc route's output, read once per route.
+            MovedRule(
+                "route_outcome",
+                // What production runs: the native answer parsed over the frozen floor.
+                native = { RouteOutcome.derive(ROUTE_OUTPUT, "plan.md") },
+                frozen = { RouteOutcome.frozen(ROUTE_OUTPUT, "plan.md") },
+            ),
+        )
 
     private fun typingReport() {
         lib.agent_doc_lazily_current_observed_v1(
@@ -300,6 +312,16 @@ internal class KeystrokeBenchmark(
         /** Outside every `.agent-doc` project, so no controller is ever contacted. */
         val BENCH_DOCUMENT_PATH: String =
             File(System.getProperty("java.io.tmpdir"), "agent-doc-keystroke-bench/session.md").absolutePath
+
+        /** A representative route output: an unproven dispatch with its snapshot and attempt. */
+        val ROUTE_OUTPUT: String =
+            "[route] preserved dispatch-start proof snapshot for plan.md pane %12 harness=codex " +
+                "phase=direct_pane_dispatch_start_unproven capture_len=1234 capture_hash=e5b665883cc3 " +
+                "snapshot_path=/repo/.agent-doc/logs/route-submit/1781670099279-unproven.txt " +
+                "editor_attempt_id=1781670087547-4\n" +
+                "Error: dispatch-only codex reopen for plan.md was accepted in pane %12 via direct_pane_submit " +
+                "(tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; " +
+                "treating this as not dispatched because no dispatch-start proof was recorded."
 
         /** A keystroke case may grow by this much (or this fraction) before the gate fails. */
         const val GATE_ABSOLUTE_MICROS = 5.0

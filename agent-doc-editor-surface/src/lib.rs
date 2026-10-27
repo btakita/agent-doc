@@ -38,6 +38,7 @@ pub mod pane_placement;
 pub mod remote_client_surface;
 pub mod remote_layout;
 pub mod replica_registration;
+pub mod route_outcome;
 pub mod surface_layout_reference;
 pub mod surface_projection;
 pub mod sync_layout;
@@ -84,6 +85,9 @@ pub use remote_layout::{
 pub use replica_registration::{
     RegistrationProjection, RegistrationProjectionAction, RegistrationProjectionEvidence,
     derive_registration_projection,
+};
+pub use route_outcome::{
+    RouteOutcome, RouteOutcomeEvidence, RouteOutcomeKind, derive_route_outcome,
 };
 pub use surface_layout_reference::{
     CONTROLLER_SURFACE_CAPABILITIES, FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,

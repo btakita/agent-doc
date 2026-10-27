@@ -84,7 +84,9 @@ class TerminalUtilTest {
             .substringBefore("finalStage = \"route_success\"")
         assertTrue(
             "a successful route must warn when its pane is on no screen (GH #243)",
-            success.contains("routePaneNotVisibleNotice(output)") && success.contains("notifyWarning("),
+            // `#jbshrinkrestarts`: the notice is read by the native `route_outcome` derivation,
+            // whose frozen floor is routePaneNotVisibleNotice.
+            success.contains("outcome.paneNotVisibleNotice") && success.contains("notifyWarning("),
         )
     }
 

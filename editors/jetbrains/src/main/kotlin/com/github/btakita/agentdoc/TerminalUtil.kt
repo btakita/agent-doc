@@ -583,7 +583,10 @@ object TerminalUtil {
                     val output = routeResult.output
                     val exitCode = routeResult.exitCode
                     val elapsed = formatElapsedMillis(System.currentTimeMillis() - startedAt)
-                    val failureKind = classifyRunAgentDocRouteFailure(output)
+                    // `#jbshrinkrestarts`: what the output means is the hot-reloaded
+                    // native `route_outcome` derivation; this thread only executes it.
+                    val outcome = RouteOutcome.derive(output, relativePath)
+                    val failureKind = outcome.kind
                     if (handle.wasCanceled()) {
                         LOG.warn("[route] superseded route exited after replacement for $relativePath")
                         finalStage = "route_superseded"
@@ -591,19 +594,19 @@ object TerminalUtil {
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.BUSY_RUNNING) {
                         LOG.warn("[route] busy/running for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocStillRunning(project, relativePath, output)
+                        notifyRunAgentDocStillRunning(project, relativePath, output, outcome)
                         finalStage = "route_busy_running"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.STARTUP_NOT_READY) {
                         LOG.warn("[route] startup not ready for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocStillRunning(project, relativePath, output)
+                        notifyRunAgentDocStillRunning(project, relativePath, output, outcome)
                         finalStage = "route_startup_not_ready"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (failureKind == RunAgentDocRouteFailureKind.STEERING_DELIVERED) {
                         LOG.warn("[route] steering delivered to active owner for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocSteeringDelivered(project, relativePath, output)
+                        notifyRunAgentDocSteeringDelivered(project, relativePath, output, outcome)
                         StateProjectionBridge.recordRouteDispatchProven(
                             documentPath,
                             routeGeneration,
@@ -613,30 +616,30 @@ object TerminalUtil {
                     } else if (failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING) {
                         LOG.warn("[route] queued behind active turn for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocQueued(project, relativePath, output)
+                        notifyRunAgentDocQueued(project, relativePath, output, outcome)
                         finalStage = "route_queued_pending"
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.QUEUE_PAUSED) {
                         LOG.warn("[route] queue paused for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocQueuePaused(project, file, relativePath, output)
+                        notifyRunAgentDocQueuePaused(project, file, relativePath, output, outcome)
                         finalStage = "route_queue_paused"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED) {
                         LOG.warn("[route] agent switch deferred for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output)
+                        notifyRunAgentDocAgentSwitchDeferred(project, file, relativePath, output, outcome)
                         finalStage = "route_agent_switch_deferred"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.DISPATCH_START_UNPROVEN) {
                         LOG.warn("[route] dispatch start unproven for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocDispatchUnproven(project, relativePath, output)
+                        notifyRunAgentDocDispatchUnproven(project, relativePath, output, outcome)
                         finalStage = "route_dispatch_start_unproven"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0 && failureKind == RunAgentDocRouteFailureKind.PROTECTED_PROMPT_INPUT) {
                         LOG.warn("[route] protected prompt input for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocProtectedPromptInput(project, relativePath, output)
+                        notifyRunAgentDocProtectedPromptInput(project, relativePath, output, outcome)
                         finalStage = "route_protected_prompt_input"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (exitCode != 0) {
@@ -653,11 +656,11 @@ object TerminalUtil {
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else {
                         LOG.warn("[route] SUCCESS: $output")
-                        routeOwnedByOtherLaneNotice(output)?.let { notifyRunAgentDocOwnedByOtherLane(project, it) }
+                        outcome.ownedByOtherLaneNotice?.let { notifyRunAgentDocOwnedByOtherLane(project, it) }
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
                         // GH #243: the delivery landed in a pane no tmux client
                         // shows. Tell the operator instead of a silent success.
-                        routePaneNotVisibleNotice(output)?.let { notice ->
+                        outcome.paneNotVisibleNotice?.let { notice ->
                             notifyWarning(project, notice)
                         }
                         StateProjectionBridge.recordRouteDispatchProven(
@@ -2219,6 +2222,9 @@ object TerminalUtil {
         return ""
     }
 
+    /** The latest `snapshot_path=` a route output names, or empty (`RouteOutcome.frozen`). */
+    internal fun routeSnapshotPath(output: String): String = latestRegexValue(output.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+
     private fun normalizePath(path: String): String = path.replace('\\', '/')
 
     internal fun isStartingActorRouteFailure(output: String): Boolean {
@@ -2849,8 +2855,13 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
-    private fun notifyRunAgentDocStillRunning(project: Project, relativePath: String, routeOutput: String) {
-        val summary = buildRunAgentDocStillRunningMessage(relativePath)
+    private fun notifyRunAgentDocStillRunning(
+        project: Project,
+        relativePath: String,
+        routeOutput: String,
+        outcome: RouteOutcome.Result,
+    ) {
+        val summary = outcome.summary ?: buildRunAgentDocStillRunningMessage(relativePath)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2866,9 +2877,14 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
-    private fun notifyRunAgentDocDispatchUnproven(project: Project, relativePath: String, routeOutput: String) {
-        val summary = buildRunAgentDocDispatchUnprovenMessage(relativePath, routeOutput)
-        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+    private fun notifyRunAgentDocDispatchUnproven(
+        project: Project,
+        relativePath: String,
+        routeOutput: String,
+        outcome: RouteOutcome.Result,
+    ) {
+        val summary = outcome.summary ?: buildRunAgentDocDispatchUnprovenMessage(relativePath, routeOutput)
+        val snapshotPath = outcome.snapshotPath
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2890,9 +2906,14 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
-    private fun notifyRunAgentDocProtectedPromptInput(project: Project, relativePath: String, routeOutput: String) {
-        val summary = buildRunAgentDocProtectedPromptInputMessage(relativePath, routeOutput)
-        val snapshotPath = latestRegexValue(routeOutput.lines(), ROUTE_SNAPSHOT_PATH_REGEX)
+    private fun notifyRunAgentDocProtectedPromptInput(
+        project: Project,
+        relativePath: String,
+        routeOutput: String,
+        outcome: RouteOutcome.Result,
+    ) {
+        val summary = outcome.summary ?: buildRunAgentDocProtectedPromptInputMessage(relativePath, routeOutput)
+        val snapshotPath = outcome.snapshotPath
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -2919,10 +2940,11 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         file: VirtualFile,
         relativePath: String,
         routeOutput: String,
+        outcome: RouteOutcome.Result,
     ) {
-        val paused = parseRunAgentDocQueuePaused(routeOutput)
+        val paused = outcome.queuePaused
             ?: RunAgentDocQueuePaused(reason = "", restartSupervisorRedirect = false, stalePid = "")
-        val summary = buildRunAgentDocQueuePausedMessage(relativePath, paused)
+        val summary = outcome.summary ?: buildRunAgentDocQueuePausedMessage(relativePath, paused)
         recordQueuePausedRouteNotificationShown(project, file, paused)
         try {
             val notification = NotificationGroupManager.getInstance()
@@ -2956,8 +2978,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         file: VirtualFile,
         relativePath: String,
         routeOutput: String,
+        outcome: RouteOutcome.Result,
     ) {
-        val deferred = parseRunAgentDocAgentSwitchDeferred(routeOutput)
+        val deferred = outcome.agentSwitchDeferred
             ?: RunAgentDocAgentSwitchDeferred(
                 previousHarness = "",
                 targetHarness = "",
@@ -2965,7 +2988,7 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                 forceRequired = false,
                 supervisorUnavailable = false,
             )
-        val summary = buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred)
+        val summary = outcome.summary ?: buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -3016,8 +3039,13 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
-    private fun notifyRunAgentDocQueued(project: Project, relativePath: String, routeOutput: String) {
-        val summary = buildRunAgentDocQueuedMessage(relativePath)
+    private fun notifyRunAgentDocQueued(
+        project: Project,
+        relativePath: String,
+        routeOutput: String,
+        outcome: RouteOutcome.Result,
+    ) {
+        val summary = outcome.summary ?: buildRunAgentDocQueuedMessage(relativePath)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")
@@ -3033,8 +3061,13 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
         }
     }
 
-    private fun notifyRunAgentDocSteeringDelivered(project: Project, relativePath: String, routeOutput: String) {
-        val summary = buildRunAgentDocSteeringDeliveredMessage(relativePath)
+    private fun notifyRunAgentDocSteeringDelivered(
+        project: Project,
+        relativePath: String,
+        routeOutput: String,
+        outcome: RouteOutcome.Result,
+    ) {
+        val summary = outcome.summary ?: buildRunAgentDocSteeringDeliveredMessage(relativePath)
         try {
             val notification = NotificationGroupManager.getInstance()
                 .getNotificationGroup("Agent Doc")

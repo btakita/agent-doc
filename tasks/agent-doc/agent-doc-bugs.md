@@ -614,6 +614,96 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 - Integrated: check-fast 5658 run, 5658 passed.
 - VS Code 225 of 225.
 - Four deliberate breakages of the fallback each turned the new tests red.
+
+### Re: JetBrains startup crash on sdk-demo.md — opus-5 · 2026-10-26T23:23-04:00
+
+> **Queue prompt:** Run Agent Doc on sdk-demo.md error
+> ```
+> kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has not been initialized
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getMainSplitters(FileEditorManagerImpl.kt:231)
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.dockable$lambda$0(FileEditorManagerImpl.kt:239)
+> 	at kotlin.SynchronizedLazyImpl.getValue(LazyJVM.kt:86)
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getDockContainer(FileEditorManagerImpl.kt:313)
+> 	at com.intellij.ui.docking.impl.DockManagerImpl.getFileManagerContainer(DockManagerImpl.kt:558)
+> 	at com.intellij.ui.docking.impl.DockManagerImpl.getAllContainers(DockManagerImpl.kt:554)
+> 	at com.intellij.ui.docking.impl.DockManagerImpl.getContainerFor(DockManagerImpl.kt:175)
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getDockContainer(FileEditorManagerImpl.kt:697)
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getActiveSplitterSync(FileEditorManagerImpl.kt:690)
+> 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getSplitters(FileEditorManagerImpl.kt:1939)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener.attachEditorTreeMouseListener$lambda$0(EditorFocusSyncListener.kt:183)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener.attachEditorTreeMouseListener(EditorFocusSyncListener.kt:205)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener.<init>(EditorFocusSyncListener.kt:177)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener.<init>(EditorFocusSyncListener.kt)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install$lambda$0(EditorFocusSyncListener.kt:250)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install$lambda$1(EditorFocusSyncListener.kt:250)
+> 	at java.base/java.util.concurrent.ConcurrentHashMap.computeIfAbsent(ConcurrentHashMap.java:1724)
+> 	at com.github.btakita.agentdoc.EditorFocusSyncListener$Companion.install(EditorFocusSyncListener.kt:250)
+> 	at com.github.btakita.agentdoc.PluginLifecycleListener.projectOpened(PluginLifecycleListener262Generated.kt:87)
+> 	at com.intellij.util.messages.impl.MessageBusImplKt.invokeMethod(MessageBusImpl.kt:848)
+> 	at com.intellij.util.messages.impl.MessageBusImplKt.invokeListener(MessageBusImpl.kt:789)
+> 	at com.intellij.util.messages.impl.MessageBusImplKt.executeOrAddToQueue(MessageBusImpl.kt:610)
+> 	at com.intellij.util.messages.impl.ToDirectChildrenMessagePublisher.publish$intellij_platform_core(CompositeMessageBus.kt:193)
+> 	at com.intellij.util.messages.impl.MessagePublisher.invoke(MessageBusImpl.kt:558)
+> 	at jdk.proxy2/jdk.proxy2.$Proxy91.projectOpened(Unknown Source)
+> 	at com.intellij.openapi.project.impl.ProjectManagerImplKt$runInitProjectActivities$2.invokeSuspend(ProjectManagerImpl.kt:1636)
+> 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+> 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+> 	at com.intellij.openapi.application.impl.DispatchedRunnable.run(DispatchedRunnable.kt:42)
+> 	at com.intellij.openapi.application.TransactionGuardImpl.runWithWritingAllowed(TransactionGuardImpl.java:246)
+> 	at com.intellij.openapi.application.TransactionGuardImpl.access$100(TransactionGuardImpl.java:22)
+> 	at com.intellij.openapi.application.TransactionGuardImpl$2.run(TransactionGuardImpl.java:228)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1$0(NonBlockingFlushQueue.kt:329)
+> 	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1$1(NonBlockingFlushQueue.kt:328)
+> 	at com.intellij.concurrency.ThreadContext.resetThreadContext(threadContext.kt:295)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent$lambda$1(NonBlockingFlushQueue.kt:325)
+> 	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.tryRunWriteIntentReadAction(NestedLocksThreadingSupport.kt:786)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.runNextEvent(NonBlockingFlushQueue.kt:321)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.flushNow(NonBlockingFlushQueue.kt:299)
+> 	at com.intellij.openapi.application.impl.NonBlockingFlushQueue.FLUSH_NOW$lambda$0(NonBlockingFlushQueue.kt:158)
+> 	at java.desktop/java.awt.event.InvocationEvent.dispatch(InvocationEvent.java:323)
+> 	at java.desktop/java.awt.EventQueue.dispatchEventImpl(EventQueue.java:732)
+> 	at java.desktop/java.awt.EventQueue.dispatchEvent(EventQueue.java:711)
+> 	at com.intellij.ide.IdeEventQueue.defaultDispatchEvent(IdeEventQueue.kt:749)
+> 	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:602)
+> 	at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:401)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399)
+> 	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136)
+> 	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:106)
+> 	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136)
+> 	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399)
+> 	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
+> 	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
+> ```
+
+**Fixed. On `main` as `76208ef0aa` (JetBrains classic 0.2.854, 2026.2 0.2.855, 2026.3 0.2.856, `2e3a03ca2e`), installed.** IntelliJ 2026.3 needs a restart to load it.
+
+**Cause:**
+- `PluginLifecycleListener.projectOpened` calls `EditorFocusSyncListener.install`.
+- Its constructor called `FileEditorManagerEx.splitters` synchronously.
+- On 2026.3, `projectOpened` can arrive before the platform has built the editor area, so `getSplitters()` threw `UninitializedPropertyAccessException`.
+- The exception escaped `install`, so every later startup step in `projectOpened` was skipped: IDE activation, `TmuxPaneFocusSync`, the `FileEditorManager` subscriptions, open-document registration and the rename listener. That is why Run Agent Doc broke afterwards.
+
+**Fix** (all in `EditorFocusSyncListener.kt`):
+- **Narrow catch:** only that one not-built-yet exception is treated as "not ready". Any other failure still throws.
+- **Retry:** the editor-tree mouse listener retries on the first `fileOpened` / `selectionChanged`. No tab can exist before the split tree does. After attaching it unsubscribes.
+- **Contained failure:** install now runs its work isolated, so a failed start is logged and disposed and can never abort `projectOpened` again. Cancellation still propagates.
+- **API choice:** `StartupManager.runAfterOpened` is internal API in 2026.3, so the fix doesn't use it.
+
+**Tests:**
+- 6 new tests, including one that fakes the exact not-ready exception and shows a later attach happens exactly once.
+- Changing the caught exception type turns 2 tests red.
+- Integrated: check-fast passed. Classic 1008 JUnit tests, 0 failures. `jetbrains-262-check` and `jetbrains-263-check` pass.
+
+**Also worth knowing:** this bump creates the `[#ahfe]` / GH #267 case. Before you restart IntelliJ, if you want to finish that check, wait for `[native] hot-reloaded libagent_doc` in `idea.log`, then run Run Agent Doc once. The old 0.2.853 plugin routing against the new binary should log `editor_route_superseded_editor_admitted`. Then restart to load 0.2.856.
+
+**Still running:** `#jbshellr1rest` and `#replicaremoteflush`. `#kotlinflushprep` waits for `#jbshellr1rest`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -627,8 +717,8 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 - 📥 do [#kotlinflushprep]
 - ~~do [#vscodekoffivsix]~~
 - ~~do [#vscodekoffisegv]~~
----
-🚧 [#subagent:focussyncinit#1] Run Agent Doc on sdk-demo.md error
+~~~done
+Run Agent Doc on sdk-demo.md error
 ```
 kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has not been initialized
 	at com.intellij.openapi.fileEditor.impl.FileEditorManagerImpl.getMainSplitters(FileEditorManagerImpl.kt:231)
@@ -692,6 +782,7 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
 	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
 ```
+~~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

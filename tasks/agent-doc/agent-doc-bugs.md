@@ -508,6 +508,37 @@ No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-pr
 - **Dispatch order:** `#jbshellr1rest` and `#replicaremoteflush` now. The three VS Code items wait until `vscoderemote` lands, and `#kotlinflushprep` waits until `#jbshellr1rest` lands, so no two workers edit the same plugin files at once.
 
 **Needs you:** restart IntelliJ 2026.3 when convenient. VS Code now has 0.2.84 installed; reload the window to load it.
+
+### Re: VS Code remote parity, sdk-demo turn — opus-5 · 2026-10-26T23:05-04:00
+
+> **Queue prompt:** do [#vscoderemoteparity]
+
+**On `main` and installed.** The worker merged main into its branch twice, as merge commits (no force-push), giving `10e342c30e`. VS Code is now 0.2.85 (`6417f3d014`). I bumped past 0.2.84 because a 0.2.84 VSIX without these changes was already installed here.
+
+- **`"extensionKind": ["workspace"]`:** confirmed loading in code-server 4.143.1's server-side extension host.
+- **Activation receipt:** every registration carries one `agent_doc_activation_receipt/v1 role=workspace` line. The controller parses it from an optional `activation_receipt` field, so older controllers are unaffected, and `agent-doc reliable-sync-status` prints it.
+- **Install path:** `plugin install|update|list vscode` now also reaches `code-server` and the newest Remote-SSH server (`~/.vscode-server`, `~/.vscodium-server`, `~/.cursor-server`). This worked against a real code-server and a real VS Code Server.
+- **Coder smoke test:** `scripts/vscode-remote-smoke.py` is written, and its procedure is in `runbooks/coder-workspace.md`. Locally, install, register and remote host passed. It has not been run on Coder, so I added todo `#vscodecodersmoke` for you.
+- **Integrated checks:** check-fast 5857 run, 5857 passed. VS Code `npm test` 220 of 220 passed.
+
+**Dispatched:** the three held VS Code items are 🚧 running in their own worktrees.
+- `#vscodesessionparsers`: move `sessionUi.ts` onto the native `session_command_outcome`.
+- `#vscodekoffivsix`: ship koffi in the VSIX.
+- `#vscodekoffisegv`: find the cause of the koffi `free` SIGSEGV.
+
+`#jbshellr1rest` and `#replicaremoteflush` are still running. `#kotlinflushprep` waits for `#jbshellr1rest`. Every brief now carries the tmux safety rule.
+
+> **Queue prompt:** sdk-demo.md turn did not complete. Response is uncommitted.
+
+**It isn't stuck. The turn is still running, so I left it alone.** Checked read-only at 03:03Z:
+- **The cycle:** `src/haiven-dev/tasks/sdk/sdk-demo.md` has cycle `cycle-1793070156281`, which started at 03:02Z and is in `preflight_started`. Its owning pane `%3` holds a fresh active-turn lease.
+- **The pane:** its main agent is waiting at the prompt. One of its 3 background workers, "Fix Boss Room session.end telemetry", is still running.
+- **Why it's uncommitted:** the response commits when that worker reports and the owner closes the turn. The uncommitted change you see in `sdk-demo.md` is that turn's work in progress.
+- **The previous turn:** it committed normally as `d29f4a52` at 22:31.
+- `session-check` says explicitly not to recover, re-finalize or clear it from another pane, so I didn't.
+- **Why I didn't start a worker:** the claim I took for this row was released (requeued) without one, since a worker would only have waited on the same turn.
+
+If it's still uncommitted after that worker finishes, run `agent-doc session-check src/haiven-dev/tasks/sdk/sdk-demo.md` and queue it again. A finished worker with no commit would be a real defect.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -515,19 +546,14 @@ No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-pr
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#jbshellr1rest]
-- do [#vscodesessionparsers]
-- do [#replicaremoteflush]
-- do [#kotlinflushprep]
-- do [#vscodekoffivsix]
-- do [#vscodekoffisegv]
-- 🚧 [#subagent:vscoderemote#1] do [#vscoderemoteparity]
-- ~~do [#vscodeupgradelayout]~~
-- ~~do [#zedparity]~~
-- ~~do [#replicadiffcost]~~
-- ~~do [#jbsessioncmdoutcome]~~
-- ~~do [#jbshellr1]~~
-- ~~[#ahfe]: I believe it works now. verify~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:jbshellr1rest#1] do [#jbshellr1rest]
+- 🚧 [#subagent:vscodesession#1] do [#vscodesessionparsers]
+- 🚧 [#subagent:replicaremote#1] do [#replicaremoteflush]
+- 📥 do [#kotlinflushprep]
+- 🚧 [#subagent:vscodekoffi#1] do [#vscodekoffivsix]
+- 🚧 [#subagent:vscodesegv#1] do [#vscodekoffisegv]
+- ~~do [#vscoderemoteparity]~~
+- ~~sdk-demo.md turn did not complete. Response is uncommitted.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -540,6 +566,7 @@ No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-pr
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
+- [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
@@ -549,7 +576,6 @@ No new issues this pass. The open ones are #379 (tracked by `#gh379-remotedev-pr
 - [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
 - [ ] [#vscodekoffivsix] Ship koffi in the VS Code VSIX: editors/vscode/.vscodeignore excludes node_modules, so a VSIX install has no koffi and the native library is off (nothing registers with the controller, including on Coder); bundle or include the koffi runtime for each target platform and add a packaging test that the VSIX contains it.
 - [ ] [#vscodekoffisegv] Investigate the VS Code extension-host SIGSEGV in free called from koffi into libagent_doc under code-server 4.143.1 (node v24.22.1), reproduced with the debug library on unmodified main by the vscoderemoteparity worker; find the ownership bug at the FFI boundary and add a regression test.
-- [ ] [#vscoderemoteparity] VS Code remote parity (editors/SPEC.md section 13): declare "extensionKind": ["workspace"] and test the extension loads in the remote extension host; add a single-role agent_doc_activation_receipt/v1 line (role=workspace) to the controller registration; make agent-doc plugin install vscode reach the workspace extension host (code-server and the Remote-SSH server extensions directory); add a Coder workspace smoke test (install, register, remoteName, tmux attach, layout sync). Update the section 13 matrix and its editor_contract test as gaps close.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

@@ -78,6 +78,16 @@ Rust binary.
   and generation-fenced backend/frontend activation of the same verified
   artifact. Native derivations may still hot-reload when the JetBrains source
   digest is unchanged.
+- The proposed route around that boundary does not unload the plugin. A stable
+  shell, the same plugin ID with an unchanged module graph, would own every
+  IntelliJ registration and load a versioned implementation jar into an
+  agent-doc-owned child classloader. Each JVM would publish an
+  `agent_doc_activation_receipt/v1` line, and a backend/frontend activation
+  fence would admit frontend-dependent work only when the two receipts match.
+  This is a design and a test-only spike (`editors/jetbrains/SPEC.md`,
+  "Restart-free implementation generations: shell plus child loader (GH #339
+  design)"). It ships nothing, and it changes no restart verdict above until
+  its R4 step lands.
 - A restart-only upgrade must reach the IDE. The JetBrains plugin compares its
   loaded version with the versioned jar in its installed tree and the
   restart-required marker's `staged_version=`, and raises a sticky in-IDE

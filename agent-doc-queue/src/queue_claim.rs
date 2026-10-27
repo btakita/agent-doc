@@ -30,10 +30,12 @@
 //! carries it. Each claim stores a [`ClaimAnchor`] (the queue's heads and the
 //! claimed line indexes), and [`QueueClaimLedger::follow_edits`] aligns it
 //! with the live heads by the edit rule mid-turn steering reports
-//! ([`crate::queue_head_alignment`]). Any structurally aligned replacement of
-//! a claimed row, from a corrected URL through a complete prose or tracked-id rewrite,
-//! carries the claim to the edited line, and steering forwards that edit to
-//! the claim's owner. Observed 2026-10-15 on
+//! ([`crate::queue_head_alignment`]). An edit of a claimed row (the same
+//! tracked id with rewritten prose, a corrected URL, an appended note,
+//! reworded text) carries the claim to the edited line, and steering forwards
+//! that edit to the claim's owner. A different row added in the claimed row's
+//! slot is not an edit (`#krwr`): the claim stays on the deleted row, closes,
+//! and steering cancels its owner. Observed 2026-10-15 on
 //! agent-doc-bugs.md: the operator corrected `…/agent-foc/issues/272` to
 //! `…/agent-doc/issues/272`; the text-keyed claim matched nothing, was pruned
 //! at closeout, and the edited line was offered to a second worker. A claimed
@@ -1445,10 +1447,11 @@ impl QueueClaimLedger {
     /// [`ClaimAnchor`] is aligned with `live_heads` by the rule mid-turn
     /// steering uses to report `previous` -> `verbatim` edits
     /// ([`crate::queue_head_alignment::pair_queue_heads`]): an unchanged or
-    /// moved line pairs by identity, and an equal-cardinality replace hunk pairs
-    /// still-unmatched rows at the same structural offset even when their text
-    /// or `#id` changes completely. A line deleted in one place and added in
-    /// another does not pair. A live (unexpired) claim
+    /// moved line pairs by identity, and inside a replace hunk a row pairs
+    /// with a similar or containing row. Position alone never pairs rows
+    /// (`#krwr`): a different row added in a deleted row's slot is new work,
+    /// so the claim stays on the deleted row and closes. A line deleted in one
+    /// place and added in another does not pair either. A live (unexpired) claim
     /// whose identity is no longer a live head follows the line its anchored
     /// line(s) became, so `#gh-fix …/agent-foc/issues/272` edited into
     /// `#gh-fix …/agent-doc/issues/272` stays claimed by the same owner and is
@@ -3678,10 +3681,12 @@ mod tests {
         assert_eq!(ledger.claims[0].anchor.as_ref().unwrap().slots, vec![1]);
     }
 
-    /// A deleted claimed line closes its claim, while an in-place rewrite keeps
-    /// the attempt. A similar line added in another place never inherits it.
+    /// A deleted claimed line closes its claim, while an in-place edit of the
+    /// same row keeps the attempt. A similar line added in another place never
+    /// inherits it, and neither does a different row added in the deleted
+    /// row's slot (`#krwr`).
     #[test]
-    fn a_claim_follows_any_in_place_rewrite_but_not_a_distant_add() {
+    fn a_claim_follows_its_row_edit_but_not_a_replacement_or_distant_add() {
         let line = "#gh-fix https://x.test/issues/7";
         let mut ledger = QueueClaimLedger::default();
         ledger.claim(line, "subagent:gh7", 100, 3600);
@@ -3697,24 +3702,53 @@ mod tests {
         let elsewhere = strings(&["#gh-fix https://x.test/issues/8", "inline", "release"]);
         assert!(ledger.follow_edits(110, &elsewhere).is_empty());
 
+        // `#krwr`: the same slot does not make a different row an edit.
+        for replacement in ["do [#b]", "replace this with a wholly different request"] {
+            let mut ids = QueueClaimLedger::default();
+            ids.claim("do [#a]", "subagent:a", 100, 3600);
+            ids.follow_edits(100, &strings(&["inline", "do [#a]"]));
+            let live = strings(&["inline", replacement]);
+            assert!(
+                ids.follow_edits(110, &live).is_empty(),
+                "{replacement} is new work, not an edit of do [#a]"
+            );
+            assert_eq!(ids.claims[0].item_text, "do [#a]");
+            assert_eq!(ids.claims[0].identity, claim_identity("do [#a]"));
+            let live: HashSet<_> = live.iter().map(|head| claim_identity(head)).collect();
+            let pruned = ids.clone().prune_detailed(110, Some(&live));
+            assert_eq!(pruned.len(), 1, "{replacement}");
+            assert_eq!(pruned[0].1, ClaimPruneCause::Closed);
+            assert!(
+                !ids.claimed_items(110, Some(&live)).claims(replacement),
+                "{replacement} stays unclaimed and dispatchable"
+            );
+        }
+
+        // The same tracked id with rewritten prose is the same row.
         let mut ids = QueueClaimLedger::default();
         ids.claim("do [#a]", "subagent:a", 100, 3600);
         ids.follow_edits(100, &strings(&["inline", "do [#a]"]));
-        assert_eq!(
-            ids.follow_edits(110, &strings(&["inline", "do [#b]"])),
-            vec![("do [#a]".to_string(), "do [#b]".to_string())],
-            "an in-place id change steers the existing worker"
-        );
+        let rewritten = "do [#a]: actually ship it as a migration instead";
+        let live = strings(&["inline", rewritten]);
+        // One identity: nothing to re-key, and the claim still holds the row.
+        assert!(ids.follow_edits(110, &live).is_empty());
         assert_eq!(ids.claims[0].owner, "subagent:a");
-        assert_eq!(ids.claims[0].item_text, "do [#b]");
+        assert_eq!(ids.claims[0].identity, claim_identity(rewritten));
+        let live: HashSet<_> = live.iter().map(|head| claim_identity(head)).collect();
+        assert!(ids.claimed_items(110, Some(&live)).claims(rewritten));
+        assert_eq!(ids.clone().prune(110, Some(&live)), 0);
 
-        let rewritten = "replace this with a wholly different request";
+        // A text edit of an id-less row is the same row.
+        let mut text = QueueClaimLedger::default();
+        text.claim("fix the login redirect bug", "subagent:login", 100, 3600);
+        text.follow_edits(100, &strings(&["inline", "fix the login redirect bug"]));
+        let edited = "fix the login redirect loop bug on Safari";
         assert_eq!(
-            ids.follow_edits(120, &strings(&["inline", rewritten])),
-            vec![("do [#b]".to_string(), rewritten.to_string())]
+            text.follow_edits(110, &strings(&["inline", edited])),
+            vec![("fix the login redirect bug".to_string(), edited.to_string())]
         );
-        assert_eq!(ids.claims[0].owner, "subagent:a");
-        assert_eq!(ids.claims[0].item_text, rewritten);
+        assert_eq!(text.claims[0].owner, "subagent:login");
+        assert_eq!(text.claims[0].item_text, edited);
     }
 
     /// `#claimtrackedalias` (sdk-demo.md, 2026-10-21): a running worker held

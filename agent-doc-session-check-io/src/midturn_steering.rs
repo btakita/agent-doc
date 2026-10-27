@@ -3802,8 +3802,9 @@ mod tests {
     /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
     /// claim follows the edit, the idle wake fires for it, the woken cycle's
     /// seed keeps it pending, and its first hook says "forward to owner", not
-    /// "dispatch a new subagent". Further edits, including a complete rewrite,
-    /// route the same way with no re-claim.
+    /// "dispatch a new subagent". Further edits route the same way with no
+    /// re-claim; a complete rewrite into a different request is a replacement
+    /// that cancels the owner instead (`#krwr`).
     #[test]
     fn claimed_head_edit_wakes_the_idle_coordinator_and_forwards_to_owner() {
         let dir = tempfile::tempdir().unwrap();
@@ -3895,26 +3896,143 @@ mod tests {
         assert_eq!(stored.claims.len(), 1, "{stored:?}");
         assert_eq!(stored.claims[0].item_text, format!("{annotated_head}."));
 
-        // A complete same-row rewrite is still steering for the existing
-        // attempt, not unregister + fresh dispatch.
+        // `#krwr`: replacing the row with a different request in its slot is
+        // a deletion plus new work, not an edit: the owner is cancelled and
+        // the new row is unclaimed, ordinary queue work.
         let replacement = "replace this claimed work with a wholly different request";
         let rewritten = period.replace(&format!("{annotated_head}."), replacement);
         std::fs::write(&file, &rewritten).unwrap();
         backdate(&file);
         let hook = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
-        assert_eq!(hook.items.len(), 1, "{hook:?}");
-        assert_eq!(
-            hook.items[0].dispatch,
-            core::SteeringDispatch::ForwardToOwner,
-            "{hook:?}"
+        assert_replacement_cancels(&file, &hook, &rewritten, replacement, "subagent:ghfix126");
+    }
+
+    /// `#krwr` assertions shared by the replacement tests: the replaced row's
+    /// owner gets `cancel_claimed`, the new row is unowned queue work, and the
+    /// ledger tombstones the attempt instead of following it.
+    fn assert_replacement_cancels(
+        file: &Path,
+        report: &SteeringReport,
+        content: &str,
+        replacement: &str,
+        owner: &str,
+    ) {
+        assert!(
+            report
+                .items
+                .iter()
+                .all(|item| item.dispatch != core::SteeringDispatch::ForwardToOwner),
+            "{report:?}"
         );
-        assert_eq!(hook.items[0].owner.as_deref(), Some("subagent:ghfix126"));
-        assert_eq!(hook.items[0].verbatim, replacement);
-        let stored =
-            agent_doc_queue_io::queue_claim::load_ledger_following(&file, &rewritten).unwrap();
-        assert_eq!(stored.claims.len(), 1, "{stored:?}");
-        assert_eq!(stored.claims[0].owner, "subagent:ghfix126");
-        assert_eq!(stored.claims[0].item_text, replacement);
+        let cancelled: Vec<_> = report
+            .items
+            .iter()
+            .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+            .collect();
+        assert_eq!(cancelled.len(), 1, "{report:?}");
+        assert_eq!(cancelled[0].change, core::SteeringChange::Deleted);
+        assert_eq!(cancelled[0].owner.as_deref(), Some(owner));
+        assert_ne!(cancelled[0].verbatim, replacement);
+        let added: Vec<_> = report
+            .items
+            .iter()
+            .filter(|item| item.verbatim == replacement)
+            .collect();
+        assert_eq!(added.len(), 1, "{report:?}");
+        assert_eq!(added[0].change, core::SteeringChange::Added);
+        assert_eq!(added[0].owner, None, "{report:?}");
+        assert_eq!(added[0].previous, None, "{report:?}");
+        let rendered = report.render().expect("render");
+        assert!(rendered.contains("dispatch=cancel_claimed"), "{rendered}");
+        assert!(
+            !rendered.contains("dispatch=forward_to_owner"),
+            "{rendered}"
+        );
+
+        let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content);
+        assert!(
+            !claimed.claims(replacement),
+            "the new row is unclaimed and dispatchable"
+        );
+        let stored = agent_doc_queue_io::queue_claim::load_ledger(file).unwrap();
+        assert!(stored.claims.is_empty(), "{stored:?}");
+        assert_eq!(stored.cancellations.len(), 1, "{stored:?}");
+        assert_eq!(stored.cancellations[0].claim.owner, owner);
+    }
+
+    /// `#krwr`: deleting a claimed `do [#a]` row while adding `do [#b]` in
+    /// the same slot cancels `#a`'s worker; `do [#b]` is new work. Rewriting
+    /// the prose of a row that keeps its tracked id still steers the owner.
+    #[test]
+    fn replacing_a_claimed_id_row_in_its_slot_cancels_but_a_same_id_rewrite_forwards() {
+        for (after, replaced) in [
+            ("do [#b]", true),
+            ("do [#a]: actually ship it as a migration instead", false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("plan.md");
+            let head = "do [#a]";
+            let baseline = format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n- later work\n<!-- /agent:queue -->\n"
+            );
+            std::fs::write(&file, &baseline).unwrap();
+            let cycle =
+                agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                    .unwrap();
+            seed_for_cycle(
+                &file,
+                &cycle.cycle_id,
+                &baseline,
+                Some("current task"),
+                Vec::new(),
+            )
+            .unwrap();
+            let (_, claim) =
+                agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:a", 3600).unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &file,
+                head,
+                "subagent:a",
+                "/root/a",
+                3600,
+                claim.generation,
+            )
+            .unwrap();
+
+            let edited = baseline.replace(&format!("- {head}\n"), &format!("- {after}\n"));
+            std::fs::write(&file, &edited).unwrap();
+            backdate(&file);
+            let report = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+            if replaced {
+                assert_replacement_cancels(&file, &report, &edited, after, "subagent:a");
+                let cancelled = report
+                    .items
+                    .iter()
+                    .find(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
+                    .unwrap();
+                assert_eq!(cancelled.verbatim, head);
+                assert_eq!(cancelled.worker_id.as_deref(), Some("/root/a"));
+                assert_eq!(cancelled.generation, Some(claim.generation));
+            } else {
+                assert_eq!(report.items.len(), 1, "{report:?}");
+                let item = &report.items[0];
+                assert_eq!(item.change, core::SteeringChange::Edited);
+                assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+                assert_eq!(item.owner.as_deref(), Some("subagent:a"));
+                assert_eq!(item.generation, Some(claim.generation));
+                assert_eq!(item.previous.as_deref(), Some(head));
+                assert_eq!(item.verbatim, after);
+                let stored =
+                    agent_doc_queue_io::queue_claim::load_ledger_following(&file, &edited).unwrap();
+                assert_eq!(stored.claims.len(), 1, "{stored:?}");
+                assert!(stored.cancellations.is_empty(), "{stored:?}");
+                assert!(
+                    agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &edited)
+                        .claims(after)
+                );
+            }
+        }
     }
 
     /// `#steerbaselineabsorb` (agent-doc-bugs.md, 2026-10-04): the operator

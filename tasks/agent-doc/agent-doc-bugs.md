@@ -593,6 +593,27 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 **Dispatched:** the JetBrains `EditorFocusSyncListener` startup crash you reported on `sdk-demo.md` (`lateinit property mainSplitters`) → `subagent:focussyncinit` (🚧). `projectOpened` calls `getSplitters()` before the 2026.3 editor area exists. The worker will defer attaching the listener until the editor area exists, and will check that no later startup step can be skipped by one listener's failure.
 
 **Still running:** `#jbshellr1rest`, `#replicaremoteflush`, `#vscodesessionparsers`. `#kotlinflushprep` waits for `#jbshellr1rest`.
+
+### Re: do [#vscodesessionparsers] — opus-5 · 2026-10-26T23:19-04:00
+
+> **Queue prompt:** do [#vscodesessionparsers]
+
+**On `main` and installed** (`064d649ded`, VS Code 0.2.88 `b2700613ad`).
+
+**What moved:**
+- VS Code's Clear and Restart Supervisor output now goes through the native `session_command_outcome` derivation, the same one JetBrains uses.
+- The new `sessionCommandOutcome.ts` asks `agent_doc_editor_derive_json`. It falls back to a TypeScript copy that answers all 51 cases of the one shared fixture exactly like native, so no divergences were needed.
+- The old regexes in `sessionUi.ts` are gone.
+
+**What changes for you in VS Code:**
+- Clears that were queued or deferred now say so. Before, VS Code read only stdout and reported "Cleared session context" even when nothing had cleared.
+- A clear refusal is recognised for `active_agent_doc` and `busy` panes too, not only `alive-busy`.
+- A restart refused because a terminal editor holds the pane is now a warning with "Show status" and "Copy details". Before, it was a generic error, and an unhandled rejection under "Interrupt and restart".
+
+**Checks:**
+- Integrated: check-fast 5658 run, 5658 passed.
+- VS Code 225 of 225.
+- Four deliberate breakages of the fallback each turned the new tests red.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -601,7 +622,7 @@ If it's still uncommitted after that worker finishes, run `agent-doc session-che
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:jbshellr1rest#1] do [#jbshellr1rest]
-- 🚧 [#subagent:vscodesession#1] do [#vscodesessionparsers]
+- ~~do [#vscodesessionparsers]~~
 - 🚧 [#subagent:replicaremote#1] do [#replicaremoteflush]
 - 📥 do [#kotlinflushprep]
 - ~~do [#vscodekoffivsix]~~
@@ -688,7 +709,6 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 
 ## Backlog <!-- agent:backlog priority queue -->
 - [ ] [#jbshellr1rest] Finish GH 339 shell stage R1 in one worker, one commit per step, in this order: (1) forward project lifecycle and the programmatic listeners through the shell and retarget generateModularLifecycle; (2) shell forwarders for the editor/language extensions; (3) GenerationContext.invokeLater with FencedTask plus per-generation executors and CoroutineScope for EDT and pooled work; (4) controller identity: the activation_receipt field on the Rust EditorRegistration (serde default) and the Kotlin Register op, landed together (VS Code already added an optional activation_receipt field on main); (5) shell-created Keys and shell-side Fleet RPC delegation, moving AuthenticatedSurfaceIngressState out of the service file. Implementation stays in the same classloader, frontend shell-only.
-- [ ] [#vscodesessionparsers] Point the VS Code extension clear/restart parsers (editors/vscode/src/sessionUi.ts) at the native session_command_outcome derivation behind agent_doc_editor_derive_json, with the TypeScript copy as the frozen fallback answering the shared session_command_outcome.json fixture identically.
 - [ ] [#replicaremoteflush] Fold remote CRDT ops into the replica visible-order index as they arrive (agent-doc-merge crdt_sync local_ops), so the first local flush after a remote update no longer pays a full index rebuild; keep the differential tests against lazily paths and gate on make jetbrains-keystroke-bench.
 - [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
 <!-- /agent:backlog -->

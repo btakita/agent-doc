@@ -50,7 +50,7 @@ use crate::dispatch::{RouteDispatchEffects, dispatch_via_supervisor_ipc};
 use crate::dispatch_only::{
     DispatchOnlyRouteEffects, DispatchOnlySendReopenOptions, dispatch_only_send_reopen,
 };
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_target::bind_running_dispatch_target;
 use crate::pane_resolution::{
     controller_dispatch_actor_state, recover_dispatch_only_authoritative_waiting_input,
     rescue_from_stash,
@@ -899,7 +899,13 @@ pub fn route_via_authoritative_actor(
             split_before,
         )
     };
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    // `#predispatchreadyoverwrite`: the actor owns this pane and is running, so
+    // the bind refreshes the registry without re-projecting the record as
+    // `Ready`. This route's admission reads `actor_state` (supervisor runtime
+    // over the record) above, and the controller's `authorize_dispatch` below
+    // reads the durable record: a `Ready` written here would wave a live `Busy`
+    // turn through the `admin queue drain` gate (`actor_busy_draining`).
+    bind_running_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
 
     // After a real stash rescue the pane is now visible in the agent-doc window,
     // which can make the harness's dispatch-ready prompt observable for the first

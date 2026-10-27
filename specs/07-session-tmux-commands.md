@@ -1010,8 +1010,33 @@ the route re-decides against the newer record instead of re-projecting it as
 `Ready`. When an owner (`start`, `supervisor`) or an operator (`claim`,
 `admin`, `session`) committed the current generation for another live pane,
 the route follows that pane and writes nothing; a gone owner pane fails the
-route closed. Pre-launch provisioning binds and pre-dispatch rebinds of an
-already-running pane keep the plain `route`/`dispatch_bind` projection.
+route closed. Pre-launch provisioning binds keep the plain
+`route`/`dispatch_bind` projection.
+- A pre-dispatch rebind of an already-running pane binds through
+`bind_running_dispatch_target` (`#predispatchreadyoverwrite`): the
+associated-pane rebind, the registered-pane and lazy-claim rebinds, the stash
+rescue, and the busy-pane optimistic dispatch in `pane_resolution.rs`; the
+stranded-trigger resubmits and the pre-send binds in `dispatch_only.rs`; and the
+authoritative-actor dispatch in `authoritative_dispatch.rs`. The route never
+writes `Ready` over a live owner. When the actor record already binds the
+session to the pane in a live state (`Starting`, `Ready`, `Busy`,
+`WaitingInput`), no actor record is written: the owner's state, generation, and
+last transition (including a readiness-proving reason such as `prompt_ready`)
+stand, and only the registry metadata is refreshed. When an owner (any writer
+other than a `route`/`sync` projection) holds the document in a non-`Closed`
+state on another live pane, the route writes nothing and fails closed, because
+binding the new pane would advance the generation and retire that owner's
+supervisor. Otherwise (no record, a `Closed`/`Blocked` record on the pane, a
+projection binding, or an owner whose pane is gone) the route binds `Ready`,
+compare-and-swapped on the generation it decided against; an owner commit in
+between fails the write and the route re-decides against the newer record.
+Dispatch admission needs only the binding: the authoritative route reads the
+supervisor's runtime state, which overrides a live record state, and the
+controller's `authorize_dispatch` checks the record's pane, session, and
+generation. The controller does read the record's lifecycle state at
+`authorize_dispatch` (an `admin queue drain` blocks a non-`Ready` actor with
+`actor_busy_draining`), so a `Ready` written there would have waved a live
+`Busy` turn through that gate.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to

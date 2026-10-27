@@ -229,6 +229,8 @@ use agent_doc_route_io::dispatch_recovery::resolve_fresh_dispatch_target_after_r
 #[cfg(test)]
 use agent_doc_route_io::dispatch_target::register_dispatch_target;
 #[cfg(test)]
+use agent_doc_route_io::dispatch_target::{PreDispatchDispatchBind, bind_running_dispatch_target};
+#[cfg(test)]
 use agent_doc_route_io::document_prep::{
     RouteDocumentPrepEffects, prepare_route_document, scrub_duplicate_prompt_comments_for_route,
 };
@@ -3121,6 +3123,101 @@ mod tests {
     /// owner (a supervisor restart) has since committed a newer generation for a
     /// different live pane, the route follows that pane and writes nothing; it
     /// must not re-project the fresh pane as `Ready` over the owner's record.
+    /// `#predispatchreadyoverwrite`: a pre-dispatch rebind of an already-running
+    /// pane (the busy-pane optimistic dispatch, the stash rescue, the
+    /// authoritative-actor dispatch) keeps the live owner's `Busy` record instead
+    /// of re-projecting it as `Ready`; it never binds over an owner on another
+    /// live pane, and takes over only once that owner's pane is gone.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn bind_running_dispatch_target_never_writes_ready_over_a_live_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-pre-dispatch-busy-owner");
+        let busy_pane = iso
+            .new_session(&format!("busy-{}", std::process::id()), dir.path())
+            .unwrap();
+        let other_pane = iso.split_window(&busy_pane, dir.path(), "-h").unwrap();
+
+        let doc = dir.path().join("pre-dispatch-busy-owner.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-pre-dispatch-busy-owner";
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            session_id,
+            &busy_pane,
+            &file_path,
+            12345,
+            "@busy",
+            dir.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc, session_id, &busy_pane, "@busy", 2,
+        )
+        .unwrap();
+        let key = agent_doc_session_actor_io::canonical_document_id_in(dir.path(), &file_path);
+        agent_doc_session_actor_io::transition_state_in(
+            dir.path(),
+            &key,
+            session_id,
+            &busy_pane,
+            Some(2),
+            agent_doc_controller::actor::ActorState::Busy,
+            "supervisor",
+            "turn_started",
+        )
+        .unwrap();
+        let load = || {
+            agent_doc_session_actor_io::load_record_in(dir.path(), &file_path)
+                .unwrap()
+                .expect("actor record")
+        };
+
+        let outcome = bind_running_dispatch_target(&iso, session_id, &busy_pane, &file_path)
+            .expect("rebinding the live owner's own pane succeeds");
+
+        assert_eq!(
+            outcome,
+            PreDispatchDispatchBind::OwnerStatePreserved {
+                state: agent_doc_controller::actor::ActorState::Busy,
+                generation: 2,
+            }
+        );
+        let record = load();
+        assert_eq!(
+            record.state,
+            agent_doc_controller::actor::ActorState::Busy,
+            "the route must not write Ready over the live owner's Busy record"
+        );
+        assert_eq!(record.last_transition.caller, "supervisor");
+        assert_eq!(record.generation, 2);
+
+        // Binding a different pane while the Busy owner's pane is alive fails
+        // closed and writes nothing.
+        let err = bind_running_dispatch_target(&iso, session_id, &other_pane, &file_path)
+            .expect_err("an owner on another live pane must not be bound over");
+        assert!(err.to_string().contains("will not bind pane"), "{err:#}");
+        let record = load();
+        assert_eq!(record.pane_id, busy_pane);
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Busy);
+
+        // Once the owner's pane is gone, the route takes the binding over.
+        iso.kill_pane(&busy_pane).unwrap();
+        let outcome = bind_running_dispatch_target(&iso, session_id, &other_pane, &file_path)
+            .expect("a gone owner's binding is taken over");
+        assert!(
+            matches!(outcome, PreDispatchDispatchBind::Bound { .. }),
+            "{outcome:?}"
+        );
+        let record = load();
+        assert_eq!(record.pane_id, other_pane);
+        assert_eq!(record.generation, 3);
+        assert_eq!(record.state, agent_doc_controller::actor::ActorState::Ready);
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_fresh_dispatch_target_follows_an_owner_instead_of_rebinding_over_it() {

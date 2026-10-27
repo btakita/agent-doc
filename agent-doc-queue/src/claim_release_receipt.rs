@@ -111,7 +111,10 @@ impl std::fmt::Display for ReceiptRecordRefused {
             Self::WorkerUnbound => write!(f, "reported claim has no bound worker"),
             Self::EmptyCompletionKey => write!(f, "completion attestation key is empty"),
             Self::InvalidCompletionKey => {
-                write!(f, "completion attestation key does not match the claim attempt")
+                write!(
+                    f,
+                    "completion attestation key does not match the claim attempt"
+                )
             }
         }
     }
@@ -327,6 +330,7 @@ mod tests {
             owner_session: None,
             anchor: None,
             followed_from: Vec::new(),
+            followed_generation: 0,
         }
     }
 

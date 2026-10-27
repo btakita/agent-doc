@@ -107,23 +107,28 @@ fn queue_rows(content: &str) -> Vec<(bool, String)> {
             _ => None,
         })
         .map(|(struck, text)| {
-            // A strike that bakes its note inside the strikethrough
-            // (`~~<work> — auto-struck: <reason>~~`, `#qftbklgstrike`) still
-            // struck `<work>`; the note is never part of the work identity.
-            let text = if struck {
-                struck_text_without_annotation(&text)
+            if struck {
+                (true, struck_row_work_text(&text))
             } else {
-                text.as_str()
-            };
-            (
-                struck,
-                strip_in_progress_marker(&strip_priority_markers(text.trim()))
-                    .trim()
-                    .to_string(),
-            )
+                (false, row_work_text(&text))
+            }
         })
         .filter(|(_, text)| !text.is_empty())
         .collect()
+}
+
+fn row_work_text(text: &str) -> String {
+    strip_in_progress_marker(&strip_priority_markers(text.trim()))
+        .trim()
+        .to_string()
+}
+
+/// The work text of a struck (completed) queue row: markers removed, and a
+/// strike that bakes its note inside the strikethrough
+/// (`~~<work> — auto-struck: <reason>~~`, `#qftbklgstrike`) still struck
+/// `<work>`; the note is never part of the work identity.
+pub fn struck_row_work_text(text: &str) -> String {
+    row_work_text(struck_text_without_annotation(text))
 }
 
 /// A struck row's work text without a trailing auto-struck note
@@ -2440,9 +2445,8 @@ mod tests {
             "an exact answer echo cannot consume work that still needs operator action"
         );
 
-        let blocked_tracked = active_queue_doc(
-            "- 🙋 [#subagent-operator-request-deploy-approval] do [#deploy]\n",
-        );
+        let blocked_tracked =
+            active_queue_doc("- 🙋 [#subagent-operator-request-deploy-approval] do [#deploy]\n");
         assert!(
             !queue_consumption_allowed_for_response(
                 Path::new("session.md"),

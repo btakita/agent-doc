@@ -20,10 +20,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_doc_queue::queue_claim::{
-    ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession, ClaimedQueueItems,
-    OwnerSessionObservation, QueueClaim, QueueClaimCancellationReceipt, QueueClaimLedger,
-    QueueClaimMiss, QueueClaimRefreshRefused, claim_identity, owner_session_liveness,
-    resolve_claim_target_in_views,
+    ClaimFollowOutcome, ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession,
+    ClaimQueueView, ClaimedQueueItems, OwnerSessionObservation, QueueClaim,
+    QueueClaimCancellationReceipt, QueueClaimLedger, QueueClaimMiss, QueueClaimRefreshRefused,
+    claim_identity, owner_session_liveness, resolve_claim_target_in_views,
 };
 use agent_doc_queue::queue_continuation::{
     live_queue_head_identities, live_queue_head_rows, live_queue_head_texts,
@@ -224,12 +224,12 @@ fn mutate_ledger<T>(
         // `#claimfollowsedit`: persist claims that followed an operator
         // annotation of their head before the mutation looks them up.
         if !ledger.claims.is_empty()
-            && let Some(heads) = std::fs::read_to_string(file)
+            && let Some(view) = std::fs::read_to_string(file)
                 .ok()
                 .as_deref()
-                .and_then(live_queue_head_rows)
+                .and_then(ClaimQueueView::from_content)
         {
-            log_followed(file, &ledger.follow_edits(now_secs(), &heads));
+            log_followed(file, &ledger.follow_edits_in_view(now_secs(), &view));
         }
         let value = mutate(&mut ledger)?;
         if ledger.claims.is_empty() && ledger.cancellations.is_empty() {
@@ -268,14 +268,27 @@ fn mutate_ledger<T>(
     }
 }
 
-fn log_followed(file: &Path, followed: &[(String, String)]) {
-    for (previous, current) in followed {
+fn log_followed(file: &Path, outcome: &ClaimFollowOutcome) {
+    for (previous, current) in &outcome.followed {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
                 "queue_claim_followed_edit previous_bytes={} current_bytes={} (#claimfollowsedit)",
                 previous.len(),
                 current.len()
+            ),
+        );
+    }
+    // `#claimfollowstruck`: a claim that had followed off a struck row onto
+    // unrelated live work is restored onto its struck row, where the strike
+    // policy judges it (retire a finished attempt, `❔` for a running one).
+    for (held, restored) in &outcome.unfollowed_struck {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_unfollowed_struck held_bytes={} restored_bytes={} (#claimfollowstruck)",
+                held.len(),
+                restored.len()
             ),
         );
     }
@@ -287,9 +300,9 @@ fn log_followed(file: &Path, followed: &[(String, String)]) {
 pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLedger> {
     let mut ledger = load_ledger(file)?;
     if !ledger.claims.is_empty()
-        && let Some(heads) = live_queue_head_rows(content)
+        && let Some(view) = ClaimQueueView::from_content(content)
     {
-        ledger.follow_edits(now_secs(), &heads);
+        ledger.follow_edits_in_view(now_secs(), &view);
     }
     Ok(ledger)
 }
@@ -325,14 +338,6 @@ pub fn load_ledger(file: &Path) -> Result<QueueClaimLedger> {
     load_from_conn(&conn, &document_hash)
 }
 
-/// Live queue-head rows (lifecycle projection retained, `#claimrowmigrate`)
-/// of the editor/CRDT authority's current text, the view preflight computes
-/// `queue_subagent_dispatch` from. `None` when no editor owns the document
-/// (disk is the authority) or no current cut is available.
-fn editor_authority_queue_rows(file: &Path, source: &str) -> Option<Vec<String>> {
-    live_queue_head_rows(&editor_authority_text(file, source)?)
-}
-
 /// Work texts of projection-bearing queue-head rows.
 fn row_head_texts(rows: &[String]) -> Vec<String> {
     rows.iter()
@@ -354,8 +359,9 @@ pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String>
 /// Resolve a claim `--item` against the live editor authority when available,
 /// otherwise against the on-disk document (GH #124 ask 5, GH #296): dispatch
 /// and claim must agree on what a live head is even while an editor save to
-/// disk is deferred. Returns the resolved head and the live head rows of the
-/// view it resolved in (a new claim's anchor, `#claimfollowedit`), with their
+/// disk is deferred. Returns the resolved head and every queue of the view it
+/// resolved in (a new claim's anchor, `#claimfollowedit`; per queue, so a
+/// claim never aligns with a sibling queue, `#claimfollowstruck`), with their
 /// lifecycle projection retained as row evidence (`#claimrowmigrate`).
 ///
 /// An item that names no live head but names a claim that has since followed
@@ -366,18 +372,30 @@ fn resolve_live_claim_target(
     file: &Path,
     item: &str,
     source: &str,
-) -> Result<(String, Vec<String>)> {
+) -> Result<(String, ClaimQueueView)> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
     let disk_rows = live_queue_head_rows(&content).unwrap_or_default();
+    let disk_view = ClaimQueueView::from_content(&content).unwrap_or_default();
     let disk_heads = row_head_texts(&disk_rows);
-    let authority_rows = editor_authority_queue_rows(file, source);
+    // The editor/CRDT authority's current text, the view preflight computes
+    // `queue_subagent_dispatch` from. `None` when no editor owns the document
+    // (disk is the authority) or no current cut is available.
+    let authority_text = editor_authority_text(file, source);
+    let authority_rows = authority_text.as_deref().and_then(live_queue_head_rows);
+    let authority_view = authority_rows.as_ref().map(|_| {
+        authority_text
+            .as_deref()
+            .and_then(ClaimQueueView::from_content)
+            .unwrap_or_default()
+    });
     let authority = authority_rows.as_deref().map(row_head_texts);
     let resolved = resolve_claim_target_in_views(item, &disk_heads, authority.as_deref());
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
-            match followed_claim_target(file, item, &disk_rows, authority_rows.as_deref()) {
+            let authority = authority_rows.as_deref().zip(authority_view.as_ref());
+            match followed_claim_target(file, item, (&disk_rows, &disk_view), authority) {
                 Some(resolved) => {
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -407,11 +425,11 @@ fn resolve_live_claim_target(
             ),
         );
     }
-    let rows = match view {
-        ClaimHeadSource::Disk => disk_rows,
-        ClaimHeadSource::EditorAuthority => authority_rows.unwrap_or_default(),
+    let queues = match view {
+        ClaimHeadSource::Disk => disk_view,
+        ClaimHeadSource::EditorAuthority => authority_view.unwrap_or_default(),
     };
-    Ok((target, rows))
+    Ok((target, queues))
 }
 
 /// The live head a claim that followed an operator edit away from `item`
@@ -422,18 +440,18 @@ fn resolve_live_claim_target(
 fn followed_claim_target(
     file: &Path,
     item: &str,
-    disk_rows: &[String],
-    authority_rows: Option<&[String]>,
+    disk: (&[String], &ClaimQueueView),
+    authority: Option<(&[String], &ClaimQueueView)>,
 ) -> Option<(String, ClaimHeadSource)> {
     let stored = load_ledger(file).ok()?;
     if stored.claims.is_empty() {
         return None;
     }
-    let (rows, view) = authority_rows
-        .map(|rows| (rows, ClaimHeadSource::EditorAuthority))
-        .unwrap_or((disk_rows, ClaimHeadSource::Disk));
+    let ((rows, queues), view) = authority
+        .map(|authority| (authority, ClaimHeadSource::EditorAuthority))
+        .unwrap_or((disk, ClaimHeadSource::Disk));
     let mut ledger = stored;
-    ledger.follow_edits(now_secs(), rows);
+    ledger.follow_edits_in_view(now_secs(), queues);
     let heads = row_head_texts(rows);
     if let Some(text) = ledger.followed_item_text(item)
         && let Ok(target) = agent_doc_queue::queue_claim::resolve_claim_target(text, &heads)
@@ -497,7 +515,7 @@ pub fn claim_with_session(
     // so an exact identity normally names one occurrence. Keep the count in the
     // log as a rolling-upgrade diagnostic: a legacy unannotated claim still
     // anchors every identical copy until preflight projects effect identities.
-    let occurrences = row_head_texts(&heads)
+    let occurrences = row_head_texts(&heads.rows())
         .iter()
         .filter(|head| claim_identity(head) == identity)
         .count();
@@ -516,7 +534,7 @@ pub fn claim_with_session(
             lineage_generation_floor,
         );
         // Anchor the claim to its line(s) in the view it resolved in.
-        log_followed(file, &ledger.follow_edits(now, &heads));
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
         let stored = ledger
             .claims
             .iter_mut()
@@ -592,7 +610,7 @@ pub fn start_attempt(
         // same authoritative rekey in the transaction before addressing the
         // attempt by its current text; otherwise `claims` can show the edited
         // item while `start` still reports the attempt missing.
-        log_followed(file, &ledger.follow_edits(now, &heads));
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
         let mut claim = ledger
             .start(&target, owner, worker_id, now, ttl_secs, Some(generation))
             .map_err(anyhow::Error::from)?;
@@ -689,7 +707,7 @@ fn refresh_attempt_at(
     // the subagent makes the claim live again.
     let owner_session = current_owner_session();
     let outcome = mutate_ledger(file, |ledger| {
-        log_followed(file, &ledger.follow_edits(now, &heads));
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
         Ok(ledger.refresh_attempt_in_session(
             &target,
             owner,
@@ -730,7 +748,7 @@ pub fn report_attempt(file: &Path, item: &str, generation: Option<u64>) -> Resul
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_report")?;
     let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
-        log_followed(file, &ledger.follow_edits(now, &heads));
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
         ledger
             .report(&target, generation)
             .map_err(anyhow::Error::from)
@@ -779,8 +797,8 @@ fn prepare_reported_release_inner(
     let heads = resolved.map(|(_, heads)| heads);
     let now = now_secs();
     mutate_ledger(file, |ledger| {
-        if let Some(heads) = heads.as_deref() {
-            log_followed(file, &ledger.follow_edits(now, heads));
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         let report = |ledger: &mut QueueClaimLedger, candidate: &str| {
             let expected = if enforce_generation {
@@ -899,8 +917,8 @@ pub fn release(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     let heads = resolved.map(|(_, heads)| heads);
     let now = now_secs();
     let released = mutate_ledger(file, |ledger| {
-        if let Some(heads) = heads.as_deref() {
-            log_followed(file, &ledger.follow_edits(now, heads));
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         Ok(ledger.release(&target).or_else(|| ledger.release(item)))
     })?;
@@ -929,8 +947,8 @@ pub fn release_attempt(
     };
     let now = now_secs();
     let released = mutate_ledger(file, |ledger| {
-        if let Some(heads) = heads.as_deref() {
-            log_followed(file, &ledger.follow_edits(now, heads));
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         match ledger.release_fenced(&target, generation)? {
             Some(claim) => Ok(Some(claim)),
@@ -962,8 +980,8 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     let heads = resolved.map(|(_, heads)| heads);
     let now = now_secs();
     mutate_ledger(file, |ledger| {
-        if let Some(heads) = heads.as_deref() {
-            log_followed(file, &ledger.follow_edits(now, heads));
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         let released = ledger.release(&target).or_else(|| ledger.release(item));
         Ok(released.map(|mut claim| {
@@ -988,8 +1006,8 @@ pub fn abandon_attempt(
     let heads = resolved.map(|(_, heads)| heads);
     let now = now_secs();
     mutate_ledger(file, |ledger| {
-        if let Some(heads) = heads.as_deref() {
-            log_followed(file, &ledger.follow_edits(now, heads));
+        if let Some(heads) = heads.as_ref() {
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         let released = match ledger.release_fenced(&target, generation)? {
             Some(claim) => Some(claim),
@@ -1068,6 +1086,7 @@ pub fn record_released_cancellation(
         owner_session: None,
         anchor: None,
         followed_from: Vec::new(),
+        followed_generation: 0,
     };
     let cancelled_at_secs = now_secs();
     let receipt = mutate_ledger(file, |ledger| {
@@ -1327,10 +1346,7 @@ pub struct ClaimReport {
     pub next_action_argv: Option<Vec<String>>,
 }
 
-fn claim_assessment(
-    claim: &QueueClaim,
-    owner_session_state: &str,
-) -> (&'static str, String) {
+fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static str, String) {
     use agent_doc_queue::queue_claim::QueueClaimState;
 
     match claim.state {
@@ -1667,13 +1683,13 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
         return Ok(0);
     }
     let live = live_queue_head_identities(content);
-    let heads = live_queue_head_rows(content);
+    let heads = ClaimQueueView::from_content(content);
     let now = now_secs();
     let pruned = mutate_ledger(file, |ledger| {
         // Follow against the closeout's content (the disk read inside
         // `mutate_ledger` may lag it) before closure is judged.
         if let Some(heads) = &heads {
-            log_followed(file, &ledger.follow_edits(now, heads));
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         Ok(ledger.prune_detailed(now, live.as_ref()))
     })?;
@@ -1736,13 +1752,13 @@ pub fn retire_struck_claims(
         })
         .collect::<std::collections::HashSet<_>>();
     let live = agent_doc_queue::queue_consume::live_work_identities(after);
-    let heads = live_queue_head_rows(after);
+    let heads = ClaimQueueView::from_content(after);
     let now = now_secs();
     let retired = mutate_ledger(file, |ledger| {
         // Follow against the strike successor (the disk read inside
         // `mutate_ledger` may lag it) before the struck rows are judged.
         if let Some(heads) = &heads {
-            log_followed(file, &ledger.follow_edits(now, heads));
+            log_followed(file, &ledger.follow_edits_in_view(now, heads));
         }
         Ok(ledger.retire_struck(now, &struck, &live))
     })?;
@@ -2148,20 +2164,89 @@ mod tests {
         assert!(release(&doc, "fix issue 110 now").unwrap().is_none());
     }
 
+    /// `#claimfollowstruck`: strike-then-next-head through the durable
+    /// ledger. A claim on the only `agent:run` row is struck, the strike
+    /// drains `agent:run` (the loop becomes the selected queue), then a new
+    /// `agent:run` head arrives. No ledger read or mutation carries the claim
+    /// onto the loop row or the new head.
+    #[test]
+    fn a_struck_claim_stays_off_the_loop_row_and_the_next_run_head() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("task.md");
+        let write = |run: &str, loop_rows: &str| {
+            std::fs::write(
+                &doc,
+                format!(
+                    "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+## Run <!-- agent:run go -->\n{run}<!-- /agent:run -->\n\n\
+## Loop <!-- agent:loop interval=\"1h\" -->\n{loop_rows}<!-- /agent:loop -->\n"
+                ),
+            )
+            .unwrap();
+            std::fs::read_to_string(&doc).unwrap()
+        };
+        let work = "port the windowed flush-prepare step";
+        let watch = "- Watch https://x.test/issues for new issues\n";
+        let next = "#gh-fix https://x.test/issues/380";
+        write(&format!("- {work}\n"), watch);
+        claim(&doc, work, "subagent:kotlinflush", 3600).unwrap();
+
+        let drained = write(&format!("- ~~{work}~~\n"), watch);
+        assert!(
+            !ledger_claimed_items_for_content(&doc, &drained)
+                .claims("Watch https://x.test/issues for new issues")
+        );
+        let arrived = write(&format!("- ~~{work}~~\n- {next}\n"), watch);
+        assert!(
+            !ledger_claimed_items_for_content(&doc, &arrived).claims(next),
+            "the next head is dispatchable"
+        );
+        let following = load_ledger_following(&doc, &arrived).unwrap();
+        assert_eq!(
+            following.claims[0].item_text, work,
+            "{:?}",
+            following.claims
+        );
+        // A mutation persists the follow pass; the claim never moved.
+        assert_eq!(prune_closed_claims(&doc, &arrived).unwrap(), 1);
+        let ledger = load_ledger(&doc).unwrap();
+        assert!(ledger.claims.is_empty(), "{:?}", ledger.claims);
+    }
+
     #[test]
     fn followed_claim_target_does_not_fall_back_to_stale_disk_when_authority_is_live() {
         let dir = tempfile::tempdir().unwrap();
         let doc = write_doc(dir.path(), &["rename this queue item"]);
         claim(&doc, "rename this queue item", "subagent:worker", 600).unwrap();
-        let disk_heads = vec!["rename this queue item with context".to_string()];
-        let authority_heads = Vec::new();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let disk_text = content.replace(
+            "rename this queue item",
+            "rename this queue item with context",
+        );
+        let disk_heads = live_queue_head_rows(&disk_text).unwrap();
+        let disk_view = ClaimQueueView::from_content(&disk_text).unwrap();
+        let authority_text = content.replace("- rename this queue item\n", "");
+        let authority_heads = live_queue_head_rows(&authority_text).unwrap_or_default();
+        let authority_view = ClaimQueueView::from_content(&authority_text).unwrap();
+        assert_eq!(
+            followed_claim_target(
+                &doc,
+                "rename this queue item",
+                (&disk_heads, &disk_view),
+                None,
+            )
+            .map(|(target, _)| target),
+            Some("rename this queue item with context".to_string()),
+            "the disk view alone does resolve the followed edit"
+        );
 
         assert_eq!(
             followed_claim_target(
                 &doc,
                 "rename this queue item",
-                &disk_heads,
-                Some(&authority_heads),
+                (&disk_heads, &disk_view),
+                Some((&authority_heads, &authority_view)),
             ),
             None
         );

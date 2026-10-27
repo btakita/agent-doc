@@ -1282,10 +1282,14 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Claim edit-following stays anchored to the scheduler-selected queue (the
-    // queue claims are dispatched from); marker projection below then reaches
-    // every queue that displays the identity.
-    if let Some(queue_component) = selected.or_else(only_queue) {
+    // Claim edit-following aligns each claim with its OWN queue
+    // (`#claimfollowstruck`): aligning with whichever queue the scheduler
+    // selects carried a claim off a struck `agent:run` row onto the
+    // `agent:loop` row once the strike drained `agent:run`. Marker projection
+    // below then reaches every queue that displays the identity.
+    if let Some(view) = agent_doc_queue::queue_claim::ClaimQueueView::from_content(current) {
+        ledger.follow_edits_in_view(now_secs, &view);
+    } else if let Some(queue_component) = selected.or_else(only_queue) {
         let entries = agent_doc_queue::document_queue::parse(queue_component.content(current))?;
         let live_heads = entries
             .iter()

@@ -20154,8 +20154,9 @@ fn orphan_drain_active_claims(
 ) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
     let mut ledger = ledger.clone();
     let live = content.and_then(|content| {
-        let heads = agent_doc_queue::queue_continuation::live_queue_head_texts(content)?;
-        ledger.follow_edits(now_secs, &heads);
+        // `#claimfollowstruck`: every claim aligns with its own queue.
+        let view = agent_doc_queue::queue_claim::ClaimQueueView::from_content(content)?;
+        ledger.follow_edits_in_view(now_secs, &view);
         agent_doc_queue::queue_continuation::live_queue_head_identities(content)
     });
     ledger.claimed_items(now_secs, live.as_ref())

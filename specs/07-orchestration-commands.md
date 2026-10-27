@@ -681,8 +681,9 @@ tie-break that text alignment cannot provide: when a restore and the
 annotation land in one queue cut directly beside the claimed row, both
 annotated rows contain the claimed text, and only the binary-written
 `[#owner#generation]` on the original row identifies it. That is why
-`QueueClaimLedger::follow_edits` receives queue rows with their lifecycle
-projection retained (`queue_continuation::live_queue_head_rows`); it strips the
+`QueueClaimLedger::follow_edits_in_view` receives queue rows with their
+lifecycle projection retained (`ClaimQueueView::from_content`, per queue,
+`#claimfollowstruck`); it strips the
 projection for work text and identity and reads the owner annotation solely as
 row evidence. An annotation naming a different owner or generation is not
 evidence, and a row another live claim holds is never taken. Only an
@@ -697,6 +698,51 @@ became `📥 … ⟦effect:2⟧`. Regressions:
 `an_effect_annotation_follows_the_row_carrying_the_claims_own_projection`,
 `a_legacy_multi_slot_claim_migrates_onto_its_projected_row_only`, and
 `queue_cmd::tests::reported_claim_keeps_its_row_through_a_duplicate_effect_annotation`.
+
+**A claim ends with its row's strike, and never leaves its queue
+(`#claimfollowstruck`).** Row migration (`#claimfollowedit`,
+`#claimrowmigrate`) follows only an edit of the same row of the same queue;
+it never hands a claim to a different successor head. Two rules enforce this.
+*Queue scope:* every claim anchor records the resolved id of the queue that
+holds its row (`ClaimAnchor.queue_id`), and every ledger reader aligns claims
+per queue (`QueueClaimLedger::follow_edits_in_view` over
+`ClaimQueueView::from_content`, which lists every queue component's live rows
+and struck rows) instead of against the document's *selected* queue. A claim
+belongs to the queue where its identity is a live row, else to the queue its
+anchor names, else (a legacy anchor without a queue id) to the one queue its
+anchored heads or its struck row identify; a claim no queue identifies is out
+of view and keeps its anchor, exactly like a lagging read. *Strike is
+completion, not an edit:* a claim whose identity is a struck row of any queue
+and no live row follows nothing, even when the structural same-slot fallback
+pairs its one-row anchor with a new head; its row closed, and the existing
+strike policy (`#strikeisterminal`, `#strikeretires`) judges the attempt — a
+`Reported`/`Lost` attempt is retired, a `Claimed`/`Running` one reopens its
+struck row as `❔`. Durable state that already followed off a struck row is
+surfaced, not kept: a claim on a live row whose `followed_from` names a text
+that is now a struck row (and no live row), recorded by this same attempt
+(`QueueClaim.followed_generation` equals its `generation`), is restored onto
+that struck predecessor (`item_text`, identity, `followed_from` truncated
+before it, anchor cleared), logged as `queue_claim_unfollowed_struck`. A
+re-claim (`Reassigned`) inherits the line history but is a new attempt made on
+the row as it is now, and a follow stored before `followed_generation`
+existed is unattributable; neither is restored. So the unrelated
+live row loses its marker and becomes dispatchable while the struck row shows
+the contradiction. A row deleted (not struck) while another row is added in
+the same slot is still an in-place replacement and steers the owner
+(`#queue-mutation-steering`). Observed 2026-10-27 on
+`tasks/agent-doc/agent-doc-bugs.md`: `subagent:kotlinflush` gen 1, dispatched
+for `do [#kotlinflushprep]`, finished and its row was struck; the strike
+drained `agent:run`, the selected queue became `agent:loop`, and the claim's
+one-row anchor paired structurally with the loop's one watch row (`🚧` on the
+loop row), then moved onto the newly added `#gh-fix …/issues/380` row in
+`agent:run`, which showed `🚧` with no worker and was never dispatched
+(`followed_from` listed both). Regressions:
+`queue_claim::tests::a_struck_row_claim_never_follows_onto_the_next_head_in_any_queue`,
+`strike_then_next_head_in_the_same_queue_does_not_inherit_the_claim`,
+`an_in_place_edit_still_follows_within_its_own_queue`,
+`a_claim_that_already_followed_off_a_struck_row_is_restored_onto_it`,
+`a_reclaimed_or_legacy_attempt_is_not_restored_onto_a_struck_predecessor`, and
+`agent-doc-queue-io` `queue_claim::tests::a_struck_claim_stays_off_the_loop_row_and_the_next_run_head`.
 
 **Every queue that displays a claimed identity shows its attempt
 (`#queuemirrormarkers`).** A claim, report receipt, and completion cell are

@@ -491,6 +491,7 @@ mod tests {
             owner_session: None,
             anchor: None,
             followed_from: Vec::new(),
+            followed_generation: 0,
         }
     }
 

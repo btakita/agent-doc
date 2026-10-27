@@ -25,7 +25,6 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -1281,14 +1280,37 @@ Both remaining workers have reported, so all four queued items are now done.
   - Running `uv` rewrote lazily-py's `uv.lock` locally. The lock says 0.44.0 while pyproject says 0.45.0. It was left out of the commit.
 
 **Recovery note:** the first `report-complete` for #lzbindingevidenceci was refused while `make install` was running: `missing_replica recovery exhausted and disk read authority is refused`. It succeeded once the install finished, and `repair-projection` said the projection was already in sync.
+
+### Re: queue subagents — #lzspecreadmeci done — opus-5-5 · 2026-10-27T00:03-04:00
+
+**#lzspecreadmeci: done.** lazily-spec `5e2a0cf` is pushed to main, and spec **CI passed** on that commit.
+- **Root cause:** `make coverage-check` ran before any sibling repo was cloned, and `sync-coverage.mjs --check` silently skipped READMEs it couldn't find. So spec CI only ever compared lazily-spec's own files. All 11 binding repos are public, so no token is needed.
+- **Fix:**
+  - A new `--require-all` flag makes a missing README fail instead of being skipped.
+  - `--check` now prints `✓ N of 13`, so a pass that compared nothing is visible.
+  - A new `make coverage-check-all` target runs both flags. The CI coverage job runs it after its existing sparse sibling clones, and now also clones `lazily-formal`.
+  - A new test file, `tests/test_sync_coverage.mjs`, has 6 tests and runs inside `coverage-check`.
+- **Proofs (exit codes):**
+  - Current mains: 0.
+  - A stale `lazily-gd` README: 1.
+  - A missing `lazily-formal`: 0 with the old behaviour, 1 with `--require-all`, 2 through make.
+  - After restoring: 0.
+  - Each of six deliberate breaks of the script, Makefile, or `ci.yml` made the tests fail.
+  - `make check` exited 0. Its first run failed in `wire-codegen-check` only because the worker's local clones lacked folders that CI adds. The worker added them and it passed.
+  - actionlint (via `uvx`) exited 0.
+- **Possible follow-up (not queued):** `core-ci-reach.json` only checks the `core` job, so the new coverage step is pinned only by a test assertion. Extending the checker to cover the `coverage` job would be the stronger fix. I didn't add it to the backlog, because backlog items here go straight into the go queue. Say so if you want it queued.
+
+**Still running:** #tmuxguardclaudeuser. The worker is investigating whether the guard should also go into your user-level `~/.claude/settings.json`. It will come back with options for you to choose from, and it won't change your home config.
+
+**agent-doc bug seen this cycle:** the `--done lzcoverageresync` strike didn't end that worker's reported claim. When `#lzspecreadmeci` took that queue position, the claim attached itself to the new row (`followed_from: do [#lzcoverageresync]`). The row then showed `☑️` (worker reported), and the binary told me to forward the new item to the finished worker. I released the stale claim with `queue release --requeue --generation 1` and gave the item a new worker (generation 2).
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- do [#tmuxguardclaudeuser]
-- ☑️ [#subagent:lzcov#1] do [#lzspecreadmeci]
+- 🚧 [#subagent:tmuxuser#1] do [#tmuxguardclaudeuser]
+- ~~do [#lzspecreadmeci]~~
 - ~~do [#tmuxkittyterminal]~~
 - ~~do [#lzcoverageresync]~~
 - ~~do [#lzbindingevidenceci]~~
@@ -1306,7 +1328,6 @@ Both remaining workers have reported, so all four queued items are now done.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#tmuxguardclaudeuser] Decide whether agent-doc should write the coined-id-pre-tool-use tmux guard into user-level ~/.claude/settings.json: today a Claude project that never ran 'agent-doc skill install --harness claude' has no guard, while Codex is covered by its user-level hooks.json (follow-up of #tmuxguardclaudeinstall; also check OpenCode/Grok/Cursor for an equivalent PreToolUse hook).
-- [ ] [#lzspecreadmeci] lazily-spec CI should clone the 11 sibling binding READMEs and run sync-coverage.mjs --check, so binding README coverage drift fails spec CI instead of surfacing only in a local make check (root cause of #lzcoverageresync).
 <!-- /agent:backlog -->
 
 ## Review

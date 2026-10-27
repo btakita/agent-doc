@@ -116,6 +116,36 @@ private `TMUX_TMPDIR`, then shows that `env -u TMUX tmux -L <private>`, and
 `-L <private>` with `$TMUX` set, leave a second server alive. No client in it
 inherits `$TMUX`; a stand-in socket is asserted not to be the operator's.
 
+A test server and every client of it agree on one socket file
+(`#isotmuxtmpdir`). `tmux -L <name>` resolves against the caller's
+`TMUX_TMPDIR`, so a client and a server with different environments reach
+different files. `isolated_test_tmux_with_default_shell` starts its server
+from a cleared environment, and it used to drop `TMUX_TMPDIR`: with
+`TMUX_TMPDIR` set, the server bound `/tmp/tmux-<uid>/<name>` while every `-L`
+client looked in `$TMUX_TMPDIR/tmux-<uid>/<name>`. Its first client command
+failed with `error connecting to ... (No such file or directory)`, and the
+teardown `-L kill-server` missed the server, so it leaked. The handle now
+resolves the absolute socket path once, from the test process's environment,
+and records it (`socket_path()`). A server started from any other environment
+is started with `-S <socket_path>`, which tmux prefers over `-L`, through
+`exact_socket_cmd()`, and keeps the test process's `TMUX_TMPDIR` so tmux
+clients started in its panes resolve the same socket. Dropping the handle,
+including while unwinding from a panic, kills the server by that exact `-S`
+path after the `-L` `kill-server`, then removes the socket file. The socket
+name is fitted to the Unix socket path limit (`sun_path`, 107 bytes on Linux)
+of the resolved directory: the label shortens, then drops, and a directory too
+long even for the unique suffix panics with a message that names it and
+`TMUX_TMPDIR`, rather than tmux failing with `(File name too long)`.
+`default_shell_server_binds_the_socket_its_clients_resolve` (`make tmux-ci`)
+reproduces the mismatch as its control with a server-only `TMUX_TMPDIR`. It then
+asserts that a `-L` client reaches the fixed server at `socket_path()`, that the
+server keeps the test process's `TMUX_TMPDIR`, and that drop and panic-unwind
+both kill the exact server pid and remove its socket.
+`socket_names_fit_the_unix_socket_path_limit_for_their_directory` pins the
+fitting. `make tmux-ci` runs the `isolated_test_server` and `pane_launch_live`
+sweeps a second time under a private `TMUX_TMPDIR`, and fails when a socket
+is left behind in it.
+
 Tests that mutate or inspect process-global state (`std::env` or the process
 current directory) must hold the reentrant shared test env lock from
 `test_support::env_lock()` or a helper backed by that same lock, and mutations

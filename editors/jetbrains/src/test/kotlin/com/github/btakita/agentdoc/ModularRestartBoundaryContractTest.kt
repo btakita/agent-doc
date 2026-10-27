@@ -35,7 +35,8 @@ class ModularRestartBoundaryContractTest {
         assertTrue(descriptor.contains("required-if-available=\"intellij.platform.backend\""))
 
         assertTrue(jetBrainsSpec.contains("Exact-263 decision (GH #339)"))
-        assertTrue(jetBrainsSpec.contains("full modular graph"))
+        assertTrue(jetBrainsSpec.contains("every platform registration (actions, extensions, listeners,"))
+        assertTrue(jetBrainsSpec.contains("generation's classloader becomes unreachable and is collected"))
         assertTrue(jetBrainsSpec.contains("backend/frontend activation receipts"))
         assertTrue(sharedSpec.contains("Exact-263 whole-package restart-free upgrade is explicitly unsupported"))
         assertTrue(sharedSpec.contains("generation-fenced backend/frontend activation"))

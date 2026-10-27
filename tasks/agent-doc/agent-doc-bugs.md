@@ -23,10 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 7 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.556 from release commit `5cbfdbbc4c`; tag `v0.35.556` is the stable latest release (GitHub Latest, PyPI 0.35.556, stable target channels). JetBrains classic/262/263 0.2.839/0.2.841/0.2.840, VS Code 0.2.83. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). Post-release `origin/main` is `16484ef75b` (unreleased, installed locally; CI green at `eebfdfef07`; JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 need an IDE restart, VS Code 0.2.89, Zed 0.1.2): the in-IDE restart-required prompt, no-argument `/agent-doc` via `agent-doc document`, `agent-doc queue repair-stale-completion`, id-less `agent:run` / `agent:loop` named by kind, the GH #376 measured-route ordering fix, the GH #339 shell design with stage R1 complete and the adopted Exact-263 reopen rule, route-outcome / exchange-prefix-repair / session-command-outcome moved into the hot-reloaded native library (JetBrains and VS Code), an edit-proportional native replica flush that also folds remote ops incrementally plus a windowed Kotlin flush-prepare step, the JetBrains editor-tree focus listener deferred until the split tree exists, todo `id=` always winning, the editor frontend/backend parity matrix, VS Code stale-VSIX prompt + measured layout + workspace extensionKind + activation receipt + code-server/Remote-SSH install, the VS Code koffi owned-string free crash fix and koffi shipped in the VSIX for 7 platforms, Zed registration identity + in-place binary handoff + document-only routing, a PreToolUse guard against agents killing the live tmux server, the GH #380 supervisor harness-binary install-dir fallback, GH #381 project-preset queue heads draining as presets, and queue claims that end on a strike and never follow across queues (`#claimfollowstruck`), the PreToolUse tmux guard in every harness user layer, the same install-dir fallback for headless harness launches (`#headlessharnesspath`), claim closure judged across every queue (`#claimclosureallqueues`), no actor write after a provisioning claim launches its start (`#claimpanecasrace`), a hermetic koffi round-trip test (`#vscodenativeceiling`), hermetic codex command-builder tests for CI runners without codex, fenced post-launch route rebinds that never overwrite the owner's actor record (`#dispatchrebindaudit`), a status-sync `agent-doc commit` that lands beside pending subagent completion cells (`#statussynccommitrefusal`), pre-dispatch rebinds that never write Ready over a running owner (`#predispatchreadyoverwrite`), sync binding writes fenced on generation plus actor record revision (`#syncbindingfence`), revision-fenced controller stale closes and prune (`#controllerclosefence`) and route lifecycle writes (`#bindingcallersaudit`), a supervisor stale-Busy self-heal that cannot wedge an admin drain (`#drainbusymask`), hermetic resync prune tests (`#prunetestisolation`), a rootless-document recovered-owner rebind that writes only the document's own store, fenced (`#syncnorootfallback`), claim binding in the document's store (`#claimwrongstore`), isolated tmux test servers sharing one socket with their clients (`#isotmuxtmpdir`), one standalone todo when a closeout adds it beside --done of the item it cites (`#todoaddonsamecycledone`), a queued /clear that can no longer be typed into a just-started turn (`#clearqueuedciflake`, the `95ae7fe959` CI red), and start resolving its store from the document, never the process cwd (`#startcwdfallback`).
+Released and published agent-doc v0.35.557 from release commit `fec25bdee1`; tag `v0.35.557` is the stable latest release (GitHub Latest with 24 assets, PyPI 0.35.557 public, `make release` public-publication complete) and is installed locally (install-full). JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 (modular IDEs need a restart to load them), VS Code 0.2.89, Zed 0.1.2. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). v0.35.557 carries the GH #380 harness install-dir fallback (supervisor and headless), GH #381 project-preset queue heads, queue claims that end on a strike, never cross queues and cancel on a same-slot replacement (`#krwr`), actor writes fenced on generation plus record revision, the queued-/clear running/pending snapshot fix, the orphan drain yielding to a supervisor mid re-exec, stores and config resolved from the document instead of the process cwd, `agent-doc commit` refusing outside git, `agent-doc gc --retired-stores`, the debug log honoring the root ceiling, GH #339 JetBrains shell stage R1, VS Code Remote Dev / koffi parity, Zed registration identity, and an edit-proportional native replica flush.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -89,22 +90,142 @@ Short answers: **tsift will not index your home directory.** Making `~` an agent
 - `#livebuffergc`: retired `live-buffer/` stores are never cleaned up.
 
 The four in-flight fixes (`#krwr`, `#autoclearorphandrain`, `#loadprojectfordoccwd`, `#queuerowdup`) are still running. Then I'll do the release you queued.
-<!-- agent:boundary:d7b4ac5d -->
+
+### Re: Subagent completed: `subagent:krwr` returned work for queue item “[#krwr]: deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit” — agent-doc
+<!-- agent-doc-subagent-response sha256=4f7c4e132ea8922dc0c54b90f8e2fe7c1a5ca82ad2581c52a3a8c8f94be2f59f -->
+> **Subagent response:**
+>
+> Branch fix/krwr-replace-cancels-claim, commit b147e288f8 on eebfdfef07 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11897 passed (183 skipped).
+> Root cause: pair_replaced_lines (agent-doc-queue/src/queue_head_alignment.rs) paired leftover rows of an equal-count replace hunk by position, so steering reported change=edited dispatch=forward_to_owner and the claim ledger moved the claim onto the unrelated new row.
+> Edit-vs-replacement rule (in pair_queue_heads, shared by steering and the ledger): a new row is an edit of an old row only when (1) same work identity (same tracked id, any prose rewrite, anywhere in the queue), or (2) in one replace hunk, one text contains the other or their char similarity ratio >= 0.5 (the existing in-place-edit threshold, now EDIT_SIMILARITY_THRESHOLD); two different tracked ids never pair; a row gaining or losing its id pairs only by containment (prose-vs-id ratio is noise: 'release + publish' scored >0.5 against 'do [#ridernavp6republish]'). Positional pairing removed.
+> Steering: no routing code changed; a replaced claimed row now arrives as a deletion, so append_claimed_queue_removals emits cancel_claimed with exact owner/worker/generation and records the attempt cancelled; the ledger leaves the claim on the deleted row where it closes; the new row is change=added with no owner. forward_to_owner only for rule-matching edits.
+> Files: agent-doc-queue/src/{queue_head_alignment.rs,queue_claim.rs}, agent-doc-document-realtime/src/midturn_steering.rs, agent-doc-session-check-io/src/midturn_steering.rs, specs/07-orchestration-commands.md (#krwr; updated #queue-mutation-steering, #claimfollowstruck), specs/07-closeout-commands.md, SPEC.md, AGENTS.md, runbooks/respond.md + 5 installed copies.
+> Tests: new a_same_slot_replacement_is_a_delete_plus_an_add, same_row_edits_still_pair, a_same_slot_replacement_cancels_the_owner_instead_of_forwarding (2 replacements + 2 edits), replacing_a_claimed_id_row_in_its_slot_cancels_but_a_same_id_rewrite_forwards; rewritten a_claim_follows_its_row_edit_but_not_a_replacement_or_distant_add and the tail of claimed_head_edit_wakes_the_idle_coordinator_and_forwards_to_owner. Mutations: positional fallback restored -> 5 tests red; containment dropped -> same_row_edits_still_pair red.
+> Behavior change: an in-place tracked-id change (do [#a] -> do [#b], including an id typo fix) now cancels instead of forwarding.
+<!-- agent-doc-subagent-completion key=4ca583d9060ecfb4588087e735cc3853ad7a4689edf4183c5cc54b3304eb09f0 -->
+
+### Re: Subagent completed: `subagent:loadprojectfordoccwd` returned work for queue item “do [#loadprojectfordoccwd]” — agent-doc
+<!-- agent-doc-subagent-response sha256=07bd8b40a8b15fd2f41780ab442ef827337d975e961cb0c30fef4f7f5e4c2562 -->
+> **Subagent response:**
+>
+> Branch fix/loadprojectfordoccwd, commit ce7838a637 (pushed); make check (via digest-runner, env -u TMUX -u TMUX_PANE) exit 0, 11901 passed (185 skipped).
+> Root cause: agent-doc-project-config-io/src/lib.rs:105-110 (pre-fix) load_project_for_doc fell back to load_project() (the cwd project's config) for a document with no .agent-doc ancestor, while start/claim/route/sync bind it in the canonical parent's store.
+> Fix: project_store_for_doc calls the existing project_root_or_file_parent (single resolver; new dep on agent-doc-project-root-io, no cycle) and load_project_for_doc reads it via load_project_for_root; a not-yet-canonicalizable path keeps the old upward walk; a rootless store with no config reads defaults and reading never creates .agent-doc.
+> Callers (~30 sites in 19 files): document callers fixed with no edit (commit-io, lint-io, preflight-io, idle_watch.rs:3671, supervisor-io, frontmatter-io session.rs:322, session-check-io guard_modes/steering_gate_log/midturn_steering, route-io authoritative_dispatch, session-accretion-io, src/ plan, orchestrate, terminal:253, session_actor_cmd, main.rs:5517); steering_cmd.rs:153 already passed a root; project_root_for_doc callers left (no project = defaults); src/describe_image.rs edited to keep its image-project-or-cwd vision config explicitly. Claim's cross-session check (cwd project_tmux_session()) and tmux_session_policy_for_scope now read claim's store_root via project_tmux_session_for_root / tmux_session_policy_for_root.
+> Tests: unit load_project_for_doc_reads_the_document_store_never_the_cwd_project; 3 CLI tests on isolated -L tmux (claim from another project checks / enforces the document's tmux pin; rootless claim ignores the cwd pin). Mutations: restoring the load_project() fallback reds the unit test; claim reading the cwd pin reds all 3 CLI tests (multi-session-rules half untested). project-config-io 11 passed; test_cli claim_ 6 passed. Specs: specs/06-config.md, specs/07-session-tmux-commands.md.
+> Follow-ups: (1) agent-doc-sync-io/src/resync.rs:267 resolve_registry_root falls back to current_dir() for a rootless target; recover_target_document_pane_in (resync.rs:380) and the registry repair (:623) read the cwd's project_tmux_session() with a document in hand. (2) src/terminal.rs reads the cwd registry (199) and cwd tmux_session pin (resolve_session_name, 306) for a document. (3) claim find_alive_project_window (--window fallback) reads the cwd registry. (4) tmux_session_policy_for_scope / sync_scope_root (agent-doc-sync/src/lib.rs:623) fall back to cwd for a rootless focused document; route session_resolution.rs:41/223 and sync resolve_preferred_session read the cwd pin without a document (likely process/layout level; decide).
+<!-- agent-doc-subagent-completion key=59944363ba545f84f9cad856a96cec289dec2625d1ce8ff2c5327586ad388543 -->
+
+### Re: Subagent completed: `subagent:queuerowdup` returned work for queue item “do [#queuerowdup]” — agent-doc
+<!-- agent-doc-subagent-response sha256=e68334ee664390375746c6e3438723c99aab70cff5c7875f5a3a194c92072394 -->
+> **Subagent response:**
+>
+> Branch fix/queuerowdup, commit dd3138e3c2 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11900 passed (185 skipped). No production code changed: the premise was wrong.
+> Finding: no binary writer added the duplicate rows; the operator typed them. ops.log: 12:47:41Z operator deleted the 504 bytes of struck rows; 12:47:57-12:48:01Z editor_ops_recorded with editor_op_capture_proof operator_ops=2 non_operator_ops=0 inserted 52 bytes at the queue end = the two plain rows (IDE list continuation, a 41-byte paste of "[#clearqueuedciflake]\n[#startcwdfallback]", a typed "- ", and "do " typed at two cursors). The 12:47:57Z queue_maintenance write (+14 bytes) started from the pre-typing text. The 12:48:49Z compact (controller_compact_document commit=true) committed the rows into the snapshot, after which preflight's dedup (converge_queue_via_lifecycle, agent-doc-queue/src/document_queue.rs) treated them as intended repeats; the 12:53:33Z queue_maintenance (+83 bytes) gave both copies the identity's marker (one marker target per row by design, agent-doc-preflight-io/src/lib.rs ~7193, queue_cmd.rs ~260). The selected head was queue:3:clearqueuedciflake:0, the marked Reported row (selectable for integration per #reportedwritebackdebt), not the plain twin.
+> Writers checked: backlog mirror (enqueue_actionable_ids_reporting) is already marker-aware (queue_prompt_reference_ids reads every #id); the claim projection only rewrites the prefix; --done strikes both copies. Selection, drainable count and dispatch exclude by work identity, so a twin of Claimed/Running work is never drained inline or redispatched.
+> Tests: backlog_sync mirror_never_re_adds_an_id_queued_behind_a_lifecycle_marker (7 marker shapes, prepend + append); CLI a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt; CLI a_committed_plain_twin_of_a_running_claim_is_never_selected_or_dispatched (twin asserted present, never selected/dispatched, drainable 0). Each failed under a targeted mutation. Spec: specs/07-orchestration-commands.md #queuerowdup.
+> Follow-ups (operator decisions): (1) the compact exchange commit absorbed an unanswered operator queue edit mid-turn (an earlier commit_document at 12:47:52Z had refused the same drift as an unanswered edit). (2) should a committed plain do [#id] twin of a claimed row be collapsed or flagged? Removing it would delete operator-typed text.
+<!-- agent-doc-subagent-completion key=c32db00ee32284e36bac3265deeccbb3e8480f6f1c388bb775fe2cac70963c24 -->
+
+### Re: Subagent completed: `subagent:tracingrootceiling` returned work for queue item “do [#tracingrootceiling]” — agent-doc
+<!-- agent-doc-subagent-response sha256=4ad7513b884215f9cf845e319f80a2c86e862bf8f9a35369b1c72e74474eb4e8 -->
+> **Subagent response:**
+>
+> Branch fix/tracingrootceiling, commit 21b4c27444 on 16484ef75b (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11900 passed (185 skipped).
+> Root cause: src/main.rs:5260-5272 init_tracing walked up from cwd with no ceiling to the first ancestor that already had .agent-doc/logs/, ignoring AGENT_DOC_ROOT_CEILING_DIRECTORIES, and skipped a nearer project root without logs/ so a nested project's log landed in an outer one.
+> Fix: tracing_log_dir(cwd) uses agent_doc_fs::find_project_root (ceiling-aware); the nearest project root owns <root>/.agent-doc/logs/ (created if missing, as ops.log does). No project root -> file logging off with a stderr note (the existing no-root behavior; no repo user-level log dir exists). Limit: with the ceiling unset, a cwd under $HOME outside any other project still logs to ~/.agent-doc/logs/ (SPEC.md:635 treats $HOME/.agent-doc as a fallback root; that is the #homerootguard decision).
+> Other walkers: src/plugin.rs log_jetbrains_upgrade_decision_at and agent-doc-ops-log-io already go through project_root_containing (ceiling-aware); other ancestors()/pop() loops are test probes or non-.agent-doc walks. Out of scope: agent-doc-template-io load_project_from_doc (src/lib.rs:528-548) walks for .agent-doc/config.toml with no ceiling.
+> Files: src/main.rs, tests/tracing_root_ceiling.rs (new), SPEC.md (#tracingrootceiling), specs/06-config.md (AGENT_DOC_LOG), docs/getting-started/configuration.md.
+> Tests: tests/tracing_root_ceiling.rs (3): ceiling -> ancestor .agent-doc gets no files (no debug.log, no ops.log); control without ceiling shows the ancestor would get it; nearest root owns the log with no logs/ yet. 3 passed; restoring the unbounded walk reds the ceiling and nearest-root tests (control passes).
+> Note: rustfmt on src/main.rs reformats every mod file it follows; reverted all but the hunk.
+> Follow-up: route agent-doc-template-io load_project_from_doc (src/lib.rs:528-548) through ceiling-aware discovery.
+<!-- agent-doc-subagent-completion key=98d497ecb3a471c5629b665cebf2d43b2006197c8e0613f6080d228146decbd9 -->
+
+### Re: Subagent completed: `subagent:livebuffergc` returned work for queue item “do [#livebuffergc]” — agent-doc
+<!-- agent-doc-subagent-response sha256=2bdc5fd3e539457147fd0dc9b861c97f569298294afdc314a389c16038ca1ac9 -->
+> **Subagent response:**
+>
+> Branch fix/livebuffergc, commit f585039309 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11906 passed (185 skipped). Nothing run against real stores (read-only inspection only).
+> Retirement evidence: d52697f953 (2026-07-16, 0.34.160, "make Lazily the sole live editor authority"; changelog: live-buffer snapshots no longer written or read, legacy files delete-only) and ef00649dfa (2026-07-17, "make Lazily the sole live document authority"); on main no reader/writer, and test_editor_hot_path_has_no_filesystem_sidecar_or_reload_broadcast_transport already forbids .agent-doc/live-buffer in hot-path sources. ~/.agent-doc/live-buffer: 2,928 flat files, no subdirs, no symlinks.
+> Interface: agent-doc gc --retired-stores --dry-run [--root DIR] lists each retired store (path, files, bytes, last write), deletes nothing; agent-doc gc --retired-stores [--root DIR] removes only <root>/.agent-doc/live-buffer. Home store: agent-doc gc --root ~ --retired-stores --dry-run, then without --dry-run (the flag skips the rest of gc, so no $HOME scan). Plain agent-doc gc (with or without --dry-run) only reports the store and prints those commands; preflight auto-gc never reports or removes it; --retired-stores conflicts with --database-only. Rationale: gc deletes by default and preflight auto-gc + the JetBrains "GC Stale Sessions" menu run plain gc, so removal needs an explicit operator flag.
+> Safety: symlinks never followed (a link inside is unlinked, target untouched); a symlinked or non-directory store root is refused; partial failures continue, are printed, exit non-zero.
+> Files: agent-doc-gc-io/src/retired_store.rs (new, 7 unit tests), agent-doc-gc-io/src/lib.rs, src/main.rs, tests/test_cli.rs (e2e + source guard), specs/07-core-commands.md.
+> Tests: gc-io 23 passed; test_cli 4 passed (test_gc_retired_stores_lists_then_removes_only_the_live_buffer_store, test_retired_store_removal_is_reachable_only_from_explicit_gc_flag, existing hot-path guard, --database-only). 6 mutants all killed (symlinked-root test tightened to require the symlink reason).
+> Follow-ups: other apparently retired dirs under real .agent-doc stores (patches/, plugin-owner/, ack-content/, op-capture/; also forbidden by the hot-path guard) could join the retired-store list after the same retirement check.
+<!-- agent-doc-subagent-completion key=8899eab8e5d2e2668319b6a533c4049cf8a9e83e7ed661b2f2d80e263152bf30 -->
+
+### Re: Subagent completed: `subagent:commitoutsidegit` returned work for queue item “do [#commitoutsidegit]” — agent-doc
+<!-- agent-doc-subagent-response sha256=7afd381f7cb9914bce2651f054c599d6d2577a2ca74ff893204f47cd1bd2b82f -->
+> **Subagent response:**
+>
+> Branch fix/commitoutsidegit, commit 7c517bdfdc on 16484ef75b (pushed); second env -u TMUX -u TMUX_PANE make check exit 0, 11902 passed (185 skipped).
+> Root cause: agent-doc-git-io/src/dirs.rs:151 resolve_absolute_to_git_root falls back to the process cwd as the "git root" outside git, so every git step no-ops, commit_with_ports_outcome returns did_commit=false and src/main.rs (~5918, commit_outcome_message 183-190) prints "nothing to commit: ... already matches HEAD" with exit 0, after already snapshotting and moving the boundary marker.
+> Fix: agent_doc_git_io::status::require_git_repository_for_commit (resolves a relative FILE against cwd; actionable error naming git init / moving the document; a missing file falls through to the command's own not-found error); agent-doc commit calls it before staging or touching the file; compact --commit (agent-doc-compact-io, controller entry point so editor compacts too) refuses after the integrity/lint gates and before any capture/tag/archive/commit (it previously compacted then blamed a stale-supervisor CRDT replay). write --commit / finalize already refuse; non-session write --commit still skips silently per its help; NotInGitRepo session-check guards never claim a commit. Spec: specs/07-closeout-commands.md #commitoutsidegit.
+> Tests: tests/commit_outside_git.rs (5): commit outside git with/without a .agent-doc ancestor, relative path, compact --commit (document bytes unchanged), relative path into a repo from a non-git cwd still commits; all assert exit code, message, file unmodified; fixtures set AGENT_DOC_ROOT_CEILING_DIRECTORIES. Mutations M1 (always pass) -> 4 refusal tests red; M2 (no relative resolution) -> in-repo test red. compact-io lib 79 passed. First make check failed on two existing source-order guards (compact_commit_leg_has_no_silent_skip, compact_integrity_gate_fails_before_tag_archive_or_document_mutation), resolved by moving the check after the integrity gate.
+> Notes: an early repro inside the worktree made two local commits, removed with git reset --hard 16484ef75b before work began (never pushed); 3 repro controllers stopped by exact pid.
+> Follow-ups: none (optional: notify quietly no-ops outside git without claiming a commit).
+<!-- agent-doc-subagent-completion key=7fd4dbd77942461dcc8209fd11c78c6df08452fc11ac28ecf513958bddf35999 -->
+
+### Re: Subagent completed: `subagent:autoclearorphandrain` returned work for queue item “do [#autoclearorphandrain]” — agent-doc
+<!-- agent-doc-subagent-response sha256=135ce3aa33420c42c1f29e5adc0cdbf8d55e7dcc518ec84ead28b89142840542 -->
+> **Subagent response:**
+>
+> Branch fix/autoclearorphandrain, commit 6be8a6340a (pushed); make check passed (11897); make tmux-ci passed (46 suites, 207 tests, 0 failed).
+> Root cause: the orphan-drain sweep's liveness probe does not see a supervisor not started with --route-owned, so it treats the document as orphaned every tick; only route-time deferral to a healthy supervisor's idle watch (GH #307) prevents a double drive. Interleaving: item one commits; drain dispatches item two (reason=no_supervisor_idle_watch); supervisor re-execs (outgoing image publishes the recycle InFlight before exec; new image has not started IPC/registered); the route sees supervisor_health=unreachable (same as dead), takes route_dispatch_only_authoritative_degraded_direct_pane, records a dispatch attempt, waits for the recycle to settle, and types item two past the /clear the new image's idle watch carried across the re-exec. Faulty branch: background guard in agent-doc-route-io/src/pane_resolution.rs (~540 pre-change) deferred only for a healthy actor.
+> Fix: three-case supervisor policy (pane_resolution.rs:125, check :540): Recovered (healthy) -> defer then fallback (existing); Restarting (not healthy, recycle InFlight) -> defer (outcome=deferred reason=supervisor_restarting), next attempt for the same head continues as orphan (restarting_supervisor_missed_backoff action=continue_orphan_route); Absent -> unchanged orphan path. Deferral happens before any dispatch receipt. A real orphan still drains (no InFlight recycle or status read failure -> unchanged; a never-settling restart proceeds on the next attempt). Deferred rather than having the drain send the clear, keeping the idle watch as the sole owner of the clear decision.
+> Tests: debug-only hooks AGENT_DOC_TEST_ORPHAN_DRAIN_GATE (rpc.rs:20397) and AGENT_DOC_TEST_HOLD_PRESERVED_CHILD_REENTRY (run.rs:38); new live test an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supervisor (before fix 3/3 failed with the CI assertion/ops.log pattern; after 5/5); whole file under stress before 12/13, after 13/13 x3; unit test for the policy; mutations (restarting check forced false -> live test red; Restarting as Absent -> unit test red).
+> Files: agent-doc-route-io/src/pane_resolution.rs, agent-doc-controller-io/src/project_controller/rpc.rs, agent-doc-start-runtime-io/src/run.rs, tests/clear_queued_live_turn_tmux.rs, specs/supervisor.md, specs/08-session-routing.md, specs/07-session-tmux-commands.md.
+> Follow-up: orphan-drain liveness probe misses operator-started supervisors (supervisor_pid_for_doc only matches 'start --route-owned'); decide whether to use start_supervisor_document_from_args (kill paths route-owned only) and its effect on the GH #307 fallback.
+<!-- agent-doc-subagent-completion key=5b1b46162de66acfa5f0bc2abd1a40d573e9f7cc45d66782f4d4419d51203b95 -->
+> **Queue prompt:** release + publish after "deleting a claimed queue row while adding a different row..." + [#autoclearorphandrain] [#loadprojectfordoccwd] [#queuerowdup] is integrated.
+
+### Re: release v0.35.557 — opus-5 · 2026-10-27T12:02-04:00
+
+**agent-doc v0.35.557 is released and published.** `make release` finished with `tag_publish_handoff=complete local_install_full=complete public_publication=complete`:
+- tag `v0.35.557` on `fec25bdee1`
+- GitHub **Latest** with 24 assets
+- PyPI wheel `agent_doc-0.35.557` public
+- `agent-doc 0.35.557` installed locally via `install-full`
+
+The release batch was your four prerequisites (`#krwr`, `#autoclearorphandrain`, `#loadprojectfordoccwd`, `#queuerowdup`) plus `#tracingrootceiling`, `#commitoutsidegit` and `#livebuffergc`, which were ready at the same boundary. On the version-projected tree, `make check` passed 11923/11923 and `make tmux-ci` passed 207.
+
+| Item | Commit | Fix |
+|---|---|---|
+| `[#krwr]` | `f1473ab067` | Deleting a claimed row while adding a different row in the same slot now cancels the claim (the owner gets `cancel_claimed`), and the new row stays unclaimed. The claim still follows a same-id rewrite or a close text edit (containment, or similarity ≥ 0.5). **Behaviour change:** an in-place id change, even a typo fix, now cancels. |
+| `#autoclearorphandrain` | `02f41205a7` | While a supervisor is mid re-exec (recycle `InFlight`), the orphan-drain route now defers instead of typing the next item past the pending auto-clear. A real orphan still drains. The forced interleaving failed 3/3 before the fix and passes 5/5 after; the whole file under load passed 13/13 three times. |
+| `#loadprojectfordoccwd` | `8c1dc136c6` | `load_project_for_doc` reads a rootless document's config from its own store, never the cwd project's. That fixes ~30 callers with no edits; claim's cross-session check and tmux-session rules now use claim's store. |
+| `#queuerowdup` | `14bdb554fe` | **I was wrong:** no binary writer created those duplicate rows. ops.log shows you pasted and typed them at 12:47:57Z, and a `compact` committed them 52s later. The worker added regression tests confirming the mirror is marker-aware and that a twin of claimed work is never selected or dispatched. No production change. |
+| `#tracingrootceiling` | `08dd87946c` | The debug log goes to the nearest project root, found by the ceiling-aware walk, or nowhere. It no longer lands in an ancestor such as `~/.agent-doc`. |
+| `#commitoutsidegit` | `f7fd826e5d` | `agent-doc commit` outside git exits 1 with a `git init` hint instead of a false "already matches HEAD". `compact --commit` refuses before changing anything. |
+| `#livebuffergc` | `953feb85a0` | `agent-doc gc --root ~ --retired-stores --dry-run` lists the retired 1.7G `~/.agent-doc/live-buffer`, and running it without `--dry-run` removes it. Plain `gc` and the daily preflight gc only report it. Nothing was deleted from your real stores. |
+
+**Release-time fixes I made.**
+- `make check` first failed the `editor-parity` gate, because each release needs one row in `editors/release-parity.tsv`. Adding that row exposed a gap: RTK had truncated `git log` to 50 of the 86 commits since `v0.35.556`, so my first `VERSIONS.md` draft missed every VS Code, Zed and native replica-flush change. I rebuilt the entry from the unfiltered list.
+- `make release` then refused once, because I'd written my logs inside the worktree, which changed the check fingerprint. I moved the logs out and reran.
+
+**Filed:**
+- Backlog (go queue): `#cwdfallbackrest`. The remaining cwd fallbacks: resync, `terminal`, claim's `--window` fallback, and the template-io config walk.
+- Backlog (go queue): `#compactabsorbsedit`. `compact` committed your unanswered queue edit mid-turn, although a `commit_document` 57s earlier refused the same drift.
+- Icebox: `#orphandrainprobe`. The drain's liveness probe misses supervisors started without `--route-owned`.
+- Icebox: `#retireddirsgc`. More retired `.agent-doc` dirs could join `--retired-stores`, and whether to collapse or flag a plain twin of a claimed row is still undecided.
+- Waiting on you: Todo `#yeja`, how to handle `~/.agent-doc`.
+<!-- agent:boundary:a358906c -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#tracingrootceiling]
-- do [#commitoutsidegit]
-- do [#livebuffergc]
-- 🚧 [#subagent:autoclearorphandrain#1] do [#autoclearorphandrain]
-- 🚧 [#subagent:loadprojectfordoccwd#1] do [#loadprojectfordoccwd]
-- 🚧 [#subagent:queuerowdup#1] do [#queuerowdup]
-- 🚧 [#subagent:krwr#1] [#krwr]: deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit
-- 📥 release + publish after "deleting a claimed queue row while adding a different row..." + [#autoclearorphandrain] [#loadprojectfordoccwd] [#queuerowdup] is integrated.
-- ~~[#ddj8]: Will making ~ a project cause tsift to index the entire home directory? This would cause bad performance implications. I don't mind having agent-doc activity contained in a child directory...it's safe. Would making ~ an agent-doc project be safe? Also, ~ is not a git repo. Can an agent-doc project work outside of a git repo?~~
+- do [#cwdfallbackrest]
+- do [#compactabsorbsedit]
+- ~~do [#tracingrootceiling]~~
+- ~~do [#commitoutsidegit]~~
+- ~~do [#livebuffergc]~~
+- ~~do [#autoclearorphandrain]~~
+- ~~do [#loadprojectfordoccwd]~~
+- ~~do [#queuerowdup]~~
+- ~~[#krwr]: deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit~~
+- ~~release + publish after "deleting a claimed queue row while adding a different row..." + [#autoclearorphandrain] [#loadprojectfordoccwd] [#queuerowdup] is integrated.~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -124,12 +245,12 @@ The four in-flight fixes (`#krwr`, `#autoclearorphandrain`, `#loadprojectfordocc
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#tracingrootceiling] agent-doc's tracing setup walks up from the process cwd with no ceiling to pick its debug.log location and ignores AGENT_DOC_ROOT_CEILING_DIRECTORIES (src/main.rs:5260-5272), so ~/.agent-doc gets a debug.log daily and tests can leak into an ancestor project. Use find_project_root (which honors the ceiling).
-- [ ] [#commitoutsidegit] agent-doc commit on a document outside any git repo exits 0 with 'nothing to commit: ... already matches HEAD' (src/main.rs:182-190) although there is no HEAD; report that the file is not in a git repository (and what to do) instead of a false success.
-- [ ] [#livebuffergc] Retired live-buffer/ directories are never cleaned up (~/.agent-doc/live-buffer is 1.7G across 2,928 files, last written 2026-07-14; agent-loop/.agent-doc/live-buffer 2.0M) and no current code writes or prunes them. Make agent-doc gc remove the retired live-buffer store (with a dry-run listing).
-- [ ] [#autoclearorphandrain] During a supervisor re-exec the controller's orphan drain (controller_orphan_drain_dispatch reason=no_supervisor_idle_watch, degraded_supervisor=supervisor_health_is_unreachable) dispatches the next queue item straight to the pane and skips the pending between-items queue auto-clear. tests/clear_queued_live_turn_tmux.rs::queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec failed 1/3 whole-file runs under load ('exactly one /clear between the two items', none sent). The orphan drain must honor a pending auto-clear (or defer to the restarting supervisor).
-- [ ] [#loadprojectfordoccwd] agent_doc_project_config_io::load_project_for_doc still falls back to the process cwd's config for a document with no .agent-doc ancestor (19 caller files, e.g. agent-doc-start-runtime-io/src/idle_watch.rs:3637); resolve it from project_root_or_file_parent like #startcwdfallback / #claimwrongstore / #syncnorootfallback.
-- [ ] [#queuerowdup] The agent:run queue now shows each claimed id row twice: '- ☑️ [#subagent:clearqueuedciflake#1] do [#clearqueuedciflake]' plus a plain '- do [#clearqueuedciflake]' (same for #startcwdfallback; committed at 493b81b9bd), and preflight then selected the plain duplicate as a drainable selected_queue_prompts head. Find which writer (backlog->queue mirror on --backlog-add, the claim projection, or the strike/prune) re-adds an id-backed head that is already present behind a lifecycle marker, and make it marker-aware.
+- [ ] ☑️ [#tracingrootceiling] agent-doc's tracing setup walks up from the process cwd with no ceiling to pick its debug.log location and ignores AGENT_DOC_ROOT_CEILING_DIRECTORIES (src/main.rs:5260-5272), so ~/.agent-doc gets a debug.log daily and tests can leak into an ancestor project. Use find_project_root (which honors the ceiling).
+- [ ] ☑️ [#commitoutsidegit] agent-doc commit on a document outside any git repo exits 0 with 'nothing to commit: ... already matches HEAD' (src/main.rs:182-190) although there is no HEAD; report that the file is not in a git repository (and what to do) instead of a false success.
+- [ ] ☑️ [#livebuffergc] Retired live-buffer/ directories are never cleaned up (~/.agent-doc/live-buffer is 1.7G across 2,928 files, last written 2026-07-14; agent-loop/.agent-doc/live-buffer 2.0M) and no current code writes or prunes them. Make agent-doc gc remove the retired live-buffer store (with a dry-run listing).
+- [ ] ☑️ [#autoclearorphandrain] During a supervisor re-exec the controller's orphan drain (controller_orphan_drain_dispatch reason=no_supervisor_idle_watch, degraded_supervisor=supervisor_health_is_unreachable) dispatches the next queue item straight to the pane and skips the pending between-items queue auto-clear. tests/clear_queued_live_turn_tmux.rs::queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec failed 1/3 whole-file runs under load ('exactly one /clear between the two items', none sent). The orphan drain must honor a pending auto-clear (or defer to the restarting supervisor).
+- [ ] ☑️ [#loadprojectfordoccwd] agent_doc_project_config_io::load_project_for_doc still falls back to the process cwd's config for a document with no .agent-doc ancestor (19 caller files, e.g. agent-doc-start-runtime-io/src/idle_watch.rs:3637); resolve it from project_root_or_file_parent like #startcwdfallback / #claimwrongstore / #syncnorootfallback.
+- [ ] ☑️ [#queuerowdup] The agent:run queue now shows each claimed id row twice: '- ☑️ [#subagent:clearqueuedciflake#1] do [#clearqueuedciflake]' plus a plain '- do [#clearqueuedciflake]' (same for #startcwdfallback; committed at 493b81b9bd), and preflight then selected the plain duplicate as a drainable selected_queue_prompts head. Find which writer (backlog->queue mirror on --backlog-add, the claim projection, or the strike/prune) re-adds an id-backed head that is already present behind a lifecycle marker, and make it marker-aware.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

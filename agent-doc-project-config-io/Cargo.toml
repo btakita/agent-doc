@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-project-config-io"
-version = "0.35.557"
+version = "0.35.558"
 edition = "2024"
 description = "File-backed project configuration IO for agent-doc"
 license = "Apache-2.0"
@@ -11,11 +11,11 @@ publish = false
 name = "agent_doc_project_config_io"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.35.557" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.557" }
-agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.557" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.557" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.557" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.558" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.558" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.558" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.558" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.558" }
 anyhow = "1"
 toml = "1.1"
 

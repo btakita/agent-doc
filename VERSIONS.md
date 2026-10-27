@@ -2,6 +2,31 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.558
+
+- **A retained captured write no longer overwrites operator text.** A write that agent-doc captured earlier and
+  re-applies later now rolls forward onto the editor's current text instead of replacing it. Retained writes, retained
+  settles and direct CLI writes also wait for editor typing that has been reported but not yet received, including a
+  burst after an earlier change in the same epoch. No commit can seal a document while an editor replica is
+  quarantined: the refusal names the quarantine (`crdt_commit_barrier_refused_quarantined_replica`), `diverged` is
+  computed from the quarantine count, and session-check reports a refused write with its remedy.
+- **Restart Agent refuses to relaunch the wrong harness.** When the editor's `agent:` frontmatter and the controller's
+  copy disagree, Restart Agent (`--expect-agent`) refuses and names both values instead of starting the old harness.
+- **Nested rows under a free-text queue row are its sub-prompts.** In `agent:run`, `agent:queue` and `agent:loop` the
+  parent and its indented `  - ` children form one item: claim, brief and dispatch are keyed by the parent, the
+  children appear verbatim in the brief, an edit to a child of a claimed parent goes to that worker, and striking the
+  parent closes the children.
+- **`--todo-add` and `--todo-edit` accept nested sub-items** (one level of `  - ` lines). A malformed child is refused
+  with nothing applied, a replay is a no-op, and a multi-line `--backlog-add` or `--icebox-add` replay no longer files
+  a second copy.
+- **`agent-doc serve` `POST /save` refuses with 409 while an editor replica holds the document**, and otherwise
+  writes through the document authority instead of straight to disk.
+- **`compact` commits only the compacted cell**, never an unanswered edit beside it.
+- **The remaining document reads resolve their store from the document, never the current directory** (resync,
+  terminal, claim and template).
+- **The superseded-plugin probe sees the 2026.3 IDE's module jars**: a deleted or backup-path
+  `lib/modules/agent.doc.*.jar` counts as a replaced plugin.
+
 ## 0.35.557
 
 - **The supervisor and headless launches find an installed harness that is missing from PATH** (GH #380). When a bare

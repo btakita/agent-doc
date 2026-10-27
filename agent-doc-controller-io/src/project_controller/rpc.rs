@@ -14085,10 +14085,8 @@ fn superseded_editor_route_verdict(
 ) -> SupersededEditorRouteVerdict {
     let mut advisory = None;
     for (kind, pid, mapped) in probes {
-        let path = match mapped {
-            agent_doc_fs::plugin_jar::MappedPluginJar::Deleted { path }
-            | agent_doc_fs::plugin_jar::MappedPluginJar::Superseded { path, .. } => path,
-            _ => continue,
+        let Some(path) = mapped.superseded_path() else {
+            continue;
         };
         let build = endpoint(*pid);
         if let agent_doc_ipc_io::EditorEndpointBuild::Current { build } = &build {
@@ -14200,24 +14198,42 @@ fn refuse_editor_route_to_superseded_editor(
         .lock()
         .projection()
         .live_registrations(&document_hash);
-    let probes = registrations
-        .into_iter()
-        .filter(|registration| registration.editor_kind.contains("jetbrains"))
-        .filter_map(|registration| {
+    let probes = editor_route_mapped_jar_probes(
+        Path::new("/proc"),
+        registrations.into_iter().filter_map(|registration| {
             // A pid that does not fit `/proc`'s u32 cannot be probed: skip it
             // (fail open) rather than refuse on a truncated id.
             let pid = u32::try_from(registration.pid).ok()?;
-            let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar(
-                pid,
-                agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
-            );
-            Some((registration.editor_kind, pid, mapped))
-        })
-        .collect::<Vec<_>>();
+            Some((registration.editor_kind, pid))
+        }),
+    );
     // The probe addresses the endpoint at the same root controller → editor
     // sends (`persist_current`, `observe_lazily_current`) resolve.
     let ipc_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
     editor_route_superseded_admission(&ipc_root, &canonical, &probes)
+}
+
+/// GH #76 / `#jb263probeblind`: the mapped-jar probe of each live JetBrains
+/// registration, read under `proc_root`. The probe classifies the exact-263
+/// modular package's `lib/modules/agent.doc.*.jar` mappings as well as the
+/// versioned root jars, so an IDE that maps only module jars is no longer
+/// reported `Unknown` after an install swapped them out.
+fn editor_route_mapped_jar_probes(
+    proc_root: &Path,
+    editors: impl IntoIterator<Item = (String, u32)>,
+) -> Vec<(String, u32, agent_doc_fs::plugin_jar::MappedPluginJar)> {
+    editors
+        .into_iter()
+        .filter(|(kind, _)| kind.contains("jetbrains"))
+        .map(|(kind, pid)| {
+            let mapped = agent_doc_fs::plugin_jar::probe_mapped_plugin_jar_at(
+                proc_root,
+                pid,
+                agent_doc_fs::plugin_jar::JETBRAINS_PLUGIN_JAR_STEMS,
+            );
+            (kind, pid, mapped)
+        })
+        .collect()
 }
 
 /// The probing half of [`refuse_editor_route_to_superseded_editor`], over
@@ -61309,6 +61325,97 @@ mod tests {
         assert!(
             !ops.contains("editor_route_refused_superseded_editor"),
             "{ops}"
+        );
+    }
+
+    /// `#jb263probeblind` fixture: a fake `/proc/<pid>/map_files` of symlinks
+    /// to the given `readlink` targets.
+    fn write_fake_map_files(proc_root: &Path, pid: u32, targets: &[String]) {
+        let dir = proc_root.join(pid.to_string()).join("map_files");
+        std::fs::create_dir_all(&dir).unwrap();
+        for (index, target) in targets.iter().enumerate() {
+            std::os::unix::fs::symlink(
+                target,
+                dir.join(format!("7f{index:04x}000-7f{index:04x}fff")),
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn exact_263_module_only_mapping_reaches_the_superseded_route_gate() {
+        // `#jb263probeblind`: the exact-263 IDE maps only the unversioned
+        // `lib/modules/agent.doc.*.jar` module jars. On 2026-10-27 04:07:49Z and
+        // 04:11:32Z the route admitted silently (no advisory, no
+        // `editor_route_superseded_editor_admitted`) because the probe matched
+        // versioned jars only. Swapped-out module jars must now reach the GH
+        // #267 gate: admitted with the advisory while the native endpoint
+        // answers with this build; current module jars admit with no advisory.
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("doc-263.md");
+        std::fs::write(&doc, "# doc\n").unwrap();
+        let _endpoint = CurrentNativeEndpoint::start(&root);
+        let pid = std::process::id();
+        let plugins = root.join("IntelliJIdea2026.3");
+        let modules = plugins.join("agent-doc-jetbrains/lib/modules");
+        std::fs::create_dir_all(&modules).unwrap();
+        let mut current = Vec::new();
+        for module in ["backend", "frontend", "shared"] {
+            let jar = modules.join(format!("agent.doc.{module}.jar"));
+            std::fs::write(&jar, module).unwrap();
+            current.push(jar.display().to_string());
+        }
+
+        let swapped_root = root.join("proc-swapped");
+        let swapped = ["backend", "frontend", "shared"]
+            .iter()
+            .map(|module| {
+                format!(
+                    "{}/.agent-doc-jetbrains-install/backup-1-2/lib/modules/agent.doc.{module}.jar (deleted)",
+                    plugins.display()
+                )
+            })
+            .collect::<Vec<_>>();
+        write_fake_map_files(&swapped_root, pid, &swapped);
+        let probes =
+            editor_route_mapped_jar_probes(&swapped_root, [("jetbrains".to_string(), pid)]);
+        assert!(probes[0].2.is_superseded(), "{probes:?}");
+        let advisory = editor_route_superseded_admission(&root, &doc, &probes)
+            .expect("a current native endpoint admits the route")
+            .expect("swapped-out module jars must carry the advisory");
+        assert!(
+            advisory.starts_with("plugin_bytes_superseded_advisory"),
+            "{advisory}"
+        );
+        assert!(advisory.contains("lib/modules/agent.doc."), "{advisory}");
+        let ops = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("editor_route_superseded_editor_admitted")
+                && ops.contains("reason=native_endpoint_current"),
+            "{ops}"
+        );
+
+        // Current module jars: inconclusive, so no probe, no advisory, no log.
+        std::fs::remove_file(root.join(".agent-doc/logs/ops.log")).unwrap();
+        let current_root = root.join("proc-current");
+        write_fake_map_files(&current_root, pid, &current);
+        let probes =
+            editor_route_mapped_jar_probes(&current_root, [("jetbrains".to_string(), pid)]);
+        assert_eq!(
+            probes[0].2,
+            agent_doc_fs::plugin_jar::MappedPluginJar::Unknown
+        );
+        assert_eq!(
+            editor_route_superseded_admission(&root, &doc, &probes).unwrap(),
+            None
+        );
+        assert!(!root.join(".agent-doc/logs/ops.log").exists());
+
+        // Non-JetBrains registrations are never probed.
+        assert!(
+            editor_route_mapped_jar_probes(&swapped_root, [("vscode".to_string(), pid)]).is_empty()
         );
     }
 

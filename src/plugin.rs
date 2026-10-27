@@ -2328,7 +2328,7 @@ fn jetbrains_zip_plugin_version(zip_path: &Path) -> Result<String> {
 /// filesystem, holding the staged extraction and the outgoing generation's
 /// backup while a replacement is in flight. Its top level is neither a plugin
 /// root (`lib/`) nor a descriptor, so the IDE never loads it.
-const JETBRAINS_INSTALL_WORK_DIR: &str = ".agent-doc-jetbrains-install";
+const JETBRAINS_INSTALL_WORK_DIR: &str = agent_doc_fs::plugin_jar::JETBRAINS_INSTALL_WORK_DIR;
 const JETBRAINS_PLUGIN_DIR: &str = "agent-doc-jetbrains";
 const JETBRAINS_MODULAR_PLUGIN_DIR: &str = "agent-doc-jetbrains-262";
 const JETBRAINS_MODERN_PLUGIN_DIR: &str = "agent-doc-jetbrains-263";

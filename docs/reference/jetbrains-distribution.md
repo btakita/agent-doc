@@ -9,6 +9,16 @@ Agent Doc ships three compatibility-ranged updates under the single plugin ID
 | Plugin Model v2 (262) | exactly `262` through `262.*` | `agent-doc-jetbrains-262-<pluginVersion>.zip` |
 | Plugin Model v2 (263) | exactly `263` through `263.*` | `agent-doc-jetbrains-263-<pluginVersion>.zip` |
 
+The 262 and 263 updates install the same Plugin Model v2 tree into
+`<IDE data dir>/agent-doc-jetbrains/`. A descriptor-only `lib/agent.doc-<pluginVersion>.jar`
+sits beside unversioned `lib/modules/agent.doc.{backend,frontend,shared}.jar`
+content-module jars. A running exact-263 IDE memory-maps only the module jars.
+agent-doc's superseded-plugin probe therefore reads stale plugin bytes in that
+IDE from those module mappings (`#jb263probeblind`). After an install has
+swapped the tree, they read `(deleted)` or resolve inside
+`.agent-doc-jetbrains-install/backup-*`. Version strings are still read only
+from the versioned root jar.
+
 The update versions are distinct. The ranges do not overlap, and all ZIPs are
 built and verified before the tag workflow may create a GitHub release. A
 missing ZIP, an equal version, an unexpected plugin ID, or a widened range stops

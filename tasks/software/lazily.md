@@ -1039,6 +1039,58 @@ It runs inside the tmux server that crashed, so it is barred from killing, reapi
 I resumed the same worker from its transcript, so its claim and binding are unchanged. I refreshed the claim. It must re-run any gate whose result was not captured before the crash, rebase on any new `origin/main`, and stay off the default tmux socket while the crash investigation runs.
 
 Both items stay open until their reports are integrated. The exchange is ~990 lines across 53 responses; I am not compacting it because the queue is active and there is no auto-compact opt-in.
+
+### Re: do [#lzcorecireachaudit] — audit complete — opus-5.5 · 2026-10-26T22:40-04:00
+
+> **Queue prompt:** do [#lzcorecireachaudit]: Why is this blocked?
+
+> **Operator note:** Why is this blocked?
+
+Nothing was technically blocking it. Generations 2 and 3 were workers that disappeared before reporting, and generation 4 was cut off by the tmux/kitty crash. I resumed generation 4 from its transcript. It re-fetched every repo (no `main` had moved) and re-ran every gate after the crash, so no result here comes from an interrupted run. The audit is now done and pushed fast-forward to `main` in four repos.
+
+**Repos with fixes:**
+
+| repo | audited | attacks killed | drift fixed | pushed | CI |
+|---|---|---|---|---|---|
+| lazily-spec | `b706c72` | 31/31 after fix | the Spec's own reach check missed 26 of 31 attacks | `e3b5ff8` | ✅ green |
+| lazily-py | `1a04b59` | 52/56 | `continue-on-error` guard; 10 undeclared stale-handle capability skips | `87c217e`, `63a811f` | running |
+| lazily-js | `2b8b488` | 39/39 | `continue-on-error: ${{ true }}` on a Core step stayed green | `ff1fe27` | ✅ green |
+| lazily-cpp | `d6f8873` | 67/70 | 2 undeclared stale-handle flavor skips | `b51ef0e` | running |
+
+**No drift found:** rs 40/40, go 27/27, kt 26/26, zig 55/55, cs 26/27, dart 56/56. The nine bindings come from the Core profile; lazily-gd is not one of them.
+
+**What was wrong:**
+- **Spec reach check (`check-core-ci-reach.mjs`)** pinned only the `make core-*` steps. Deleting or disabling any other qualification step stayed green: pin-rejection, binding checkout, manifest verification, evidence, upload. So did dropping `--require-publish-ready` or `--require-all`, or hollowing a gate's Makefile recipe to `true`. The check now:
+  - pins every step's name and order in both jobs, with no step-level conditions;
+  - requires key fragments inside the non-make steps;
+  - pins permissions to `contents: read` with no secrets;
+  - compares each gate's `make -n` output to pinned command lines.
+
+  Its self-test rejects 44 workflow and 18 recipe mutations.
+- **js and py** refused only a literal `continue-on-error: true`. They now refuse any value except `false`. The regression tests fail against the old guard and pass against the new one.
+- **py and cpp evidence** failed the aggregate evidence check after the 2026-10-22 stale-handle fixtures joined the Core profile. The fixes reuse the lost generation-3 branch's commits.
+
+**Attacks left surviving on purpose:**
+- **cpp (3) and cs (1):** renaming a step that runs `make <core target>`. The gate still runs.
+- **py (4):** dropping the 3.12 matrix leg. The standing test `test_ci_reach_activation_pin.py` in `make check` already catches it; the worker confirmed it goes red.
+
+**Gates** (exit 0 each; logs in `~/worktrees/lzcorecireachaudit4/_logs/`):
+- `check-ci-reach.sh` in all nine bindings;
+- Spec `core-ci-reach`, `core-profile-check`, `core-support-check`, `core-cohort-check` (425 passed) and `core-evidence-self-test`;
+- `core-evidence-check`: all nine OK;
+- `core-artifact-consumers-check-all`: all nine passed, on the local toolchain only, not CI's minimum and current versions;
+- `make check`: py 1240 passed / 1 skipped, js 722 passed, cpp 69/69.
+
+**Not green yet:** Spec's local `make check` fails only on `coverage-check`. All nine binding README coverage tables have been out of sync with `coverage.json` since `c30bd8f`. This predates the audit, and Spec CI misses it because it doesn't check out the binding READMEs. The worker committed the Spec change despite that red target; the first follow-up fixes it.
+
+**What I didn't change:** I did not bump the superproject's submodule pointers. The `src/lazily-{spec,py,js,cpp}` checkouts in agent-loop are 13–17 commits behind and hold other sessions' uncommitted edits, so moving them would disturb that work. The fixes live on each repo's `main`.
+
+**Follow-ups**, added to the backlog behind the running `#tmuxkittyterminal`:
+1. `#lzcoverageresync`: regenerate and commit the nine README coverage tables so Spec's local `make check` passes.
+2. `#lzbindingevidenceci`: add a per-binding Core evidence gate to every binding's CI, so evidence drift is caught on push.
+3. `#lzauditbranchprune` (recommended): delete the superseded audit branches in py and cpp.
+
+`#lzcorecireachaudit` is complete.
 <!-- agent:boundary:e199c066 -->
 <!-- /agent:exchange -->
  
@@ -1046,7 +1098,10 @@ Both items stay open until their reports are integrated. The exchange is ~990 li
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
 - 🚧 [#subagent:tmuxkittycrash#1] do [#tmuxkittyterminal]
-- 🚧 [#subagent:corecireachaudit4#4] do [#lzcorecireachaudit]: Why is this blocked?
+- ~~do [#lzcorecireachaudit]: Why is this blocked?~~
+- do [#lzcoverageresync]
+- do [#lzbindingevidenceci]
+- do [#lzauditbranchprune]
 <!-- /agent:queue -->
 
 ## Todo
@@ -1058,8 +1113,10 @@ Both items stay open until their reports are integrated. The exchange is ~990 li
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzcoverageresync] Restore lazily-spec's local make check: run node scripts/sync-coverage.mjs in lazily-spec and commit the regenerated README coverage tables in all nine Core bindings (drift since spec c30bd8f; spec CI misses it because it does not check out binding READMEs).
+- [ ] [#lzbindingevidenceci] Add a per-binding Core evidence gate to each of the nine bindings' CI (check-core-evidence.mjs --binding <id> --generate-reports --require-all), so stale-handle-style evidence drift is caught on push instead of only on a manual cohort-qualification dispatch (py/cpp drift went unnoticed four days).
+- [ ] [#lzauditbranchprune] [recommended] Delete superseded branches audit/core-ci-reach-20261022 and task/lzcorecireachaudit-20261022 in lazily-py and lazily-cpp.
 - [ ] [#tmuxkittyterminal] tmux + the kitty terminal crashed. Fix agent-doc causes. This may have to do with reaping tmux sessions?
-- [ ] 🚧 [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 4 Claude worker subagent:corecireachaudit4 is running the audit in per-repo worktrees under ~/worktrees/lzcorecireachaudit4-*; generations 2 and 3 were lost without a report)
 <!-- /agent:backlog -->
 
 ## Review

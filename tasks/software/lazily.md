@@ -1236,18 +1236,64 @@ I sent the four queued items to four background workers. Two have finished and a
 - **New backlog item #lzspecreadmeci:** the root cause is still there. Spec CI never checks out the binding READMEs, so this drift can come back without failing CI. The new item makes spec CI run `--check` against the 11 sibling READMEs.
 
 The exchange is now about 1,100 lines and the queue is still running, so I haven't compacted it.
+
+### Re: queue subagents — #tmuxguardclaudeinstall, #lzbindingevidenceci done — opus-5-5 · 2026-10-26T23:59-04:00
+
+Both remaining workers have reported, so all four queued items are now done.
+
+**#tmuxguardclaudeinstall: done.** It turned out to be the reverse of what the backlog item said. agent-doc `e3b716ae8a` is pushed to main.
+- **Claude Code was already covered.** `skill install --harness claude` has written the `coined-id-pre-tool-use` hook into `.claude/settings.json` since `d75d5eb3bc` (2026-07-19), merging it without duplicates, but no test covered it.
+- **Codex was the gap.** The install never wrote `PreToolUse` to `$CODEX_HOME/hooks.json`, even though spec 10 said it did, so Codex panes never had the tmux guard. The fix adds it to the user-level Codex hooks file.
+- **New tests:** unit and CLI tests now cover both installs. They check that the guard appears once, that your own entries and unrelated settings keys survive, and that a second run changes nothing. All tests use temp `HOME`/`CODEX_HOME`.
+- **Specs and docs:** spec 09/10 and the harness-invocation runbooks (six copies) now say where each install writes the guard.
+- **Tests:**
+  - The worker ran the `skill::` unit tests (107 passed), all of `test_cli` (354 passed) and the bin plus `codex_hook_integration` suite (1306 passed, 13 skipped). All had 0 failures, and clippy `-D warnings` was clean.
+  - With the new Codex lines removed, both new Codex tests failed.
+  - The full `make check` (tla/lean/JetBrains/simulators) was not run.
+- **Installed:** I ran `make install` from that worktree (at `origin/main`). `~/.cargo/bin/agent-doc` was rebuilt at 23:54, and `~/.codex/hooks.json` now contains the guard.
+  - JetBrains: no plugin bytes changed, so no restart is needed.
+  - VS Code was skipped because `vsce` isn't installed. Its package stays on the previous generation.
+- **CI:** agent-doc CI run `40446479425` was in progress when last checked.
+- **New backlog item #tmuxguardclaudeuser:** a Claude project that never ran `skill install --harness claude` still has no guard. Closing that means writing it into your user-level `~/.claude/settings.json`, which the install deliberately doesn't touch, so that's your decision. The same item also covers checking whether OpenCode, Grok and Cursor have an equivalent hook.
+
+**#lzbindingevidenceci: done.** The gate is pushed to all nine bindings plus lazily-spec, one fast-forward commit each.
+- **The gate:** each binding has a new `make core-evidence-check` target, wired into both `make check` and CI. It runs `check-core-evidence.mjs --binding <id> --generate-reports --require-all` against the spec revision that binding's CI already clones.
+  - zig gets its own `core-evidence` job, because its test job has a 5-minute timeout across three toolchains.
+  - Each binding's `check-ci-reach.sh` registers the new target.
+
+| Repo | Commit | | Repo | Commit |
+|---|---|---|---|---|
+| spec | 4516ac9 | | zig | c4767bd |
+| rs | 5f6f101 | | go | 353b608 |
+| py | c346950 | | cpp | d1fa704 |
+| kt | 92143bf | | cs | 015aed6 |
+| js | b54a440 | | dart | c5247ec |
+
+- **It can't pass by checking nothing.** lazily-spec's `--self-test` now has four checks that fail when the checkout is missing, the binding id is unknown, or no report exists. Removing any of those three guards from the script made the self-test fail.
+- **Local results:**
+  - All nine bindings pass the gate (8–82 s each), at their pinned spec revision and at spec main. No binding had real drift.
+  - On lazily-py, two deliberate breaks each turned the gate red (exit 2): a broken evidence path, and a dropped declared skip. The files were restored from a scratch copy.
+  - `make ci-reach` and actionlint pass in all nine bindings.
+- **My check:** every remote `main` contains both this commit and the earlier #lzcoverageresync README commit.
+- **CI:** lazily-spec passed. rs, py and zig were still running, and the other bindings were running or queued when the worker last checked.
+- **Leftovers:**
+  - Worktrees are at `~/worktrees/lzevci-20261026/`, plus two pinned spec worktrees, `…-spec-v0.43.0` and `…-spec-v0.44.0`.
+  - Running `uv` rewrote lazily-py's `uv.lock` locally. The lock says 0.44.0 while pyproject says 0.45.0. It was left out of the commit.
+
+**Recovery note:** the first `report-complete` for #lzbindingevidenceci was refused while `make install` was running: `missing_replica recovery exhausted and disk read authority is refused`. It succeeded once the install finished, and `repair-projection` said the projection was already in sync.
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- do [#lzspecreadmeci]
+- do [#tmuxguardclaudeuser]
+- ☑️ [#subagent:lzcov#1] do [#lzspecreadmeci]
 - ~~do [#tmuxkittyterminal]~~
 - ~~do [#lzcoverageresync]~~
-- 🚧 [#subagent:lzevci#1] do [#lzbindingevidenceci]
+- ~~do [#lzbindingevidenceci]~~
 - ~~do [#lzauditbranchprune]~~
-- 🚧 [#subagent:tmuxguard#1] do [#tmuxguardclaudeinstall]
+- ~~do [#tmuxguardclaudeinstall]~~
 <!-- /agent:queue -->
 
 ## Todo
@@ -1259,9 +1305,8 @@ The exchange is now about 1,100 lines and the queue is still running, so I haven
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmuxguardclaudeuser] Decide whether agent-doc should write the coined-id-pre-tool-use tmux guard into user-level ~/.claude/settings.json: today a Claude project that never ran 'agent-doc skill install --harness claude' has no guard, while Codex is covered by its user-level hooks.json (follow-up of #tmuxguardclaudeinstall; also check OpenCode/Grok/Cursor for an equivalent PreToolUse hook).
 - [ ] [#lzspecreadmeci] lazily-spec CI should clone the 11 sibling binding READMEs and run sync-coverage.mjs --check, so binding README coverage drift fails spec CI instead of surfacing only in a local make check (root cause of #lzcoverageresync).
-- [ ] [#tmuxguardclaudeinstall] Make agent-doc skill install wire the coined-id-pre-tool-use PreToolUse hook (which now carries the live-tmux-server guard) for Claude Code projects, not only Codex; today agent-loop has it only because .claude/settings.json was hand-edited, so other Claude projects' subagents can still kill the operator's tmux server.
-- [ ] [#lzbindingevidenceci] Add a per-binding Core evidence gate to each of the nine bindings' CI (check-core-evidence.mjs --binding <id> --generate-reports --require-all), so stale-handle-style evidence drift is caught on push instead of only on a manual cohort-qualification dispatch (py/cpp drift went unnoticed four days).
 <!-- /agent:backlog -->
 
 ## Review

@@ -824,16 +824,56 @@ I dispatched both issues to background subagents. Each works in its own worktree
 **The #380 row's 🚧 marker had no worker behind it.** `queue claims` showed the row held by `subagent:kotlinflush` gen 1, carrying the `#kotlinflushprep` alias, with `followed_from: [do [#kotlinflushprep], Watch …]`. That worker was the `#kotlinflushprep` job, and it finished at 00:21. When that row was struck, its claim moved to the next head instead of ending. Earlier it had also moved onto the Loop watch row. So #380 had never been dispatched. I released the stray claim (`queue release --requeue --generation 1`), then claimed and started a real worker (gen 2). I filed the claim-move bug as backlog `#claimfollowstruck`.
 
 The exchange is 778 lines over 22 sections. The queue is draining, so I'm not compacting.
-<!-- agent:boundary:3ec64169 -->
+
+### Re: Subagent completed: `subagent:claimfollow` returned work for queue item “do [#claimfollowstruck]” — agent-doc
+<!-- agent-doc-subagent-response sha256=b5eaff1d216857f77fb600147f6eb41e86e9c788d121273e99fb17160319e29f -->
+> **Subagent response:**
+>
+> Branch fix/claimfollowstruck, commit 75ff627e58 (pushed).
+> Root cause: every claim reader aligned anchors against the document's SELECTED queue (live_queue_head_rows -> queue_component_entries -> selected(), agent-doc-queue/src/queue_continuation.rs:1038/:1076), anchors carried no queue id, and a struck row was never treated as terminal. Striking the last agent:run row made agent:loop selected; the 1-row anchor paired with the loop row through the equal-count positional fallback in pair_replaced_lines (queue_head_alignment.rs ~150), then onto #380 when new run heads arrived. The relay overlay used the same selected-queue follow and painted markers on every queue.
+> Fix: ClaimAnchor records queue_id; QueueClaimLedger::follow_edits_in_view over ClaimQueueView (all queues, live + struck rows) aligns each claim only within its own queue; a claim whose row is struck never follows a different head (existing #claimstrike retire / reopen-as-unknown applies). Self-repair: a same-attempt mis-follow (new QueueClaim.followed_generation) whose followed_from names a struck row is restored onto it (queue_claim_unfollowed_struck); re-claims and legacy claims are never restored. All readers migrated (queue-io claim paths, relay overlay, controller orphan drain, claimed_live_head_texts). In-place edits still follow.
+> Files: agent-doc-queue/src/{queue_claim.rs, queue_consume.rs}, agent-doc-queue-io/src/queue_claim.rs, agent-doc-crdt-relay-io/src/lib.rs, agent-doc-controller-io/src/project_controller/rpc.rs, specs/07-orchestration-commands.md; field-only: agent-doc-queue/src/claim_release_receipt.rs, agent-doc-session-check-io/src/midturn_steering.rs, src/queue_completion_feedback.rs.
+> Tests: 5 new agent-doc-queue tests + 1 queue-io ledger test; 4 deliberate mutations each reddened the matching test. cargo test -p agent-doc-queue --lib 962 passed; -p agent-doc-queue-io --lib queue_claim 16 passed; make -k check Rust 11814/11814 (182 skipped), only failure the pre-existing VS Code native.test round-trip (passes 22/22 with a temporary .agent-doc root).
+> Follow-ups: (1) live_queue_head_identities still reads only the selected queue for prune/active/claimed_items closure; judge claim closure across every queue. (2) delete-plus-add at the same position still hands over a claim as an edit (#queue-mutation-steering design; decision needed).
+<!-- agent-doc-subagent-completion key=c329a8b06f1564a79e4267a1812689fd4bd00be19466436d3a92c634eef29568 -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/380
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/381
+
+### Re: #gh-fix GH #380 + #381, do [#claimfollowstruck] — opus-5 · 2026-10-27T01:40-04:00
+
+All three fixes are on `main` (`d1155e8943..c0a4e87ed7`, fast-forward) and installed locally with one `make install`. GH #380 and #381 are closed with fix summaries.
+
+| Item | Main commit | Fix |
+|---|---|---|
+| GH #380 | `149f8ab776` | If a bare `claude`/`codex`/`opencode`/`grok` isn't on the child PATH, the supervisor now looks in the usual install directories (`~/.local/bin`, `~/.claude/local`, npm/bun/volta/cargo bins, Homebrew, …). It launches the binary by that path and adds the directory to the end of the child PATH. When nothing is found, the error lists every directory it searched. |
+| GH #381 | `58a41ce8f6` | Every drain check and the preflight Todo audit now read the document presets plus the project presets. A head like `- #review` whose preset is defined only in `.agent-doc/project.md` now drains as that preset, with no backlog item and no Todo warning. A name that is also open tracked work still counts as tracked work. |
+| `#claimfollowstruck` | `c0a4e87ed7` | A claim now records its queue, and is matched against that queue's live and struck rows. A struck row ends its claim instead of passing it to the next row, and claims never move across queues. A claim that an earlier version already moved off its struck row is put back on it. That repair skips re-claims and claims stored before this fix. |
+
+**Verification.** I ran `make -k check` on the merged branch. Rust: 11829 run, 11829 passed, 182 skipped. Every other target passed except `dev-harness-test`, where one VS Code test fails: "round-trips owned strings through the built library without crashing". That test already fails on `main` CI (run 40449457567 on `d1155e89`), and all three workers saw it before merging, so it was already failing before these fixes. I've queued it as `#vscodenativeceiling`. Each worker also made sure its new tests fail without the fix. The `#claimfollowstruck` worker went further and broke the fix four different ways on purpose, and each break made its test fail. `make install` replaced the binary and `libagent_doc.so`, marked 6 supervisors and 2 controllers to restart at their next idle point, and reloaded the editor library. No JetBrains restart is needed. CI for `c0a4e87ed7` (run 40456320768) was still in progress when I checked; I didn't wait for it.
+
+**Follow-ups filed:**
+- `#vscodenativeceiling`: the VS Code test above.
+- `#claimclosureallqueues`: deciding whether a claim's row is closed still looks only at the selected queue.
+- `#headlessharnesspath`: headless harness launches can hit the same PATH failure as #380.
+- `#claimpanecasrace`: a timing race in a CLI claim test that failed once.
+- One Todo for you: when a claimed row is deleted and a different row is added at the same position, should the claim be cancelled instead of moving to the new row?
+
+The worker worktrees and the integration worktree are removed; their branches stay on origin.
+<!-- agent:boundary:d7b4ac5d -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#claimfollowstruck]
-- 🚧 [#subagent:gh380#2] #gh-fix https://github.com/btakita/agent-doc/issues/380
-- 🚧 [#subagent:gh381#1] #gh-fix https://github.com/btakita/agent-doc/issues/381
+- do [#vscodenativeceiling]
+- do [#claimclosureallqueues]
+- do [#headlessharnesspath]
+- do [#claimpanecasrace]
+- ~~do [#claimfollowstruck]~~
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/380~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~#gh-fix https://github.com/btakita/agent-doc/issues/381~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -847,10 +887,15 @@ The exchange is 778 lines over 22 sections. The queue is draining, so I'm not co
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
+- [x] [#12t8] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix). (source: agent:backlog [#claimfollowstruck])
+- [ ] [#krwr] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#claimfollowstruck] Queue claim followed a struck row onto unrelated work: the claim for subagent:kotlinflush gen 1 (dispatched for do [#kotlinflushprep]) moved onto the #gh-fix .../issues/380 row after #kotlinflushprep was struck, and before that onto the Loop watch row (followed_from lists both). It kept the kotlinflushprep alias and showed a 🚧 marker with no worker on #380, so the row was never dispatched. A claim must end when its row is struck/completed; row migration (#claimrowmigrate) may follow only a text edit of the same work, never a different successor head. Add a regression test for strike-then-next-head.
+- [ ] [#vscodenativeceiling] Fix VS Code editors/vscode/src/native.test.ts 'round-trips owned strings through the built library without crashing': under make check's AGENT_DOC_ROOT_CEILING_DIRECTORIES=/tmp:<workspace>, resolveProjectPath returns null for the workspace's own files, so out.resolved?.relativePath is undefined. It is red on main CI (40449457567 on d1155e89) and keeps make check from going green (dev-harness-test).
+- [ ] [#claimclosureallqueues] Judge queue-claim closure across every queue: live_queue_head_identities still reads only the selected queue, and prune / active() / claimed_items use it, so a claim on a live row in a non-selected queue (e.g. agent:loop while agent:run has work) can be pruned as closed. Follow-up to #claimfollowstruck.
+- [ ] [#headlessharnesspath] Headless harness launches in agent-doc-agent-io (claude.rs, codex.rs, opencode.rs, grok.rs) resolve the bare program name only on the inherited PATH and would fail under the Coder workspace default PATH just as the supervisor did in GH #380; reuse the supervisor's spawn_program install-dir fallback.
+- [ ] [#claimpanecasrace] Fix the race in test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning: claim and the supervisor it starts both write the controller actor generation (CAS 'expected 1, found 2'); seen once in a full run during GH #380 work.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

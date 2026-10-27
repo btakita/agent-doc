@@ -8,6 +8,7 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub mod queue_identity;
+pub mod subprompts;
 
 pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "run",
@@ -469,8 +470,17 @@ pub fn struck_work_text(text: &str) -> &str {
 /// and wraps only the work text, byte for byte. Under GFM the result is one
 /// strikethrough span over the whole work text, including inline code,
 /// links, and images inside it.
+///
+/// A head with nested sub-prompts (`#nestedsubprompts`) strikes its parent
+/// part only and keeps the sub-prompt block verbatim beneath it, so the struck
+/// item still renders as a Markdown list (`~~parent~~` with its children
+/// below). The queue enumerators read that shape back as one completed item.
 pub fn render_struck_row_body(text: &str) -> String {
-    format!("~~{}~~", struck_work_text(text))
+    let (head, block) = subprompts::split_subprompt_block(text);
+    match block {
+        Some(block) => format!("~~{}~~\n{block}", struck_work_text(head)),
+        None => format!("~~{}~~", struck_work_text(text)),
+    }
 }
 
 /// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`☑️`/`⚠️`/`⏭️`/`⏳`
@@ -548,8 +558,15 @@ pub fn strip_priority_markers(text: &str) -> String {
 /// convergence and dedup decide whether two *lines of text* are one line, and
 /// collapsing `#gh-fix <url>` with `#review <url>` there would delete operator
 /// text. This key only decides which in-flight work a line names.
+///
+/// A head's nested sub-prompts (`#nestedsubprompts`) are steering for the
+/// work, never part of its identity: the key is computed from
+/// [`subprompts::head_without_subprompts`], so editing, adding or removing a
+/// child row keeps the parent's claim and reaches its owner as an edit.
 pub fn queue_head_identity(text: &str) -> QueueItemIdentity {
-    QueueItemIdentity::from_prompt(&strip_intent_tags(text))
+    QueueItemIdentity::from_prompt(&strip_intent_tags(subprompts::head_without_subprompts(
+        text,
+    )))
 }
 
 /// `text` with leading markers and leading `#tag` / `#tag:` intent tokens

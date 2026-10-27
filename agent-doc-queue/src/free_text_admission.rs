@@ -41,8 +41,17 @@ impl FreeTextAdmissionScope {
 }
 
 /// Normalize prompt text before using it as admitted backlog work.
+///
+/// Binary-owned queue projection (lifecycle markers such as `☑️`/`🚧`, the
+/// `[#owner#generation]` attempt annotation) is never work text, so it never
+/// reaches the backlog: promoting a claimed or reported head once produced
+/// `- [ ] ☑️ [#movedsingleplugin] ☑️ [#subagent:jbsingleplugin#1] Have we …`.
+/// Operator pins are kept.
 pub fn normalize_admitted_free_text(text: &str) -> String {
-    text.trim().trim_start_matches('❯').trim().to_string()
+    let text = text.trim().trim_start_matches('❯').trim();
+    agent_doc_document::queue_projection::strip_in_progress_marker(text)
+        .trim()
+        .to_string()
 }
 
 /// The backlog text a queue prompt is admitted as.
@@ -53,7 +62,24 @@ pub fn normalize_admitted_free_text(text: &str) -> String {
 /// continuation line's words survive the promotion. A fenced multiline prompt
 /// (`~~~prompt` / `---`) keeps its line structure: the backlog renders those as
 /// item continuation, and literal fenced examples must stay literal.
+///
+/// `#nestedsubprompts`: a head's sub-prompt rows stay rows. The parent part is
+/// joined as above and the sub-prompt block follows it verbatim (without any
+/// legacy per-child projection), so the backlog item carries the children as
+/// its nested checklist instead of one flattened line.
 pub fn admitted_prompt_text(prompt: &crate::document_queue::QueuePrompt) -> String {
+    if !prompt.multiline
+        && let (head, Some(block)) =
+            agent_doc_element_queue::subprompts::split_subprompt_block(&prompt.text)
+    {
+        let head = crate::document_queue::QueuePrompt {
+            text: head.to_string(),
+            ..prompt.clone()
+        };
+        let joined = format!("{}\n{}", admitted_prompt_text(&head), block.trim_end());
+        return agent_doc_element_queue::subprompts::strip_subprompt_projections(&joined)
+            .unwrap_or(joined);
+    }
     if prompt.multiline || !prompt.text.contains('\n') {
         return normalize_admitted_free_text(&prompt.text);
     }
@@ -1091,6 +1117,26 @@ pub fn snapshot_queue_free_text_prompt_keys(content: &str) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admitted_text_drops_queue_projection_and_keeps_subprompt_rows() {
+        let claimed = crate::document_queue::QueuePrompt::new(
+            "☑️ [#subagent:jbsingleplugin#1] Have we moved to a single JB plugin?",
+        );
+        assert_eq!(
+            admitted_prompt_text(&claimed),
+            "Have we moved to a single JB plugin?"
+        );
+        let pinned = crate::document_queue::QueuePrompt::new("📌 🚧 Pinned work");
+        assert_eq!(admitted_prompt_text(&pinned), "📌 Pinned work");
+        let nested = crate::document_queue::QueuePrompt::new(
+            "🚧 [#subagent:pmsync#1] Sync PR state\n  wrapped parent\n  - 🟡 [#subagent:pmsync#1] first child\n  - second child",
+        );
+        assert_eq!(
+            admitted_prompt_text(&nested),
+            "Sync PR state wrapped parent\n  - first child\n  - second child"
+        );
+    }
 
     #[test]
     fn free_text_prompt_is_backlog_task_rejects_commands_and_directives() {

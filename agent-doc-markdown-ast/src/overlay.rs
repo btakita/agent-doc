@@ -483,6 +483,85 @@ pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
         && !item.text.starts_with("[#")
 }
 
+/// True when a runnable list row whose content (after its bullet) is
+/// `item_content` can own nested sub-prompt rows (`#nestedsubprompts`): a
+/// free-text row, live or struck. A tracked-id directive never does; its
+/// nested rows keep the `#queuenest` / `#f1s3` group semantics.
+pub fn queue_item_accepts_subprompts(item_content: &str) -> bool {
+    let item = parse_item(item_content, 0, item_content.len());
+    item.kind == ItemKind::FreeText && !item.text.is_empty() && !item.text.starts_with("[#")
+}
+
+/// End (exclusive line index) of the sub-prompt block owned by the runnable
+/// list row at `lines[parent]`, when that block starts at `lines[from]`
+/// (`#nestedsubprompts`).
+///
+/// `from` is the first line after the parent row and its `#queuecruft`
+/// continuation. The block is the maximal run of lines that are either
+///
+/// * a list item indented deeper than the parent row whose content is a
+///   sub-prompt ([`agent_doc_element_queue::subprompts::subprompt_row_is_eligible`]),
+///   or
+/// * an indented, non-structural line deeper than the parent (a wrapped
+///   child),
+///
+/// and it ends at a blank line, a row at or above the parent's depth, or any
+/// structural line (fence, component marker, heading). `None` when `lines[from]`
+/// is not a nested list row, and also when the run reaches a nested row that
+/// can NOT be a sub-prompt (a tracked `do [#id]` / bare `[#id]` directive,
+/// `preset`, `dispatch`): a subtree with tracked work is a `#f1s3` group, not
+/// one prompt, so nothing is folded and the legacy leaf-head shape stands.
+///
+/// Both queue enumerators (`components` here and
+/// `agent_doc_queue::document_queue::parse_spans`) call this one rule, so they
+/// segment a parent and its children identically.
+pub fn queue_subprompt_block_end(lines: &[&str], parent: usize, from: usize) -> Option<usize> {
+    use agent_doc_element_queue::subprompts::{
+        line_indent_width, list_item_content, subprompt_row_is_eligible,
+    };
+    let parent_indent = line_indent_width(lines.get(parent)?);
+    let first = lines.get(from)?;
+    if line_indent_width(first) <= parent_indent || list_item_content(first).is_none() {
+        return None;
+    }
+    let mut end = from;
+    while let Some(line) = lines.get(end) {
+        if line.trim().is_empty() || line_indent_width(line) <= parent_indent {
+            break;
+        }
+        if let Some(content) = list_item_content(line) {
+            if content.trim().is_empty() {
+                // An editor placeholder (`  - ` while typing the next child)
+                // stays inside the block only when another child follows it;
+                // a trailing placeholder is not content (the queue drops it).
+                let next_child = lines[end + 1..]
+                    .iter()
+                    .find(|later| list_item_content(later).is_none_or(|c| !c.trim().is_empty()));
+                let continues = next_child.is_some_and(|later| {
+                    line_indent_width(later) > parent_indent
+                        && list_item_content(later).is_some_and(subprompt_row_is_eligible)
+                });
+                if !continues {
+                    break;
+                }
+                end += 1;
+                continue;
+            }
+            if !subprompt_row_is_eligible(content) {
+                return None;
+            }
+            end += 1;
+            continue;
+        }
+        if queue_prompt_content_line(line) {
+            end += 1;
+            continue;
+        }
+        break;
+    }
+    (end > from).then_some(end)
+}
+
 /// Byte-free shape of one bullet-less multi-line queue head: a prose title run
 /// followed by one or more balanced Markdown code fences
 /// (`#multilinequeuehead`).
@@ -719,7 +798,13 @@ fn classify(content: &str) -> ItemKind {
 
 fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Item {
     let raw = raw_line_content.trim().to_string();
-    let mut body = raw.as_str();
+    // `#nestedsubprompts`: a runnable row that absorbed nested sub-prompt rows
+    // is struck, pinned, classified and keyed by its parent part alone. The
+    // sub-prompt block rides along in `text` verbatim, so a child edit is an
+    // edit of the same node, never a new node.
+    let (head_raw, subprompt_block) =
+        agent_doc_element_queue::subprompts::split_subprompt_block(&raw);
+    let mut body = head_raw.trim();
 
     // Strikethrough wrapper. Tolerates an `#qstrikenote` annotation appended
     // outside the `~~…~~` wrapper (`~~text~~ — auto-struck: …`): the line is still
@@ -747,8 +832,12 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
     }
 
     let kind = classify(body);
-    let text = body.trim().to_string();
-    let (id, explicit_id) = work_item_id(&text);
+    let head_text = body.trim();
+    let (id, explicit_id) = work_item_id(head_text);
+    let text = match subprompt_block {
+        Some(block) => format!("{head_text}\n{}", block.trim_end()),
+        None => head_text.to_string(),
+    };
     Item {
         id,
         explicit_id,
@@ -1032,19 +1121,43 @@ pub fn components(source: &str) -> Vec<Component> {
     let mut out: Vec<Component> = Vec::new();
     let mut open: Option<Component> = None;
 
-    let mut offset = 0usize;
+    // `#nestedsubprompts`: sub-prompt folding needs to look ahead over the
+    // lines below a row, so walk an indexed line table.
+    let raw_lines: Vec<&str> = source.split_inclusive('\n').collect();
+    let content_lines: Vec<&str> = raw_lines
+        .iter()
+        .map(|line| {
+            let content = line.trim_end_matches('\n');
+            content.strip_suffix('\r').unwrap_or(content)
+        })
+        .collect();
+    let mut line_offsets = Vec::with_capacity(raw_lines.len());
+    let mut running = 0usize;
+    for line in &raw_lines {
+        line_offsets.push(running);
+        running += line.len();
+    }
+
+    let mut offset;
     // `#queuecruft`: byte offset where the open queue list item's content
     // starts, while that item still accepts continuation lines.
     let mut continuable_item: Option<(usize, QueueContinuationState)> = None;
-    for line in source.split_inclusive('\n') {
-        let line_start = offset;
-        offset += line.len();
+    // `#nestedsubprompts`: `(content start byte, parent line index)` of the
+    // last runnable free-text row, while nested sub-prompt rows may follow it.
+    let mut subprompt_parent: Option<(usize, usize)> = None;
+    let mut line_index = 0usize;
+    while line_index < raw_lines.len() {
+        let index = line_index;
+        line_index += 1;
+        let line = raw_lines[index];
+        let line_start = line_offsets[index];
+        offset = line_start + line.len();
         if markers.in_code(line_start) {
             continuable_item = None;
+            subprompt_parent = None;
             continue;
         }
-        let content = line.trim_end_matches('\n');
-        let content = content.strip_suffix('\r').unwrap_or(content);
+        let content = content_lines[index];
         let trimmed = content.trim();
 
         if let Some((raw_start, state)) = continuable_item.as_mut() {
@@ -1057,6 +1170,24 @@ pub fn components(source: &str) -> Vec<Component> {
                 continue;
             }
             continuable_item = None;
+        }
+
+        if let Some((raw_start, parent_index)) = subprompt_parent.take()
+            && let Some(end) = queue_subprompt_block_end(&content_lines, parent_index, index)
+            && (index..end).all(|j| !markers.in_code(line_offsets[j]))
+            && let Some(comp) = open.as_mut()
+            && let Some(last) = comp.items.last_mut()
+        {
+            let last_line = end - 1;
+            let joined =
+                &source[raw_start..line_offsets[last_line] + content_lines[last_line].len()];
+            *last = parse_item(
+                joined,
+                last.start_byte,
+                line_offsets[last_line] + raw_lines[last_line].len(),
+            );
+            line_index = end;
+            continue;
         }
 
         if let Some(name) = markers.close_at(line_start, trimmed) {
@@ -1100,13 +1231,14 @@ pub fn components(source: &str) -> Vec<Component> {
         {
             comp.items
                 .push(parse_item(item_content, line_start, offset));
+            // `item_content` is a suffix slice of `content`, which starts at
+            // `line_start`.
+            let raw_start = line_start + (content.len() - item_content.len());
             if is_runnable_component(&comp.name) && queue_item_accepts_continuation(item_content) {
-                // `item_content` is a suffix slice of `content`, which starts at
-                // `line_start`.
-                continuable_item = Some((
-                    line_start + (content.len() - item_content.len()),
-                    QueueContinuationState::default(),
-                ));
+                continuable_item = Some((raw_start, QueueContinuationState::default()));
+            }
+            if is_runnable_component(&comp.name) && queue_item_accepts_subprompts(item_content) {
+                subprompt_parent = Some((raw_start, index));
             }
         }
     }

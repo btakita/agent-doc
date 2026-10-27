@@ -2111,10 +2111,18 @@ pub fn completion_attestation_key(
 /// The stable CLI handle for a queue claim. Only a structurally id-backed head
 /// collapses to `#id`; an id mentioned later in free text remains verbatim so
 /// dispatch, admission, and closeout agree on the line's identity (GH #182).
+///
+/// A head with nested sub-prompts (`#nestedsubprompts`) is handled by its
+/// parent part alone: the identity ignores the children, so the handle stays
+/// valid while the operator edits or adds child rows.
 pub fn claim_item_handle(item: &str) -> String {
     match claim_identity(item) {
         QueueItemIdentity::Id(id) => format!("#{id}"),
-        QueueItemIdentity::FreeText(_) => item.trim().to_string(),
+        QueueItemIdentity::FreeText(_) => {
+            agent_doc_element_queue::subprompts::head_without_subprompts(item.trim())
+                .trim()
+                .to_string()
+        }
     }
 }
 

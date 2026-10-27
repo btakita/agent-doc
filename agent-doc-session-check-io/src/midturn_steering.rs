@@ -3798,6 +3798,90 @@ mod tests {
         assert!(cleanup.items.is_empty(), "{cleanup:?}");
     }
 
+    /// `#nestedsubprompts`: nested rows under a claimed free-text parent are
+    /// that parent's sub-prompts. Editing a child, or adding a new one, is ONE
+    /// edit of the parent, forwarded to the parent's owner; no child ever
+    /// surfaces as its own item or as new dispatch work, and the claim stays
+    /// on the parent.
+    #[test]
+    fn nested_subprompt_edit_or_addition_forwards_to_the_parent_owner() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let parent = "Sync PR and Jira state into this document.";
+        let head =
+            format!("{parent}\n  - So this is the first subtask.\n  - This is the second subtask.");
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# S\n\n<!-- agent:run subagents go -->\n- current task\n- {head}\n<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        // The coordinator claims the parent by its parent line alone.
+        agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pmsync", 3600).unwrap();
+
+        for (label, edited) in [
+            (
+                "child edited",
+                baseline.replace("second subtask.", "second subtask, now steered."),
+            ),
+            (
+                "child added",
+                baseline.replace(
+                    "  - This is the second subtask.\n",
+                    "  - This is the second subtask.\n  - A brand new third subtask.\n",
+                ),
+            ),
+        ] {
+            std::fs::write(&file, &edited).unwrap();
+            backdate(&file);
+            let hook = observe(&file, CONSUMER_HOOK, true)
+                .unwrap()
+                .unwrap_or_else(|| panic!("{label}: no steering observation"));
+            assert_eq!(
+                hook.items.len(),
+                1,
+                "{label}: one parent edit, never per-child items: {hook:?}"
+            );
+            let item = &hook.items[0];
+            assert_eq!(
+                item.change,
+                core::SteeringChange::Edited,
+                "{label}: {hook:?}"
+            );
+            assert_eq!(
+                item.dispatch,
+                core::SteeringDispatch::ForwardToOwner,
+                "{label}: {hook:?}"
+            );
+            assert_eq!(item.owner.as_deref(), Some("subagent:pmsync"), "{label}");
+            assert!(
+                item.verbatim.starts_with(parent),
+                "{label}: {}",
+                item.verbatim
+            );
+            let claimed =
+                agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &edited);
+            assert!(
+                claimed.claims(&item.verbatim),
+                "{label}: the claim stays on the parent"
+            );
+            // Reset to the baseline between cases so each is a single edit.
+            std::fs::write(&file, &baseline).unwrap();
+            backdate(&file);
+            let _ = observe(&file, CONSUMER_HOOK, true).unwrap();
+        }
+    }
+
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator
     /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
     /// claim follows the edit, the idle wake fires for it, the woken cycle's

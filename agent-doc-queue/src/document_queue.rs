@@ -39,8 +39,8 @@
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKERS, prioritized_marker,
-    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
+    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKERS, prioritized_marker, strip_in_progress_marker,
+    strip_in_progress_marker_for_display, strip_priority_markers,
 };
 use agent_doc_element_queue::{QueueItemLifecycle, struck_work_text};
 use agent_doc_markdown_ast::overlay::{queue_bare_fence_close, queue_fenced_title_block};
@@ -420,6 +420,57 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
+            // `#nestedsubprompts`: a free-text row (live or struck) owns the
+            // nested free-text rows indented beneath it as its sub-prompts.
+            // The parent and its children are ONE entry: one head, one claim,
+            // one lifecycle projection, one strike. A subtree that contains a
+            // tracked directive is not folded (`#f1s3` groups stand).
+            if !rest.trim().is_empty()
+                && !is_reference_directive(rest)
+                && agent_doc_markdown_ast::overlay::queue_item_accepts_subprompts(rest)
+            {
+                let mut head_end = i + 1;
+                if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
+                    let mut continuation =
+                        agent_doc_markdown_ast::overlay::QueueContinuationState::default();
+                    while head_end < lines.len() && continuation.accepts_line(lines[head_end]) {
+                        head_end += 1;
+                    }
+                }
+                if let Some(block_end) =
+                    agent_doc_markdown_ast::overlay::queue_subprompt_block_end(&lines, i, head_end)
+                {
+                    let mut head_text = rest.to_string();
+                    for continuation in &lines[i + 1..head_end] {
+                        head_text.push('\n');
+                        head_text.push_str(continuation);
+                    }
+                    let block = lines[head_end..block_end].join("\n");
+                    // A struck parent retires its children with it: one
+                    // completed entry spanning the whole block. Its render
+                    // strikes the parent part only (`- ~~parent~~` + the
+                    // children), exactly as a struck flat row normalizes a
+                    // `~x~` / annotated strike spelling to `~~x~~`.
+                    let entry = match parse_completed_inline(&head_text) {
+                        Some(inner) => QueueEntry::Completed(QueuePrompt {
+                            text: format!("{inner}\n{block}"),
+                            multiline: false,
+                            indent,
+                            ordered_marker,
+                        }),
+                        None => QueueEntry::Prompt(QueuePrompt {
+                            text: format!("{head_text}\n{block}"),
+                            multiline: false,
+                            indent,
+                            ordered_marker,
+                        }),
+                    };
+                    entries.push((entry, span(start_i, block_end)));
+                    bare_prompt_allowed = true;
+                    i = block_end;
+                    continue;
+                }
+            }
             let entry = if rest.trim().is_empty() {
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
@@ -906,9 +957,18 @@ pub fn render(entries: &[QueueEntry]) -> String {
                         out.push(' ');
                     }
                     out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
-                    out.push_str(" ~~");
-                    out.push_str(&p.text);
+                    out.push(' ');
+                    // `#nestedsubprompts`: strike the parent part only; the
+                    // sub-prompt block stays a Markdown list beneath it.
+                    let (head, block) =
+                        agent_doc_element_queue::subprompts::split_subprompt_block(&p.text);
+                    out.push_str("~~");
+                    out.push_str(head);
                     out.push_str("~~\n");
+                    if let Some(block) = block {
+                        out.push_str(block.trim_end_matches('\n'));
+                        out.push('\n');
+                    }
                 }
             }
             QueueEntry::Preset(preset) => {
@@ -1023,7 +1083,11 @@ pub fn is_noise_freeform_line(line: &str) -> bool {
 /// Extract the `#id` from `do [#id]` (or `do #id`) prompt text, normalized to
 /// lowercase. Returns `None` for prompts that do not reference an id.
 fn do_prompt_id(text: &str) -> Option<String> {
-    let text = agent_doc_document::queue_projection::strip_priority_markers(text);
+    // `#nestedsubprompts`: a head's tracked id comes from its parent part; a
+    // sub-prompt row never lends the parent an id.
+    let text = agent_doc_document::queue_projection::strip_priority_markers(
+        agent_doc_element_queue::subprompts::head_without_subprompts(text),
+    );
     let marker = text.find('#')?;
     let id: String = text[marker + 1..]
         .chars()
@@ -1487,10 +1551,16 @@ pub fn set_prompt_runtime_projections(
     entries: &[QueueEntry],
     targets: &[QueueRowProjection],
 ) -> Option<Vec<QueueEntry>> {
+    // `#nestedsubprompts`: children never carry their own projection, so a
+    // legacy child marker is neither part of the match key nor kept.
+    let projection_key = |text: &str| {
+        let cleaned = agent_doc_element_queue::subprompts::strip_subprompt_projections(text);
+        strip_priority_markers(cleaned.as_deref().unwrap_or(text))
+    };
     let mut targets = targets
         .iter()
         .filter_map(|target| {
-            let key = strip_priority_markers(&target.text);
+            let key = projection_key(&target.text);
             (!key.is_empty()).then_some((key, target.clone(), false))
         })
         .collect::<Vec<_>>();
@@ -1504,7 +1574,13 @@ pub fn set_prompt_runtime_projections(
                     next.text = stripped;
                     changed = true;
                 }
-                let key = strip_priority_markers(&next.text);
+                if let Some(cleaned) =
+                    agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
+                {
+                    next.text = cleaned;
+                    changed = true;
+                }
+                let key = projection_key(&next.text);
                 let target = targets
                     .iter_mut()
                     .find(|(target_key, target, consumed)| {
@@ -1520,11 +1596,10 @@ pub fn set_prompt_runtime_projections(
                 let has_target = target.is_some();
                 if let Some(target) = target {
                     if !crate::queue_command::is_slash_command(&next.text) {
-                        let marked =
-                            agent_doc_document::queue_projection::apply_lifecycle_marker(
-                                &next.text,
-                                target.marker,
-                            );
+                        let marked = agent_doc_document::queue_projection::apply_lifecycle_marker(
+                            &next.text,
+                            target.marker,
+                        );
                         let marked_text =
                             agent_doc_document::queue_projection::apply_owner_projection(
                                 &marked,
@@ -1680,31 +1755,40 @@ pub fn project_prompt_runtime_projections(
         if before != after {
             let source = &body[range.clone()];
             let replacement = match (before, after) {
+                // `#nestedsubprompts`: a list row with sub-prompts renders
+                // byte-for-byte (its text holds the raw child lines), and the
+                // projection also retires legacy child markers below line 1.
+                (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
+                | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
+                    if !before_prompt.multiline
+                        && !after_prompt.multiline
+                        && agent_doc_element_queue::subprompts::has_subprompts(
+                            &after_prompt.text,
+                        ) =>
+                {
+                    render(std::slice::from_ref(after))
+                }
                 // Runtime projection owns only the marker/attempt annotation in
                 // an otherwise-live row. Preserve the operator's exact source
                 // wrapper instead of canonicalizing a recovered multiline
                 // head (`---` + title + evidence fence) while the editor may
                 // also be adding a following row. Canonical rendering here can
                 // insert a synthetic closing fence and retarget that neighbor.
-                (
-                    QueueEntry::Prompt(before_prompt),
-                    QueueEntry::Prompt(after_prompt),
-                )
-                | (
-                    QueueEntry::Completed(before_prompt),
-                    QueueEntry::Completed(after_prompt),
-                ) if before_prompt.text != after_prompt.text => {
+                (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
+                | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
+                    if before_prompt.text != after_prompt.text =>
+                {
                     let before_prefix = before_prompt.text.lines().next().unwrap_or_default();
                     let after_prefix = after_prompt.text.lines().next().unwrap_or_default();
-                    source.find(before_prefix).map(|offset| {
-                        let mut preserved = source.to_string();
-                        preserved.replace_range(
-                            offset..offset + before_prefix.len(),
-                            after_prefix,
-                        );
-                        preserved
-                    })
-                    .unwrap_or_else(|| render(std::slice::from_ref(after)))
+                    source
+                        .find(before_prefix)
+                        .map(|offset| {
+                            let mut preserved = source.to_string();
+                            preserved
+                                .replace_range(offset..offset + before_prefix.len(), after_prefix);
+                            preserved
+                        })
+                        .unwrap_or_else(|| render(std::slice::from_ref(after)))
                 }
                 _ => render(std::slice::from_ref(after)),
             };
@@ -4700,9 +4784,7 @@ mod tests {
 
     #[test]
     fn runtime_projection_reopens_struck_work_and_preserves_choice_and_whitespace() {
-        use agent_doc_document::queue_projection::{
-            QueueLifecycleMarker, QueueOwnerProjection,
-        };
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let body = "- ~~  🙋 [#subagent-operator-request-choice] fix sdk demo  ~~\n- untouched\n";
         let targets = vec![QueueRowProjection {
             text: "fix sdk demo".to_string(),
@@ -4725,9 +4807,7 @@ mod tests {
 
     #[test]
     fn terse_owner_runtime_projection_is_idempotent() {
-        use agent_doc_document::queue_projection::{
-            QueueLifecycleMarker, QueueOwnerProjection,
-        };
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let targets = vec![QueueRowProjection {
             text: "dispatched worker work".to_string(),
             marker: QueueLifecycleMarker::Claimed,
@@ -4742,15 +4822,19 @@ mod tests {
             .expect("bare work should gain an attempt projection")
             .0;
 
-        assert_eq!(projected, "- 🟡 [#subagent:worker#1] dispatched worker work\n");
-        assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
+        assert_eq!(
+            projected,
+            "- 🟡 [#subagent:worker#1] dispatched worker work\n"
+        );
+        assert_eq!(
+            project_prompt_runtime_projections(&projected, &targets).unwrap(),
+            None
+        );
     }
 
     #[test]
     fn runtime_projection_preserves_recovered_multiline_source_and_following_row() {
-        use agent_doc_document::queue_projection::{
-            QueueLifecycleMarker, QueueOwnerProjection,
-        };
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let body = concat!(
             "---\n",
             "Run Agent Doc on sdk-demo.md (Grok)\n",
@@ -7802,12 +7886,13 @@ mod tests {
 
     // ---- Nested queue lists (`#queuenest` / `#f1s3`) ----
 
-    /// Indented items parse as real nested prompts, retaining their depth.
-    /// Before this they failed `strip_prefix("- ")` at column 0 and fell through
-    /// to inert `Freeform`.
+    /// Indented tracked items parse as real nested prompts, retaining their
+    /// depth. Before this they failed `strip_prefix("- ")` at column 0 and fell
+    /// through to inert `Freeform`. (Nested FREE-TEXT rows are the parent's
+    /// sub-prompts instead: `#nestedsubprompts`.)
     #[test]
     fn nested_items_parse_with_indent() {
-        let body = "- parent epic\n  - first child\n  - second child\n- another top level\n";
+        let body = "- parent epic\n  - do [#first]\n  - do [#second]\n- another top level\n";
         let entries = parse(body).unwrap();
 
         let items: Vec<(&str, usize)> = entries
@@ -7822,11 +7907,244 @@ mod tests {
             items,
             vec![
                 ("parent epic", 0),
-                ("first child", 2),
-                ("second child", 2),
+                ("do [#first]", 2),
+                ("do [#second]", 2),
                 ("another top level", 0),
             ]
         );
+    }
+
+    // ---- Nested sub-prompts (`#nestedsubprompts`) ----
+
+    const SUBPROMPT_BODY: &str = concat!(
+        "- Sync PR and Jira state into this document.\n",
+        "  - So this is the first subtask.\n",
+        "  - This is the second subtask.\n",
+        "    wrapped onto a second line\n",
+        "- separate flat head\n",
+    );
+
+    /// A free-text row owns the nested free-text rows beneath it: one entry,
+    /// one head, whose text carries every child verbatim, and whose span is
+    /// the overlay node's span (single segmentation truth).
+    #[test]
+    fn nested_free_text_rows_are_one_head_with_subprompts() {
+        let spans = parse_spans(SUBPROMPT_BODY).unwrap();
+        assert_eq!(spans.len(), 2, "{spans:?}");
+        let QueueEntry::Prompt(parent) = &spans[0].0 else {
+            panic!("{spans:?}");
+        };
+        assert_eq!(
+            parent.text,
+            "Sync PR and Jira state into this document.\n  - So this is the first subtask.\n  - This is the second subtask.\n    wrapped onto a second line"
+        );
+        assert_eq!(parent.indent, 0);
+        let entries = parse(SUBPROMPT_BODY).unwrap();
+        assert_eq!(render(&entries), SUBPROMPT_BODY);
+        let heads: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(heads.len(), 2, "{heads:?}");
+        assert!(heads[0].starts_with("Sync PR"));
+        assert_eq!(heads[1], "separate flat head");
+        assert!((0..entries.len()).all(|i| !entry_is_group_parent(&entries, i)));
+
+        let doc = format!("<!-- agent:run -->\n{SUBPROMPT_BODY}<!-- /agent:run -->\n");
+        let body_start = doc.find('\n').unwrap() + 1;
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), spans.len(), "{nodes:#?}");
+        for (node, (_, range)) in nodes.iter().zip(spans.iter()) {
+            assert_eq!(node.item.start_byte - body_start, range.start);
+            assert_eq!(node.item.end_byte - body_start, range.end);
+        }
+        assert_eq!(nodes[0].item.text, parent.text);
+    }
+
+    /// The parent's identity is its parent part: editing, adding or striking
+    /// a child keeps the work identity, the overlay node key and the claim
+    /// handle.
+    #[test]
+    fn subprompt_edits_never_change_the_parent_identity() {
+        let edited = SUBPROMPT_BODY
+            .replace("second subtask.", "second subtask, steered.")
+            .replace(
+                "- separate flat head\n",
+                "  - ~~So this is a new third subtask.~~\n- separate flat head\n",
+            );
+        let text = |body: &str| prompts(&parse(body).unwrap())[0].text.clone();
+        let (before, after) = (text(SUBPROMPT_BODY), text(&edited));
+        assert_ne!(before, after);
+        assert_eq!(
+            agent_doc_element_queue::queue_head_identity(&before),
+            agent_doc_element_queue::queue_head_identity(&after)
+        );
+        assert_eq!(
+            agent_doc_element_queue::queue_head_identity(&before),
+            agent_doc_element_queue::queue_head_identity(
+                "Sync PR and Jira state into this document."
+            )
+        );
+        let key = |body: &str| {
+            let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
+            agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap()[0]
+                .node_key
+                .clone()
+        };
+        assert_eq!(key(SUBPROMPT_BODY), key(&edited));
+        assert_eq!(
+            crate::queue_claim::claim_item_handle(&after),
+            "Sync PR and Jira state into this document."
+        );
+    }
+
+    /// A strike covers the parent and its children: the agent's strike wraps
+    /// the parent part only (the children stay a Markdown list), the struck
+    /// shape reads back as ONE completed entry, renders byte for byte, and
+    /// unstrike restores the live head.
+    #[test]
+    fn striking_a_parent_retires_its_subprompts_with_it() {
+        let doc = format!("<!-- agent:run -->\n{SUBPROMPT_BODY}<!-- /agent:run -->\n");
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        let struck =
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+                .unwrap();
+        assert!(
+            struck.contains(concat!(
+                "- ~~Sync PR and Jira state into this document.~~\n",
+                "  - So this is the first subtask.\n",
+            )),
+            "{struck}"
+        );
+        let body = &struck[struck.find('\n').unwrap() + 1..struck.find("<!-- /agent:run").unwrap()];
+        let entries = parse(body).unwrap();
+        assert!(
+            matches!(entries[0], QueueEntry::Completed(_)),
+            "{entries:?}"
+        );
+        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(render(&entries), body);
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["separate flat head"]
+        );
+        let struck_nodes = agent_doc_markdown_ast::mutations::item_nodes(&struck, "queue").unwrap();
+        assert_eq!(struck_nodes.len(), 2);
+        assert!(struck_nodes[0].item.struck);
+
+        let patch = agent_doc_markdown_ast::mutations::MutationNodePatch {
+            component: "queue".to_string(),
+            node_key: struck_nodes[0].node_key.clone(),
+            op: agent_doc_markdown_ast::mutations::MutationNodePatchOp::Unstrike,
+            content: None,
+            expected_content: None,
+            before: None,
+            after: None,
+            order: Vec::new(),
+        };
+        let restored = agent_doc_markdown_ast::mutations::apply_node_patches(
+            &struck,
+            std::slice::from_ref(&patch),
+        )
+        .unwrap();
+        assert_eq!(restored, doc);
+
+        // The entries-based completion path renders the same canonical shape.
+        let QueueEntry::Prompt(live) = parse(SUBPROMPT_BODY).unwrap()[0].clone() else {
+            unreachable!()
+        };
+        assert_eq!(
+            render(&[QueueEntry::Completed(live)]),
+            SUBPROMPT_BODY[..SUBPROMPT_BODY.find("- separate").unwrap()].replacen(
+                "- Sync PR and Jira state into this document.",
+                "- ~~Sync PR and Jira state into this document.~~",
+                1
+            )
+        );
+    }
+
+    /// Any other strike spelling still retires the children with the parent:
+    /// one completed entry whose render normalizes the strike spelling (as a
+    /// struck flat row's does) and keeps the children verbatim.
+    #[test]
+    fn a_non_canonical_parent_strike_retires_its_children() {
+        let body =
+            "- ~~parent~~ — auto-struck: answered (#ftstrike)\n  - child one\n  - child two\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(
+            matches!(entries[0], QueueEntry::Completed(_)),
+            "{entries:?}"
+        );
+        assert!(prompts(&entries).is_empty(), "{entries:?}");
+        assert_eq!(
+            render(&entries),
+            "- ~~parent~~\n  - child one\n  - child two\n"
+        );
+        let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(nodes[0].item.struck);
+        let body_start = doc.find('\n').unwrap() + 1;
+        assert_eq!(nodes[0].item.end_byte - body_start, body.len());
+    }
+
+    /// A subtree that contains tracked work is a `#f1s3` group, not one
+    /// prompt: nothing folds, the tracked leaf stays its own head.
+    #[test]
+    fn a_tracked_child_keeps_the_group_shape() {
+        let body = "- epic\n  - do [#alpha]\n  - remember the logs\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert!(entry_is_group_parent(&entries, 0));
+        let heads: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(heads, vec!["do [#alpha]", "remember the logs"]);
+        assert_eq!(render(&entries), body);
+    }
+
+    /// Lifecycle markers project onto the parent only, and a legacy child
+    /// marker (stamped when each child was its own head) is retired.
+    #[test]
+    fn lifecycle_projection_marks_the_parent_and_retires_child_markers() {
+        let body = concat!(
+            "- 📥 Sync PR and Jira state into this document.\n",
+            "  - 🚧 [#subagent:pmsync#1] So this is the first subtask.\n",
+            "  - 🟡 [#subagent:pmsync#1] This is the second subtask.\n",
+        );
+        let head = prompts(&parse(body).unwrap())[0].text.clone();
+        let (projected, _) = project_prompt_runtime_projections(
+            body,
+            &[QueueRowProjection {
+                text: head,
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+                owner: None,
+                reopen_completed: false,
+            }],
+        )
+        .unwrap()
+        .expect("projection changed the row");
+        assert_eq!(
+            projected,
+            concat!(
+                "- 🚧 Sync PR and Jira state into this document.\n",
+                "  - So this is the first subtask.\n",
+                "  - This is the second subtask.\n",
+            )
+        );
+    }
+
+    /// An editor placeholder between children keeps the block together; a
+    /// trailing one is dropped like any queue placeholder.
+    #[test]
+    fn subprompt_placeholders_never_split_or_extend_the_parent() {
+        let middle = "- parent\n  - one\n  - \n  - two\n";
+        let entries = parse(middle).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(prompts(&entries)[0].text, "parent\n  - one\n  - \n  - two");
+
+        let trailing = parse("- parent\n  - one\n  -\n").unwrap();
+        assert_eq!(prompts(&trailing).len(), 1);
+        assert_eq!(prompts(&trailing)[0].text, "parent\n  - one");
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`
@@ -7913,22 +8231,22 @@ mod tests {
         assert!(!reordered.contains_key("b"));
     }
 
-    /// Leaf-only execution: a parent is the group label and never yields a
-    /// runnable head; its children do.
+    /// Leaf-only execution: a parent of TRACKED children is the group label
+    /// and never yields a runnable head; its children do.
     #[test]
     fn group_parents_are_not_executable() {
-        let body = "- parent epic\n  - child one\n  - child two\n";
+        let body = "- parent epic\n  - do [#one]\n  - do [#two]\n";
         let entries = parse(body).unwrap();
 
         let runnable: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
         assert_eq!(
             runnable,
-            vec!["child one", "child two"],
+            vec!["do [#one]", "do [#two]"],
             "the parent label must not be executable"
         );
         assert_eq!(
             first_prompt(&entries).map(|p| p.text.as_str()),
-            Some("child one"),
+            Some("do [#one]"),
             "the drain head must skip the group label"
         );
     }
@@ -7941,11 +8259,11 @@ mod tests {
         assert!(!entry_is_group_parent(&flat, 0));
         assert_eq!(prompts(&flat).len(), 2, "a flat queue has no parents");
 
-        let nested = parse("- do the thing\n  - sub step\n").unwrap();
+        let nested = parse("- do the thing\n  - do [#substep]\n").unwrap();
         assert!(entry_is_group_parent(&nested, 0));
 
         // A LATER sibling at the same depth does not make an earlier item a parent.
-        let siblings = parse("- first\n- second\n  - only second has a child\n").unwrap();
+        let siblings = parse("- first\n- second\n  - do [#onlysecond]\n").unwrap();
         assert!(!entry_is_group_parent(&siblings, 0));
         assert!(entry_is_group_parent(&siblings, 1));
     }

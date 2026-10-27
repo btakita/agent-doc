@@ -23,11 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.557 from release commit `fec25bdee1`; tag `v0.35.557` is the stable latest release (GitHub Latest with 24 assets, PyPI 0.35.557 public, `make release` public-publication complete) and is installed locally (install-full). JetBrains classic/262/263 0.2.862/0.2.863/0.2.864 (modular IDEs need a restart to load them), VS Code 0.2.89, Zed 0.1.2. GH #378, #380 and #381 closed; GH #379 stays open pending Remote Dev proof (todo `#gh379-remotedev-proof`). v0.35.557 carries the GH #380 harness install-dir fallback (supervisor and headless), GH #381 project-preset queue heads, queue claims that end on a strike, never cross queues and cancel on a same-slot replacement (`#krwr`), actor writes fenced on generation plus record revision, the queued-/clear running/pending snapshot fix, the orphan drain yielding to a supervisor mid re-exec, stores and config resolved from the document instead of the process cwd, `agent-doc commit` refusing outside git, `agent-doc gc --retired-stores`, the debug log honoring the root ceiling, GH #339 JetBrains shell stage R1, VS Code Remote Dev / koffi parity, Zed registration identity, and an edit-proportional native replica flush. Post-release `origin/main` is `c7e7de85fc` (unreleased, installed locally): compaction commits only the compacted exchange, never an unanswered sibling edit (`#compactabsorbsedit`), and the remaining document reads (resync, terminal, claim --window fallback, template config) resolve from the document's store (`#cwdfallbackrest`).
+Latest release: agent-doc v0.35.557 (release commit `fec25bdee1`; GitHub Latest + PyPI 0.35.557). Main is at `dd9971e80e`, unreleased and installed locally (2026-10-27 17:54 EDT). Since v0.35.557: document-scoped store resolution, retained-projection clobber fix + follow-ups, Restart Agent `--expect-agent`, nested sub-prompts, `serve /save` 409 under an editor, in-flight typing hold, nested `--todo-add`. JetBrains plugins 0.2.865 / 0.2.866 / 0.2.867.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -458,6 +458,14 @@ That first needed a binary change. `--todo-add` refused multi-line text, so `fea
 |---|---|---|
 | `#servesavebypass` | `23b71bd99c` | `agent-doc serve` `POST /save` now refuses with **409** while an editor replica holds the document, and nothing is written or committed. Otherwise it writes through the document authority instead of a raw `fs::write`. A merge wasn't safe: the browser posts a whole document with no base, so a merge would drop your typing. |
 | `#inflighttypinghold` | `0154f75d3a` | The direct CLI write path now waits for editor typing that has been reported but not yet received. The hold also covers bursts after an earlier delta in the same epoch, using one rule shared by the CLI and the controller. A commit refused because an editor is quarantined now says so (`crdt_commit_barrier_refused_quarantined_replica`), instead of "convergence pending". |
+
+### Re: follow-ups filed — opus-5 · 2026-10-27T18:02-04:00
+
+I filed six follow-ups from this batch in the Icebox, and the Status sync block now shows main at `dd9971e80e` (installed, unreleased; latest release v0.35.557).
+- `#nestedechostrike`: the pmsync and ahfe rows stay ☑️ because no command can close a reported subagent row. Their work is finished: pmsync Part 1 shipped and Part 2 is a design doc; the ahfe evidence pass is done, and its Todo waits on your live check.
+- `#echosteermisread`, `#claimmarkersteer`: false steering. This cycle's "edited" report on the pmsync row was only the claim marker, so I did not forward anything to its finished worker.
+- `#servegetdisk`, `#holdroundtrip`: follow-ups to `#servesavebypass` and `#inflighttypinghold`.
+- `#nestedtodograndchildren`: `--todo-add` takes one level of nesting.
 <!-- agent:boundary:f9b5eee1 -->
 <!-- /agent:exchange -->
 
@@ -520,6 +528,12 @@ That first needed a binary change. `--todo-add` refused multi-line text, so `fea
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#nestedechostrike] A reported (☑️) subagent row cannot be closed. A `> **Queue prompt:**` echo of a parent with nested sub-prompts does not strike it (the pmsync row), and `queue consume --ack-id` refuses an id-backed reported row (the ahfe row). Both stay ☑️ after their work closed.
+- [ ] [#echosteermisread] Exchange steering reports the coordinator's own committed `> **Queue prompt:**` echo cells as new operator prompts, on almost every cycle.
+- [ ] [#claimmarkersteer] Steering reports a claimed row as operator-edited (dispatch=forward_to_owner) when the only difference is the binary ☑️ claim marker plus nested rows that were there at claim time. It asks to forward to a worker that already finished.
+- [ ] [#servegetdisk] serve follow-ups: GET /doc still reads disk, not the authority; a browser save carries no base revision, so it cannot be merged; the editor-attached check races the commit.
+- [ ] [#holdroundtrip] The in-flight typing hold adds a controller round-trip to every direct CLI write and can stall up to 60s. session-check should report the quarantine state that the new commit refusal names.
+- [ ] [#nestedtodograndchildren] `--todo-add` / `--todo-edit` accept one nesting level only; grandchildren and checkbox children are refused.
 - [ ] [#controllersocketlock] From the automation-API design: lock down the controller socket (socket/dir permissions, SO_PEERCRED same-user check) and stop a request that omits binary_version from skipping the stale-binary refusal (agent-doc-controller-io rpc.rs:21823-21833); fix specs/10-security.md:10 ('no network services') now that agent-doc serve can bind non-loopback with bearer tokens. Also from nested sub-prompts: a do [#id] parent with nested free-text children still runs the children as separate heads.
 - [ ] [#jbdocdrift] JetBrains doc drift found by #movedsingleplugin: editors/PLUGIN-SPEC.md:33-35 says two disjoint packages (there are three); PLUGIN-SPEC.md:74-79 keeps the old full module-graph replacement wording that contradicts the restated Exact-263 reopen rule (editors/jetbrains/SPEC.md:286-294,701-720); editors/jetbrains-262/README.md:114-118 says the resolver must not choose the exact-262 ZIP (it now picks the ranged ZIP). Also pending operator decision: merge 262+263 into one 262-263.* modular ZIP (option B). And VS Code Restart Agent needs the same --expect-agent check as JetBrains.
 - [ ] [#cwdfallbacktail] Leftover cwd uses found by #cwdfallbackrest: (1) agent_doc_git_io::dirs::resolve_pane_cwd falls back to the process cwd for a document outside any git repo, and claim/route record it as the registry entry's cwd (should likely be the canonical parent); (2) agent-doc-sync ResyncTargetMatcher / resolve_absolute_file_path resolve relative registry entries against the process cwd (filter_registry_for_target, targeted prune) instead of the store; (3) terminal::run builds Tmux::default() instead of configured_tmux(), ignoring AGENT_DOC_TMUX_SOCKET and the configured tmux binary (also why terminal has no CLI test).

@@ -11471,6 +11471,24 @@ pub fn dispatch_turn_pending_for_file(file: &Path) -> Result<bool> {
     state_store::has_pending_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
 }
 
+/// `#clearqueuedciflake`: the dispatch receipt proving this document's turn
+/// running or pending, read as one snapshot. Use this, never
+/// [`dispatch_turn_running_for_file`] then [`dispatch_turn_pending_for_file`]:
+/// a turn starting between those two reads reads as neither. See
+/// [`state_store::open_dispatch_turn_as_of`]. A missing project root reads as
+/// `None`.
+pub fn open_dispatch_turn_for_file(file: &Path) -> Result<Option<state_store::OpenDispatchTurn>> {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Ok(None);
+    };
+    let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+        &project_root,
+        &file.to_string_lossy(),
+    );
+    let conn = open_state_db(&project_root)?;
+    state_store::open_dispatch_turn_as_of(&conn, &document_id, timestamp_secs() as i64)
+}
+
 /// `#clearqueuedliveturn`: an open dispatch for this document accepted after
 /// `after_secs` and at or before `at_or_before_secs`. See
 /// [`state_store::has_open_dispatch_accepted_between`].

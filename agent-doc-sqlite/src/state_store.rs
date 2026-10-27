@@ -4889,6 +4889,62 @@ pub fn has_pending_dispatch_turn_as_of(
     Ok(count > 0)
 }
 
+/// `#clearqueuedciflake`: which dispatch receipt proves this document's turn
+/// live or about to start, read as ONE snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenDispatchTurn {
+    /// A `running` receipt: [`has_running_dispatch_turn_as_of`].
+    Running,
+    /// An `accepted`/`queued` receipt whose turn has not started:
+    /// [`has_pending_dispatch_turn_as_of`].
+    Pending,
+}
+
+/// `#clearqueuedciflake`: [`has_running_dispatch_turn_as_of`] OR
+/// [`has_pending_dispatch_turn_as_of`], answered by one statement. A started
+/// turn's preflight promotes its receipt `accepted` -> `running`
+/// ([`mark_open_dispatches_turn_started`]) in one UPDATE; asked as two separate
+/// reads, that promotion landing between them reads as neither, and an
+/// operator clear waiting on the receipt was typed into the turn that had just
+/// started (main CI 40485993738). `Running` wins when both match.
+pub fn open_dispatch_turn_as_of(
+    conn: &Connection,
+    document_id: &str,
+    now_secs: i64,
+) -> Result<Option<OpenDispatchTurn>> {
+    let (running, pending): (i64, i64) = conn.query_row(
+        r#"
+        SELECT
+          COALESCE(SUM(
+            COALESCE(result_status, '') = 'running'
+            AND timestamp > ?2
+          ), 0),
+          COALESCE(SUM(
+            COALESCE(result_status, '') IN ('accepted', 'queued')
+            AND command_kind NOT LIKE 'session\_%' ESCAPE '\'
+            AND timestamp > ?3
+          ), 0)
+        FROM dispatch_attempts
+        WHERE document_id = ?1
+          AND failed_stage IS NULL
+          AND dispatch_start_proven = 0
+        "#,
+        params![
+            document_id,
+            now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS,
+            now_secs - DISPATCH_PRE_TURN_GRACE_SECS
+        ],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(if running > 0 {
+        Some(OpenDispatchTurn::Running)
+    } else if pending > 0 {
+        Some(OpenDispatchTurn::Pending)
+    } else {
+        None
+    })
+}
+
 /// `#clearqueuedliveturn`: does this document have an open (accepted, queued or
 /// running, unsettled) dispatch accepted AFTER `after_secs` and at or before
 /// `at_or_before_secs`? A deferred operator clear asks this when a newer prompt
@@ -7616,6 +7672,61 @@ mod tests {
             !has_pending_dispatch_turn_as_of(&conn, "doc", now)?,
             "a started turn is running, not pending"
         );
+        Ok(())
+    }
+
+    /// `#clearqueuedciflake`: the one-snapshot read agrees with the running and
+    /// pending reads at every receipt state, so a turn's `accepted` ->
+    /// `running` promotion is seen as one or the other, never as neither.
+    #[test]
+    fn open_dispatch_turn_reads_running_or_pending_in_one_snapshot() -> Result<()> {
+        let conn = dispatch_attempts_fixture()?;
+        let now = 1_000_000i64;
+        let agrees = |now: i64| -> Result<Option<OpenDispatchTurn>> {
+            let snapshot = open_dispatch_turn_as_of(&conn, "doc", now)?;
+            let expected = if has_running_dispatch_turn_as_of(&conn, "doc", now)? {
+                Some(OpenDispatchTurn::Running)
+            } else if has_pending_dispatch_turn_as_of(&conn, "doc", now)? {
+                Some(OpenDispatchTurn::Pending)
+            } else {
+                None
+            };
+            assert_eq!(snapshot, expected, "at now={now}");
+            Ok(snapshot)
+        };
+        assert_eq!(agrees(now)?, None);
+        conn.execute(
+            "INSERT INTO dispatch_attempts (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+             VALUES ('doc', 1, 'session_clear', 'accepted', 0, ?1)",
+            params![now - 1],
+        )?;
+        assert_eq!(agrees(now)?, None, "an operator clear's own receipt");
+        insert_open_dispatch(&conn, "doc", now - 3, "accepted")?;
+        assert_eq!(agrees(now)?, Some(OpenDispatchTurn::Pending));
+        assert_eq!(
+            agrees(now + DISPATCH_PRE_TURN_GRACE_SECS)?,
+            None,
+            "a trigger that never started is lost after the pre-turn grace"
+        );
+        assert_eq!(mark_open_dispatches_turn_started(&conn, "doc")?, 1);
+        assert_eq!(agrees(now)?, Some(OpenDispatchTurn::Running));
+        assert_eq!(
+            agrees(now + DISPATCH_PRE_TURN_GRACE_SECS)?,
+            Some(OpenDispatchTurn::Running),
+            "a running turn outlives the pre-turn grace"
+        );
+        assert_eq!(
+            agrees(now + OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS)?,
+            None,
+            "a leaked running receipt is bounded by the in-flight horizon"
+        );
+        insert_open_dispatch(&conn, "doc", now - 2, "accepted")?;
+        assert_eq!(
+            agrees(now)?,
+            Some(OpenDispatchTurn::Running),
+            "running wins over a newer accepted dispatch"
+        );
+        assert!(open_dispatch_turn_as_of(&conn, "other-doc", now)?.is_none());
         Ok(())
     }
 

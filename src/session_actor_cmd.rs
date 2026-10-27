@@ -1602,21 +1602,25 @@ fn harness_turn_live_evidence(
     {
         return Some("turn_active_lease");
     }
-    if agent_doc_controller_io::project_controller::dispatch_turn_running_for_file(
+    // A `running` receipt, or (`#clearqueuedliveturn`) a dispatch accepted for
+    // this document whose turn has not started yet (Run Agent Doc pressed,
+    // trigger not yet submitted or not yet past its `UserPromptSubmit` hooks):
+    // a clear typed now would race the trigger into the composer; queue it
+    // behind that turn instead. Bounded by the pre-turn grace, so a lost
+    // trigger cannot hold clears. `#clearqueuedciflake`: one snapshot, so a
+    // turn whose preflight promotes `accepted` -> `running` mid-read is still
+    // seen as one or the other, never as neither.
+    match agent_doc_controller_io::project_controller::open_dispatch_turn_for_file(
         &ctx.canonical_file,
     )
-    .unwrap_or(false)
+    .ok()
+    .flatten()?
     {
-        return Some("dispatch_turn_running");
+        agent_doc_sqlite::state_store::OpenDispatchTurn::Running => Some("dispatch_turn_running"),
+        agent_doc_sqlite::state_store::OpenDispatchTurn::Pending => {
+            Some(DISPATCH_TURN_PENDING_EVIDENCE)
+        }
     }
-    // `#clearqueuedliveturn`: a dispatch accepted for this document whose turn
-    // has not started yet (Run Agent Doc pressed, trigger not yet submitted or
-    // not yet past its `UserPromptSubmit` hooks). A clear typed now would race
-    // the trigger into the composer; queue it behind that turn instead. Bounded
-    // by the pre-turn grace, so a lost trigger cannot hold clears.
-    agent_doc_controller_io::project_controller::dispatch_turn_pending_for_file(&ctx.canonical_file)
-        .unwrap_or(false)
-        .then_some(DISPATCH_TURN_PENDING_EVIDENCE)
 }
 
 /// `#clearqueuedliveturn`: how old the live-turn evidence a queued clear waits

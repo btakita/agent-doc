@@ -118,8 +118,13 @@
 //!   saves only when at least one entry changed.
 //! - `is_file_rename` is pure (no tmux dependency): it compares two paths and checks
 //!   disk existence of the old one. Safe to call from any context.
-//! - File rename re-registration reuses the existing `sessions::register` path, so
-//!   single-session-per-pane invariant and `RegistryLock` apply as normal.
+//! - File rename re-registration goes through the recovered-owner bind
+//!   (`reregister_recovered_owner` -> `sessions::rebind_recovered_owner_in`), so the
+//!   single-session-per-pane invariant and `RegistryLock` apply as normal and the
+//!   actor write is fenced on generation + `ActorRevision` (`#syncbindingfence`).
+//!   A document with no `.agent-doc` ancestor binds in its canonical parent's store,
+//!   as `start` and the route do; a registry-only refresh never creates that store
+//!   and never writes the process cwd's store (`#syncnorootfallback`).
 //! - **Column memory:** project `state.db` persists a column→agent-doc mapping.
 //!   When a column has no agent doc (user switches to a non-session file), sync substitutes
 //!   the last known agent doc for that column index. Empty `--col` placeholders from editor
@@ -6850,12 +6855,31 @@ fn rebind_recovered_owner_pane(
     pane_id: &str,
     may_write_actor: bool,
 ) -> anyhow::Result<()> {
-    let Some((canonical_file, project_root, _registry_key)) = registry_location_for_file(file)
-    else {
-        return sessions::register(session_id, pane_id, &file.to_string_lossy());
-    };
-    let file_str = registry_relative_file_path(&project_root, &canonical_file);
+    rebind_recovered_owner_pane_with(
+        file,
+        session_id,
+        pane_id,
+        may_write_actor,
+        || observe_recovered_owner_pane(tmux, file, session_id, pane_id),
+        &mut || {},
+    )
+    .map(|_| ())
+}
 
+/// What a recovered-owner bind records about the pane: the live supervisor
+/// proven in it (if any), the pid to register, and the pane's window.
+struct RecoveredOwnerPaneEvidence {
+    supervisor: Option<SupervisorIdentity>,
+    pid: u32,
+    window: String,
+}
+
+fn observe_recovered_owner_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+) -> RecoveredOwnerPaneEvidence {
     let supervisor = lookup_registry_entry_for_file_session(file, session_id)
         .filter(|entry| {
             entry.pane == pane_id
@@ -6876,23 +6900,83 @@ fn rebind_recovered_owner_pane(
         .map(|identity| identity.pid)
         .unwrap_or_else(|| pane_pid_from_tmux(tmux, pane_id).unwrap_or(std::process::id()));
     let window = agent_doc_tmux_io::target_window_id(tmux, pane_id).unwrap_or_default();
-    let cwd = project_root.to_string_lossy();
-    let outcome = sessions::rebind_recovered_owner_in(
-        &project_root,
+    RecoveredOwnerPaneEvidence {
+        supervisor,
+        pid,
+        window,
+    }
+}
+
+/// The store a recovered-owner bind for `file` decides against and writes:
+/// `(canonical file, store root)`.
+///
+/// `#syncnorootfallback`: a document inside an agent-doc project uses that
+/// project's `.agent-doc/state.db`. A document with no `.agent-doc` ancestor
+/// uses its canonical parent directory, the same store `start` (which falls
+/// back to `canonical.parent()`) and the route
+/// ([`agent_doc_project_root_io::project_root_or_file_parent`]) bind it in.
+/// Until that store exists the document has no actor record and no registry
+/// entry, so a registry refresh (`may_write_actor: false`) has nothing to
+/// refresh and gets `None`; it never creates the store. Only a recovery that
+/// may bind creates it, through the fenced bind.
+///
+/// The fallback this replaces called `sessions::register`, which resolves its
+/// store from the process cwd, not the document: it re-projected an unfenced
+/// `Ready` actor record (`register`/`register`) into whatever project the sync
+/// process ran in (creating `<cwd>/.agent-doc/` when there was none), evicted
+/// that project's registry entries on the same pane, and did so even for a
+/// registry-only refresh. No reader of the document consults the cwd's store.
+fn recovered_owner_store(file: &Path, may_write_actor: bool) -> Option<(PathBuf, PathBuf)> {
+    if let Some((canonical, project_root, _registry_key)) = registry_location_for_file(file) {
+        return Some((canonical, project_root));
+    }
+    let canonical = canonicalize_sync_file(file)?;
+    let store_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical).ok()?;
+    (may_write_actor || agent_doc_sqlite::state_store::state_db_path(&store_root).is_file())
+        .then_some((canonical, store_root))
+}
+
+/// [`rebind_recovered_owner_pane`] with the pane observation injected and a
+/// hook between the bind's decision read and its fenced write, so tests drive
+/// the store choice and the race without a tmux server. `observe` runs only
+/// once a store is chosen. Returns `None` when there is no store to refresh.
+fn rebind_recovered_owner_pane_with(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    may_write_actor: bool,
+    observe: impl FnOnce() -> RecoveredOwnerPaneEvidence,
+    between_decision_and_write: &mut dyn FnMut(),
+) -> anyhow::Result<Option<sessions::RecoveredOwnerBind>> {
+    let Some((canonical_file, store_root)) = recovered_owner_store(file, may_write_actor) else {
+        sync_log(&format!(
+            "registry_refresh_skipped_no_actor_store file={} pane={}",
+            file.display(),
+            pane_id
+        ));
+        return Ok(None);
+    };
+    let file_str = registry_relative_file_path(&store_root, &canonical_file);
+    let evidence = observe();
+    let cwd = store_root.to_string_lossy();
+    let outcome = sessions::rebind_recovered_owner_with_hook_in(
+        &store_root,
         sessions::RecoveredOwnerBinding {
             session_id,
             pane_id,
             file: &file_str,
-            pid,
-            window: &window,
+            pid: evidence.pid,
+            window: &evidence.window,
             cwd: &cwd,
-            supervisor_instance_id: supervisor
+            supervisor_instance_id: evidence
+                .supervisor
                 .as_ref()
                 .map(|identity| identity.instance_id.as_str()),
             may_write_actor,
         },
+        between_decision_and_write,
     )?;
-    match outcome {
+    match &outcome {
         sessions::RecoveredOwnerBind::OwnerSuperseded {
             pane_id: owner_pane,
             generation,
@@ -6915,7 +6999,7 @@ fn rebind_recovered_owner_pane(
         sessions::RecoveredOwnerBind::RegistryRefreshed
         | sessions::RecoveredOwnerBind::Bound { .. } => {}
     }
-    Ok(())
+    Ok(Some(outcome))
 }
 
 fn find_registered_pane_via_path_provenance(
@@ -14269,5 +14353,185 @@ mod tests {
 
         assert_eq!(columns, vec!["tasks/main.md"]);
         assert_eq!(dropped, vec!["tasks/detached.md", "tasks/detached.md"]);
+    }
+
+    /// `#syncnorootfallback` fixture: a document with no `.agent-doc` ancestor,
+    /// and a separate agent-doc project the sync process runs in (its cwd).
+    /// Returns `(cwd project, document parent, document)`, all canonical.
+    fn rootless_document_fixture(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+        let cwd_project = dir.join("cwd-project");
+        std::fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+        let loose = dir.join("loose");
+        std::fs::create_dir_all(&loose).unwrap();
+        let doc = loose.join("rootless.md");
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: rootless-session\nagent_doc_format: template\n---\n",
+        )
+        .unwrap();
+        let (cwd_project, loose, doc) = (
+            cwd_project.canonicalize().unwrap(),
+            loose.canonicalize().unwrap(),
+            doc.canonicalize().unwrap(),
+        );
+        assert!(
+            registry_location_for_file(&doc).is_none(),
+            "fixture document must have no project root"
+        );
+        (cwd_project, loose, doc)
+    }
+
+    fn rootless_pane_evidence() -> RecoveredOwnerPaneEvidence {
+        RecoveredOwnerPaneEvidence {
+            supervisor: None,
+            pid: 4242,
+            window: "@3".to_string(),
+        }
+    }
+
+    /// The cwd project's store holds nothing for the rootless document: the
+    /// fallback used to `sessions::register` into it.
+    fn assert_cwd_store_untouched(cwd_project: &Path, doc: &Path) {
+        let doc_key = doc.to_string_lossy();
+        assert_eq!(
+            agent_doc_session_actor_io::load_record_in(cwd_project, &doc_key).unwrap(),
+            None,
+            "the sync process cwd's store is not the document's actor store"
+        );
+        assert!(
+            agent_doc_session_registry_io::load_in(cwd_project)
+                .unwrap()
+                .values()
+                .all(|entry| entry.session_id != "rootless-session"),
+            "no registry entry for the rootless document lands in the cwd's store"
+        );
+    }
+
+    /// A registry-only refresh (`may_write_actor: false`) of a document with no
+    /// project root has no actor and no registry to refresh. The old fallback
+    /// wrote an unfenced `Ready` actor record into the process cwd's store.
+    #[test]
+    fn registry_refresh_for_a_rootless_document_writes_no_actor_or_store() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (cwd_project, loose, doc) = rootless_document_fixture(dir.path());
+        let _cwd = ScopedCurrentDir::set(&cwd_project);
+
+        let mut observed = false;
+        let outcome = rebind_recovered_owner_pane_with(
+            &doc,
+            "rootless-session",
+            "%77",
+            false,
+            || {
+                observed = true;
+                rootless_pane_evidence()
+            },
+            &mut || panic!("a refresh with no store makes no decision"),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, None);
+        assert!(!observed, "no store, so no pane evidence is gathered");
+        assert!(
+            !loose.join(".agent-doc").exists(),
+            "a registry refresh never creates the document's store"
+        );
+        assert_cwd_store_untouched(&cwd_project, &doc);
+    }
+
+    /// A recovery that may bind writes the document's own store (its canonical
+    /// parent, as `start` and the route use) through the fenced bind, never the
+    /// process cwd's store.
+    #[test]
+    fn recovered_owner_bind_for_a_rootless_document_binds_in_its_parent_store() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        let (cwd_project, loose, doc) = rootless_document_fixture(dir.path());
+        let _cwd = ScopedCurrentDir::set(&cwd_project);
+
+        let outcome = rebind_recovered_owner_pane_with(
+            &doc,
+            "rootless-session",
+            "%77",
+            true,
+            rootless_pane_evidence,
+            &mut || {},
+        )
+        .unwrap();
+
+        assert!(
+            matches!(outcome, Some(sessions::RecoveredOwnerBind::Bound { .. })),
+            "{outcome:?}"
+        );
+        let record = agent_doc_session_actor_io::load_record_in(&loose, &doc.to_string_lossy())
+            .unwrap()
+            .expect("the bind lands in the document's parent store");
+        assert_eq!(record.pane_id, "%77");
+        assert_eq!(record.session_id, "rootless-session");
+        assert_eq!(record.window_id, "@3");
+        assert_eq!(record.state, ActorState::Ready);
+        assert_eq!(
+            (
+                record.last_transition.caller.as_str(),
+                record.last_transition.reason.as_str()
+            ),
+            ("route", "dispatch_bind")
+        );
+        assert_cwd_store_untouched(&cwd_project, &doc);
+    }
+
+    /// An owner `start` commits the rootless document to another pane between
+    /// the recovery's decision read and its write. The fenced bind loses the
+    /// compare-and-swap, re-decides, and leaves the newer owner alone.
+    #[test]
+    fn recovered_owner_bind_for_a_rootless_document_loses_to_an_owner_start_after_its_read() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        let (cwd_project, loose, doc) = rootless_document_fixture(dir.path());
+        let _cwd = ScopedCurrentDir::set(&cwd_project);
+
+        let mut started = false;
+        let mut owner_starts = || {
+            if !started {
+                started = true;
+                // `start` creates the document's parent store if the recovery's
+                // decision read has not already.
+                std::fs::create_dir_all(loose.join(".agent-doc")).unwrap();
+                agent_doc_session_actor_io::record_session_start_direct(
+                    &doc,
+                    "rootless-session",
+                    "%9",
+                    "@7",
+                    1,
+                )
+                .unwrap();
+            }
+        };
+        let outcome = rebind_recovered_owner_pane_with(
+            &doc,
+            "rootless-session",
+            "%77",
+            true,
+            rootless_pane_evidence,
+            &mut owner_starts,
+        )
+        .unwrap();
+
+        assert!(started, "the race ran inside the decision/write window");
+        let record = agent_doc_session_actor_io::load_record_in(&loose, &doc.to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.pane_id, "%9");
+        assert_eq!(record.generation, 1);
+        assert_eq!(record.state, ActorState::Starting);
+        assert_eq!(record.last_transition.caller, "start");
+        assert!(
+            matches!(
+                &outcome,
+                Some(sessions::RecoveredOwnerBind::OwnerSuperseded { pane_id, .. }) if pane_id == "%9"
+            ),
+            "{outcome:?}"
+        );
+        assert_cwd_store_untouched(&cwd_project, &doc);
     }
 }

@@ -1085,6 +1085,19 @@ revision (see the same-generation lifecycle invariant in
     `route`/`dispatch_bind` projection), fenced on the record read. After a lost
     compare-and-swap an owner or operator commit for another live pane wins and
     nothing is written; a projection write is re-decided.
+  - Both of the above resolve the document's actor store from the document,
+    never from the sync process cwd (`#syncnorootfallback`). A document with no
+    `.agent-doc` ancestor uses its canonical parent directory's store, the
+    store `start` (`canonical.parent()`) and the route
+    (`project_root_or_file_parent`) bind it in. Until that store exists the
+    document has no actor record and no registry entry: the registry refresh
+    writes nothing and never creates the store, and a recovered-owner
+    re-registration binds through the same fenced `rebind_recovered_owner_in`
+    in that store (creating it, as `start` would). The fallback this replaced
+    called `sessions::register`, which re-projected an unfenced `Ready` record
+    into the cwd project's store (creating `<cwd>/.agent-doc/` if absent and
+    evicting that project's registry entries on the same pane) even for a
+    registry-only refresh, where no reader of the document ever looks.
   - The pane-window correction (`#panewindowbindingrebind`, doctor and the
     post-layout pass) keeps the observed pane, session, generation, and state
     and rewrites only the window (`correct_binding_window_fenced_in`). A record

@@ -352,10 +352,10 @@ class RefreshBeforeApplyConflictTest {
             Files.readString(
                 listOf(
                         Paths.get(
-                            "src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"
+                            "src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"
                         ),
                         Paths.get(
-                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"
+                            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"
                         ),
                     )
                     .first { Files.exists(it) }
@@ -390,7 +390,7 @@ class RefreshBeforeApplyConflictTest {
         val layoutDetector = read("LayoutChangeDetector.kt")
         val visualHighlighter = read("VisualHighlighterManager.kt")
         val nativeReload = read("NativeReloadCoordinator.kt")
-        val lifecycle = read("PluginLifecycleListener.kt")
+        val lifecycle = read("AgentDocProjectLifecycle.kt")
 
         assertFalse("status widget must not own a Swing timer", turnWidget.contains("Alarm("))
         assertFalse(

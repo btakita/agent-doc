@@ -67,11 +67,18 @@ class PluginGenerationRetirementTest {
         val lifecycle = source("PluginLifecycleListener.kt")
         val cleanup = lifecycle.substringAfter("class PluginUnloadCleanupService")
         val retire = cleanup.indexOf("PluginGeneration.retire()")
-        val dispose = cleanup.indexOf("disposeProjectResources(project)")
+        // GH #339 R1: the shell retires the implementation generation, whose `retire` disposes
+        // every open project (AgentDocProjectLifecycle.retire).
+        val dispose = cleanup.indexOf("retireActiveGeneration()")
         assertTrue("unload must retire the generation", retire >= 0)
         assertTrue("retire must precede disposal", dispose > retire)
         val closeResources = cleanup.indexOf("PluginGeneration.closeResources()")
         assertTrue("global resources close only after project teardown", closeResources > dispose)
+        val implRetire = source("AgentDocProjectLifecycle.kt").substringAfter("fun retire()")
+        assertTrue(
+            "the generation's own retirement marks it retired before disposing projects",
+            implRetire.indexOf("PluginGeneration.retire()") in 0 until implRetire.indexOf("disposeProjectResources(project)"),
+        )
 
         val getInstance = source("CrdtReplicaManager.kt")
             .substringAfter("fun getInstance(project: Project): CrdtReplicaManager")

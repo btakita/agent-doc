@@ -116,7 +116,7 @@ class DynamicPluginUpgradeReattachTest {
             wait.contains("return nativeReloadReplicaRestartReport("),
         )
 
-        val lifecycle = source("kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+        val lifecycle = source("kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt")
         assertTrue(
             "the attach bridge entry point must hand back a receipt, not a bare count",
             lifecycle.contains("fun initializeOpenProjectsAfterDynamicLoad(): String"),

@@ -78,9 +78,9 @@ class PeerReplicaPullTest {
     @Test
     fun `startup pulls missing replicas instead of blindly refreshing every open document`() {
         val source = Files.readString(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt")
                 .takeIf { Files.exists(it) }
-                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
         )
 
         assertTrue(

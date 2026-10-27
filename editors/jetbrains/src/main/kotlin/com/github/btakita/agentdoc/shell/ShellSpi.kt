@@ -1,6 +1,12 @@
 package com.github.btakita.agentdoc.shell
 
+import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.openapi.editor.event.EditorMouseListener
+import com.intellij.openapi.project.Project
+import com.intellij.util.messages.Topic
 
 /*
  * GH #339 R1: the shell/implementation boundary. See `editors/jetbrains/SPEC.md`
@@ -39,20 +45,67 @@ interface ImplGeneration {
      */
     fun action(actionId: String): ImplAction?
 
+    /**
+     * The shell's `ProjectManagerListener.projectOpened`, forwarded. Runs on every delivery,
+     * including the attach bridge's replay after a dynamic load; the generation decides whether
+     * the project still needs initializing.
+     */
+    fun projectOpened(project: Project)
+
+    /**
+     * Release this generation's resources for [project]: the shell's `projectClosed` and its
+     * project lifecycle service's disposal both forward here.
+     */
+    fun disposeProject(project: Project)
+
+    /**
+     * The classic attach bridge's `initializeOpenProjectsAfterDynamicLoad` hook, forwarded from
+     * the shell's static entry point. Returns the bridge's one-line reattach receipt.
+     */
+    fun initializeOpenProjectsAfterDynamicLoad(): String
+
+    /** The classic attach bridge's `disposeOpenProjectsForDynamicUnload` hook; the projects released. */
+    fun disposeOpenProjectsForDynamicUnload(): Int
+
     /** Stop work and return version-neutral state for the next generation. */
     fun quiesce(): String
 
     /** Undo [quiesce] when a replacement generation failed before activation. */
     fun resume()
+
+    /**
+     * Release everything this generation created, once, after [quiesce]: in R1 that is plugin
+     * unload (or application exit), the only time a generation leaves.
+     */
+    fun retire()
 }
 
-/** What the shell lends a generation. R1 lends identity only; later classes add their hooks here. */
+/**
+ * What the shell lends a generation: its identity, and the shell-owned forwarders it stages its
+ * platform handlers through. Each `parent` is the disposable that released the handler's own
+ * platform registration before R1; disposing it removes the handler from the forwarder.
+ */
 interface GenerationContext {
     /** Local, per-JVM generation counter; never compared across JVMs. */
     val generation: Long
 
     /** The backend-assigned swap epoch; 0 until a live swap exists (R3). */
     val epoch: Long
+
+    /** Tier A: [topic] on the application message bus. */
+    fun <L : Any> subscribe(topic: Topic<L>, handler: L, parent: Disposable)
+
+    /** Tier A: [topic] on [project]'s message bus. */
+    fun <L : Any> subscribe(project: Project, topic: Topic<L>, handler: L, parent: Disposable)
+
+    /** Tier A: `EditorFactory.eventMulticaster.addDocumentListener`. */
+    fun addDocumentListener(listener: DocumentListener, parent: Disposable)
+
+    /** Tier A: `EditorFactory.eventMulticaster.addEditorMouseListener`. */
+    fun addEditorMouseListener(listener: EditorMouseListener, parent: Disposable)
+
+    /** Tier A: `EditorFactory.addEditorFactoryListener`. */
+    fun addEditorFactoryListener(listener: EditorFactoryListener, parent: Disposable)
 }
 
 /**

@@ -22,7 +22,8 @@ class EditorFocusSyncListenerTest {
         assertTrue(listener.contains("EditorMouseListener"))
         assertTrue(listener.contains("override fun mousePressed(event: EditorMouseEvent)"))
         assertTrue(listener.contains("handleEditorActivated(event.editor)"))
-        assertTrue(listener.contains("factory.eventMulticaster.addEditorMouseListener(mouseListener, this)"))
+        // GH #339 R1 Tier A: staged through the shell forwarder for the multicaster.
+        assertTrue(listener.contains("GenerationListeners.addEditorMouseListener(mouseListener, this)"))
         assertTrue(listener.contains("if (editor.project != project) return"))
         assertTrue(!listener.contains("editorEx.addEditorMouseListener"))
         assertTrue(
@@ -251,7 +252,8 @@ class EditorFocusSyncListenerTest {
         assertTrue(body.contains("FileEditorManagerListener.FILE_EDITOR_MANAGER"))
         assertTrue(body.contains("override fun fileOpened(source: FileEditorManager, file: VirtualFile)"))
         assertTrue(body.contains("override fun selectionChanged(event: FileEditorManagerEvent)"))
-        assertTrue(body.contains("readinessConnection.getAndSet(null)?.disconnect()"))
+        // GH #339 R1 Tier A: the readiness subscription is staged under a disposable it releases.
+        assertTrue(body.contains("readinessConnection.getAndSet(null)?.let(Disposer::dispose)"))
         // Every read of the split tree goes through the readiness guard.
         val unguardedReads = Regex("""\.splitters as\? Container""").findAll(body).count()
         val guardedReads =

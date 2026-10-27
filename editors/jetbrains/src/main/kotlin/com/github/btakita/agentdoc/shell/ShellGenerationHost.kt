@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc.shell
 
+import com.github.btakita.agentdoc.ProjectPluginLifecycleService
 import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
 import com.github.btakita.agentdoc.shell.receipt.SHELL_SPI_VERSION
 import com.github.btakita.agentdoc.shell.receipt.ShellIdentity
@@ -7,6 +8,12 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.DocumentListener
+import com.intellij.openapi.editor.event.EditorFactoryListener
+import com.intellij.openapi.editor.event.EditorMouseListener
+import com.intellij.openapi.project.Project
+import com.intellij.util.messages.Topic
 
 /**
  * GH #339 R1: the shell's generation host, one per JVM. It instantiates the implementation
@@ -26,9 +33,55 @@ class ShellGenerationHost : Disposable {
     /** Set by plugin unload; a late forwarder call then finds no generation instead of making one. */
     @Volatile private var disposed = false
 
+    /** Set once the active generation has been retired; it then stages no more handlers. */
+    @Volatile private var retired = false
+
     private class ActiveGeneration(val impl: ImplGeneration, val receipt: ActivationReceipt)
 
-    private class HostContext(override val generation: Long, override val epoch: Long) : GenerationContext
+    /**
+     * Application-level Tier A forwarders: the application message bus, the editor event
+     * multicaster and the editor factory. Their platform registrations end with this host.
+     */
+    internal val applicationListeners =
+        ShellListenerHub(this, "application") { ApplicationManager.getApplication().messageBus }
+
+    private inner class HostContext(override val generation: Long, override val epoch: Long) : GenerationContext {
+        private fun admits(what: String): Boolean {
+            if (!retired) return true
+            LOG.info("[shell] retired generation $generation staged $what after retirement; ignored")
+            return false
+        }
+
+        override fun <L : Any> subscribe(topic: Topic<L>, handler: L, parent: Disposable) {
+            if (admits(topic.displayName)) applicationListeners.subscribe(topic, handler, parent)
+        }
+
+        override fun <L : Any> subscribe(project: Project, topic: Topic<L>, handler: L, parent: Disposable) {
+            if (!admits(topic.displayName)) return
+            project.getService(ProjectPluginLifecycleService::class.java).listeners.subscribe(topic, handler, parent)
+        }
+
+        override fun addDocumentListener(listener: DocumentListener, parent: Disposable) {
+            if (!admits(DOCUMENT_LISTENERS)) return
+            applicationListeners.addListener(DOCUMENT_LISTENERS, DocumentListener::class.java, listener, parent) { forwarder, owner ->
+                EditorFactory.getInstance().eventMulticaster.addDocumentListener(forwarder, owner)
+            }
+        }
+
+        override fun addEditorMouseListener(listener: EditorMouseListener, parent: Disposable) {
+            if (!admits(EDITOR_MOUSE_LISTENERS)) return
+            applicationListeners.addListener(EDITOR_MOUSE_LISTENERS, EditorMouseListener::class.java, listener, parent) { forwarder, owner ->
+                EditorFactory.getInstance().eventMulticaster.addEditorMouseListener(forwarder, owner)
+            }
+        }
+
+        override fun addEditorFactoryListener(listener: EditorFactoryListener, parent: Disposable) {
+            if (!admits(EDITOR_FACTORY_LISTENERS)) return
+            applicationListeners.addListener(EDITOR_FACTORY_LISTENERS, EditorFactoryListener::class.java, listener, parent) { forwarder, owner ->
+                EditorFactory.getInstance().addEditorFactoryListener(forwarder, owner)
+            }
+        }
+    }
 
     /** Activate the implementation generation if it is not active yet; null once unloading. */
     fun activate(): ImplGeneration? = activeGeneration()?.impl
@@ -78,22 +131,46 @@ class ShellGenerationHost : Disposable {
     private fun inactiveReceipt(): ActivationReceipt =
         ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND)
 
-    override fun dispose() {
-        val retired = synchronized(lock) {
+    /**
+     * Retire the active generation now, once: it stops staging handlers, then [ImplGeneration.quiesce]
+     * and [ImplGeneration.retire] run. Plugin unload calls this from `PluginUnloadCleanupService`
+     * and from this host's own disposal, whichever IntelliJ disposes first; the second call finds
+     * nothing to retire.
+     */
+    fun retireActiveGeneration() {
+        val leaving = synchronized(lock) {
             disposed = true
             active.also { active = null }
         } ?: return
+        retired = true
         try {
-            retired.impl.quiesce()
+            leaving.impl.quiesce()
         } catch (failure: Throwable) {
-            LOG.warn("[shell] implementation generation ${retired.receipt.generation} failed to quiesce", failure)
+            LOG.warn("[shell] implementation generation ${leaving.receipt.generation} failed to quiesce", failure)
         }
+        try {
+            leaving.impl.retire()
+        } catch (failure: Throwable) {
+            LOG.warn("[shell] implementation generation ${leaving.receipt.generation} failed to retire", failure)
+        }
+    }
+
+    override fun dispose() {
+        retireActiveGeneration()
     }
 
     companion object {
         private val LOG = Logger.getInstance(ShellGenerationHost::class.java)
 
+        internal const val DOCUMENT_LISTENERS = "editor-multicaster-document"
+        internal const val EDITOR_MOUSE_LISTENERS = "editor-multicaster-mouse"
+        internal const val EDITOR_FACTORY_LISTENERS = "editor-factory"
+
         fun getInstance(): ShellGenerationHost =
             ApplicationManager.getApplication().getService(ShellGenerationHost::class.java)
+
+        /** The host when IntelliJ has created it; teardown paths never create one. */
+        fun getInstanceIfCreated(): ShellGenerationHost? =
+            ApplicationManager.getApplication()?.getServiceIfCreated(ShellGenerationHost::class.java)
     }
 }

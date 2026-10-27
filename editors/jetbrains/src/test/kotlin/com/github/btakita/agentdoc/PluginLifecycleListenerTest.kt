@@ -11,8 +11,8 @@ class PluginLifecycleListenerTest {
     @Test
     fun `startup installs focus ingress before seeding selected editor focus`() {
         val sourcePath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
         ).first { Files.exists(it) }
         val source = Files.readString(sourcePath)
         val install = source.indexOf("EditorFocusSyncListener.install(project, editorTabSync)")
@@ -25,9 +25,9 @@ class PluginLifecycleListenerTest {
     @Test
     fun `startup does not run automatic resync audit`() {
         val source = Files.readString(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt")
                 .takeIf { Files.exists(it) }
-                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt")
         )
 
         assertFalse(source.contains("agent-doc\", \"resync"))
@@ -71,14 +71,20 @@ class PluginLifecycleListenerTest {
         assertTrue(pluginXml.contains("PluginUnloadCleanupService"))
         assertTrue(pluginXml.contains("ProjectPluginLifecycleService"))
 
-        val source = Files.readString(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+        // GH #339 R1: the shell file declares the listener and services; the implementation file
+        // owns the startup body they forward to.
+        fun mainSource(name: String): String = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$name")
                 .takeIf { Files.exists(it) }
-                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/$name")
         )
-        assertTrue(source.contains("class PluginUnloadCleanupService : Disposable"))
-        assertTrue(source.contains("class ProjectPluginLifecycleService"))
-        assertTrue(source.contains("connect(lifecycle)"))
+        val shell = mainSource("PluginLifecycleListener.kt")
+        val source = shell + mainSource("AgentDocProjectLifecycle.kt")
+        assertTrue(shell.contains("class PluginUnloadCleanupService : Disposable"))
+        assertTrue(shell.contains("class ProjectPluginLifecycleService"))
+        assertTrue(shell.contains("@JvmStatic\n        fun initializeOpenProjectsAfterDynamicLoad(): String"))
+        assertTrue(shell.contains("@JvmStatic\n        fun disposeOpenProjectsForDynamicUnload(): Int"))
+        assertTrue(source.contains("FILE_EDITOR_MANAGER,\n            editorTabSync,\n            lifecycle,"))
         assertFalse(
             "programmatic listeners must not outlive their plugin generation",
             source.contains(".connect(project)"),
@@ -155,7 +161,7 @@ class PluginLifecycleListenerTest {
         )
         assertTrue(livenessListener.contains("fun install(project: Project, lifecycle: Disposable)"))
         assertTrue(livenessListener.contains("instances.computeIfAbsent(project)"))
-        assertTrue(livenessListener.contains(".connect(lifecycle)"))
+        assertTrue(livenessListener.contains("listener,\n                        lifecycle,"))
         assertFalse(
             "the liveness publisher must be rebuilt explicitly for surviving projects",
             pluginXml.contains("class=\"com.github.btakita.agentdoc.ReliableSyncLivenessListener\""),
@@ -166,10 +172,10 @@ class PluginLifecycleListenerTest {
     fun `IDE activation republishes the settled editor surface`() {
         val source =
             Files.readString(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt")
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt")
                     .takeIf { Files.exists(it) }
                     ?: Paths.get(
-                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt",
+                        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt",
                     ),
             )
 

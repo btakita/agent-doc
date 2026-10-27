@@ -120,8 +120,8 @@ class TypingTrackerEdtBudgetTest {
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TypingTracker.kt"),
         ).first { Files.exists(it) }
         val lifecyclePath = listOf(
-            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
-            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
         ).first { Files.exists(it) }
         val replicaPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),

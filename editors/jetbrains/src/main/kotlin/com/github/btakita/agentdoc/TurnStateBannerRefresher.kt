@@ -169,32 +169,32 @@ class TurnStateBannerRefresher(private val project: Project) : Disposable {
     fun start() {
         if (!started.compareAndSet(false, true)) return
         LOG.info("[turn-state] event refresher started")
-        project.messageBus
-            .connect(this)
-            .subscribe(
-                FileEditorManagerListener.FILE_EDITOR_MANAGER,
-                object : FileEditorManagerListener {
-                    override fun selectionChanged(event: FileEditorManagerEvent) {
-                        event.newFile?.let { observeDisplayed(it, "selection") }
-                        event.oldFile?.let { requestRefresh(it, "selection-old") }
-                    }
+        GenerationListeners.subscribe(
+            project,
+            FileEditorManagerListener.FILE_EDITOR_MANAGER,
+            object : FileEditorManagerListener {
+                override fun selectionChanged(event: FileEditorManagerEvent) {
+                    event.newFile?.let { observeDisplayed(it, "selection") }
+                    event.oldFile?.let { requestRefresh(it, "selection-old") }
+                }
 
-                    override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
-                        observeDisplayed(file, "file-opened")
-                    }
+                override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                    observeDisplayed(file, "file-opened")
+                }
 
-                    override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
-                        if (!isMarkdown(file)) return
-                        // GH #323 / GH #241: `fileClosed` fires when ONE editor is removed. A
-                        // Remote Dev client can still show the document, and no selection edge
-                        // reaches this listener to re-admit it, so release only when no client
-                        // still has it open.
-                        DocumentCloseDecision.route("turn-state-banner", project, source, file) {
-                            release(file.path)
-                        }
+                override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                    if (!isMarkdown(file)) return
+                    // GH #323 / GH #241: `fileClosed` fires when ONE editor is removed. A
+                    // Remote Dev client can still show the document, and no selection edge
+                    // reaches this listener to re-admit it, so release only when no client
+                    // still has it open.
+                    DocumentCloseDecision.route("turn-state-banner", project, source, file) {
+                        release(file.path)
                     }
-                },
-            )
+                }
+            },
+            this,
+        )
         requestOpenMarkdownRefresh("startup")
     }
 

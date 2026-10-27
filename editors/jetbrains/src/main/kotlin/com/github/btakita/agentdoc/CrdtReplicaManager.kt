@@ -1379,8 +1379,8 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val disposed = AtomicBoolean(false)
 
     fun start() {
-        EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
-        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+        GenerationListeners.addDocumentListener(this, this)
+        GenerationListeners.subscribe(
             FileDocumentManagerListener.TOPIC,
             object : FileDocumentManagerListener {
                 override fun beforeFileContentReload(file: VirtualFile, document: Document) {
@@ -1396,8 +1396,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     fileContentReloadingPaths.remove(file.path)
                 }
             },
+            this,
         )
-        ApplicationManager.getApplication().messageBus.connect(this).subscribe(
+        GenerationListeners.subscribe(
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
                 override fun after(events: List<VFileEvent>) {
@@ -1410,6 +1411,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         .forEach(::projectNativeSaveReceipt)
                 }
             },
+            this,
         )
     }
 

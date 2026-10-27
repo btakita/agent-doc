@@ -121,19 +121,20 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private val refreshLifecycleLock = Any()
 
     init {
-        EditorFactory.getInstance().eventMulticaster.addDocumentListener(object : DocumentListener {
+        GenerationListeners.addDocumentListener(object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
                 if (!isMarkdown(event.document)) return
                 scheduleRefresh(event.document)
             }
         }, this)
-        EditorFactory.getInstance().addEditorFactoryListener(object : EditorFactoryListener {
+        GenerationListeners.addEditorFactoryListener(object : EditorFactoryListener {
             override fun editorCreated(event: EditorFactoryEvent) {
                 if (!isMarkdown(event.editor.document)) return
                 scheduleRefresh(event.editor.document)
             }
         }, this)
-        project.messageBus.connect(this).subscribe(
+        GenerationListeners.subscribe(
+            project,
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
@@ -144,8 +145,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
                     event.newFile?.let { refreshMarkdownFileAfterEditorEvent(it) }
                 }
             },
+            this,
         )
-        project.messageBus.connect(this).subscribe(
+        GenerationListeners.subscribe(
+            project,
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
                 override fun after(events: List<VFileEvent>) {
@@ -157,6 +160,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
                     }
                 }
             },
+            this,
         )
         refreshAll()
     }

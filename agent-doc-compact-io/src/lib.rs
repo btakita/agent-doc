@@ -548,6 +548,27 @@ pub fn run(
     )
 }
 
+/// `#commitoutsidegit`: `compact --commit` outside a git work tree used to
+/// compact the document and then fail with a stale-supervisor/CRDT diagnosis
+/// for the missing `HEAD` image. Refuse after the integrity gate and before
+/// tagging, archiving, or rewriting anything, with the same precondition
+/// `agent-doc commit` names. It runs inside the controller entrypoint, which
+/// every compact (CLI and editor) reaches, rather than in [`run`].
+/// A compact without `--commit` needs no repository. The `commit` flag is
+/// checked here rather than in an `if commit {` at the call sites, because
+/// `compact_commit_leg_has_no_silent_skip` locates the commit leg by the first
+/// such gate.
+fn require_git_repository_for_compact_commit(file: &Path, commit: bool) -> Result<()> {
+    if !commit {
+        return Ok(());
+    }
+    agent_doc_git_io::status::require_git_repository_for_commit(
+        file,
+        "compact --commit",
+        &format!("agent-doc compact {} --commit", file.display()),
+    )
+}
+
 /// Parse the controller-wire `lint` field of a compact invocation back into the
 /// CLI override (GH #227). Unknown text fails closed rather than silently
 /// falling back to the resolved mode.
@@ -735,6 +756,10 @@ fn run_in_controller_scoped(
         lint,
         agent_doc_ops_log_io::log_op,
     )?;
+    // `#commitoutsidegit`: after the integrity/lint gates (a malformed document
+    // is reported as such first) and before any capture, tag, archive, CRDT
+    // mutation, or commit.
+    require_git_repository_for_compact_commit(file, commit)?;
 
     let content = compose_active_capture_for_compaction(file, &semantic_base_content)?;
     // A salient node is display state for the open cycle,

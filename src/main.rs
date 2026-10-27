@@ -5926,6 +5926,14 @@ fn try_main() -> anyhow::Result<()> {
             }
         }
         Commands::Commit { file } => {
+            // `#commitoutsidegit`: outside git there is no HEAD, so "already
+            // matches HEAD" would be a false success. Refuse before the absorb
+            // and document-only paths create a snapshot or touch the file.
+            agent_doc_git_io::status::require_git_repository_for_commit(
+                &file,
+                "commit",
+                &format!("agent-doc commit {}", file.display()),
+            )?;
             // `#preflightvisibleabsorb`: the stranded-write remedy names this command,
             // so it must absorb a visible response its closed cycle never committed.
             let did_commit = agent_doc_commit_io::commit_visible_uncommitted_response(&file)?

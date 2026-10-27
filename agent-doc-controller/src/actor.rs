@@ -62,6 +62,27 @@ pub struct ActorRecord {
     pub last_transition: ActorLastTransition,
 }
 
+/// The write an actor record was last committed by (`#syncbindingfence`).
+///
+/// A generation fence alone does not detect a write that keeps the generation:
+/// lifecycle transitions (`Starting`/`Ready`/`Busy`/`Closed`), a same-pane
+/// binding projection, a harness writeback, and a cross-document pane eviction
+/// all commit at the current generation. Every one of them inserts a fresh
+/// `actor_transitions` row and points the durable `documents.last_transition_id` at it, so
+/// that id names the exact write a decision was made against. `None` means the
+/// document had no actor row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActorRevision {
+    pub last_transition_id: Option<i64>,
+}
+
+impl ActorRevision {
+    /// No actor row existed when the decision was read.
+    pub const ABSENT: ActorRevision = ActorRevision {
+        last_transition_id: None,
+    };
+}
+
 /// Accepted actor-store mutation emitted by the durable persistence boundary.
 ///
 /// Consumers publish this value into the controller's reactive actor Source;

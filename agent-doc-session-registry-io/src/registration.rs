@@ -27,6 +27,11 @@
 //!   writes nothing over the owner's record, follows an owner that committed a
 //!   newer generation elsewhere, and reclaims only a projection rebind,
 //!   compare-and-swapped on the generation it decided against.
+//! - `rebind_recovered_owner_in` is sync/resync's recovered-owner bind
+//!   (`#syncbindingfence`): it refreshes only the registry when the actor already
+//!   binds the pane, and otherwise binds fenced on the record it read. Both
+//!   fenced binds compare the record revision as well as the generation, so a
+//!   same-generation owner transition between decision and write is detected.
 //! ## Agentic Contracts
 //! - Registry snapshot IO is not self-locking. Any read-modify-write cycle must
 //!   acquire `RegistryLock` first; prefer `tmux_router::with_registry` for safe
@@ -53,9 +58,14 @@
 //!   record alone, follows an owner on another pane, reclaims a projection
 //!   rebind, and, with an owner `start_session` committed between its decision
 //!   and its write, re-decides instead of binding over the restarted owner.
+//! - post_launch_bind_is_fenced_against_a_same_generation_owner_transition and
+//!   recovered_owner_bind_*: a supervisor `Busy` at the same generation, or an
+//!   owner `start` elsewhere, committed inside the decision/write window wins;
+//!   a recovery never re-projects an owner record naming the pane as `Ready`.
 
 use crate as session_registry_io;
 use agent_doc_controller::actor::ActorRecord;
+use agent_doc_session_actor_io::ActorRevision;
 use agent_doc_session_registry as session_registry;
 use agent_doc_sqlite::state_store;
 use agent_doc_supervisor::{
@@ -407,6 +417,7 @@ fn decide_post_launch_bind(
     session_id: &str,
     pane_id: &str,
     record: Option<&ActorRecord>,
+    revision: ActorRevision,
 ) -> Result<PostLaunchBindDecision> {
     use agent_doc_controller::actor::ActorState;
     let Some(record) = record else {
@@ -416,6 +427,7 @@ fn decide_post_launch_bind(
                     base_dir, file, session_id,
                 )?,
                 prior_names_pane: false,
+                prior_revision: revision,
             },
         ));
     };
@@ -440,6 +452,7 @@ fn decide_post_launch_bind(
         agent_doc_session_actor_io::BindingFence {
             prior_generation: record.generation,
             prior_names_pane: names_pane,
+            prior_revision: revision,
         },
     ))
 }
@@ -507,12 +520,18 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
     let registry_key = session_registry::canonical_registry_key_in(base_dir, file);
     let mut last_error = None;
     for _ in 0..MAX_DECISIONS {
-        let record = load_actor_record(base_dir, &registry_key)?;
-        let fence =
-            match decide_post_launch_bind(base_dir, file, session_id, pane_id, record.as_ref())? {
-                PostLaunchBindDecision::Done(outcome) => return Ok(outcome),
-                PostLaunchBindDecision::Reclaim(fence) => fence,
-            };
+        let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
+        let fence = match decide_post_launch_bind(
+            base_dir,
+            file,
+            session_id,
+            pane_id,
+            record.as_ref(),
+            revision,
+        )? {
+            PostLaunchBindDecision::Done(outcome) => return Ok(outcome),
+            PostLaunchBindDecision::Reclaim(fence) => fence,
+        };
         between_decision_and_write();
         let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
         let mut registry = session_registry_io::load_in(base_dir)?;
@@ -528,7 +547,7 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
             None,
             "route",
             "dispatch_bind",
-            Some(fence),
+            ActorBindingWrite::Fenced(fence),
         ) {
             Ok(generations) => {
                 return Ok(PostLaunchDispatchBind::Reclaimed {
@@ -546,6 +565,168 @@ pub fn bind_dispatch_target_after_owner_launch_with_hook_in(
         .unwrap_or_else(|| anyhow::anyhow!("post-launch dispatch bind made no decision"))
         .context(format!(
             "dispatch bind for {file} on pane {pane_id} lost the actor generation race {MAX_DECISIONS} times"
+        )))
+}
+
+/// The pane a sync/resync recovery re-registers as a document's owner
+/// (`#syncbindingfence`).
+#[derive(Debug, Clone, Copy)]
+pub struct RecoveredOwnerBinding<'a> {
+    pub session_id: &'a str,
+    pub pane_id: &'a str,
+    pub file: &'a str,
+    pub pid: u32,
+    pub window: &'a str,
+    pub cwd: &'a str,
+    /// The live supervisor proven in the pane, when there is one. With it the
+    /// write is sync's supervisor-backed `recover_owner` (owner evidence);
+    /// without it a `route`/`dispatch_bind` projection.
+    pub supervisor_instance_id: Option<&'a str>,
+    /// `false` for a registry-metadata refresh: the actor is never written,
+    /// and a record that no longer names the pane is left to its owner.
+    pub may_write_actor: bool,
+}
+
+/// What a recovered-owner re-registration did (`#syncbindingfence`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecoveredOwnerBind {
+    /// The authoritative actor already binds the session to the pane. Only the
+    /// durable registry was refreshed; the owner's state and generation stand.
+    RegistryRefreshed,
+    /// The pane was bound, compare-and-swapped on the record decided against.
+    Bound { generations: OwnershipGeneration },
+    /// A registry refresh (`may_write_actor: false`) found no open actor
+    /// binding the session to the pane. Nothing was written.
+    ActorNotBound,
+    /// After the decision, an owner or operator committed the binding for a
+    /// different pane. Nothing was written: the newer commit wins.
+    OwnerSuperseded {
+        pane_id: String,
+        generation: u64,
+        caller: String,
+        reason: String,
+    },
+}
+
+/// Re-register a pane a sync or resync recovery proved hosts `file`'s owner
+/// (`#syncbindingfence`).
+///
+/// The recovery used to write through [`register_supervisor_in`] or
+/// [`register_full_with_cwd_in`], whose [`agent_doc_session_actor_io::project_binding_in`]
+/// re-reads the generation at write time. So a recovery whose actor record
+/// already named the pane stamped the owner's `Busy`/`Starting` as `Ready`, and
+/// a recovery that an owner's `start` or an operator's `claim` overtook between
+/// its observation and its write bound the observed pane back over the newer
+/// owner at generation + 1. This decides from one read of the actor record
+/// (taken before the caller's tmux evidence, by [`rebind_recovered_owner_in`]'s
+/// callers, or here) and:
+/// - record already binds the session to the pane, not `Closed`: refreshes the
+///   durable registry only;
+/// - otherwise, on the first decision: binds the pane, compare-and-swapped on
+///   that record's generation AND revision, so any commit after the read
+///   (including one that kept the generation) fails the write;
+/// - after a lost compare-and-swap: an owner or operator commit for another
+///   live pane wins and nothing is written; a projection write is re-decided.
+pub fn rebind_recovered_owner_in(
+    base_dir: &Path,
+    binding: RecoveredOwnerBinding<'_>,
+) -> Result<RecoveredOwnerBind> {
+    rebind_recovered_owner_with_hook_in(base_dir, binding, &mut || {})
+}
+
+/// [`rebind_recovered_owner_in`] with a hook that runs after each decision read
+/// and before its fenced write. Tests commit a racing write there; production
+/// passes a no-op.
+#[doc(hidden)]
+pub fn rebind_recovered_owner_with_hook_in(
+    base_dir: &Path,
+    binding: RecoveredOwnerBinding<'_>,
+    between_decision_and_write: &mut dyn FnMut(),
+) -> Result<RecoveredOwnerBind> {
+    use agent_doc_controller::actor::ActorState;
+    const MAX_DECISIONS: usize = 4;
+    let (caller, reason) = if binding.supervisor_instance_id.is_some() {
+        ("sync", "recover_owner")
+    } else {
+        ("route", "dispatch_bind")
+    };
+    let registry_key = session_registry::canonical_registry_key_in(base_dir, binding.file);
+    let mut last_error = None;
+    for decision in 0..MAX_DECISIONS {
+        let (record, revision) = load_actor_record_with_revision(base_dir, &registry_key)?;
+        let names_pane = record.as_ref().is_some_and(|record| {
+            record.pane_id == binding.pane_id && record.session_id == binding.session_id
+        });
+        let open = record
+            .as_ref()
+            .is_some_and(|record| record.state != ActorState::Closed);
+        let superseded = |record: &ActorRecord| RecoveredOwnerBind::OwnerSuperseded {
+            pane_id: record.pane_id.clone(),
+            generation: record.generation,
+            caller: record.last_transition.caller.clone(),
+            reason: record.last_transition.reason.clone(),
+        };
+        let write = if names_pane && open {
+            ActorBindingWrite::RegistryOnly
+        } else if !binding.may_write_actor {
+            return Ok(RecoveredOwnerBind::ActorNotBound);
+        } else if let Some(record) = record.as_ref().filter(|record| {
+            decision > 0
+                && !names_pane
+                && record.state != ActorState::Closed
+                && !binding_projection_write(record)
+        }) {
+            return Ok(superseded(record));
+        } else {
+            ActorBindingWrite::Fenced(agent_doc_session_actor_io::BindingFence {
+                prior_generation: match record.as_ref() {
+                    Some(record) => record.generation,
+                    None => agent_doc_session_actor_io::binding_generation_in(
+                        base_dir,
+                        binding.file,
+                        binding.session_id,
+                    )?,
+                },
+                prior_names_pane: names_pane,
+                prior_revision: revision,
+            })
+        };
+        between_decision_and_write();
+        let _lock = RegistryLock::acquire(&session_registry_io::registry_path_in(base_dir))?;
+        let mut registry = session_registry_io::load_in(base_dir)?;
+        match register_full_internal_fenced(
+            base_dir,
+            &mut registry,
+            binding.session_id,
+            binding.pane_id,
+            binding.file,
+            binding.pid,
+            binding.window,
+            binding.cwd,
+            binding.supervisor_instance_id,
+            caller,
+            reason,
+            write,
+        ) {
+            Ok(generations) => {
+                return Ok(match (write, generations) {
+                    (ActorBindingWrite::Fenced(_), Some(generations)) => {
+                        RecoveredOwnerBind::Bound { generations }
+                    }
+                    _ => RecoveredOwnerBind::RegistryRefreshed,
+                });
+            }
+            Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+                last_error = Some(err)
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last_error
+        .unwrap_or_else(|| anyhow::anyhow!("recovered-owner bind made no decision"))
+        .context(format!(
+            "recovered-owner bind for {} on pane {} lost the actor record race {MAX_DECISIONS} times",
+            binding.file, binding.pane_id
         )))
 }
 
@@ -668,14 +849,29 @@ fn register_full_internal(
         supervisor_instance_id,
         transition_caller,
         transition_reason,
-        None,
+        ActorBindingWrite::Project,
     )
     .map(|_| ())
 }
 
-/// [`register_full_internal`] whose actor binding write is fenced on
-/// `binding_fence` when one is given (`#dispatchrebindaudit`). Returns the
-/// generations the actor binding moved through, when it wrote one.
+/// How [`register_full_internal_fenced`] writes the actor binding.
+#[derive(Debug, Clone, Copy)]
+enum ActorBindingWrite {
+    /// Plain [`agent_doc_session_actor_io::project_binding_in`] (re-reads the
+    /// generation it supersedes).
+    Project,
+    /// Compare-and-swapped on the record the caller decided against
+    /// (`#dispatchrebindaudit`, `#syncbindingfence`).
+    Fenced(agent_doc_session_actor_io::BindingFence),
+    /// No actor write: the authoritative actor already binds the session to the
+    /// pane, so only the durable registry is refreshed from it
+    /// (`#syncbindingfence`).
+    RegistryOnly,
+}
+
+/// [`register_full_internal`] whose actor binding write follows `binding_write`
+/// (`#dispatchrebindaudit`, `#syncbindingfence`). Returns the generations the
+/// actor binding moved through, when it wrote one.
 #[allow(clippy::too_many_arguments)]
 fn register_full_internal_fenced(
     base_dir: &Path,
@@ -689,10 +885,12 @@ fn register_full_internal_fenced(
     supervisor_instance_id: Option<&str>,
     transition_caller: &'static str,
     transition_reason: &'static str,
-    binding_fence: Option<agent_doc_session_actor_io::BindingFence>,
+    binding_write: ActorBindingWrite,
 ) -> Result<Option<OwnershipGeneration>> {
-    let project_binding = || match binding_fence {
-        Some(fence) => agent_doc_session_actor_io::project_binding_fenced_in(
+    let writes_actor =
+        transition_caller != "start" && !matches!(binding_write, ActorBindingWrite::RegistryOnly);
+    let project_binding = || match binding_write {
+        ActorBindingWrite::Fenced(fence) => agent_doc_session_actor_io::project_binding_fenced_in(
             base_dir,
             file,
             session_id,
@@ -702,15 +900,17 @@ fn register_full_internal_fenced(
             transition_reason,
             fence,
         ),
-        None => agent_doc_session_actor_io::project_binding_in(
-            base_dir,
-            file,
-            session_id,
-            pane_id,
-            window,
-            transition_caller,
-            transition_reason,
-        ),
+        ActorBindingWrite::Project | ActorBindingWrite::RegistryOnly => {
+            agent_doc_session_actor_io::project_binding_in(
+                base_dir,
+                file,
+                session_id,
+                pane_id,
+                window,
+                transition_caller,
+                transition_reason,
+            )
+        }
     };
     let mut binding_generations = None;
     let started = chrono_now();
@@ -743,7 +943,7 @@ fn register_full_internal_fenced(
 
     let mut controller_row_exists = false;
     if let Some(previous) = registry.get(&registry_key).cloned() {
-        if transition_caller != "start" {
+        if writes_actor {
             let generations = project_binding()?;
             binding_generations = Some(generations);
             log_session_rebind(
@@ -758,7 +958,7 @@ fn register_full_internal_fenced(
             );
             controller_row_exists = true;
         }
-    } else if transition_caller != "start" {
+    } else if writes_actor {
         binding_generations = Some(project_binding()?);
         controller_row_exists = true;
     } else if load_actor_record(base_dir, &registry_key)?.is_some() {
@@ -806,6 +1006,17 @@ fn log_stale_registry_keys(stale_keys: &[String], pane_id: &str) {
             key, pane_id
         );
     }
+}
+
+/// [`load_actor_record`] with the [`ActorRevision`] of the same row, read in one
+/// statement, for a decision a fenced write is compare-and-swapped on
+/// (`#syncbindingfence`).
+pub fn load_actor_record_with_revision(
+    project_root: &Path,
+    document_id: &str,
+) -> Result<(Option<ActorRecord>, ActorRevision)> {
+    let conn = state_store::open_state_db(project_root)?;
+    state_store::load_actor_record_with_revision_from_db(&conn, document_id)
 }
 
 pub fn load_actor_record(project_root: &Path, document_id: &str) -> Result<Option<ActorRecord>> {
@@ -1931,5 +2142,247 @@ mod tests {
 
         assert_eq!(outcome, PostLaunchDispatchBind::OwnerBound);
         assert_eq!(actor(dir.path(), &file).state, ActorState::Closed);
+    }
+
+    // --- #syncbindingfence: same-generation fence and recovered-owner bind ---
+
+    fn supervisor_transition(
+        root: &Path,
+        file: &str,
+        pane: &str,
+        generation: u64,
+        state: ActorState,
+    ) {
+        let key = session_registry::canonical_registry_key_in(root, file);
+        agent_doc_session_actor_io::transition_state_in(
+            root,
+            &key,
+            "s",
+            pane,
+            Some(generation),
+            state,
+            "supervisor",
+            "turn_start",
+        )
+        .unwrap();
+    }
+
+    /// Same-generation owner transitions exist: the supervisor's lifecycle
+    /// writes keep the generation. The route decides to reclaim from a
+    /// projection rebind to `%7`; the supervisor on `%7` then goes `Busy` at
+    /// the same generation. A generation-only fence passes and the route binds
+    /// over the running owner; the revision fence fails the write, and the
+    /// re-decision follows the owner.
+    #[test]
+    fn post_launch_bind_is_fenced_against_a_same_generation_owner_transition() {
+        let (dir, file) = post_launch_project();
+        route_bind(dir.path(), "s", "%10", &file);
+        agent_doc_session_actor_io::project_binding_in(
+            dir.path(),
+            &file,
+            "s",
+            "%7",
+            "@1",
+            "sync",
+            "layout_rebind",
+        )
+        .unwrap();
+        let mut transitioned = false;
+        let root = dir.path().to_path_buf();
+        let mut owner_goes_busy = || {
+            if !transitioned {
+                transitioned = true;
+                supervisor_transition(&root, &file, "%7", 2, ActorState::Busy);
+            }
+        };
+
+        let outcome = post_launch_bind(dir.path(), "s", "%10", &file, &mut owner_goes_busy);
+
+        assert_eq!(
+            outcome,
+            PostLaunchDispatchBind::OwnerSuperseded {
+                pane_id: "%7".to_string(),
+                generation: 2,
+                caller: "supervisor".to_string(),
+                reason: "turn_start".to_string(),
+            }
+        );
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.pane_id, "%7");
+        assert_eq!(record.generation, 2);
+        assert_eq!(record.state, ActorState::Busy);
+    }
+
+    fn recovered(
+        root: &Path,
+        pane: &str,
+        file: &str,
+        supervisor_instance_id: Option<&str>,
+        may_write_actor: bool,
+        hook: &mut dyn FnMut(),
+    ) -> RecoveredOwnerBind {
+        let cwd = root.to_string_lossy().into_owned();
+        rebind_recovered_owner_with_hook_in(
+            root,
+            RecoveredOwnerBinding {
+                session_id: "s",
+                pane_id: pane,
+                file,
+                pid: std::process::id(),
+                window: "@1",
+                cwd: &cwd,
+                supervisor_instance_id,
+                may_write_actor,
+            },
+            hook,
+        )
+        .unwrap()
+    }
+
+    /// sync's registry refresh / rename reuse reached `project_binding_in`,
+    /// which stamped the owner's running record `Ready` even though the record
+    /// already named the pane. Now only the registry is refreshed.
+    #[test]
+    fn recovered_owner_bind_leaves_an_owner_record_naming_the_pane_alone() {
+        let (dir, file) = post_launch_project();
+        owner_start(&file, "s", "%10", 1);
+        supervisor_transition(dir.path(), &file, "%10", 1, ActorState::Busy);
+        let before = transitions(dir.path(), &file);
+
+        for may_write_actor in [true, false] {
+            let outcome = recovered(
+                dir.path(),
+                "%10",
+                &file,
+                Some("instance"),
+                may_write_actor,
+                &mut || {},
+            );
+            assert_eq!(outcome, RecoveredOwnerBind::RegistryRefreshed);
+        }
+
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.state, ActorState::Busy);
+        assert_eq!(record.last_transition.caller, "supervisor");
+        assert_eq!(transitions(dir.path(), &file), before);
+        assert_eq!(
+            session_registry_io::lookup_in(dir.path(), "s")
+                .unwrap()
+                .as_deref(),
+            Some("%10"),
+            "the durable registry follows the actor"
+        );
+    }
+
+    #[test]
+    fn recovered_owner_bind_rebinds_a_moved_record_fenced_as_owner_evidence() {
+        let (dir, file) = post_launch_project();
+        route_bind(dir.path(), "s", "%10", &file);
+
+        let outcome = recovered(dir.path(), "%20", &file, Some("instance"), true, &mut || {});
+
+        assert_eq!(
+            outcome,
+            RecoveredOwnerBind::Bound {
+                generations: OwnershipGeneration {
+                    prior_generation: 1,
+                    new_generation: 2,
+                },
+            }
+        );
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.pane_id, "%20");
+        assert_eq!(record.last_transition.caller, "sync");
+        assert_eq!(record.last_transition.reason, "recover_owner");
+    }
+
+    /// An owner `start` lands on another pane between the recovery's decision
+    /// and its write. The old write re-read the generation and bound the
+    /// observed pane over the newer owner at generation + 1.
+    #[test]
+    fn recovered_owner_bind_is_fenced_against_an_owner_start_between_decision_and_write() {
+        let (dir, file) = post_launch_project();
+        route_bind(dir.path(), "s", "%10", &file);
+        let mut started = false;
+        let mut start_elsewhere = || {
+            if !started {
+                started = true;
+                owner_start(&file, "s", "%30", 2);
+            }
+        };
+
+        let outcome = recovered(
+            dir.path(),
+            "%20",
+            &file,
+            Some("instance"),
+            true,
+            &mut start_elsewhere,
+        );
+
+        assert_eq!(
+            outcome,
+            RecoveredOwnerBind::OwnerSuperseded {
+                pane_id: "%30".to_string(),
+                generation: 2,
+                caller: "start".to_string(),
+                reason: "session_start".to_string(),
+            }
+        );
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.pane_id, "%30");
+        assert_eq!(record.state, ActorState::Starting);
+    }
+
+    /// The same race with a same-generation owner transition: the supervisor
+    /// on `%10` goes `Busy` without bumping the generation. Only the revision
+    /// fence detects it.
+    #[test]
+    fn recovered_owner_bind_is_fenced_against_a_same_generation_owner_transition() {
+        let (dir, file) = post_launch_project();
+        route_bind(dir.path(), "s", "%10", &file);
+        let mut transitioned = false;
+        let root = dir.path().to_path_buf();
+        let mut owner_goes_busy = || {
+            if !transitioned {
+                transitioned = true;
+                supervisor_transition(&root, &file, "%10", 1, ActorState::Busy);
+            }
+        };
+
+        let outcome = recovered(dir.path(), "%20", &file, None, true, &mut owner_goes_busy);
+
+        assert!(
+            matches!(
+                &outcome,
+                RecoveredOwnerBind::OwnerSuperseded { pane_id, generation: 1, caller, .. }
+                    if pane_id == "%10" && caller == "supervisor"
+            ),
+            "{outcome:?}"
+        );
+        let record = actor(dir.path(), &file);
+        assert_eq!(record.pane_id, "%10");
+        assert_eq!(record.generation, 1);
+        assert_eq!(record.state, ActorState::Busy);
+    }
+
+    #[test]
+    fn recovered_owner_registry_refresh_never_writes_an_actor_on_another_pane() {
+        let (dir, file) = post_launch_project();
+        route_bind(dir.path(), "s", "%10", &file);
+        let before = transitions(dir.path(), &file);
+
+        let outcome = recovered(
+            dir.path(),
+            "%20",
+            &file,
+            Some("instance"),
+            false,
+            &mut || {},
+        );
+
+        assert_eq!(outcome, RecoveredOwnerBind::ActorNotBound);
+        assert_eq!(actor(dir.path(), &file).pane_id, "%10");
+        assert_eq!(transitions(dir.path(), &file), before);
     }
 }

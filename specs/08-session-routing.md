@@ -896,7 +896,7 @@ When the user navigates to a document in the editor:
 - Registers the session→pane **Binding** in the controller state transaction
    - Starts Claude asynchronously in the new pane
    - Registers before the launch and never after it: from the launch on, the child `agent-doc start` owns the document's actor generation, so a provision returns the pane it bound without writing the binding again (`#claimpanecasrace`)
-   - A waiting (non-provision) route re-validates the fresh pane after the ready wait through the fenced post-launch bind, as does every route path that restarted a supervisor: it writes nothing when the owner's record already names the pane, reclaims a pane a projection rebind moved away (compare-and-swapped on the generation it decided against, so a supervisor restart committing in between wins), and follows an owner that committed a newer generation for another live pane (`#dispatchrebindaudit`)
+   - A waiting (non-provision) route re-validates the fresh pane after the ready wait through the fenced post-launch bind, as does every route path that restarted a supervisor: it writes nothing when the owner's record already names the pane, reclaims a pane a projection rebind moved away (compare-and-swapped on the generation and record revision it decided against, so a supervisor restart or a same-generation owner transition committing in between wins, `#syncbindingfence`), and follows an owner that committed a newer generation for another live pane (`#dispatchrebindaudit`)
 
 ### Cross-Repository Owner Guard (`#cross-repo-owner-guard`)
 

@@ -1004,14 +1004,37 @@ already binds the session to the pane, nothing is written and the owner's state
 (`Starting`, `Busy`, or a `Closed` it wrote) stands. When a projection write (a
 `route` or `sync` dispatch bind; sync's supervisor-backed `recover_owner` is not
 one) moved the binding off a pane the route created, the route reclaims the
-pane, compare-and-swapped on the generation it decided against: a commit in
-between, such as a supervisor restart's `start_session`, fails the write and
-the route re-decides against the newer record instead of re-projecting it as
-`Ready`. When an owner (`start`, `supervisor`) or an operator (`claim`,
+pane, compare-and-swapped on the generation and the record revision it decided
+against: a commit in between, such as a supervisor restart's `start_session` or
+a same-generation owner transition like the supervisor going `Busy`
+(`#syncbindingfence`), fails the write and the route re-decides against the
+newer record instead of re-projecting it as `Ready`. When an owner (`start`, `supervisor`) or an operator (`claim`,
 `admin`, `session`) committed the current generation for another live pane,
 the route follows that pane and writes nothing; a gone owner pane fails the
 route closed. Pre-launch provisioning binds and pre-dispatch rebinds of an
 already-running pane keep the plain `route`/`dispatch_bind` projection.
+- Sync never writes an actor binding it decided from an earlier read without a
+fence on that read (`#syncbindingfence`). Every sync/resync actor write decides
+from one read of the record and compare-and-swaps on its generation and
+revision (see the same-generation lifecycle invariant in
+[Single-process control plane](08b-single-process-control-plane.md)):
+  - The registry refresh for an authoritative actor (`refresh_durable_registry_for_actor_record`)
+    writes the durable registry only, never the actor; an actor that no longer
+    binds the session to the pane is left to its owner.
+  - A recovered-owner re-registration (`reregister_recovered_owner`: resync's
+    target-document recovery, sync's rename reuse and associated-pane recovery)
+    goes through `rebind_recovered_owner_in`. A record that already binds the
+    session to the pane, not `Closed`, is left alone and only the registry is
+    refreshed, so the owner's `Busy`/`Starting` is never re-projected as
+    `Ready`. Otherwise the pane is bound (sync's supervisor-backed
+    `recover_owner` when a live supervisor is proven in the pane, else a
+    `route`/`dispatch_bind` projection), fenced on the record read. After a lost
+    compare-and-swap an owner or operator commit for another live pane wins and
+    nothing is written; a projection write is re-decided.
+  - The pane-window correction (`#panewindowbindingrebind`, doctor and the
+    post-layout pass) keeps the observed pane, session, generation, and state
+    and rewrites only the window (`correct_binding_window_fenced_in`). A record
+    that changed after the read is left for the next pass.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to

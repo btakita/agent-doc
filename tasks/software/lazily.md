@@ -1013,7 +1013,7 @@ The audit is no longer blocked. Its prior execution attempt was lost, and the re
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
+- [ ] 🚧 [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
 <!-- /agent:backlog -->
 
 ## Review

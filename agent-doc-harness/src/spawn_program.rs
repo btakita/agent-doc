@@ -1,10 +1,15 @@
-//! # Module: supervisor::spawn_program
+//! # Module: harness::spawn_program
 //!
-//! Resolves the program a supervisor hands to the pty spawn (GH #380).
+//! Resolves the program a harness launch hands to the OS: the supervisor's pty
+//! spawn (GH #380) and the headless backends in `agent-doc-agent-io`
+//! (`#headlessharnesspath`). It lives here, below both callers, so the two
+//! launch paths share one search order; `agent-doc-supervisor-process`
+//! re-exports it as `supervisor_process::spawn_program`.
 //!
 //! ## Spec
 //! See `src/agent-doc/specs/supervisor.md` § Env determinism / Harness program
-//! resolution.
+//! resolution, and `src/agent-doc/specs/05-agent-backend.md` § Harness program
+//! resolution (headless launches).
 //!
 //! The supervisor clears the ambient environment and spawns the harness with
 //! exactly the resolved child env, so `portable-pty` looks a bare program name
@@ -59,6 +64,22 @@
 //! - explicit_path_program_is_used_as_given
 //! - not_found_error_lists_searched_directories
 //! - append_path_dir_preserves_existing_entries
+//! - headless_child_env_inherits_parent_then_applies_removals_and_overrides
+//! - headless_bare_name_missing_from_coder_default_path_resolves_user_local_bin
+//! - headless_bare_name_on_inherited_path_is_used_as_given
+//!
+//! ## Headless launches
+//!
+//! A headless backend (`claude -p`, `codex exec`, `opencode run`, `grok`)
+//! spawns through `std::process::Command`, which does NOT clear the env: the
+//! child inherits the parent env, then the backend removes its recursion
+//! guards and applies the document `env:` overrides. So for a headless launch
+//! the child `PATH` *is* the parent `PATH` unless the document overrides it,
+//! and a controller started under the Coder default `PATH` fails the same way
+//! the supervisor did. [`resolve_headless_program`] computes that effective
+//! child `PATH`/`HOME` ([`inherited_child_env`]) and runs the same
+//! [`resolve_spawn_program`] over it; a fallback hit also returns the full
+//! child `PATH` value to set, with the install directory appended.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -220,6 +241,74 @@ pub fn append_path_dir(env: &mut HashMap<String, String>, dir: &Path) {
     }
 }
 
+/// The keys [`resolve_spawn_program`] reads from the child env.
+const RESOLUTION_ENV_KEYS: [&str; 2] = ["PATH", "HOME"];
+
+/// The child env a headless (`std::process::Command`) launch runs with,
+/// reduced to the keys resolution reads (`PATH`, `HOME`).
+///
+/// The child inherits the parent env (`parent` reads one parent variable),
+/// then `removals` are removed, then `overrides` are applied in order (a
+/// `None` value removes the key; the last entry for a key wins) — the same
+/// order the backends apply them to the `Command`.
+pub fn inherited_child_env(
+    removals: &[&str],
+    overrides: &[(String, Option<String>)],
+    parent: impl Fn(&str) -> Option<String>,
+) -> HashMap<String, String> {
+    let mut env = HashMap::new();
+    for key in RESOLUTION_ENV_KEYS {
+        let mut value = if removals.contains(&key) {
+            None
+        } else {
+            parent(key)
+        };
+        for (override_key, override_value) in overrides {
+            if override_key == key {
+                value = override_value.clone();
+            }
+        }
+        if let Some(value) = value {
+            env.insert(key.to_string(), value);
+        }
+    }
+    env
+}
+
+/// The resolved program for one headless launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadlessSpawnProgram {
+    pub resolved: ResolvedSpawnProgram,
+    /// The full child `PATH` value to set on the `Command`, with the install
+    /// directory appended. `Some` only for
+    /// [`SpawnProgramSource::InstallDirFallback`].
+    pub child_path: Option<String>,
+}
+
+/// Resolve the program for a headless launch over the effective child env
+/// (see the module docs, "Headless launches"). `parent` reads one parent env
+/// variable; the parent `HOME` is also the fallback `HOME` when the overrides
+/// unset it, mirroring the supervisor.
+pub fn resolve_headless_program(
+    program: &str,
+    removals: &[&str],
+    overrides: &[(String, Option<String>)],
+    parent: impl Fn(&str) -> Option<String>,
+    cwd: &Path,
+) -> anyhow::Result<HeadlessSpawnProgram> {
+    let parent_home = parent("HOME");
+    let mut env = inherited_child_env(removals, overrides, &parent);
+    let resolved = resolve_spawn_program(program, &env, cwd, parent_home.as_deref())?;
+    let child_path = resolved.path_dir_appended.as_deref().and_then(|dir| {
+        append_path_dir(&mut env, dir);
+        env.get("PATH").cloned()
+    });
+    Ok(HeadlessSpawnProgram {
+        resolved,
+        child_path,
+    })
+}
+
 #[cfg(unix)]
 fn is_executable_file(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
@@ -370,5 +459,79 @@ mod tests {
         let mut empty = HashMap::new();
         append_path_dir(&mut empty, Path::new("/home/u/.local/bin"));
         assert_eq!(empty["PATH"], "/home/u/.local/bin");
+    }
+
+    /// The Coder workspace default `PATH` (GH #380): no `~/.local/bin`.
+    const CODER_DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    #[test]
+    fn headless_child_env_inherits_parent_then_applies_removals_and_overrides() {
+        let parent = |key: &str| match key {
+            "PATH" => Some("/parent/bin".to_string()),
+            "HOME" => Some("/parent/home".to_string()),
+            _ => None,
+        };
+        let inherited = inherited_child_env(&[], &[], parent);
+        assert_eq!(inherited["PATH"], "/parent/bin");
+        assert_eq!(inherited["HOME"], "/parent/home");
+
+        let overridden = inherited_child_env(
+            &["HOME"],
+            &[
+                ("PATH".to_string(), Some("/first".to_string())),
+                ("PATH".to_string(), Some("/doc/bin".to_string())),
+            ],
+            parent,
+        );
+        assert_eq!(overridden["PATH"], "/doc/bin");
+        assert!(!overridden.contains_key("HOME"));
+
+        let unset = inherited_child_env(&[], &[("PATH".to_string(), None)], parent);
+        assert!(!unset.contains_key("PATH"));
+    }
+
+    #[test]
+    fn headless_bare_name_missing_from_coder_default_path_resolves_user_local_bin() {
+        let home = TempDir::new().unwrap();
+        let local_bin = home.path().join(".local/bin");
+        let installed = install(&local_bin, PROGRAM, 0o755);
+        let home_str = home.path().to_str().unwrap().to_string();
+        // The controller inherited the Coder default PATH; nothing overrides it.
+        let parent = |key: &str| match key {
+            "PATH" => Some(CODER_DEFAULT_PATH.to_string()),
+            "HOME" => Some(home_str.clone()),
+            _ => None,
+        };
+        let headless =
+            resolve_headless_program(PROGRAM, &["CLAUDECODE"], &[], parent, home.path()).unwrap();
+        assert_eq!(headless.resolved.program, installed.to_str().unwrap());
+        assert_eq!(
+            headless.resolved.source,
+            SpawnProgramSource::InstallDirFallback
+        );
+        assert_eq!(
+            headless.child_path.as_deref(),
+            Some(format!("{CODER_DEFAULT_PATH}:{}", local_bin.display()).as_str())
+        );
+    }
+
+    #[test]
+    fn headless_bare_name_on_inherited_path_is_used_as_given() {
+        let root = TempDir::new().unwrap();
+        let bin = root.path().join("on-path");
+        install(&bin, PROGRAM, 0o755);
+        // A fallback hit too, which the inherited PATH entry must beat.
+        install(&root.path().join(".local/bin"), PROGRAM, 0o755);
+        let bin_str = bin.to_str().unwrap().to_string();
+        let home_str = root.path().to_str().unwrap().to_string();
+        let parent = |key: &str| match key {
+            "PATH" => Some(bin_str.clone()),
+            "HOME" => Some(home_str.clone()),
+            _ => None,
+        };
+        let headless = resolve_headless_program(PROGRAM, &[], &[], parent, root.path()).unwrap();
+        assert_eq!(headless.resolved.program, PROGRAM);
+        assert_eq!(headless.resolved.source, SpawnProgramSource::AsGiven);
+        assert_eq!(headless.child_path, None);
     }
 }

@@ -5,7 +5,7 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use super::{
     Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
@@ -118,26 +118,21 @@ impl Agent for Grok {
             .context("write Grok prompt file")?;
         prompt_file.flush()?;
         let args = self.args(prompt_file.path(), session_id, fork, model)?;
-        let mut command = Command::new(&self.command);
+        let launch_context = || {
+            format!(
+                "failed to launch Grok Build '{}'; install Grok Build and run `grok login`",
+                self.command
+            )
+        };
+        let mut command =
+            super::harness_command(&self.command, &[], &self.env).with_context(launch_context)?;
         command
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        for (key, value) in &self.env {
-            if let Some(value) = value {
-                command.env(key, value);
-            } else {
-                command.env_remove(key);
-            }
-        }
         configure_agent_child_process_group(&mut command);
-        let child = command.spawn().with_context(|| {
-            format!(
-                "failed to launch Grok Build '{}'; install Grok Build and run `grok login`",
-                self.command
-            )
-        })?;
+        let child = command.spawn().with_context(launch_context)?;
         let output =
             wait_with_output_timeout(child, run_agent_timeout()).context("wait for Grok Build")?;
         if !output.status.success() {

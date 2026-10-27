@@ -390,11 +390,9 @@ fn prove_opencode_child_network_access(
 ) -> Result<()> {
     let probe_args =
         opencode_run_args_for_probe(launch_args, opencode_child_network_probe_prompt());
-    let mut cmd = std::process::Command::new(command);
-    cmd.args(&probe_args).env_remove("OPENCODE_CLIENT");
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
+    let mut cmd = super::harness_command(command, &["OPENCODE_CLIENT"], &env_map_as_overrides(env))
+        .map_err(|e| anyhow::anyhow!("failed to start {harness} child network probe: {e:#}"))?;
+    cmd.args(&probe_args);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     let output = wait_with_timeout(
@@ -436,11 +434,9 @@ fn prove_opencode_child_required_ssh(
         launch_args,
         opencode_child_required_ssh_probe_prompt(targets),
     );
-    let mut cmd = std::process::Command::new(command);
-    cmd.args(&probe_args).env_remove("OPENCODE_CLIENT");
-    for (key, value) in env {
-        cmd.env(key, value);
-    }
+    let mut cmd = super::harness_command(command, &["OPENCODE_CLIENT"], &env_map_as_overrides(env))
+        .map_err(|e| anyhow::anyhow!("failed to start {harness} child SSH probe: {e:#}"))?;
+    cmd.args(&probe_args);
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
     let output = wait_with_timeout(
@@ -873,7 +869,7 @@ impl Codex {
         _fork: bool,
         model: Option<&str>,
     ) -> Result<Command> {
-        let mut cmd = Command::new(&self.command);
+        let mut cmd = super::harness_command(&self.command, &["CODEX_CLI", "CODEX"], &self.env)?;
 
         if let Some(sid) = session_id {
             let prefix = vec![
@@ -892,8 +888,6 @@ impl Codex {
         if let Some(m) = model {
             cmd.arg("-m").arg(m);
         }
-
-        self.apply_env_overrides(&mut cmd);
 
         Ok(cmd)
     }

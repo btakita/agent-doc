@@ -99,7 +99,7 @@ fn spawn_fallback_agent(file: &Path, model: &str) -> Result<String> {
         truncated
     );
 
-    let output = std::process::Command::new("claude")
+    let output = agent_doc_agent_io::agent::harness_command("claude", &[], &[])?
         .args(["--print", "--model", model, "-p"])
         .arg(&prompt)
         .output()

@@ -68,6 +68,79 @@ pub fn run_agent_timeout() -> Duration {
     Duration::from_secs(secs.max(1))
 }
 
+/// Build the `Command` for a headless harness launch (`#headlessharnesspath`,
+/// the headless counterpart of GH #380).
+///
+/// A bare `program` is resolved over the effective child env (the inherited
+/// parent env, minus `removals`, plus the document `env:` `overrides`) through
+/// `agent_doc_harness::spawn_program::resolve_headless_program`: a name on that
+/// `PATH`, or one containing `/`, is launched exactly as before; a name missing
+/// from it (the Coder workspace default `PATH` leaves out `~/.local/bin`) is
+/// launched from the first well-known install directory that holds it, and that
+/// directory is appended to the child `PATH`. When nothing is found the launch
+/// fails with an error that lists every directory searched.
+///
+/// The returned `Command` already carries `removals` and `overrides` (applied
+/// in that order); callers add args, stdio, and the process group.
+pub fn harness_command(
+    program: &str,
+    removals: &[&str],
+    overrides: &[(String, Option<String>)],
+) -> Result<Command> {
+    let path_overridden = overrides.iter().any(|(key, _)| key == "PATH");
+    // A non-UTF-8 inherited PATH cannot be searched as a `String`; leave the
+    // lookup to `Command` exactly as before rather than misreport it missing.
+    let parent_path_unreadable = !path_overridden
+        && !removals.contains(&"PATH")
+        && std::env::var_os("PATH").is_some_and(|raw| raw.to_str().is_none());
+    let resolved = if parent_path_unreadable {
+        None
+    } else {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Some(agent_doc_harness::spawn_program::resolve_headless_program(
+            program,
+            removals,
+            overrides,
+            |key| std::env::var(key).ok(),
+            &cwd,
+        )?)
+    };
+    let launch_program = resolved
+        .as_ref()
+        .map_or(program, |headless| headless.resolved.program.as_str());
+    let mut command = Command::new(launch_program);
+    for key in removals {
+        command.env_remove(key);
+    }
+    for (key, value) in overrides {
+        match value {
+            Some(value) => {
+                command.env(key, value);
+            }
+            None => {
+                command.env_remove(key);
+            }
+        }
+    }
+    if let Some(headless) = resolved.as_ref()
+        && let Some(child_path) = headless.child_path.as_deref()
+    {
+        command.env("PATH", child_path);
+        eprintln!(
+            "[agent] harness_program_resolved harness={program} source={} program={} path_dir_appended={}",
+            headless.resolved.source.as_str(),
+            headless.resolved.program,
+            headless
+                .resolved
+                .path_dir_appended
+                .as_deref()
+                .map(|dir| dir.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+        );
+    }
+    Ok(command)
+}
+
 /// Isolate an agent backend in a child-owned process group so a timeout can
 /// terminate and reap the backend together with any preflight/background
 /// descendants it started.
@@ -427,5 +500,177 @@ mod tests {
         let streaming = resolve_streaming_for_file("junie", None, vec![], Path::new("doc.md"), &fm);
         assert!(streaming.is_ok());
         assert!(streaming.unwrap().is_none());
+    }
+}
+
+/// `#headlessharnesspath` — every headless backend resolves a bare harness name
+/// the same way the supervisor's pty spawn does (GH #380). Each test gives the
+/// child the Coder workspace default `PATH` and a temp `HOME` through the
+/// document `env:` overrides (the real `HOME` and process env are never
+/// touched), installs a fake harness only under `$HOME/.local/bin`, and has it
+/// report the `PATH` it was started with.
+#[cfg(all(test, unix))]
+mod headless_harness_path_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::TempDir;
+
+    /// The Coder workspace default `PATH`: system dirs only, no `~/.local/bin`.
+    const CODER_DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+    struct FakeHome {
+        home: TempDir,
+        program: String,
+    }
+
+    impl FakeHome {
+        /// Install `body` as `$HOME/.local/bin/<unique name>`. The name is
+        /// unique to the suite, so a real install under `/usr/local/bin` (a
+        /// system fallback dir) can never satisfy the lookup.
+        fn install(harness: &str, body: &str) -> Self {
+            let home = TempDir::new().unwrap();
+            let program = format!("agent-doc-headlessharnesspath-fake-{harness}");
+            let local_bin = home.path().join(".local/bin");
+            std::fs::create_dir_all(&local_bin).unwrap();
+            let path = local_bin.join(&program);
+            std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            Self { home, program }
+        }
+
+        fn local_bin(&self) -> String {
+            self.home.path().join(".local/bin").display().to_string()
+        }
+
+        /// The document `env:` overrides that recreate a Coder controller.
+        fn coder_env(&self) -> Vec<(String, Option<String>)> {
+            vec![
+                ("PATH".to_string(), Some(CODER_DEFAULT_PATH.to_string())),
+                (
+                    "HOME".to_string(),
+                    Some(self.home.path().display().to_string()),
+                ),
+            ]
+        }
+
+        /// The child `PATH` a fallback launch must see: every Coder entry
+        /// first, then the install directory it was found in.
+        fn expected_child_path(&self) -> String {
+            format!("{CODER_DEFAULT_PATH}:{}", self.local_bin())
+        }
+    }
+
+    #[test]
+    fn harness_command_launches_bare_name_from_user_local_bin_under_coder_default_path() {
+        let fake = FakeHome::install("cmd", "printf '%s' \"$PATH\"\n");
+        let output = harness_command(&fake.program, &[], &fake.coder_env())
+            .unwrap()
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            fake.expected_child_path()
+        );
+    }
+
+    #[test]
+    fn harness_command_not_found_lists_every_searched_directory() {
+        let home = TempDir::new().unwrap();
+        let env = vec![
+            ("PATH".to_string(), Some(CODER_DEFAULT_PATH.to_string())),
+            ("HOME".to_string(), Some(home.path().display().to_string())),
+        ];
+        let err = harness_command("agent-doc-headlessharnesspath-missing", &[], &env)
+            .expect_err("a harness installed nowhere must not resolve");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("was not found"), "{msg}");
+        assert!(
+            msg.contains(&format!("child PATH {CODER_DEFAULT_PATH}")),
+            "{msg}"
+        );
+        let local_bin = home.path().join(".local/bin");
+        assert!(msg.contains(local_bin.to_str().unwrap()), "{msg}");
+    }
+
+    #[test]
+    fn harness_command_keeps_a_name_on_the_child_path_as_given() {
+        let fake = FakeHome::install("aspath", "exit 0\n");
+        let env = vec![
+            ("PATH".to_string(), Some(fake.local_bin())),
+            (
+                "HOME".to_string(),
+                Some(fake.home.path().display().to_string()),
+            ),
+        ];
+        let mut command = harness_command(&fake.program, &[], &env).unwrap();
+        assert_eq!(command.get_program(), fake.program.as_str());
+        assert!(command.status().unwrap().success());
+    }
+
+    #[test]
+    fn claude_send_resolves_bare_name_missing_from_coder_default_path() {
+        let fake = FakeHome::install(
+            "claude",
+            "cat >/dev/null\nprintf '{\"result\":\"%s\",\"session_id\":\"s1\"}' \"$PATH\"\n",
+        );
+        let claude =
+            claude::Claude::new(Some(fake.program.clone()), None).with_env(fake.coder_env());
+        let response = claude.send("prompt", None, false, None).unwrap();
+        assert_eq!(response.text, fake.expected_child_path());
+    }
+
+    #[test]
+    fn claude_send_streaming_resolves_bare_name_missing_from_coder_default_path() {
+        let fake = FakeHome::install(
+            "claude-stream",
+            "cat >/dev/null\nprintf '{\"type\":\"result\",\"result\":\"%s\",\"session_id\":\"s1\"}\\n' \"$PATH\"\n",
+        );
+        let claude =
+            claude::Claude::new(Some(fake.program.clone()), None).with_env(fake.coder_env());
+        let last = claude
+            .send_streaming("prompt", None, false, None)
+            .unwrap()
+            .map(Result::unwrap)
+            .last()
+            .unwrap();
+        assert!(last.is_final);
+        assert_eq!(last.text, fake.expected_child_path());
+    }
+
+    #[test]
+    fn codex_send_resolves_bare_name_missing_from_coder_default_path() {
+        let fake = FakeHome::install(
+            "codex",
+            concat!(
+                "cat >/dev/null\n",
+                "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"t1\"}'\n",
+                "printf '{\"type\":\"item.completed\",\"item\":{\"id\":\"m1\",\"type\":\"agent_message\",\"text\":\"%s\"}}\\n' \"$PATH\"\n",
+                "printf '%s\\n' '{\"type\":\"turn.completed\",\"usage\":{}}'\n",
+            ),
+        );
+        let codex = codex::Codex::new(Some(fake.program.clone()), None).with_env(fake.coder_env());
+        let response = codex.send("prompt", None, false, None).unwrap();
+        assert_eq!(response.text, fake.expected_child_path());
+    }
+
+    #[test]
+    fn opencode_send_resolves_bare_name_missing_from_coder_default_path() {
+        let fake = FakeHome::install("opencode", "printf '%s' \"$PATH\"\n");
+        let opencode =
+            opencode::OpenCode::new(Some(fake.program.clone()), None).with_env(fake.coder_env());
+        let response = opencode.send("prompt", None, false, None).unwrap();
+        assert_eq!(response.text, fake.expected_child_path());
+    }
+
+    #[test]
+    fn grok_send_resolves_bare_name_missing_from_coder_default_path() {
+        let fake = FakeHome::install(
+            "grok",
+            "printf '{\"text\":\"%s\",\"stopReason\":\"end_turn\",\"sessionId\":\"g1\"}' \"$PATH\"\n",
+        );
+        let grok = grok::Grok::new(Some(fake.program.clone()), None).with_env(fake.coder_env());
+        let response = grok.send("prompt", None, false, None).unwrap();
+        assert_eq!(response.text, fake.expected_child_path());
     }
 }

@@ -17,7 +17,6 @@
 
 use agent_doc_turn_executor::opencode_launch::{default_base_args, opencode_run_args};
 use anyhow::Result;
-use std::process::Command;
 
 use super::{
     Agent, AgentResponse, configure_agent_child_process_group, run_agent_timeout,
@@ -56,18 +55,8 @@ impl Agent for OpenCode {
         model: Option<&str>,
     ) -> Result<AgentResponse> {
         let args = opencode_run_args(&self.base_args, prompt, session_id, fork, model);
-        let mut cmd = Command::new(&self.command);
-        cmd.args(&args).env_remove("OPENCODE_CLIENT");
-        for (k, v) in &self.env {
-            match v {
-                Some(val) => {
-                    cmd.env(k, val);
-                }
-                None => {
-                    cmd.env_remove(k);
-                }
-            }
-        }
+        let mut cmd = super::harness_command(&self.command, &["OPENCODE_CLIENT"], &self.env)?;
+        cmd.args(&args);
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
         configure_agent_child_process_group(&mut cmd);

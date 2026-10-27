@@ -38,7 +38,6 @@
 use anyhow::Result;
 use parking_lot::Mutex;
 use std::io::BufRead;
-use std::process::Command;
 use std::sync::Arc;
 
 use super::{Agent, AgentResponse};
@@ -82,18 +81,8 @@ impl Agent for Claude {
     ) -> Result<AgentResponse> {
         let args = claude_json_args(&self.base_args, session_id, fork, model);
 
-        let mut cmd = Command::new(&self.command);
-        cmd.args(&args).env_remove("CLAUDECODE");
-        for (k, v) in &self.env {
-            match v {
-                Some(val) => {
-                    cmd.env(k, val);
-                }
-                None => {
-                    cmd.env_remove(k);
-                }
-            }
-        }
+        let mut cmd = super::harness_command(&self.command, &["CLAUDECODE"], &self.env)?;
+        cmd.args(&args);
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -155,18 +144,8 @@ impl StreamingAgent for Claude {
     ) -> Result<Box<dyn Iterator<Item = Result<StreamChunk>>>> {
         let args = claude_streaming_args(&self.base_args, session_id, fork, model);
 
-        let mut cmd = Command::new(&self.command);
-        cmd.args(&args).env_remove("CLAUDECODE");
-        for (k, v) in &self.env {
-            match v {
-                Some(val) => {
-                    cmd.env(k, val);
-                }
-                None => {
-                    cmd.env_remove(k);
-                }
-            }
-        }
+        let mut cmd = super::harness_command(&self.command, &["CLAUDECODE"], &self.env)?;
+        cmd.args(&args);
         cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());

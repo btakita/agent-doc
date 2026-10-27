@@ -129,20 +129,22 @@ impl Agent for Junie {
                 .to_string(),
         );
 
-        let mut command = Command::new(&self.command);
+        let launch_context = || {
+            format!(
+                "failed to run junie command '{}'. Install junie-bridge.sh to your PATH \
+                     or configure [agents.junie] command in ~/.config/agent-doc/config.toml",
+                self.command
+            )
+        };
+        let mut command =
+            super::harness_command(&self.command, &[], &[]).with_context(launch_context)?;
         command
             .args(&args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         configure_agent_child_process_group(&mut command);
-        let mut child = command.spawn().with_context(|| {
-            format!(
-                "failed to run junie command '{}'. Install junie-bridge.sh to your PATH \
-                     or configure [agents.junie] command in ~/.config/agent-doc/config.toml",
-                self.command
-            )
-        })?;
+        let mut child = command.spawn().with_context(launch_context)?;
         {
             use std::io::Write;
             if let Some(ref mut stdin) = child.stdin {

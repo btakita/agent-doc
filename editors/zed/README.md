@@ -18,3 +18,10 @@ features and receive no agent-doc edits or commands.
 
 The extension starts `agent-doc zed-lsp`. You can override the executable or
 arguments with Zed's `lsp.agent-doc.binary` settings.
+
+Installing a new `agent-doc` binary over the one Zed started does not require
+restarting Zed: the running language server hands its session to the new binary
+in place. If it cannot, Zed shows a message asking you to run
+`editor: restart language server`.
+
+For Zed remote development, see [REMOTE.md](REMOTE.md).

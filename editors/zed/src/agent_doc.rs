@@ -1,5 +1,21 @@
 use zed_extension_api::{self as zed, settings::LspSettings, LanguageServerId, Result, Worktree};
 
+/// Tells `agent-doc zed-lsp` which extension generation launched it; the
+/// server reports it as `editor_version` in its replica registration.
+const EXTENSION_VERSION_ENV: &str = "AGENT_DOC_ZED_EXTENSION_VERSION";
+
+/// The version Zed installed this extension under: `extension.toml`, not the
+/// WASM crate's `Cargo.toml`.
+fn extension_version() -> &'static str {
+    include_str!("../extension.toml")
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once('=')?;
+            (key.trim() == "version").then(|| value.trim().trim_matches('"'))
+        })
+        .unwrap_or("unknown")
+}
+
 struct AgentDocExtension;
 
 impl zed::Extension for AgentDocExtension {
@@ -29,7 +45,10 @@ impl zed::Extension for AgentDocExtension {
         Ok(zed::Command {
             command,
             args,
-            env: Vec::new(),
+            env: vec![(
+                EXTENSION_VERSION_ENV.to_string(),
+                extension_version().to_string(),
+            )],
         })
     }
 }

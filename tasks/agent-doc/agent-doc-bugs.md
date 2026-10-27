@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -825,6 +826,17 @@ I dispatched both issues to background subagents. Each works in its own worktree
 
 The exchange is 778 lines over 22 sections. The queue is draining, so I'm not compacting.
 
+### Re: Subagent completed: `subagent:gh380` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/380” — agent-doc
+<!-- agent-doc-subagent-response sha256=1b0fbb2ddbb3d3aafc7611958b8979452d14d8123945563260f0eabfbfa3a008 -->
+> **Subagent response:**
+>
+> Branch fix/gh380-supervisor-spawn-path, commit 82ff929303 (pushed). Files: agent-doc-supervisor-process/src/{spawn_program.rs (new), pty.rs, lib.rs}, agent-doc-start-runtime-io/src/run.rs, specs/supervisor.md.
+> Root cause: PtySession::spawn clears env and portable-pty resolves the bare harness name only against the inherited controller PATH; the Coder default PATH omits ~/.local/bin. All four harnesses share this spawn.
+> Fix: if the bare name is not on the child PATH, resolve it from well-known install dirs (~/.local/bin, ~/.claude/local, ~/.opencode/bin, ~/.grok/bin, npm/bun/volta/cargo bins, ~/bin, /usr/local/bin, Homebrew); spawn the absolute path (symlinks unresolved), append its dir to the child PATH, log harness_program_resolved source=install_dir_fallback; not-found error lists every dir searched.
+> Tests: cargo test -p agent-doc-supervisor-process --lib -- spawn_program pty:: = 22 passed (8+2 new; regression bare_harness_name_missing_from_coder_default_path_spawns_from_user_local_bin fails with the fallback disabled). make check: clippy ok, Rust 11818/11818 passed (182 skipped); exits 2 on VS Code dev-harness-test "round-trips owned strings through the built library" (editors/vscode/src/native.test.ts:390, from 6431911c50), which the worker reports as pre-existing under make's project-root bound. One-off flake test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning (controller generation CAS expected 1 found 2) passed 5/5 in isolation.
+> Follow-ups: (1) VS Code native test resolveProjectPath under make's root bound; (2) claim-vs-supervisor generation CAS race in that CLI test; (3) optional: headless harness launches in agent-doc-agent-io (claude/codex/opencode/grok) use bare-name PATH lookup too.
+<!-- agent-doc-subagent-completion key=357ed6d65b725f8e41502d578a4ac1f8543a91a031e49359893178d7cb484e2a -->
+
 ### Re: Subagent completed: `subagent:claimfollow` returned work for queue item “do [#claimfollowstruck]” — agent-doc
 <!-- agent-doc-subagent-response sha256=b5eaff1d216857f77fb600147f6eb41e86e9c788d121273e99fb17160319e29f -->
 > **Subagent response:**
@@ -836,6 +848,20 @@ The exchange is 778 lines over 22 sections. The queue is draining, so I'm not co
 > Tests: 5 new agent-doc-queue tests + 1 queue-io ledger test; 4 deliberate mutations each reddened the matching test. cargo test -p agent-doc-queue --lib 962 passed; -p agent-doc-queue-io --lib queue_claim 16 passed; make -k check Rust 11814/11814 (182 skipped), only failure the pre-existing VS Code native.test round-trip (passes 22/22 with a temporary .agent-doc root).
 > Follow-ups: (1) live_queue_head_identities still reads only the selected queue for prune/active/claimed_items closure; judge claim closure across every queue. (2) delete-plus-add at the same position still hands over a claim as an edit (#queue-mutation-steering design; decision needed).
 <!-- agent-doc-subagent-completion key=c329a8b06f1564a79e4267a1812689fd4bd00be19466436d3a92c634eef29568 -->
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/380
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/381
+
+### Re: Subagent completed: `subagent:gh381` returned work for queue item “#gh-fix https://github.com/btakita/agent-doc/issues/381” — agent-doc
+<!-- agent-doc-subagent-response sha256=1a5922840550989cf9daa5b4d0a85ec858ec36b916877bfdbf733c4058f26293 -->
+> **Subagent response:**
+>
+> Branch fix/gh381-project-preset-queue-head, commit 54a4ecf938 (pushed).
+> Root cause: preset_only_identity_ids and the preflight Todo audit read only the session document's own frontmatter presets, so a project-only preset head `#review` was treated as tracked id `review`; with an agent:backlog lacking it, head_is_drainable called it a stale mirror (queue_drainable_head_count 0) and append_unlinked_queue_signals flagged a missing Todo backlink.
+> Fix: `_with_presets` drain variants in agent-doc-queue/src/queue_continuation.rs fed the merged document+project preset map; new effective_prompt_presets_for_drain (agent-doc-frontmatter-io/src/session.rs, falls back to document presets when project.md is unreadable; grants no authorization). Callers migrated: preflight drain count/supervisor head/skip set, session-check + Codex Stop continuation, supervisor idle watch, controller orphan drain + handoff, route closeout drain, consumption proof, plan. Todo audit skips heads whose leading token is a preset-only name (head_leads_with_preset). Open tracked work with the same name keeps precedence; nothing is written into the document. Specs: project-preset-inheritance.md, 07-orchestration-commands.md, 02-document-format.md, pending-system.md.
+> Tests: 3 agent-doc-queue units, 1 preflight-io repro, 1 end-to-end test_cli repro (red before the fix with the exact reported output); 2 source guards updated. cargo test -p agent-doc-queue --lib preset 36 passed; preflight-io repro 1 passed; test_cli repro 1 passed; make -k check Rust 11813 passed (182 skipped), all other targets green except the pre-existing VS Code native.test round-trip (fails only under make's AGENT_DOC_ROOT_CEILING_DIRECTORIES; red on main CI 40449457567).
+> Follow-up: fix the VS Code native.test.ts round-trip under make check's root ceiling.
+<!-- agent-doc-subagent-completion key=ab5a8a457707abf7e17c6b69fe7b84a8adb7d8881a208dd15194f9e49a3fdbc8 -->
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/380
 
 > **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/381

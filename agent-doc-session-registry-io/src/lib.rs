@@ -69,6 +69,22 @@ pub fn load_in(base_dir: &Path) -> Result<Registry> {
         .with_context(|| format!("failed to load registry from {}", path.display()))
 }
 
+/// The session registry of the store at `base_dir`, or an empty one when that
+/// store has no registry yet.
+///
+/// A document-scoped *read* (claim's occupancy and `--window` fallback,
+/// resync's targeted repair, `terminal`'s session scan) resolves the
+/// document's store (`project_root_or_file_parent`) and reads it here: a
+/// store that does not exist holds no binding, and reading it must never
+/// create it (`#rootlessstorecreate`, `#cwdfallbackrest`). [`load_in`] opens,
+/// and so creates, `state.db`.
+pub fn load_existing_in(base_dir: &Path) -> Result<Registry> {
+    if !registry_path_in(base_dir).is_file() {
+        return Ok(Registry::default());
+    }
+    load_in(base_dir)
+}
+
 /// Save the session registry to durable controller state.
 ///
 /// This is not locked internally. Callers must hold `tmux_router::RegistryLock`

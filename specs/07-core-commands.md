@@ -935,6 +935,11 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
 
 - Opens an external terminal that attaches to the target tmux session, but only when another attached client does not already exist.
 - The terminal command comes from user config or `$TERMINAL`.
+- The target session comes from the **document's** store (`project_store_for_doc`: its
+  `.agent-doc` project, or a rootless document's canonical parent), never the process cwd's
+  (`#cwdfallbackrest`): an explicit `--session`, else the store's multi-session document binding,
+  else a live pane in the store's registry, else the store's `tmux_session` pin, else `"0"`. A
+  store that does not exist yet has no registry and no pin, and reading it creates nothing.
 
 ## env
 

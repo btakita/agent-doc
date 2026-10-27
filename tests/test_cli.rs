@@ -27249,8 +27249,9 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/resync.rs")).unwrap();
     assert!(
         !resync_source.contains("agent_doc_fs::find_project_root(")
-            && resync_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "resync should call focused project-root IO instead of owning registry root discovery"
+            && resync_source.contains("agent_doc_project_root_io::project_root_containing(")
+            && resync_source.contains("agent_doc_project_root_io::project_root_or_file_parent("),
+        "resync should call focused project-root IO instead of owning registry root discovery (a targeted resync resolves the document's store, `#cwdfallbackrest`)"
     );
     let compact_source =
         fs::read_to_string(manifest_dir.join("agent-doc-compact-io/src/lib.rs")).unwrap();
@@ -34878,6 +34879,278 @@ fn test_cli_claim_from_another_project_enforces_the_documents_tmux_pin() {
         agent_doc_session_actor_io::load_record_in(&project, &doc.to_string_lossy()).unwrap(),
         None,
         "a refused claim binds nothing: {stderr}"
+    );
+}
+
+/// The tmux window id of `pane` on the isolated test server.
+fn isolated_tmux_window_of(tmux: &IsolatedTmuxServer, pane: &str) -> String {
+    let output = ProcessCommand::new("tmux")
+        .env_remove("TMUX")
+        .env_remove("TMUX_PANE")
+        .args(["-L", &tmux.socket, "-f", "/dev/null"])
+        .args(["display-message", "-p", "-t", pane, "#{window_id}"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+/// `#cwdfallbackrest`: claim's dead-`--window` fallback searches the
+/// **document store's** registry for a live window of the document's project
+/// (an entry whose `cwd` is the pane cwd a bind of the document records), never
+/// the process cwd's registry. The cwd project here registers a live window
+/// under its own cwd; read from the cwd, the fallback adopted that foreign
+/// window instead of the document project's.
+#[test]
+fn test_cli_claim_dead_window_fallback_reads_the_documents_store_never_the_cwd() {
+    let label = "claim-window-store";
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new(label);
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc/logs")).unwrap();
+    let project = tmp.path().join("doc-project");
+    fs::create_dir_all(&project).unwrap();
+    let doc = project.join("doc.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: claim-window-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    init_git_repo(&project, &doc);
+    let (cwd_project, project, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        project.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    let pane = claim_store_test_pane(&tmux, &project, label);
+    let cwd_pane = claim_store_test_pane(&tmux, &cwd_project, &format!("{label}-cwd"));
+    let doc_window_pane = claim_store_test_pane(&tmux, &project, &format!("{label}-doc"));
+    let cwd_window = isolated_tmux_window_of(&tmux, &cwd_pane);
+    let doc_window = isolated_tmux_window_of(&tmux, &doc_window_pane);
+    assert_ne!(cwd_window, doc_window);
+    agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+        &cwd_project,
+        "cwd-project-session",
+        &cwd_pane,
+        "cwd.md",
+        std::process::id(),
+        &cwd_window,
+        &cwd_project.to_string_lossy(),
+    )
+    .unwrap();
+    agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+        &project,
+        "doc-project-session",
+        &doc_window_pane,
+        "other.md",
+        std::process::id(),
+        &doc_window,
+        &project.to_string_lossy(),
+    )
+    .unwrap();
+
+    let mut claim = agent_doc_cmd();
+    claim
+        .current_dir(&cwd_project)
+        .arg("claim")
+        .arg(&doc)
+        .args(["--window", "@999999", "--pane", &pane]);
+    tmux.configure(&mut claim);
+    let output = claim.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!("found alive window {doc_window} from registry")),
+        "the fallback finds the document project's live window: {stderr}"
+    );
+    assert!(
+        !stderr.contains(&format!("found alive window {cwd_window} ")),
+        "the fallback never adopts the cwd project's window: {stderr}"
+    );
+}
+
+/// The `[components]` mode `template-info` reports for `doc`'s `status`
+/// component when run from `cwd` (with `ceiling` as the root ceiling, if any).
+fn template_info_status_mode(cwd: &Path, doc: &Path, ceiling: Option<&Path>) -> String {
+    let mut info = agent_doc_cmd();
+    info.current_dir(cwd).arg("template-info").arg(doc);
+    if let Some(ceiling) = ceiling {
+        info.env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", ceiling);
+    }
+    let output = info.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    json["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|component| component["name"] == "status")
+        .unwrap_or_else(|| panic!("no status component: {json}"))["mode"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+const CWDFALLBACK_TEMPLATE_DOC: &str = "---\nagent_doc_format: template\n---\n# Doc\n\n<!-- agent:status -->\nidle\n<!-- /agent:status -->\n";
+const CWDFALLBACK_APPEND_STATUS_CONFIG: &str = "[components.status]\npatch = \"append\"\n";
+
+/// `#cwdfallbackrest`: the template patch modes of a document come from its
+/// store's `[components]`, never the process cwd's project. A rootless
+/// document's store has no config until it is created, so it gets the default
+/// mode even when run from inside a project that overrides it, and the read
+/// creates no store; a document in a project reads that project's modes.
+#[test]
+fn test_cli_template_info_reads_the_documents_store_never_the_cwd_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc")).unwrap();
+    fs::write(
+        cwd_project.join(".agent-doc/config.toml"),
+        CWDFALLBACK_APPEND_STATUS_CONFIG,
+    )
+    .unwrap();
+    let loose = tmp.path().join("loose");
+    fs::create_dir_all(&loose).unwrap();
+    let rootless = loose.join("rootless.md");
+    fs::write(&rootless, CWDFALLBACK_TEMPLATE_DOC).unwrap();
+    let project = tmp.path().join("doc-project");
+    fs::create_dir_all(project.join(".agent-doc")).unwrap();
+    fs::write(
+        project.join(".agent-doc/config.toml"),
+        "[components.status]\npatch = \"prepend\"\n",
+    )
+    .unwrap();
+    let tracked = project.join("doc.md");
+    fs::write(&tracked, CWDFALLBACK_TEMPLATE_DOC).unwrap();
+
+    assert_eq!(
+        template_info_status_mode(
+            &cwd_project,
+            &cwd_project.join("../loose/rootless.md"),
+            None
+        ),
+        "replace",
+        "a rootless document never reads the cwd project's component modes"
+    );
+    assert!(
+        !loose.join(".agent-doc").exists(),
+        "reading a rootless document's config creates no store"
+    );
+    assert_eq!(
+        template_info_status_mode(&cwd_project, &tracked, None),
+        "prepend",
+        "a tracked document reads its own project's component modes"
+    );
+}
+
+/// `#cwdfallbackrest`: the document's config walk honors the root ceiling
+/// (`AGENT_DOC_ROOT_CEILING_DIRECTORIES`). `template-io` used to walk up for
+/// `.agent-doc/config.toml` on its own, past the ceiling, and patched with the
+/// modes of a project above it.
+#[test]
+fn test_cli_template_info_honors_the_root_ceiling() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outer = tmp.path().join("outer");
+    fs::create_dir_all(outer.join(".agent-doc")).unwrap();
+    fs::write(
+        outer.join(".agent-doc/config.toml"),
+        CWDFALLBACK_APPEND_STATUS_CONFIG,
+    )
+    .unwrap();
+    let inner = outer.join("inner");
+    fs::create_dir_all(&inner).unwrap();
+    let doc = inner.join("doc.md");
+    fs::write(&doc, CWDFALLBACK_TEMPLATE_DOC).unwrap();
+
+    assert_eq!(
+        template_info_status_mode(&inner, &doc, None),
+        "append",
+        "fixture: without a ceiling the outer project owns the document"
+    );
+    assert_eq!(
+        template_info_status_mode(&inner, &doc, Some(&outer)),
+        "replace",
+        "a project above the root ceiling is never the document's"
+    );
+    assert!(!inner.join(".agent-doc").exists());
+}
+
+/// `#cwdfallbackrest`: `agent-doc resync <FILE>` repairs the **document's**
+/// store (its project, or a rootless document's canonical parent), never the
+/// process cwd's. A rootless document whose store does not exist yet has no
+/// binding: the command reports that and creates neither that store nor any
+/// state (registry, controller) in the cwd project it ran from.
+#[test]
+fn test_cli_resync_of_a_rootless_document_never_touches_the_cwd_project() {
+    let tmp = tempfile::tempdir().unwrap();
+    let tmux = IsolatedTmuxServer::new("resync-rootless-store");
+    let cwd_project = tmp.path().join("cwd-project");
+    fs::create_dir_all(cwd_project.join(".agent-doc")).unwrap();
+    let loose = tmp.path().join("loose");
+    fs::create_dir_all(&loose).unwrap();
+    let doc = loose.join("rootless.md");
+    fs::write(
+        &doc,
+        "---\nagent_doc_session: resync-rootless-session\n---\n# Doc\n",
+    )
+    .unwrap();
+    let (cwd_project, loose, doc) = (
+        cwd_project.canonicalize().unwrap(),
+        loose.canonicalize().unwrap(),
+        doc.canonicalize().unwrap(),
+    );
+    // The cwd project is a live store with a registry of its own, so a resync
+    // resolved from the cwd would launch its controller and repair its rows.
+    agent_doc_session_registry_io::registration::register_full_with_cwd_in(
+        &cwd_project,
+        "cwd-project-session",
+        "%999999",
+        "cwd.md",
+        std::process::id(),
+        "",
+        &cwd_project.to_string_lossy(),
+    )
+    .unwrap();
+    let cwd_state = |dir: &Path| -> Vec<(std::ffi::OsString, Vec<u8>)> {
+        let mut entries: Vec<_> = fs::read_dir(dir.join(".agent-doc"))
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let bytes = if entry.file_type().unwrap().is_file() {
+                    fs::read(entry.path()).unwrap()
+                } else {
+                    Vec::new()
+                };
+                (entry.file_name(), bytes)
+            })
+            .collect();
+        entries.sort();
+        entries
+    };
+    let before = cwd_state(&cwd_project);
+
+    let mut resync = agent_doc_cmd();
+    resync.current_dir(&cwd_project).arg("resync").arg(&doc);
+    tmux.configure(&mut resync);
+    let output = resync.output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(&format!(
+            "No registered sessions found for {} (its store {} has no registry yet)",
+            doc.display(),
+            loose.display()
+        )),
+        "resync reports the document's own (absent) store: {stderr}"
+    );
+    assert!(
+        !loose.join(".agent-doc").exists(),
+        "a read of a rootless document's store never creates it: {stderr}"
+    );
+    assert!(
+        before == cwd_state(&cwd_project),
+        "resync of another store's document writes nothing into the cwd project: {stderr}"
     );
 }
 

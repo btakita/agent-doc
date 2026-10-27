@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -309,8 +309,8 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#clobberfollowups] Data-safety follow-ups from #retainedprojectionclobber: (1) find why the 2026-10-27 16:07:52Z captured_finalize_resume_tracked_work_replay built its retained target from text without the operator's latest typing (length matched response-write target 3fc1e92, not live canonical ef39f88) - if the recorded base matched canonical while the target came from older text, the new OperatorTextWouldBeLost check cannot catch it; (2) refuse a commit while an editor replica is quarantined (the 16:31:34Z closeout committed 206af5eef3 via local_commit_then_composed_late_projection_proof while the editor held unmerged text); (3) derive diverged in realtime_doc_resolve from quarantined_live_replicas() instead of hard-coding false; (4) surface retained_transition_refused_operator_text_loss in session-check.
-- [ ] [#jb263probeblind] On the exact-263 modular JetBrains package the superseded-plugin probe is blind: it matches versioned agent.doc-<v>.jar in /proc/<pid>/map_files, but the 263 IDE maps only unversioned lib/modules/agent.doc.{backend,frontend,shared}.jar, so it returns Unknown and silently admits (missed 2026-10-27 04:07:49Z and 04:11:32Z with restart_required pending=0.2.861). Also classify the module-jar mappings ((deleted)/backup-path targets) or fall back to live_plugin_generation_refresh stale=true / the .agent-doc-jetbrains-restart-required marker; keep Unknown failing open; regression test with a 263 maps fixture of module jars only.
+- [ ] ☑️ [#clobberfollowups] Data-safety follow-ups from #retainedprojectionclobber: (1) find why the 2026-10-27 16:07:52Z captured_finalize_resume_tracked_work_replay built its retained target from text without the operator's latest typing (length matched response-write target 3fc1e92, not live canonical ef39f88) - if the recorded base matched canonical while the target came from older text, the new OperatorTextWouldBeLost check cannot catch it; (2) refuse a commit while an editor replica is quarantined (the 16:31:34Z closeout committed 206af5eef3 via local_commit_then_composed_late_projection_proof while the editor held unmerged text); (3) derive diverged in realtime_doc_resolve from quarantined_live_replicas() instead of hard-coding false; (4) surface retained_transition_refused_operator_text_loss in session-check.
+- [ ] ☑️ [#jb263probeblind] On the exact-263 modular JetBrains package the superseded-plugin probe is blind: it matches versioned agent.doc-<v>.jar in /proc/<pid>/map_files, but the 263 IDE maps only unversioned lib/modules/agent.doc.{backend,frontend,shared}.jar, so it returns Unknown and silently admits (missed 2026-10-27 04:07:49Z and 04:11:32Z with restart_required pending=0.2.861). Also classify the module-jar mappings ((deleted)/backup-path targets) or fall back to live_plugin_generation_refresh stale=true / the .agent-doc-jetbrains-restart-required marker; keep Unknown failing open; regression test with a 263 maps fixture of module jars only.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

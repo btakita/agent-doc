@@ -5627,6 +5627,13 @@ mod tests {
             listed["output"]["derivations"]
                 .as_array()
                 .unwrap()
+                .contains(&serde_json::json!("editor_group_layout")),
+            "#vscodeupgradelayout: the VS Code editor-group layout is a shipped derivation"
+        );
+        assert!(
+            listed["output"]["derivations"]
+                .as_array()
+                .unwrap()
                 .contains(&serde_json::json!("attach_failure_diagnosis")),
             "GH #326 phase 5b: the attach-failure diagnosis is a shipped derivation"
         );

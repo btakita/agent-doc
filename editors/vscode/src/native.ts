@@ -177,6 +177,7 @@ function resetBindings(): void {
     _tmux_focus_state_json = null;
     _focus_document_pane_json = null;
     _sync_tmux_layout_json = null;
+    _editor_derive_json = null;
     _editor_surface_observe_json = null;
     _editor_surface_enqueue_json = null;
     _document_authority_json = null;
@@ -226,7 +227,7 @@ function resetBindings(): void {
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
 export const NATIVE_HOT_RELOAD_CAPABILITY = 'native_hot_reload_generation_v1';
-export const EDITOR_PLUGIN_VERSION = '0.2.83';
+export const EDITOR_PLUGIN_VERSION = '0.2.84';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 const BOUNDED_EDITOR_SPLICES_CAPABILITY = 'bounded_editor_splices_v1';
@@ -426,6 +427,7 @@ let _admin_inspect_json: any = null;
 let _tmux_focus_state_json: any = null;
 let _focus_document_pane_json: any = null;
 let _sync_tmux_layout_json: any = null;
+let _editor_derive_json: any = null;
 let _editor_surface_observe_json: any = null;
 let _editor_surface_enqueue_json: any = null;
 let _document_authority_json: any = null;
@@ -675,6 +677,13 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] deferred reconnect ABI unavailable: ${e.message}`);
         _deferred_write_reconnect_content = null;
         _deferred_write_reconnect_propagated = null;
+    }
+    try {
+        // `#vscodeupgradelayout`: hot-reloadable editor derivations (GH #326).
+        _editor_derive_json = lib.func('agent_doc_editor_derive_json', FfiJsonResultType, ['str']);
+    } catch (e: any) {
+        console.log(`[agent-doc/native] editor_derive_json unavailable: ${e.message}`);
+        _editor_derive_json = null;
     }
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_state = lib.func('agent_doc_free_state', 'void', ['void*', 'size_t']);
@@ -1827,6 +1836,20 @@ export function focusDocumentPaneJson(options: {
         ),
         'focus_document_pane',
     );
+}
+
+/**
+ * One editor derivation of the loaded native library
+ * (`agent_doc_editor_derive_json`): `{"derivation", "input"}` in,
+ * `{"derivation", "output"}` out, or `null` when the library is absent, predates
+ * the entry point, or refused the request (an older library answers an unknown
+ * derivation with an error, so callers keep their frozen floor).
+ */
+export function editorDeriveJson(requestJson: string, projectRoot?: string | null): string | null {
+    if (!ensureLoaded(projectRoot ?? undefined)) return null;
+    bindFunctions();
+    if (!_editor_derive_json) return null;
+    return decodeJsonResult(_editor_derive_json(requestJson), 'editor_derive');
 }
 
 /**

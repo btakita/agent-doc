@@ -59,6 +59,19 @@ import {
 } from './popupMenu.js';
 import { DASHBOARD_COMMAND_ARGS, dashboardPath } from './dashboard.js';
 import {
+    AGENT_DOC_EXTENSION_ID,
+    installedExtension,
+    staleExtensionVerdict,
+    upgradePrompt,
+} from './pluginUpgrade.js';
+import {
+    deriveGroupLayout,
+    resolutionColumns,
+    type EditorGroupLayout,
+    type GroupLayoutEvidence,
+    type GroupLayoutResolution,
+} from './groupLayout.js';
+import {
     buildEditorSurface,
     buildSyncCommandArgs,
     flattenVisibleColumns,
@@ -987,74 +1000,72 @@ let commandRunning = false;
 // Split / Layout Detection (Features 2, 3)
 // ---------------------------------------------------------------------------
 
-interface SplitInfo {
-    orientation: 'h' | 'v' | undefined;
-    position: string | undefined;
+/**
+ * `#vscodeupgradelayout`: VS Code exposes the editor grid through the
+ * `vscode.getEditorLayout` command (orientation plus nested group sizes) and
+ * the groups' documents through `tabGroups`/`visibleTextEditors`. The extension
+ * reports that evidence and the native `editor_group_layout` derivation turns it
+ * into columns, orientation, and claim position (`groupLayout.ts` holds the
+ * frozen floor), so a layout rule change hot-reloads with `libagent_doc`.
+ */
+async function readEditorLayout(): Promise<EditorGroupLayout | null> {
+    try {
+        const layout = await vscode.commands.executeCommand<EditorGroupLayout>('vscode.getEditorLayout');
+        return layout && typeof layout === 'object' ? layout : null;
+    } catch {
+        return null;
+    }
 }
 
-function detectSplit(editor: vscode.TextEditor): SplitInfo {
+/** Index into `tabGroups.all` of the first group holding `uri` as a text tab. */
+function groupIndexHolding(uri: vscode.Uri | undefined): number | null {
+    if (!uri) return null;
+    const target = uri.toString();
     const groups = vscode.window.tabGroups.all;
-    if (groups.length < 2) {
-        return { orientation: undefined, position: undefined };
-    }
-
-    // Find which group the editor belongs to
-    const editorUri = editor.document.uri.toString();
-    let editorGroupIndex = -1;
-    for (let i = 0; i < groups.length; i++) {
-        for (const tab of groups[i].tabs) {
-            if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === editorUri) {
-                editorGroupIndex = i;
-                break;
+    for (let index = 0; index < groups.length; index += 1) {
+        for (const tab of groups[index].tabs) {
+            if (tab.input instanceof vscode.TabInputText && tab.input.uri.toString() === target) {
+                return index;
             }
         }
-        if (editorGroupIndex >= 0) break;
     }
-
-    // VS Code doesn't directly expose orientation, but viewColumn gives position.
-    // viewColumn 1,2,3... for side-by-side; for top/bottom we heuristic-check.
-    // Side-by-side is the most common split in VS Code.
-    const orientation: 'h' | 'v' = 'h'; // Default assumption: horizontal split
-    let position: string | undefined;
-
-    if (editorGroupIndex === 0) {
-        position = 'left';
-    } else if (editorGroupIndex >= 1) {
-        position = 'right';
-    }
-
-    return { orientation, position };
+    return null;
 }
 
-function collectVisibleMarkdownColumns(root: string): string[][] {
-    const columns = new Map<number, string[]>();
-    let maxColumn = 0;
+let lastObservedLayoutLine = '';
 
-    for (const editor of vscode.window.visibleTextEditors) {
-        const viewColumn = editor.viewColumn;
-        if (viewColumn === undefined) continue;
-        maxColumn = Math.max(maxColumn, viewColumn);
-
-        const column = columns.get(viewColumn) ?? [];
-        if (isMarkdown(editor)) {
-            const uri = editor.document.uri;
-            if (uri.fsPath.startsWith(root)) {
-                const rel = relativePath(root, uri.fsPath);
-                if (!column.includes(rel)) column.push(rel);
-            }
-        }
-        columns.set(viewColumn, column);
+/**
+ * Measure the editor groups and derive their layout. `root` scopes which
+ * markdown documents count (reported workspace-relative, as the CLI takes
+ * them); `focusedUri` selects the group whose side becomes the claim position.
+ */
+async function captureGroupLayout(root: string, focusedUri?: vscode.Uri): Promise<GroupLayoutResolution> {
+    const layout = await readEditorLayout();
+    const evidence: GroupLayoutEvidence = {
+        layout,
+        group_count: vscode.window.tabGroups.all.length,
+        editors: vscode.window.visibleTextEditors.map((editor) => ({
+            view_column: editor.viewColumn ?? null,
+            file: isMarkdown(editor) && editor.document.uri.fsPath.startsWith(root)
+                ? relativePath(root, editor.document.uri.fsPath)
+                : null,
+        })),
+        focused_group: groupIndexHolding(focusedUri),
+    };
+    const { resolution, native: answered } = deriveGroupLayout(
+        evidence,
+        (request) => native.editorDeriveJson(request, root),
+    );
+    const line = `${resolution.observed_line} derivation=${answered ? 'native' : 'floor'}`;
+    if (line !== lastObservedLayoutLine) {
+        lastObservedLayoutLine = line;
+        console.debug(`[agent-doc/layout] ${line}`);
     }
+    return resolution;
+}
 
-    if (maxColumn === 0) {
-        return [];
-    }
-
-    const orderedColumns: string[][] = [];
-    for (let column = 1; column <= maxColumn; column += 1) {
-        orderedColumns.push(columns.get(column) ?? []);
-    }
-    return orderedColumns;
+async function collectVisibleMarkdownColumns(root: string): Promise<string[][]> {
+    return resolutionColumns(await captureGroupLayout(root));
 }
 
 function formatSyncLayoutSummary(columns: string[][], focusFile?: string): string {
@@ -1263,7 +1274,7 @@ async function runEditorRouteViaProjectController(
     signal: AbortSignal,
 ): Promise<string> {
     await ensureProjectControllerRunning(cwd, signal);
-    const layoutArgs = buildRouteLayoutArgs(collectVisibleMarkdownColumns(cwd), rel);
+    const layoutArgs = buildRouteLayoutArgs(await collectVisibleMarkdownColumns(cwd), rel);
     if (commandPlaneEnabled()) {
         return runEditorRouteViaCommandPlane(cwd, rel, filePath, routeKey, layoutArgs, signal);
     }
@@ -1951,8 +1962,8 @@ async function initSessionAction(resource?: vscode.Uri): Promise<void> {
     const { cwd, relativePath: rel } = resolveProject(root, uri.fsPath);
     const args = ['init-session', rel];
     if (activeEditor?.document.uri.fsPath === uri.fsPath) {
-        const split = detectSplit(activeEditor);
-        if (split.position) args.push('--position', split.position);
+        const { position } = await captureGroupLayout(root, activeEditor.document.uri);
+        if (position) args.push('--position', position);
     }
 
     try {
@@ -1991,7 +2002,7 @@ async function claimActionInternal(force: boolean): Promise<void> {
     let recoveryCtx: { cwd: string; rel: string; position?: string } | undefined;
     try {
         const { cwd, relativePath: rel } = resolveProject(root, editor.document.uri.fsPath);
-        const split = detectSplit(editor);
+        const split = { position: (await captureGroupLayout(root, editor.document.uri)).position ?? undefined };
         recoveryCtx = { cwd, rel, position: split.position };
         const args = ['claim', rel];
         if (force) {
@@ -2113,7 +2124,7 @@ async function syncLayoutInternal(
     noAutostart: boolean,
     terminalPrepared = false,
 ): Promise<void> {
-    const visibleColumns = collectVisibleMarkdownColumns(root);
+    const visibleColumns = await collectVisibleMarkdownColumns(root);
     const visibleMd = flattenVisibleColumns(visibleColumns);
     if (visibleMd.length === 0) {
         if (notify) showHint('No .md files open');
@@ -2253,7 +2264,7 @@ function openMarkdownDocumentsByPriority(
     );
 }
 
-function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservation | null {
+async function captureCurrentSurface(forceReconcile: boolean): Promise<PendingSurfaceObservation | null> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return null;
 
@@ -2261,7 +2272,8 @@ function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservati
     if (!root) return null;
 
     const activeFsPath = editor.document.uri.fsPath;
-    const visibleColumns = absolutizeColumns(root, collectVisibleMarkdownColumns(root));
+    const groupLayout = await captureGroupLayout(root, editor.document.uri);
+    const visibleColumns = absolutizeColumns(root, resolutionColumns(groupLayout));
     const visibleMarkdownDocuments = flattenVisibleColumns(visibleColumns);
     const openMarkdownDocuments = openMarkdownDocumentsByPriority(
         root,
@@ -2273,6 +2285,7 @@ function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservati
         visibleMd: visibleMarkdownDocuments,
         openMd: openMarkdownDocuments,
         visibleColumns,
+        columnOrder: groupLayout.column_order,
         forceReconcile,
     });
     if (surface === null) return null;
@@ -2286,14 +2299,17 @@ function requestSurfaceObservation(): number {
     queueMicrotask(() => {
         surfaceProjectionQueued = false;
         if (!surfaceProjectionActive) return;
-        reportCurrentSurface(latestSurfaceGeneration);
+        void reportCurrentSurface(latestSurfaceGeneration);
     });
     return requestedGeneration;
 }
 
-function reportCurrentSurface(requestedGeneration: number): void {
+async function reportCurrentSurface(requestedGeneration: number): Promise<void> {
     if (requestedGeneration !== latestSurfaceGeneration) return;
-    const pending = captureCurrentSurface(false);
+    const pending = await captureCurrentSurface(false);
+    // Measuring the grid awaits the renderer; a newer editor edge supersedes
+    // this observation and publishes its own.
+    if (requestedGeneration !== latestSurfaceGeneration || !surfaceProjectionActive) return;
     if (pending === null) return;
     observedSurfaceRoots.add(pending.root);
     surfaceObservationController?.abort();
@@ -3549,6 +3565,101 @@ let syntaxDecorationController: SyntaxDecorationController | undefined;
 // Activation / Deactivation
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Stale extension generation (`#vscodeupgradelayout`, editors/SPEC.md § 13)
+// ---------------------------------------------------------------------------
+
+const STALE_EXTENSION_CHECK_DELAY_MS = 500;
+
+/**
+ * Prompt for the host's own reload when the extensions directory this host
+ * loaded agent-doc from now holds a different generation than the running one.
+ * Event-driven: activation, a change to that directory's `extensions.json` or
+ * `.obsolete`, and `vscode.extensions.onDidChange`. One prompt per installed
+ * generation per extension-host lifetime.
+ */
+function startStaleExtensionWatch(context: vscode.ExtensionContext): void {
+    if (context.extensionUri.scheme !== 'file') return;
+    const extensionsDir = path.dirname(context.extensionUri.fsPath);
+    const manifestPath = path.join(extensionsDir, 'extensions.json');
+    const obsoletePath = path.join(extensionsDir, '.obsolete');
+    const extensionId = context.extension?.id ?? AGENT_DOC_EXTENSION_ID;
+    const running = typeof context.extension?.packageJSON?.version === 'string'
+        ? context.extension.packageJSON.version as string
+        : native.EDITOR_PLUGIN_VERSION;
+    let promptedVersion: string | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+
+    const readOptional = async (filePath: string): Promise<string | null> => {
+        try {
+            return await fs.promises.readFile(filePath, 'utf-8');
+        } catch {
+            return null;
+        }
+    };
+    const check = async (): Promise<void> => {
+        const [manifest, obsolete] = await Promise.all([
+            readOptional(manifestPath),
+            readOptional(obsoletePath),
+        ]);
+        const verdict = staleExtensionVerdict(running, installedExtension(manifest, extensionId, obsolete));
+        if (disposed || !verdict || verdict.installed === promptedVersion) return;
+        // A manifest entry whose directory is gone is not a loadable generation.
+        if (verdict.location && !fs.existsSync(verdict.location)) return;
+        promptedVersion = verdict.installed;
+        const prompt = upgradePrompt(verdict, {
+            remoteName: vscode.env.remoteName,
+            webUi: vscode.env.uiKind === vscode.UIKind.Web,
+            extensionId,
+        });
+        console.log(
+            `[agent-doc/upgrade] stale_extension running=${verdict.running} installed=${verdict.installed} `
+            + `remedy=${prompt.remedy} remote_name=${vscode.env.remoteName ?? 'local'} dir=${extensionsDir}`,
+        );
+        const choice = await vscode.window.showWarningMessage(
+            prompt.message,
+            ...prompt.actions.map((action) => action.label),
+        );
+        const action = prompt.actions.find((candidate) => candidate.label === choice);
+        if (action) {
+            await vscode.commands.executeCommand(action.command, ...action.args);
+        }
+    };
+    const schedule = (): void => {
+        if (disposed) return;
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            timer = undefined;
+            void check().catch((error: unknown) => {
+                console.debug(`[agent-doc/upgrade] stale extension check failed: ${String(error)}`);
+            });
+        }, STALE_EXTENSION_CHECK_DELAY_MS);
+    };
+
+    let watcher: fs.FSWatcher | undefined;
+    try {
+        watcher = fs.watch(extensionsDir, (_event, filename) => {
+            const name = filename?.toString();
+            if (!name || name === 'extensions.json' || name === '.obsolete') schedule();
+        });
+        watcher.on('error', () => watcher?.close());
+    } catch {
+        watcher = undefined;
+    }
+    context.subscriptions.push(
+        vscode.extensions.onDidChange(() => schedule()),
+        {
+            dispose: () => {
+                disposed = true;
+                if (timer) clearTimeout(timer);
+                watcher?.close();
+            },
+        },
+    );
+    schedule();
+}
+
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     surfaceProjectionActive = true;
     // #lzsync 3B clean split: the generic lazily GraphView is a plain statically
@@ -3565,6 +3676,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         String(context.extension.packageJSON?.main ?? 'out/extension.js'),
     ));
     registerReliableSyncLiveness(context, EDITOR_ID);
+
+    startStaleExtensionWatch(context);
 
     // Coordinate Project Controller turn state into the status bar. Refresh on
     // active editor changes and editor/plugin events; state itself comes from
@@ -3677,6 +3790,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.window.onDidChangeVisibleTextEditors(() => onTabChanged())
     );
+    // A group opened, closed, or moved changes the measured grid even when the
+    // visible editors stay the same (`#vscodeupgradelayout`).
+    context.subscriptions.push(
+        vscode.window.tabGroups.onDidChangeTabGroups(() => onTabChanged())
+    );
     requestSurfaceObservation();
 
     // Feature: File Rename Handling
@@ -3689,10 +3807,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 const root = getWorkspaceRoot(newUri);
                 if (!root) continue;
                 const newRel = relativePath(root, newUri.fsPath);
-                const visibleColumns = collectVisibleMarkdownColumns(root);
-                const args = buildSyncLayoutCommand(visibleColumns, newRel, false);
-                args.push('--rename');
-                runCli(args, root).catch(() => {});
+                void collectVisibleMarkdownColumns(root).then((visibleColumns) => {
+                    const args = buildSyncLayoutCommand(visibleColumns, newRel, false);
+                    args.push('--rename');
+                    return runCli(args, root);
+                }).catch(() => {});
             }
         })
     );

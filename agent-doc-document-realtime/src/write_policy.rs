@@ -155,6 +155,22 @@ pub fn rebase_agent_candidate_over_editor_cut(
     agent_target: &str,
     editor_cut: &str,
 ) -> Result<String> {
+    rebase_agent_candidate_over_editor_cut_reconciled(merge_base, agent_target, editor_cut)
+        .map(|rebase| rebase.rebased)
+}
+
+/// One rebase result together with the editor cut it was rebased onto, after
+/// superseded response targets were reconciled out of that cut.
+struct ReconciledRebase {
+    rebased: String,
+    editor_reconciled: String,
+}
+
+fn rebase_agent_candidate_over_editor_cut_reconciled(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Result<ReconciledRebase> {
     let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
         editor_cut,
         merge_base,
@@ -164,19 +180,37 @@ pub fn rebase_agent_candidate_over_editor_cut(
     let target_introduces_response = !buffer_presents_reference_response(agent_target, merge_base);
     if target_introduces_response {
         if buffer_presents_reference_response(agent_target, &editor_reconciled) {
-            return Ok(editor_reconciled);
+            return Ok(ReconciledRebase {
+                rebased: editor_reconciled.clone(),
+                editor_reconciled,
+            });
         }
         if let Some(recovered) = live_prompt_drift_recovery_target(
             agent_target,
             &editor_reconciled,
             normalize_visible_recovery_compare,
         ) {
-            return Ok(recovered);
+            return Ok(ReconciledRebase {
+                rebased: recovered,
+                editor_reconciled,
+            });
         }
     }
 
+    // `#retainedprojectionclobber`: the frontmatter-aware merge, never the bare
+    // component merge. `merge_by_component` resolves a frontmatter block both
+    // sides changed as "ours wins", and here ours is the AGENT target: on
+    // 2026-10-27 a retained captured write that only dropped `queue: go`
+    // replaced the operator's `agent: claude` -> `agent: grok` edit wholesale
+    // (tasks/software/lazily.md). The field-wise merge keeps the operator's
+    // keys and the agent's managed keys, as every other editor-merge path does.
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(merge_base).encode_state();
-    agent_doc_merge::crdt::merge_by_component(Some(&base_state), agent_target, &editor_reconciled)
+    let (rebased, _) =
+        agent_doc_merge::merge_contents_crdt(Some(&base_state), agent_target, &editor_reconciled)?;
+    Ok(ReconciledRebase {
+        rebased,
+        editor_reconciled,
+    })
 }
 
 /// Rebase a retained target only when the converged editor cut still carries a
@@ -186,6 +220,13 @@ pub fn rebase_agent_candidate_over_editor_cut(
 /// replacement document must never be treated as that edit and overwritten.
 /// Exact generic headings are intentionally not sufficient evidence; prompt
 /// headings, frontmatter fields, and ordinary retained content are.
+///
+/// `#retainedprojectionclobber`: the result must also carry every line the
+/// operator added over the intent's base. A retained write is the agent's
+/// unapplied op; it rolls FORWARD onto the operator's text and never replaces
+/// it. When the merge cannot place an operator line, the rebase is refused with
+/// [`OperatorTextWouldBeLost`] instead of returning a projection that would
+/// delete operator text from every replica and from disk.
 pub fn rebase_retained_target_over_editor_cut(
     merge_base: &str,
     agent_target: &str,
@@ -200,7 +241,168 @@ pub fn rebase_retained_target_over_editor_cut(
         has_stable_anchor,
         "retained rebase rejected unrelated editor projection without a stable base anchor"
     );
-    rebase_agent_candidate_over_editor_cut(merge_base, agent_target, editor_cut)
+    let rebase =
+        rebase_agent_candidate_over_editor_cut_reconciled(merge_base, agent_target, editor_cut)?;
+    let lost = operator_lines_lost(
+        merge_base,
+        agent_target,
+        &rebase.editor_reconciled,
+        &rebase.rebased,
+    );
+    if !lost.is_empty() {
+        return Err(OperatorTextWouldBeLost { lines: lost }.into());
+    }
+    Ok(rebase.rebased)
+}
+
+/// `#retainedprojectionclobber`: a retained rebase that would have deleted
+/// text the operator typed after the retained intent's base.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorTextWouldBeLost {
+    /// The operator-added lines (trimmed) the rebased projection does not carry.
+    pub lines: Vec<String>,
+}
+
+impl std::fmt::Display for OperatorTextWouldBeLost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "retained rebase refused: it would delete {} operator-authored line(s) typed after the retained base",
+            self.lines.len()
+        )
+    }
+}
+
+impl std::error::Error for OperatorTextWouldBeLost {}
+
+/// `#retainedprojectionclobber`: operator-added lines of `editor_cut` (over
+/// `merge_base`) that `rebased` does not carry, in editor order.
+///
+/// A line counts as operator-added when the cut holds more copies of it than
+/// the base. The agent target was derived from the base, so it never intends to
+/// delete such a copy: the rebase must hold every copy the cut holds, less the
+/// base copies `agent_target` itself removed.
+///
+/// A line the operator EDITED (it replaced base lines) may also survive merged
+/// with the agent's edit of the same line, e.g. the agent checks a todo the
+/// operator was amending: `- [x] [#t1] write tests and docs`. Such a line is
+/// carried when some rebased line that is neither a base line nor an agent
+/// target line holds every word the operator inserted. A line the operator
+/// typed from nothing must survive verbatim. Blank lines and binary-owned
+/// markers (boundary markers, the `(HEAD)` heading suffix) are not operator
+/// text.
+pub fn operator_lines_lost(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+    rebased: &str,
+) -> Vec<String> {
+    fn trimmed_lines(text: &str) -> Vec<String> {
+        agent_doc_merge::captured_splice::without_binary_owned_markers(text)
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect()
+    }
+    fn counts(lines: &[String]) -> std::collections::HashMap<&str, usize> {
+        let mut counts = std::collections::HashMap::new();
+        for line in lines {
+            *counts.entry(line.as_str()).or_insert(0) += 1;
+        }
+        counts
+    }
+    fn words(line: &str) -> std::collections::HashMap<&str, usize> {
+        let mut words = std::collections::HashMap::new();
+        for word in line.split_whitespace() {
+            *words.entry(word).or_insert(0) += 1;
+        }
+        words
+    }
+    let base_lines = trimmed_lines(merge_base);
+    let target_lines = trimmed_lines(agent_target);
+    let cut_lines = trimmed_lines(editor_cut);
+    let rebased_lines = trimmed_lines(rebased);
+    let (base, target, cut, rebased_counts) = (
+        counts(&base_lines),
+        counts(&target_lines),
+        counts(&cut_lines),
+        counts(&rebased_lines),
+    );
+
+    // The base words each operator-changed cut line replaced (its line-diff
+    // hunk). Absent for a line inserted into an otherwise unchanged region.
+    let mut replaced_words: std::collections::HashMap<usize, Vec<&str>> =
+        std::collections::HashMap::new();
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &base_lines, &cut_lines) {
+        if let similar::DiffOp::Replace {
+            old_index,
+            old_len,
+            new_index,
+            new_len,
+        } = op
+        {
+            let replaced: Vec<&str> = base_lines[old_index..old_index + old_len]
+                .iter()
+                .flat_map(|line| line.split_whitespace())
+                .collect();
+            for index in new_index..new_index + new_len {
+                replaced_words.insert(index, replaced.clone());
+            }
+        }
+    }
+
+    let mut seen = HashSet::new();
+    let mut lost = Vec::new();
+    for (index, line) in cut_lines.iter().enumerate() {
+        let line = line.as_str();
+        if !seen.insert(line) {
+            continue;
+        }
+        let cut_count = cut.get(line).copied().unwrap_or(0);
+        let base_count = base.get(line).copied().unwrap_or(0);
+        if cut_count <= base_count {
+            continue;
+        }
+        // Every copy the cut holds survives, less the base copies the agent
+        // itself removed: the operator's added copies are never the agent's.
+        let agent_removed = base_count.saturating_sub(target.get(line).copied().unwrap_or(0));
+        if rebased_counts.get(line).copied().unwrap_or(0) >= cut_count.saturating_sub(agent_removed)
+        {
+            continue;
+        }
+        let replaced = cut_lines
+            .iter()
+            .enumerate()
+            .filter(|(candidate, text)| text.as_str() == line && *candidate >= index)
+            .find_map(|(candidate, _)| replaced_words.get(&candidate));
+        let carried_merged = replaced.is_some_and(|replaced| {
+            let mut inserted = words(line);
+            for word in replaced {
+                if let Some(count) = inserted.get_mut(word) {
+                    *count = count.saturating_sub(1);
+                }
+            }
+            inserted.retain(|_, count| *count > 0);
+            // A deletion-only edit inserts no word; there is nothing of the
+            // operator's to look for in a merged line.
+            inserted.is_empty()
+                || rebased_lines.iter().any(|candidate| {
+                    let candidate = candidate.as_str();
+                    !base.contains_key(candidate)
+                        && (!target.contains_key(candidate) || target.contains_key(line))
+                        && {
+                            let available = words(candidate);
+                            inserted.iter().all(|(word, needed)| {
+                                available.get(word).copied().unwrap_or(0) >= *needed
+                            })
+                        }
+                })
+        });
+        if !carried_merged {
+            lost.push(line.to_string());
+        }
+    }
+    lost
 }
 
 /// `#replayafterack`: lines of [content] that sit outside every component
@@ -2901,6 +3103,140 @@ pub fn classify_committed_historical_agent_doc_mutation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#retainedprojectionclobber` fixture: the shape of the 2026-10-27
+    /// `tasks/software/lazily.md` loss. The response had already landed; the
+    /// retained captured closeout's tracked-work half then consumed the queue
+    /// (dropped `queue: go` and the answered head). The operator meanwhile
+    /// switched `agent:` and queued new work.
+    const CLOBBER_BASE: &str = "---\nagent_doc_session: s1\nagent: claude\nqueue: go\n---\n\n## Notes\n\nnote a\n\n<!-- agent:queue -->\n- do [#first] first request\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
+    const CLOBBER_TARGET: &str = "---\nagent_doc_session: s1\nagent: claude\n---\n\n## Notes\n\nnote A\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
+    const CLOBBER_CUT: &str = "---\nagent_doc_session: s1\nagent: grok\nqueue: go\n---\n\n## Notes\n\nnote a\nnote b typed by the operator\n\n<!-- agent:queue -->\n- do [#first] first request\n- do [#second] operator queued this after the base\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
+
+    #[test]
+    fn retainedprojectionclobber_retained_rebase_rolls_operator_edits_forward() {
+        let rebased =
+            rebase_retained_target_over_editor_cut(CLOBBER_BASE, CLOBBER_TARGET, CLOBBER_CUT)
+                .unwrap();
+        // The operator's frontmatter edit survives the agent's frontmatter
+        // edit (field-wise merge, not "ours wins" on the whole block).
+        assert!(rebased.contains("\nagent: grok\n"), "{rebased}");
+        assert!(!rebased.contains("\nagent: claude\n"), "{rebased}");
+        // ...and the agent's own frontmatter edit still applies.
+        assert!(!rebased.contains("\nqueue: go\n"), "{rebased}");
+        // Operator text in an interstitial both sides edited survives.
+        assert!(
+            rebased.contains("note b typed by the operator"),
+            "{rebased}"
+        );
+        assert!(rebased.contains("note A"), "{rebased}");
+        // The operator's queued work lands; the agent's consumed head does not.
+        assert!(rebased.contains("- do [#second] operator queued this after the base"));
+        assert!(
+            !rebased.contains("- do [#first] first request"),
+            "{rebased}"
+        );
+        assert_eq!(rebased.matches("retained response body").count(), 1);
+        assert!(
+            operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, CLOBBER_CUT, &rebased).is_empty(),
+            "{rebased}"
+        );
+    }
+
+    #[test]
+    fn retainedprojectionclobber_same_frontmatter_key_resolves_field_wise_to_the_operator() {
+        // Both sides changed `queue:`. The frontmatter is reconciled field-wise
+        // (`#fmreset`): the operator owns `queue`, and a text merge of the two
+        // values must never splice them into one invalid scalar.
+        let base = CLOBBER_BASE;
+        let target = CLOBBER_BASE.replace("\nqueue: go\n", "\nqueue: stop\n");
+        let cut = CLOBBER_BASE.replace("\nqueue: go\n", "\nqueue: start\n");
+        let rebased = rebase_retained_target_over_editor_cut(base, &target, &cut).unwrap();
+        let frontmatter = rebased.split("\n---\n").next().unwrap();
+        assert!(frontmatter.contains("\nqueue: start"), "{rebased}");
+        assert_eq!(frontmatter.matches("queue:").count(), 1, "{rebased}");
+        assert!(!frontmatter.contains("stop"), "{rebased}");
+    }
+
+    #[test]
+    fn retainedprojectionclobber_operator_lines_lost_counts_only_operator_added_lines() {
+        // The agent target itself loses every operator line: exactly what a
+        // whole-target overwrite of the cut would publish.
+        assert_eq!(
+            operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, CLOBBER_CUT, CLOBBER_TARGET),
+            vec![
+                "agent: grok".to_string(),
+                "note b typed by the operator".to_string(),
+                "- do [#second] operator queued this after the base".to_string(),
+            ],
+        );
+        // Lines the agent removed from the BASE are the agent's to remove.
+        assert!(
+            operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, CLOBBER_BASE, CLOBBER_TARGET)
+                .is_empty()
+        );
+        // A duplicate the operator typed is a second copy that must survive.
+        let doubled = CLOBBER_CUT.replace("## Notes\n", "## Notes\n## Notes\n");
+        assert_eq!(
+            operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, &doubled, CLOBBER_CUT),
+            vec!["## Notes".to_string()],
+        );
+        // ...less a base copy the agent itself removed.
+        let readded = CLOBBER_CUT.replace("note a\n", "note a\nnote a\n");
+        assert!(
+            operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, &readded, CLOBBER_CUT).is_empty(),
+            "the agent removed one base copy, so one operator copy is the full obligation"
+        );
+        // Binary-owned markers and blank lines are not operator text.
+        let marked = CLOBBER_CUT.replace(
+            "<!-- /agent:exchange -->",
+            "<!-- agent:boundary:abc123 -->\n\n<!-- /agent:exchange -->",
+        );
+        assert!(operator_lines_lost(CLOBBER_BASE, CLOBBER_TARGET, &marked, CLOBBER_CUT).is_empty());
+    }
+
+    #[test]
+    fn retainedprojectionclobber_retained_rebase_refuses_a_projection_that_drops_operator_text() {
+        // Both sides rewrote the same exchange line. The component merge
+        // resolves that conflict to the agent's line, so publishing the rebase
+        // would delete the operator's rewrite from every replica and from disk.
+        // The retained rebase refuses instead.
+        let base = "---\nagent_doc_session: s1\n---\n\n# Doc\n\n<!-- agent:exchange -->\n### do x\n\nbody line\n<!-- /agent:exchange -->\n";
+        let target = base.replace("\nbody line\n", "\nbody line agent\n");
+        let cut = base.replace("\nbody line\n", "\nbody line operator\n");
+        // The unguarded rebase is exactly the lossy projection the controller
+        // used to apply.
+        let unguarded = rebase_agent_candidate_over_editor_cut(base, &target, &cut).unwrap();
+        assert!(!unguarded.contains("body line operator"), "{unguarded}");
+        let error = rebase_retained_target_over_editor_cut(base, &target, &cut)
+            .expect_err("a rebase that drops the operator's rewrite is refused");
+        let loss = error
+            .downcast_ref::<OperatorTextWouldBeLost>()
+            .expect("the refusal is typed so the controller reports it");
+        assert_eq!(loss.lines, vec!["body line operator".to_string()]);
+    }
+
+    #[test]
+    fn retainedprojectionclobber_a_line_both_sides_edited_is_carried_when_merged() {
+        // With a sibling item the merge combines both edits on the line; the
+        // guard must accept that merged line rather than demand it verbatim.
+        let base = "---\nagent_doc_session: s1\n---\n\n# Doc\n\n<!-- agent:todo -->\n- [ ] [#t1] write tests\n- [ ] [#t2] ship\n<!-- /agent:todo -->\n";
+        let target = base.replace("- [ ] [#t1] write tests", "- [x] [#t1] write tests");
+        let cut = base.replace(
+            "- [ ] [#t1] write tests",
+            "- [ ] [#t1] write tests and docs",
+        );
+        let rebased = rebase_retained_target_over_editor_cut(base, &target, &cut).unwrap();
+        assert!(
+            rebased.contains("- [x] [#t1] write tests and docs"),
+            "{rebased}"
+        );
+        // The same merged line is NOT accepted when it is the agent's own line.
+        assert_eq!(
+            operator_lines_lost(base, &target, &cut, &target),
+            vec!["- [ ] [#t1] write tests and docs".to_string()],
+        );
+    }
 
     #[test]
     fn semantic_repair_settlement_accepts_a_newer_canonical_editor_cut() {

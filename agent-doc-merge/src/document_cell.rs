@@ -1548,11 +1548,20 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // aligned positionally; absent base ⇒ legacy ours-wins.
                 let base = base_interstitials.get(interstitial_index).copied();
                 let chosen = match base {
-                    Some(b) if *o == b => t.as_str(), // only theirs diverged
-                    Some(b) if t == b => o.as_str(),  // only ours diverged
-                    _ => o.as_str(),                  // both diverged / no base ⇒ ours-wins
+                    Some(b) if *o == b => t.clone(), // only theirs diverged
+                    Some(b) if t == b => o.clone(),  // only ours diverged
+                    // `#retainedprojectionclobber`: both diverged from a known
+                    // base. "Ours wins" silently deleted the other side's text,
+                    // and theirs is the operator's editor cut on every rebase
+                    // path. Merge the slot 3-way so both sides' edits survive;
+                    // only a merge failure keeps the legacy ours-wins.
+                    Some(b) => {
+                        let base_state = crate::crdt::CrdtDoc::from_text(b).encode_state();
+                        crate::crdt::merge(Some(&base_state), o, t).unwrap_or_else(|_| o.clone())
+                    }
+                    None => o.clone(), // no base ⇒ ours-wins
                 };
-                out.push_str(chosen);
+                out.push_str(&chosen);
                 interstitial_index += 1;
             }
             (

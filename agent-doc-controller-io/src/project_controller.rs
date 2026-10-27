@@ -5268,6 +5268,15 @@ const RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS: u32 = 2;
 /// replica was still behind canonical. After them the durable exhausted state
 /// stands alone and its remedy governs.
 const RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS: u32 = 2;
+/// `#retainedprojectionclobber`: roll-forward requests per refused content that
+/// may reach NO editor replica before the state is terminal. An undelivered
+/// request is refunded so a transient IPC gap cannot spend the budget, but an
+/// unbounded refund is a silent wait: on 2026-10-27 `tasks/software/lazily.md`
+/// re-sent it 39 times (`notified=0 diagnosis=delivery_failed_to_all:1`,
+/// `refusals=117`) over an hour while the editor's typing stayed quarantined.
+/// After this many the durable exhausted record is marked terminal, so
+/// `session-check` reports the operator remedy instead of "pending".
+const RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RetainedPersistenceRetryDecision {
@@ -5298,6 +5307,9 @@ struct RetainedPersistenceRefusalStreak {
     rebuilds: u32,
     exhausted_reported: bool,
     roll_forwards: u32,
+    /// `#retainedprojectionclobber`: refunded roll-forward requests that
+    /// reached no editor replica.
+    undelivered_roll_forwards: u32,
 }
 
 /// Backoff before re-claim attempt `attempt` (1-based): 1s doubling, capped at 30s.
@@ -5399,16 +5411,30 @@ fn refund_undelivered_retained_persistence_rebuild(
 
 /// `#jetbrainsreplicaloops`: a roll-forward request that reached no editor
 /// replica is not an attempt, so it does not spend the per-content budget.
+///
+/// `#retainedprojectionclobber`: but the refund is bounded. Returns `true` when
+/// this refund was the
+/// [`RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS`]-th undelivered
+/// request for the content: the budget is then spent at once (no further
+/// request is sent) and the caller must report the terminal state.
 fn refund_undelivered_retained_persistence_roll_forward(
     retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
     key: &str,
     content_hash: &str,
-) {
-    if let Some(entry) = retries.get_mut(key)
-        && entry.content_hash == content_hash
-    {
-        entry.roll_forwards = entry.roll_forwards.saturating_sub(1);
+) -> bool {
+    let Some(entry) = retries.get_mut(key) else {
+        return false;
+    };
+    if entry.content_hash != content_hash {
+        return false;
     }
+    entry.undelivered_roll_forwards = entry.undelivered_roll_forwards.saturating_add(1);
+    if entry.undelivered_roll_forwards >= RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS {
+        entry.roll_forwards = RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS;
+        return true;
+    }
+    entry.roll_forwards = entry.roll_forwards.saturating_sub(1);
+    false
 }
 
 /// A live endpoint's rejected receipt is terminal for this content. Spend the
@@ -5619,6 +5645,19 @@ enum RetainedTransitionConflict {
     DivergentVisibleProjection,
 }
 
+/// `#retainedprojectionclobber`: a retained target whose rebase over the live
+/// editor cut would delete operator-authored text. The write is held, never
+/// applied, and the refusal is reported once per (intent, visible cut).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RetainedOperatorTextConflict {
+    file: PathBuf,
+    intent_id: String,
+    target_hash: String,
+    visible_hash: String,
+    delivery_version: u64,
+    lost_lines: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum RetainedTransitionState {
     NoProjection,
@@ -5646,6 +5685,9 @@ enum RetainedTransitionState {
     },
     SettledCloseoutReady(RetainedResumeSignal),
     ReconcileMaterializedCapture(RetainedResumeSignal),
+    /// `#retainedprojectionclobber`: the retained target cannot roll forward
+    /// onto the operator's text without deleting some of it.
+    OperatorTextConflict(RetainedOperatorTextConflict),
     Conflict {
         intent_id: String,
         target_hash: String,
@@ -5662,6 +5704,7 @@ enum RetainedTransitionEffect {
     ApplyTarget(RetainedTransitionProjection),
     ResumeCloseout(RetainedResumeSignal),
     SettleMaterializedCapture(RetainedResumeSignal),
+    ReportOperatorTextConflict(RetainedOperatorTextConflict),
 }
 
 impl RetainedTransitionState {
@@ -5682,6 +5725,9 @@ impl RetainedTransitionState {
             }
             Self::ReconcileMaterializedCapture(signal) => Some(
                 RetainedTransitionEffect::SettleMaterializedCapture(signal.clone()),
+            ),
+            Self::OperatorTextConflict(conflict) => Some(
+                RetainedTransitionEffect::ReportOperatorTextConflict(conflict.clone()),
             ),
             Self::NoProjection
             | Self::Idle
@@ -6294,6 +6340,41 @@ impl RetainedWriteSettleSink {
         true
     }
 
+    /// `#retainedprojectionclobber`: report, once per (intent, visible cut), a
+    /// retained target the controller refused to project because its rebase
+    /// would delete operator text. Nothing is written: the editor keeps the
+    /// operator's text, the retained intent stays durable and unsettled, and
+    /// the closeout that owns it cannot report this write as delivered.
+    fn report_retained_operator_text_conflict(
+        &self,
+        document_hash: &str,
+        conflict: &RetainedOperatorTextConflict,
+    ) -> bool {
+        let first_lost_line_hash = conflict
+            .lost_lines
+            .first()
+            .map(|line| agent_doc_hash::content_hash(line))
+            .unwrap_or_default();
+        agent_doc_ops_log_io::log_op(
+            &conflict.file,
+            &format!(
+                "retained_transition_refused_operator_text_loss document_hash={document_hash} intent_id={} target_hash={} visible_hash={} delivery_version={} lost_operator_lines={} first_lost_line_hash={first_lost_line_hash} applied=false recovery=retained_write_held_editor_text_kept operator_action=none (#retainedprojectionclobber)",
+                conflict.intent_id,
+                conflict.target_hash,
+                conflict.visible_hash,
+                conflict.delivery_version,
+                conflict.lost_lines.len(),
+            ),
+        );
+        eprintln!(
+            "[controller] refused retained write {} for {}: rebasing it over the editor would delete {} operator-authored line(s); the editor text is kept and the write stays held (#retainedprojectionclobber)",
+            conflict.intent_id,
+            conflict.file.display(),
+            conflict.lost_lines.len(),
+        );
+        true
+    }
+
     /// Materialize one derived retained target in the controller-owned CRDT
     /// relay. The relay performs the final expected-base CAS, so a stale Effect
     /// can never overwrite operator typing that advanced after derivation.
@@ -6861,7 +6942,20 @@ impl ControllerDocumentGraphs {
                                         (false, false)
                                     }
                                 };
-                                if terminal_refusal {
+                                // `#retainedprojectionclobber`: an undelivered
+                                // request is refunded, but only a bounded number
+                                // of times; the bound is terminal and loud.
+                                let undelivered_terminal = !terminal_refusal
+                                    && !delivered
+                                    && worker_sink.runtime.upgrade().is_some_and(|runtime| {
+                                        runtime
+                                            .document_graphs
+                                            .refund_retained_persistence_roll_forward(
+                                                &document_hash,
+                                                &content_hash,
+                                            )
+                                    });
+                                if terminal_refusal || undelivered_terminal {
                                     if let Some(runtime) = worker_sink.runtime.upgrade() {
                                         runtime
                                             .document_graphs
@@ -6870,7 +6964,11 @@ impl ControllerDocumentGraphs {
                                                 &content_hash,
                                             );
                                     }
-                                    let refusal = "editor_endpoint_rejected";
+                                    let refusal = if terminal_refusal {
+                                        "editor_endpoint_rejected"
+                                    } else {
+                                        "editor_unreachable"
+                                    };
                                     match crate::retained_persistence_exhaustion::mark_roll_forward_refusal(
                                         &worker_sink.project_root,
                                         &file,
@@ -6890,15 +6988,6 @@ impl ControllerDocumentGraphs {
                                             ),
                                         ),
                                     }
-                                } else if !delivered
-                                    && let Some(runtime) = worker_sink.runtime.upgrade()
-                                {
-                                    runtime
-                                        .document_graphs
-                                        .refund_retained_persistence_roll_forward(
-                                            &document_hash,
-                                            &content_hash,
-                                        );
                                 }
                             }
                             schedule_refused_retained_persistence_retry(
@@ -6950,6 +7039,14 @@ impl ControllerDocumentGraphs {
                                     worker_sink.settle_materialized_capture(
                                         &command.document_hash,
                                         signal,
+                                    ),
+                                )
+                            }
+                            RetainedTransitionEffect::ReportOperatorTextConflict(conflict) => {
+                                RetainedTransitionCompletion::Applied(
+                                    worker_sink.report_retained_operator_text_conflict(
+                                        &command.document_hash,
+                                        conflict,
                                     ),
                                 )
                             }
@@ -8241,12 +8338,17 @@ impl ControllerDocumentGraphs {
     }
 
     /// `#jetbrainsreplicaloops`: return an undelivered roll-forward request.
-    fn refund_retained_persistence_roll_forward(&self, document_hash: &str, content_hash: &str) {
+    /// `true` when the undelivered bound made the state terminal.
+    fn refund_retained_persistence_roll_forward(
+        &self,
+        document_hash: &str,
+        content_hash: &str,
+    ) -> bool {
         refund_undelivered_retained_persistence_roll_forward(
             &mut self.retained_persistence_retries.lock(),
             document_hash,
             content_hash,
-        );
+        )
     }
 
     fn terminalize_retained_persistence_roll_forward(
@@ -8506,7 +8608,8 @@ impl ControllerDocumentGraphs {
                 RetainedTransitionEffect::ObserveCurrentDelivery(_)
                 | RetainedTransitionEffect::ApplyTarget(_)
                 | RetainedTransitionEffect::ResumeCloseout(_)
-                | RetainedTransitionEffect::SettleMaterializedCapture(_) => {
+                | RetainedTransitionEffect::SettleMaterializedCapture(_)
+                | RetainedTransitionEffect::ReportOperatorTextConflict(_) => {
                     let attempted = attempted_frontier.observe(ctx, &effect_key).flatten();
                     if attempted.as_ref() == Some(&projected_effect) {
                         return;
@@ -8785,7 +8888,25 @@ fn retained_transition_state(
                 },
             ) {
                 Ok(rebased) => rebased,
-                Err(_) => {
+                Err(error) => {
+                    // `#retainedprojectionclobber`: the retained write is the
+                    // agent's unapplied op and rolls forward onto the operator's
+                    // text; a rebase that cannot keep that text is refused and
+                    // reported, never applied.
+                    if let Some(loss) = error.downcast_ref::<
+                        agent_doc_document_realtime::write_policy::OperatorTextWouldBeLost,
+                    >() {
+                        return RetainedTransitionState::OperatorTextConflict(
+                            RetainedOperatorTextConflict {
+                                file: delivery.file.clone(),
+                                intent_id: intent.intent_id.clone(),
+                                target_hash: intent.target_hash.clone(),
+                                visible_hash: delivery.content_hash.clone(),
+                                delivery_version: delivery.delivery_version,
+                                lost_lines: loss.lines.clone(),
+                            },
+                        );
+                    }
                     return RetainedTransitionState::Conflict {
                         intent_id: intent.intent_id.clone(),
                         target_hash: intent.target_hash.clone(),
@@ -23353,6 +23474,7 @@ agent:queue\n\
             RetainedTransitionState::ReconcileMaterializedCapture(_) => {
                 "reconcile_materialized_capture"
             }
+            RetainedTransitionState::OperatorTextConflict(_) => "operator_text_conflict",
             RetainedTransitionState::Conflict {
                 reason: RetainedTransitionConflict::MissingBase,
                 ..
@@ -23381,6 +23503,9 @@ agent:queue\n\
             Some(RetainedTransitionEffect::ResumeCloseout(_)) => "resume_closeout",
             Some(RetainedTransitionEffect::SettleMaterializedCapture(_)) => {
                 "settle_materialized_capture"
+            }
+            Some(RetainedTransitionEffect::ReportOperatorTextConflict(_)) => {
+                "report_operator_text_conflict"
             }
         }
     }
@@ -24134,6 +24259,272 @@ revised operator request
         assert!(
             !retained_transition_matches_intent(&transition, &superseded),
             "a newer durable target must fence the stale projected effect"
+        );
+    }
+
+    /// `#retainedprojectionclobber` SimWorld: the 2026-10-27
+    /// `tasks/software/lazily.md` sequence, deterministically and without
+    /// sleeps. Every step runs the production derivation
+    /// (`retained_transition_state`) and the production relay hub; the editor is
+    /// an independent CRDT replica that only learns what is delivered to it.
+    ///
+    /// 1. A captured closeout's tracked-work half is retained: Base -> Target
+    ///    drops `queue: go` and the answered queue head.
+    /// 2. The operator switches `agent:` and queues new work after that base.
+    /// 3. The retained write projects over the live canonical.
+    /// 4. The editor's next typing is quarantined before it receives that
+    ///    write: the hub must not report the cut converged.
+    /// 5. A library reload replaces the controller: the editor reseeds the
+    ///    fresh relay from its retained replica, the still-pending intent is
+    ///    re-derived over that reseeded cut (the 17:09:04Z clobber), and a
+    ///    replacement editor replica registers with a full bootstrap.
+    ///
+    /// The operator's text must survive in every replica and in the canonical
+    /// a native save would project to disk.
+    #[test]
+    fn retainedprojectionclobber_operator_text_survives_retained_write_quarantine_and_reload() {
+        use agent_doc_document_realtime::crdt_relay::RelayHub;
+        use agent_doc_merge::crdt_sync::ReplicaState;
+
+        let base = "\
+---
+agent_doc_session: s1
+agent: claude
+queue: go
+---
+
+<!-- agent:queue -->
+- do [#first] first request
+<!-- /agent:queue -->
+
+<!-- agent:exchange patch=append -->
+### do [#first]
+
+first request
+
+### Re: do [#first]
+
+retained response body
+<!-- /agent:exchange -->
+";
+        let target = base
+            .replace("queue: go\n", "")
+            .replace("- do [#first] first request\n", "");
+        let operator_lines = [
+            "agent: grok",
+            "- do [#second] queued by the operator after the base",
+            "- do [#third] typed while the editor was quarantined",
+        ];
+
+        // 1. The captured retained transition.
+        let mut projection = retained_resume_projection("doc-retainedprojectionclobber");
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.clone();
+        intent.target_hash = agent_doc_hash::content_hash(&target);
+
+        let editor_id = 7;
+        let mut hub = RelayHub::from_text(1, base);
+        hub.register(editor_id).unwrap();
+        let editor = ReplicaState::from_encoded(editor_id, &hub.canonical_encoded_state()).unwrap();
+        let type_at = |replica: &ReplicaState, needle: &str, delete: &str, insert: &str| {
+            let text = replica.text();
+            let byte = text
+                .find(needle)
+                .unwrap_or_else(|| panic!("{needle:?} in {text}"));
+            let offset = text[..byte].chars().count() as u32;
+            replica.apply_local_edit(offset, delete.chars().count() as u32, insert);
+        };
+        let observe = |hub: &RelayHub, version: u64| RetainedDeliveryObservation {
+            file: PathBuf::from("/work/lazily.md"),
+            content: Arc::from(hub.canonical_text().as_str()),
+            content_hash: agent_doc_hash::content_hash(&hub.canonical_text()),
+            live_editors: hub.live_count(),
+            delivery_converged: hub.delivery_converged(),
+            delivery_version: version,
+        };
+
+        // 2. Operator edits land after the retained base.
+        type_at(&editor, "agent: claude", "agent: claude", "agent: grok");
+        type_at(
+            &editor,
+            "<!-- /agent:queue -->",
+            "",
+            "- do [#second] queued by the operator after the base\n",
+        );
+        let sv = hub.canonical_state_vector();
+        hub.relay_update(editor_id, &editor.diff(&sv).unwrap())
+            .unwrap();
+        assert!(hub.canonical_text().contains("agent: grok"));
+
+        // 3. The retained write, derived over the live canonical and applied
+        //    through the relay's expected-base CAS.
+        let transition =
+            retained_transition_projection(Some(&projection), Some(&observe(&hub, 1)), 1)
+                .expect("a converged live cut derives the retained projection");
+        assert_eq!(transition.base_content.as_ref(), hub.canonical_text());
+        hub.apply_canonical_replace_scoped(
+            &transition.base_content,
+            &transition.target_content,
+            transition.component_scope.as_ref(),
+        )
+        .unwrap();
+        let after_write = hub.canonical_text();
+        assert!(!after_write.contains("queue: go"), "{after_write}");
+        assert!(!after_write.contains("- do [#first] first request"));
+        for line in &operator_lines[..2] {
+            assert!(
+                after_write.contains(line),
+                "{line} lost by the retained write"
+            );
+        }
+
+        // 4. Quarantine: the editor never received that write; its next frame
+        //    is structurally quarantined and its author fenced.
+        type_at(
+            &editor,
+            "<!-- /agent:queue -->",
+            "",
+            "- do [#third] typed while the editor was quarantined\n",
+        );
+        hub.fence_registered_document_op_origins([editor_id])
+            .unwrap();
+        for _ in 0..=agent_doc_document_realtime::crdt_relay::MAX_REDELIVERIES_WITHOUT_ACK {
+            hub.pending_updates(editor_id).unwrap();
+        }
+        assert!(
+            !hub.delivery_converged(),
+            "a quarantined editor must never be reported converged"
+        );
+        assert_eq!(hub.quarantined_live_replicas(), vec![editor_id]);
+        assert!(
+            retained_transition_projection(Some(&projection), Some(&observe(&hub, 2)), 1).is_none(),
+            "no retained projection is derived over a cut that lacks quarantined text"
+        );
+
+        // 5. Reload: a fresh controller generation reseeds from the editor's
+        //    retained replica. The intent was never settled, so it re-derives
+        //    over the reseeded operator cut, exactly as at 17:09:04Z.
+        let mut fresh = RelayHub::new(2);
+        fresh.begin_retained_replica_reseed();
+        fresh.register(editor_id).unwrap();
+        fresh
+            .relay_update(editor_id, &editor.encode_state())
+            .unwrap();
+        assert!(!fresh.retained_replica_reseed_pending());
+        assert_eq!(fresh.canonical_text(), editor.text());
+        let reseeded = observe(&fresh, 3);
+        assert!(reseeded.delivery_converged);
+        let transition = retained_transition_projection(Some(&projection), Some(&reseeded), 2)
+            .expect("the pending intent re-derives over the reseeded editor cut");
+        assert_eq!(transition.base_content.as_ref(), editor.text());
+        for line in operator_lines {
+            assert!(
+                transition.target_content.contains(line),
+                "the re-derived retained projection drops operator text {line:?}:\n{}",
+                transition.target_content
+            );
+        }
+        fresh
+            .apply_canonical_replace_scoped(
+                &transition.base_content,
+                &transition.target_content,
+                transition.component_scope.as_ref(),
+            )
+            .unwrap();
+        for update in fresh.pending_updates(editor_id).unwrap() {
+            editor.apply_update(&update.update).unwrap();
+        }
+        let replacement_id = 9;
+        fresh.register(replacement_id).unwrap();
+
+        // Every replica and the projected disk carry the operator's text and
+        // the retained write rolled forward on top of it.
+        let projected_disk = fresh.canonical_text();
+        for (name, text) in [
+            ("canonical/projected disk", projected_disk.clone()),
+            ("editor", editor.text()),
+            (
+                "replacement replica",
+                fresh.member_text(replacement_id).unwrap(),
+            ),
+        ] {
+            for line in operator_lines {
+                assert!(text.contains(line), "{name} lost {line:?}:\n{text}");
+            }
+            assert!(
+                !text.contains("queue: go"),
+                "{name} lacks the retained write"
+            );
+            assert!(
+                !text.contains("- do [#first] first request"),
+                "{name}: {text}"
+            );
+            assert_eq!(text.matches("retained response body").count(), 1, "{name}");
+        }
+        assert_eq!(editor.text(), projected_disk);
+    }
+
+    /// `#retainedprojectionclobber`: when no merge keeps the operator's text,
+    /// the retained transition is a reported refusal, never an ApplyTarget.
+    #[test]
+    fn retainedprojectionclobber_lossy_retained_rebase_is_a_reported_refusal() {
+        let mut projection = retained_resume_projection("doc-retainedprojectionclobber-refusal");
+        let base = "---\nagent_doc_session: s1\n---\n\n# Doc\n\n<!-- agent:exchange -->\n### do x\n\nbody line\n<!-- /agent:exchange -->\n";
+        let target = base.replace("\nbody line\n", "\nbody line agent\n");
+        let cut = base.replace("\nbody line\n", "\nbody line operator\n");
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(base.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(base);
+        intent.target_content = target.clone();
+        intent.target_hash = agent_doc_hash::content_hash(&target);
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/session.md"),
+            content: Arc::from(cut.as_str()),
+            content_hash: agent_doc_hash::content_hash(&cut),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 5,
+        };
+        let state = retained_transition_state(Some(&projection), Some(&delivery), 1);
+        assert_eq!(
+            retained_transition_state_tag(&state),
+            "operator_text_conflict"
+        );
+        assert_eq!(
+            retained_transition_effect_tag(&state),
+            "report_operator_text_conflict"
+        );
+        let Some(RetainedTransitionEffect::ReportOperatorTextConflict(conflict)) = state.effect()
+        else {
+            unreachable!()
+        };
+        assert_eq!(conflict.lost_lines, vec!["body line operator".to_string()]);
+        assert_eq!(conflict.visible_hash, delivery.content_hash);
+        assert_eq!(conflict.delivery_version, 5);
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, &cut).unwrap();
+        let sink = RetainedWriteSettleSink {
+            project_root: dir.path().to_path_buf(),
+            runtime: std::sync::Weak::new(),
+        };
+        assert!(sink.report_retained_operator_text_conflict(
+            "doc",
+            &RetainedOperatorTextConflict {
+                file: file.clone(),
+                ..conflict
+            },
+        ));
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("retained_transition_refused_operator_text_loss")
+                && log.contains("lost_operator_lines=1")
+                && log.contains("applied=false"),
+            "{log}"
         );
     }
 
@@ -26744,6 +27135,59 @@ mod retained_persistence_retry_tests {
             retries["doc"].rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS,
             "a roll-forward refund never refunds a rebuild"
         );
+    }
+
+    /// `#retainedprojectionclobber` (b): lazily.md re-sent the roll-forward 39
+    /// times (`notified=0 diagnosis=delivery_failed_to_all:1`, refusals=117)
+    /// because every undelivered request was refunded. The refund is bounded:
+    /// the bound is terminal, and no request is sent after it.
+    #[test]
+    fn retainedprojectionclobber_undelivered_roll_forwards_become_terminal() {
+        let mut retries = std::collections::HashMap::new();
+        let mut requested = 0;
+        let mut terminal_at = None;
+        for refusal in 0..400 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
+                    .unwrap();
+            if decision.request_visible_roll_forward {
+                requested += 1;
+                // No request ever reaches an editor replica.
+                if refund_undelivered_retained_persistence_roll_forward(
+                    &mut retries,
+                    "doc",
+                    CONTENT.0,
+                ) {
+                    assert!(terminal_at.is_none(), "terminal is reported exactly once");
+                    terminal_at = Some(refusal);
+                }
+            }
+        }
+        assert_eq!(
+            requested,
+            RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS
+        );
+        assert!(terminal_at.is_some(), "the undelivered bound is terminal");
+        assert_eq!(
+            retries["doc"].roll_forwards, RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS,
+            "the terminal refund spends the budget instead of re-arming it"
+        );
+        // Different content (a real new write) starts its own budget.
+        let next = ("next-content", 12usize);
+        for _ in 0..40 {
+            let decision =
+                retained_persistence_retry_step(&mut retries, "doc", 8, next, false, false)
+                    .unwrap();
+            if decision.request_visible_roll_forward {
+                assert!(!refund_undelivered_retained_persistence_roll_forward(
+                    &mut retries,
+                    "doc",
+                    "other-content",
+                ));
+                return;
+            }
+        }
+        panic!("new content must earn a fresh roll-forward request");
     }
 
     #[test]

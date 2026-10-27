@@ -282,17 +282,15 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#clobberfollowups]
-- do [#jb263probeblind]
-- ~~do [#movedsingleplugin]~~
-- ~~do [#retainedprojectionclobber]~~
+- ☑️ [#subagent:clobberfollowups#1] do [#clobberfollowups]
+- ☑️ [#subagent:jb263probeblind#1] do [#jb263probeblind]
 - ☑️ [#subagent:ahfe#1] do [#ahfe]
 - 📥 I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
-  - 🚧 [#subagent:pmsync#1] So this is the first subtask.
-  - 🚧 [#subagent:pmsync#1] This is the second subtask.
-  - 🚧 [#subagent:pmsync#1] Subtasks should be editable and steerable.
-  - 🚧 [#subagent:pmsync#1] Make sure these subtasks are being deterministically associated with the parent task.
-- 🚧 [#subagent:automationapi#1] agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?
+  - ☑️ [#subagent:pmsync#1] So this is the first subtask.
+  - ☑️ [#subagent:pmsync#1] This is the second subtask.
+  - ☑️ [#subagent:pmsync#1] Subtasks should be editable and steerable.
+  - ☑️ [#subagent:pmsync#1] Make sure these subtasks are being deterministically associated with the parent task.
+- ☑️ [#subagent:automationapi#1] agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

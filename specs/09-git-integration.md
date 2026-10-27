@@ -54,6 +54,8 @@ Cross-session event coordination via `agent-kit` hooks (v0.3).
 
 - `UserPromptSubmit` → `agent-doc hook codex-user-prompt-submit`
 - `Stop` → `agent-doc hook codex-stop`
+- `PostToolUse` → `agent-doc hook steering-post-tool-use`
+- `PreToolUse` → `agent-doc hook coined-id-pre-tool-use` (the live-tmux-server and coined-id guards, `#tmuxguardclaudeinstall`; the Claude install wires the same command into `.claude/settings.json`)
 
 The Codex Stop payload's `last_assistant_message` and `stop_hook_active` accept `null` as their defaults (`#stopnullmessage`). Codex sends `"last_assistant_message": null` when a turn ends on a tool call with no final text; a missing field was tolerated but an explicit `null` failed the whole payload as `parse stop JSON`, a fail-closed stop with no document or recovery guidance, and the hook's `missing_last_assistant_message` path for exactly that tool-only stop could never run.
 

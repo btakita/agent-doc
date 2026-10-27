@@ -1386,6 +1386,19 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
         None,
         Some(STEERING_HOOK_TIMEOUT_SECS),
     );
+    // `#tmuxguardclaudeinstall`: the same `PreToolUse` guard the Claude install
+    // wires. It hosts the live-tmux-server guard (`#tmuxkittyterminal`), which
+    // needs no session document, so the user-level layer is the right owner:
+    // it covers every Codex project, governed or not. No matcher, matching
+    // Claude: the handler filters by tool name and allows what it does not
+    // recognize.
+    ensure_codex_hook_command(
+        hooks_map,
+        "PreToolUse",
+        COINED_ID_PRETOOLUSE_COMMAND,
+        None,
+        None,
+    );
 
     let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
     write_if_changed(path, &rendered)
@@ -3295,6 +3308,120 @@ mod tests {
             post[0]["timeout"].as_u64(),
             Some(STEERING_HOOK_TIMEOUT_SECS)
         );
+    }
+
+    /// Every `command` hook wired under `event`, across all matcher entries.
+    fn hook_commands(settings: &serde_json::Value, event: &str) -> Vec<String> {
+        settings["hooks"][event]
+            .as_array()
+            .map(|entries| {
+                entries
+                    .iter()
+                    .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+                    .filter_map(|hook| hook["command"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `#tmuxguardclaudeinstall`: a Claude project install wires the
+    /// `PreToolUse` command that hosts the live-tmux-server guard
+    /// (`#tmuxkittyterminal`). It merges into the operator's existing
+    /// settings: their own `PreToolUse` entry (with its matcher) and unrelated
+    /// top-level keys survive, and a re-run adds no duplicate.
+    #[test]
+    fn install_for_claude_wires_the_pretooluse_guard_and_preserves_operator_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings_path = dir.path().join(".claude/settings.json");
+        std::fs::create_dir_all(settings_path.parent().unwrap()).unwrap();
+        let operator = serde_json::json!({
+            "permissions": { "allow": ["Bash(make check)"] },
+            "model": "opus",
+            "hooks": {
+                "PreToolUse": [{
+                    "matcher": "Write|Edit",
+                    "hooks": [{ "type": "command", "command": "operator-pre-write-hook" }]
+                }]
+            }
+        });
+        std::fs::write(&settings_path, operator.to_string()).unwrap();
+
+        super::install_env_artifacts(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        let first = std::fs::read_to_string(&settings_path).unwrap();
+        super::install_env_artifacts(Environment::ClaudeCode, Some(dir.path())).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&settings_path).unwrap(),
+            first,
+            "a re-run must not rewrite settings.json"
+        );
+
+        let settings: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let pre = hook_commands(&settings, "PreToolUse");
+        assert_eq!(
+            pre.iter()
+                .filter(|command| command.as_str() == COINED_ID_PRETOOLUSE_COMMAND)
+                .count(),
+            1,
+            "{settings:#}"
+        );
+        assert!(pre.contains(&"operator-pre-write-hook".to_string()));
+        let operator_entry = settings["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["matcher"] == "Write|Edit")
+            .expect("the operator's matcher entry survives");
+        assert_eq!(operator_entry["hooks"].as_array().unwrap().len(), 1);
+        // The guard rides in its own unmatched entry, so it sees `Bash`.
+        let guard_entry = settings["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| {
+                entry["hooks"][0]["command"].as_str() == Some(COINED_ID_PRETOOLUSE_COMMAND)
+            })
+            .unwrap();
+        assert!(guard_entry.get("matcher").is_none(), "{settings:#}");
+        assert_eq!(settings["permissions"], operator["permissions"]);
+        assert_eq!(settings["model"], "opus");
+    }
+
+    /// `#tmuxguardclaudeinstall`: the user-level Codex hooks file carries the
+    /// same `PreToolUse` guard, once, beside an operator's own entry.
+    #[test]
+    fn codex_user_hooks_wire_the_pretooluse_guard_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_codex = dir.path().join("codex-home");
+        std::fs::create_dir_all(&user_codex).unwrap();
+        std::fs::write(
+            user_codex.join("hooks.json"),
+            serde_json::json!({
+                "hooks": {
+                    "PreToolUse": [{
+                        "matcher": "Bash",
+                        "hooks": [{ "type": "command", "command": "operator-bash-audit" }]
+                    }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
+        super::install_codex_user_hook_artifacts_at(&user_codex).unwrap();
+
+        let hooks: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(user_codex.join("hooks.json")).unwrap())
+                .unwrap();
+        let pre = hook_commands(&hooks, "PreToolUse");
+        assert_eq!(
+            pre.iter()
+                .filter(|command| command.as_str() == COINED_ID_PRETOOLUSE_COMMAND)
+                .count(),
+            1,
+            "{hooks:#}"
+        );
+        assert!(pre.contains(&"operator-bash-audit".to_string()));
     }
 
     #[test]

@@ -34853,6 +34853,91 @@ fn test_cli_skill_install_reload_restart_with_explicit_harness_and_root() {
     );
 }
 
+/// Count `command` hooks equal to `command` under `event` in a harness hooks file.
+fn installed_hook_count(path: &std::path::Path, event: &str, command: &str) -> usize {
+    let settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    settings["hooks"][event]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+        .filter(|hook| hook["command"].as_str() == Some(command))
+        .count()
+}
+
+/// `#tmuxguardclaudeinstall`: `agent-doc skill install --harness claude`
+/// wires the `PreToolUse` command that hosts the live-tmux-server guard into
+/// the project's `.claude/settings.json`, keeps the operator's own hooks and
+/// settings, and stays single on a re-run.
+#[test]
+fn test_cli_skill_install_claude_wires_the_pretooluse_tmux_guard() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let settings = tmp.path().join(".claude/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(
+        &settings,
+        r#"{"env":{"KEEP":"1"},"hooks":{"PreToolUse":[{"matcher":"Edit","hooks":[{"type":"command","command":"operator-hook"}]}]}}"#,
+    )
+    .unwrap();
+
+    for _ in 0..2 {
+        agent_doc_cmd()
+            .env("HOME", tmp.path().join("home"))
+            .env("CODEX_HOME", tmp.path().join("codex-home"))
+            .args(["skill", "install", "--harness", "claude", "--root"])
+            .arg(tmp.path())
+            .assert()
+            .success();
+    }
+
+    let guard = "agent-doc hook coined-id-pre-tool-use";
+    assert_eq!(installed_hook_count(&settings, "PreToolUse", guard), 1);
+    assert_eq!(
+        installed_hook_count(&settings, "PreToolUse", "operator-hook"),
+        1
+    );
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&settings).unwrap()).unwrap();
+    assert_eq!(written["env"]["KEEP"], "1");
+    assert!(
+        !tmp.path().join("home/.claude").exists(),
+        "a project install must not write the operator's user-level Claude settings"
+    );
+}
+
+/// `#tmuxguardclaudeinstall`: the Codex install wires the same guard into the
+/// user-level `$CODEX_HOME/hooks.json`, the layer that owns agent-doc's Codex
+/// hooks, and a re-run adds no duplicate.
+#[test]
+fn test_cli_skill_install_codex_wires_the_pretooluse_tmux_guard() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let codex_home = tmp.path().join("codex-home");
+    for _ in 0..2 {
+        agent_doc_cmd()
+            .current_dir(tmp.path())
+            .env("HOME", tmp.path().join("home"))
+            .env("CODEX_HOME", &codex_home)
+            .args(["skill", "install", "--harness", "codex"])
+            .assert()
+            .success();
+    }
+
+    let hooks = codex_home.join("hooks.json");
+    assert_eq!(
+        installed_hook_count(
+            &hooks,
+            "PreToolUse",
+            "agent-doc hook coined-id-pre-tool-use"
+        ),
+        1
+    );
+    assert!(
+        !tmp.path().join(".codex/hooks.json").exists(),
+        "the user layer is the sole owner of agent-doc's Codex hooks"
+    );
+}
+
 #[test]
 fn test_skill_md_contains_required_steps() {
     let tmp = tempfile::TempDir::new().unwrap();

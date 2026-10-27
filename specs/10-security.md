@@ -39,7 +39,16 @@ when its client exited.
 
 The `PreToolUse` command installed for Claude Code and Codex
 (`agent-doc hook coined-id-pre-tool-use`) runs this guard first, before the
-coined-id guard, in every pane, with or without a session document:
+coined-id guard, in every pane, with or without a session document.
+`agent-doc skill install` wires it for both harnesses (`#tmuxguardclaudeinstall`):
+for Claude Code into the project's `.claude/settings.json`, and for Codex into
+the user-level `$CODEX_HOME/hooks.json` beside the other agent-doc Codex hooks.
+The entry has no matcher, because the handler filters by tool name itself. The
+install merges it: the operator's own `PreToolUse` entries, their matchers, and
+unrelated settings survive, and a re-run adds no duplicate. A Claude project
+where `agent-doc skill install --harness claude` never ran has no guard; the
+install does not write the operator's user-level `~/.claude/settings.json`.
+The guard behaves as follows:
 
 - **Scope.** Only `Bash` commands. The guard follows quote-aware segments,
   prefix assignments, `env`/`sudo`/`command`/`exec`/`nohup`/`timeout`/`nice`/

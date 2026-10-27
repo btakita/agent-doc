@@ -399,8 +399,13 @@ pub struct TodoLinkIndex {
     todo_ids: std::collections::BTreeSet<String>,
     /// Durable reverse edges: tracked-work id -> todo own ids. The edge may be
     /// carried by the tracked item or resolved from a Todo source locator.
-    todo_backlinks:
-        std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    todo_backlinks: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// `#todoaddonsamecycledone`: open ids the CURRENT closeout resolves
+    /// (`--done` / `--review-resolve`). They stay open evidence (the item is
+    /// still `[ ]` when the closeout's todo ops run), but a todo is never
+    /// LAYERED on one: its operator prompt would be checked off by this same
+    /// closeout, and a replay would no longer recognise the layered row.
+    resolving_this_closeout: std::collections::BTreeSet<String>,
 }
 
 fn normalize_link_id(id: &str) -> String {
@@ -421,6 +426,17 @@ impl TodoLinkIndex {
         let id = normalize_link_id(id);
         if !id.is_empty() {
             self.resolved.insert(id);
+        }
+    }
+
+    /// `#todoaddonsamecycledone`: record that the current closeout resolves
+    /// open tracked work `id`. A `--todo-add` evaluated in that closeout never
+    /// layers on it (no `(source: ...)` locator, no fold into its open todo):
+    /// the add mints a standalone follow-up that outlives the item.
+    pub fn mark_resolving_this_closeout(&mut self, id: &str) {
+        let id = normalize_link_id(id);
+        if !id.is_empty() {
+            self.resolving_this_closeout.insert(id);
         }
     }
 
@@ -549,9 +565,14 @@ impl TodoLinkIndex {
     /// (`#todoidlayer`: a parked item can still need an operator decision —
     /// thaw it, drop it — and the todo is the visibility layer over it).
     fn linkable_component(&self, id: &str) -> Option<&str> {
-        self.open_component(id).filter(|component| {
-            matches!(*component, "review" | "backlog" | "pending" | "icebox")
-        })
+        if self
+            .resolving_this_closeout
+            .contains(&normalize_link_id(id))
+        {
+            return None;
+        }
+        self.open_component(id)
+            .filter(|component| matches!(*component, "review" | "backlog" | "pending" | "icebox"))
     }
 }
 
@@ -797,13 +818,17 @@ pub fn add_todo_item_to_document(
     let wanted = normalize_action_text(&contextual_action);
     let wanted_legacy = normalize_action_text(&action);
     let items: Vec<TodoLine<'_>> = body.lines().filter_map(parse_todo_line).collect();
-    if let Some(existing) = items
-        .iter()
-        .find(|item| {
-            let existing = normalize_action_text(item.action);
-            existing == wanted || existing == wanted_legacy
-        })
-    {
+    // `#todoaddonsamecycledone`: the binary-owned source locator is not part
+    // of the action the caller wrote. A replay evaluated after the source was
+    // resolved computes no locator, so it must still recognise the row the
+    // first pass wrote WITH one; otherwise it mints a second, surrogate copy.
+    if let Some(existing) = items.iter().find(|item| {
+        let existing = normalize_action_text(item.action);
+        let existing_bare = strip_trailing_source_reference(item.action)
+            .map(normalize_action_text)
+            .unwrap_or_else(|| existing.clone());
+        existing == wanted || existing == wanted_legacy || existing_bare == wanted_legacy
+    }) {
         let id = existing.own_id.map(str::to_ascii_lowercase);
         let source = contextual_source.clone();
         if wanted != wanted_legacy
@@ -2076,6 +2101,17 @@ pub fn auto_complete_linked_todos(
     content: &str,
     links: &TodoLinkIndex,
 ) -> Result<TodoAutoCompleteOutcome> {
+    auto_complete_linked_todos_except(content, links, &[])
+}
+
+/// [`auto_complete_linked_todos`], leaving every todo whose own id is in
+/// `exempt` open (`#todoaddonsamecycledone`: the todos the same closeout's
+/// `--todo-add` created).
+pub fn auto_complete_linked_todos_except(
+    content: &str,
+    links: &TodoLinkIndex,
+    exempt: &[String],
+) -> Result<TodoAutoCompleteOutcome> {
     let unchanged = |content: &str| TodoAutoCompleteOutcome {
         content: content.to_string(),
         completed: Vec::new(),
@@ -2090,9 +2126,13 @@ pub fn auto_complete_linked_todos(
         let Some(own) = item.own_id.as_deref() else {
             continue;
         };
-        if item.state.is_open()
-            && (links.is_resolved(own) || links.linked_sources_resolved(own))
+        if exempt
+            .iter()
+            .any(|id| normalize_link_id(id) == normalize_link_id(own))
         {
+            continue;
+        }
+        if item.state.is_open() && (links.is_resolved(own) || links.linked_sources_resolved(own)) {
             body.rewrite_line(item.line, TodoState::Done, Some(own), &item.action);
             if !completed.iter().any(|seen: &String| seen == own) {
                 completed.push(own.to_string());
@@ -2725,6 +2765,83 @@ mod tests {
         let backlog = add_linked(&wrap(""), "Grant CI access for (#work)", &index).unwrap();
         assert_ne!(backlog.id.as_deref(), Some("work"));
         assert_eq!(backlog.source, Some(("work".to_string(), "backlog".to_string())));
+    }
+
+    /// `#todoaddonsamecycledone`: an add evaluated in a closeout that also
+    /// resolves the one item it cites never layers on it. Before the fix it
+    /// took `(source: agent:backlog [#cfs])`, so the same closeout's
+    /// auto-completion checked it off at once.
+    #[test]
+    fn add_never_layers_on_an_item_the_same_closeout_resolves() {
+        let mut index = links(&[("cfs", "backlog"), ("other", "backlog")], &[]);
+        index.mark_resolving_this_closeout("#CFS");
+        let action = "Decide the strike policy (raised by the #cfs fix).";
+        let outcome = add_linked(&wrap(""), action, &index).unwrap();
+        assert!(outcome.inserted);
+        assert_eq!(outcome.source, None, "no locator for finished work");
+        let id = outcome.id.clone().unwrap();
+        assert_eq!(
+            todo_body(&outcome.content),
+            format!("- [ ] [#{id}] {action}\n")
+        );
+        // The settling item's open todo is not a fold target either: the
+        // follow-up is a separate operator decision.
+        let existing = wrap("- [ ] [#k3vd] Verify #cfs live (source: agent:backlog [#cfs])\n");
+        let follow = add_linked(&existing, action, &index).unwrap();
+        assert!(follow.inserted && follow.source.is_none());
+        assert_eq!(todo_body(&follow.content).lines().count(), 2);
+        // An item the closeout does NOT resolve still layers.
+        let layered = add_linked(&wrap(""), "Grant CI access for (#other)", &index).unwrap();
+        assert_eq!(
+            layered.source,
+            Some(("other".to_string(), "backlog".to_string()))
+        );
+        // The exemption leaves the item's open evidence alone.
+        assert_eq!(index.open_component("cfs"), Some("backlog"));
+        assert!(!index.is_resolved("cfs"));
+    }
+
+    /// `#todoaddonsamecycledone`: a replay evaluated after the cited item was
+    /// resolved computes no locator; it must still recognise the row an
+    /// earlier pass wrote WITH one (in any checkbox state) instead of minting a
+    /// second, surrogate copy (observed: `[x] [#12t8] ... (source: agent:backlog
+    /// [#claimfollowstruck])` beside a fresh `[ ] [#krwr] ...`).
+    #[test]
+    fn replayed_add_recognises_its_row_after_the_cited_item_resolved() {
+        let action = "Decide the strike policy (raised by the #cfs fix).";
+        let content = wrap(&format!(
+            "- [x] [#k3vd] {action} (source: agent:backlog [#cfs])\n"
+        ));
+        let index = links(&[], &["cfs"]);
+        let replay = add_linked(&content, action, &index).unwrap();
+        assert!(!replay.inserted, "a replay is a no-op");
+        assert_eq!(replay.id.as_deref(), Some("k3vd"));
+        assert_eq!(replay.content, content);
+        // Operator prose that merely contains `source:` is not a locator.
+        let prose = wrap("- [ ] [#k3vd] Ship it (source: the vendor)\n");
+        let other = add_linked(&prose, "Ship it", &index).unwrap();
+        assert!(
+            other.inserted,
+            "free-form `(source: ...)` is the operator's text"
+        );
+    }
+
+    /// `#todoaddonsamecycledone`: auto-completion skips the todos the same
+    /// closeout added, even when their linked work resolved.
+    #[test]
+    fn auto_complete_leaves_exempt_same_closeout_todos_open() {
+        let mut index = links(&[], &["cfs"]);
+        let content = wrap(concat!(
+            "- [ ] [#k3vd] Old prompt (source: agent:backlog [#cfs])\n",
+            "- [ ] [#t9z1] New follow-up (source: agent:backlog [#cfs])\n",
+        ));
+        index
+            .resolve_todo_backlinks_from_document(&content)
+            .unwrap();
+        let outcome =
+            auto_complete_linked_todos_except(&content, &index, &["#T9Z1".to_string()]).unwrap();
+        assert_eq!(outcome.completed, vec!["k3vd".to_string()]);
+        assert!(todo_body(&outcome.content).contains("- [ ] [#t9z1] New follow-up"));
     }
 
     #[test]

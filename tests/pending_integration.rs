@@ -2120,6 +2120,172 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         .failure();
 }
 
+/// `#todoaddonsamecycledone`: the exact 2026-10-27 closeout sequence. One
+/// write carried `--done claimfollowstruck` and a `--todo-add` whose action
+/// cites `#claimfollowstruck` only as context. Before the fix the todo ops
+/// (which run before `--done`) layered the row on the still-open item, the
+/// same closeout's auto-completion checked it off, and a replay of the
+/// captured plan (evaluated after the item resolved, so with no locator) no
+/// longer recognised that row and minted an open surrogate:
+/// `[x] [#12t8] ... (source: agent:backlog [#claimfollowstruck])` +
+/// `[ ] [#krwr] ...`. Now exactly one open, standalone follow-up exists, and a
+/// replay folds into it.
+#[test]
+fn todo_add_citing_an_item_the_same_closeout_resolves_mints_one_open_follow_up() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#claimfollowstruck] fix claim follow\n- [ ] [#other] other work",
+        "",
+    );
+    let action = "Decide whether deleting a claimed queue row should strike (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).";
+    let closeout = |extra: &[&str]| {
+        let mut args = vec![
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "claimfollowstruck",
+            "--todo-add",
+            action,
+        ];
+        args.extend_from_slice(extra);
+        agent_doc()
+            .args(&args)
+            .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+            .assert()
+            .success()
+    };
+    let first = closeout(&[]);
+    let stderr = String::from_utf8_lossy(&first.get_output().stderr).to_string();
+    assert!(!stderr.contains("[todo] auto-done"), "{stderr}");
+    assert!(
+        !stderr.contains("(#tododone)"),
+        "the new follow-up is not finished work: {stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        component_body(&content, "backlog").contains("[x] [#claimfollowstruck]")
+            || !component_body(&content, "backlog").contains("claimfollowstruck"),
+        "{content}"
+    );
+    let todo = todo_item_id(&content, action);
+    assert_eq!(
+        component_body(&content, "todo"),
+        format!("- [ ] [#{todo}] {action}"),
+        "one open standalone follow-up, no locator to finished work"
+    );
+
+    // A replay of the same closeout (a captured-plan resume) is a no-op.
+    let replay = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-add",
+            action,
+        ])
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&replay.get_output().stderr);
+    assert!(stderr.contains("already present"), "{stderr}");
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!("- [ ] [#{todo}] {action}")
+    );
+
+    // A later closeout with tracked-work flags leaves the follow-up open: it
+    // only cites the resolved item, so it is never auto-completed.
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--done",
+            "other",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        component_body(&fs::read_to_string(&doc).unwrap(), "todo"),
+        format!("- [ ] [#{todo}] {action}")
+    );
+}
+
+/// `#todoaddonsamecycledone`: two `--done` + `--todo-add` pairs in ONE
+/// closeout each mint exactly one open follow-up; a todo added in an EARLIER
+/// cycle and layered on one of those items keeps its semantics (checked off
+/// by the closeout that resolves it), and an add citing an item the closeout
+/// does not resolve still layers on it.
+#[test]
+fn two_done_and_todo_add_pairs_in_one_closeout_keep_both_follow_ups_open() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [ ] [#claimfollowstruck] fix claim follow\n- [ ] [#prunetestisolation] prune isolation\n- [ ] [#keepopen] still open",
+        "",
+    );
+    // Earlier cycle: an operator prompt layered on #prunetestisolation.
+    agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-add",
+            "Approve the isolation plan for [#prunetestisolation]",
+        ])
+        .assert()
+        .success();
+    let earlier = todo_item_id(
+        &fs::read_to_string(&doc).unwrap(),
+        "Approve the isolation plan for [#prunetestisolation]",
+    );
+    let follow_a = "Decide whether deleting a claimed queue row strikes (raised by the #claimfollowstruck fix).";
+    let follow_b =
+        "Decide whether ~/.agent-doc/ is pruned (found by #prunetestisolation; see logs).";
+    let layered = "Grant CI access for [#keepopen]";
+    let out = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "claimfollowstruck",
+            "--todo-add",
+            follow_a,
+            "--done",
+            "prunetestisolation",
+            "--todo-add",
+            follow_b,
+            "--todo-add",
+            layered,
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&out.get_output().stderr).to_string();
+    let content = fs::read_to_string(&doc).unwrap();
+    let a = todo_item_id(&content, follow_a);
+    let b = todo_item_id(&content, follow_b);
+    let c = todo_item_id(&content, layered);
+    assert_eq!(
+        component_body(&content, "todo"),
+        format!(
+            "- [x] [#{earlier}] Approve the isolation plan for [#prunetestisolation] (source: agent:backlog [#prunetestisolation])\n- [ ] [#{a}] {follow_a}\n- [ ] [#{b}] {follow_b}\n- [ ] [#{c}] {layered} (source: agent:backlog [#keepopen])"
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("[todo] auto-done: #{earlier}")),
+        "{stderr}"
+    );
+    for id in [&a, &b, &c] {
+        assert!(
+            !stderr.contains(&format!("[todo] auto-done: #{id}")),
+            "{stderr}"
+        );
+    }
+}
+
 /// `#todoaddidhijack` end to end: a todo is a visibility layer over the one
 /// review/backlog/icebox item it surfaces an operator decision for, but its
 /// own id is its OWN identity — an explicit `id=` always wins, an id an open

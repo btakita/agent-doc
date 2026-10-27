@@ -1668,12 +1668,41 @@ pub fn todo_link_index_in_content(
 /// rejected). An action citing exactly one open tracked item links to it with
 /// `(source: agent:<component> [#<id>])`. Returns whether a line was appended.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
+    Ok(todo_add_in_closeout(file, text, &[])?.inserted)
+}
+
+/// What one closeout `--todo-add` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TodoAddReceipt {
+    /// Whether the document changed (a new row, or a locator added in place).
+    pub inserted: bool,
+    /// The own id of a NEW row this add appended; `None` when the add folded
+    /// into, or qualified, an existing row.
+    pub new_todo_id: Option<String>,
+}
+
+/// [`todo_add`] inside a closeout that also resolves `resolving_this_closeout`
+/// (its `--done` / `--review-resolve` ids).
+///
+/// `#todoaddonsamecycledone`: the add is evaluated against the tracked state
+/// from BEFORE this closeout's `--done` (the todo ops run first, so those items
+/// are still open), but it never layers on an item the same closeout resolves:
+/// such an action is a follow-up raised by finishing that item, so it gets a
+/// standalone minted id and no `(source: ...)` locator. Layering would make the
+/// row the operator prompt for finished work, which this closeout's
+/// auto-completion checks off at once, and a later replay (evaluated after the
+/// item is resolved) would then mint a second, surrogate copy.
+pub fn todo_add_in_closeout(
+    file: &Path,
+    text: &str,
+    resolving_this_closeout: &[String],
+) -> Result<TodoAddReceipt> {
     let full_content = read_command_document(file, "todo_add")?;
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let reserved = backlog::document_reserved_identity_ids(&full_content);
     // An unreadable archive only weakens minted-id reservation and the
     // resolved-id rejection; it never links anything, so it is not fatal.
-    let links = match todo_link_index_in_content(file, &full_content, true, &[]) {
+    let mut links = match todo_link_index_in_content(file, &full_content, true, &[]) {
         Ok(links) => links,
         Err(err) => {
             eprintln!(
@@ -1682,8 +1711,10 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
             todo_link_index_in_content(file, &full_content, false, &[])?
         }
     };
-    let id_for =
-        |action: &str, counter: u64| backlog::generate_hash_n(action, &doc_id, counter, 4);
+    for id in resolving_this_closeout {
+        links.mark_resolving_this_closeout(id);
+    }
+    let id_for = |action: &str, counter: u64| backlog::generate_hash_n(action, &doc_id, counter, 4);
     let outcome = agent_doc_element::todo::add_todo_item_to_document(
         &full_content,
         text,
@@ -1722,7 +1753,12 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
             id_label
         );
     }
-    Ok(outcome.inserted)
+    Ok(TodoAddReceipt {
+        inserted: outcome.inserted,
+        new_todo_id: (outcome.inserted && !outcome.source_reference_added)
+            .then(|| outcome.id.clone())
+            .flatten(),
+    })
 }
 
 /// `#todoids`: check off every OPEN `agent:todo` item whose OWN id is resolved
@@ -1741,6 +1777,18 @@ pub fn todo_auto_complete_linked(
     file: &Path,
     resolved_this_cycle: &[String],
 ) -> Result<Option<Vec<String>>> {
+    todo_auto_complete_linked_except(file, resolved_this_cycle, &[])
+}
+
+/// [`todo_auto_complete_linked`], never checking off a todo in
+/// `added_this_closeout` (`#todoaddonsamecycledone`: a todo this closeout's
+/// `--todo-add` created is outstanding operator work by definition, so the
+/// same closeout's `--done` never reaps it).
+pub fn todo_auto_complete_linked_except(
+    file: &Path,
+    resolved_this_cycle: &[String],
+    added_this_closeout: &[String],
+) -> Result<Option<Vec<String>>> {
     let full_content = read_command_document(file, "todo_auto_complete")?;
     if agent_doc_element::todo::find_todo_component(&full_content)
         .ok()
@@ -1758,7 +1806,11 @@ pub fn todo_auto_complete_linked(
             return Ok(None);
         }
     };
-    let outcome = agent_doc_element::todo::auto_complete_linked_todos(&full_content, &links)?;
+    let outcome = agent_doc_element::todo::auto_complete_linked_todos_except(
+        &full_content,
+        &links,
+        added_this_closeout,
+    )?;
     if outcome.completed.is_empty() {
         return Ok(Some(Vec::new()));
     }
@@ -1876,14 +1928,32 @@ pub fn todo_open_references(
     file: &Path,
     ids: &[String],
 ) -> Result<Vec<agent_doc_element::todo::OpenTodoReference>> {
+    todo_open_references_except(file, ids, &[])
+}
+
+/// [`todo_open_references`] without the todos this closeout's `--todo-add`
+/// created (`#todoaddonsamecycledone`): a follow-up raised by finishing an
+/// item is not a finished operator action, so the `#tododone` advisory must
+/// not tell the agent to check off the row it just added.
+pub fn todo_open_references_except(
+    file: &Path,
+    ids: &[String],
+    added_this_closeout: &[String],
+) -> Result<Vec<agent_doc_element::todo::OpenTodoReference>> {
     if ids.is_empty() {
         return Ok(Vec::new());
     }
     let full_content = read_command_document(file, "todo_open_references")?;
-    Ok(agent_doc_element::todo::open_todo_items_referencing(
-        &full_content,
-        ids,
-    ))
+    Ok(
+        agent_doc_element::todo::open_todo_items_referencing(&full_content, ids)
+            .into_iter()
+            .filter(|reference| {
+                !added_this_closeout
+                    .iter()
+                    .any(|added| added.eq_ignore_ascii_case(&reference.selector))
+            })
+            .collect(),
+    )
 }
 
 /// `#operatortodo`: ids from `ids` that the current document's `agent:todo`

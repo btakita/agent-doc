@@ -1,6 +1,6 @@
 //! Route dispatch recovery and fresh-target validation.
 
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_target::{PostLaunchDispatchBind, bind_dispatch_target_after_owner_launch};
 use agent_doc_controller::dispatch::{
     FreshDispatchTargetAfterReadyWaitDecision, FreshDispatchTargetAfterReadyWaitFacts,
     decide_fresh_dispatch_target_after_ready_wait,
@@ -81,8 +81,61 @@ pub fn resolve_fresh_dispatch_target_after_ready_wait(
             // sync/layout path rebinds the same document session back to another pane
             // during the ready wait, keep the fresh pane authoritative instead of
             // handing dispatch back to the older pane and making the new pane disposable.
-            register_dispatch_target(tmux, session_id, pane, file_path)?;
+            //
+            // `#dispatchrebindaudit`: every caller runs after the route launched the
+            // pane's `agent-doc start` or restarted its supervisor, so the owner holds
+            // the actor generation. The rebind is fenced and never writes over the
+            // owner's record: it reclaims only a projection rebind, and follows an
+            // owner that committed a newer generation elsewhere.
+            settle_post_launch_dispatch_target(tmux, session_id, pane, file_path)
+        }
+    }
+}
+
+/// Bind `pane` as the dispatch target after the route launched or restarted the
+/// document's owner, and return the pane to dispatch to (`#dispatchrebindaudit`).
+///
+/// The owner (the child `agent-doc start`, or the restarted supervisor) holds
+/// the actor generation from its launch on. When its record already names
+/// `pane`, nothing is written and its state stands. When a projection write
+/// (route/sync dispatch bind) moved the binding away, the route reclaims
+/// `pane`, fenced on the generation it decided against. When an owner
+/// committed a newer generation for another live pane, the route follows that
+/// pane instead of binding over it, and fails closed when that pane is gone.
+pub fn settle_post_launch_dispatch_target(
+    tmux: &Tmux,
+    session_id: &str,
+    pane: &str,
+    file_path: &str,
+) -> Result<String> {
+    match bind_dispatch_target_after_owner_launch(tmux, session_id, pane, file_path)? {
+        PostLaunchDispatchBind::OwnerBound | PostLaunchDispatchBind::Reclaimed { .. } => {
             Ok(pane.to_string())
+        }
+        PostLaunchDispatchBind::OwnerSuperseded {
+            pane_id,
+            generation,
+            caller,
+            reason,
+        } => {
+            let file = Path::new(file_path);
+            let alive = tmux.pane_alive(&pane_id);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_post_launch_bind_owner_superseded file={} pane={} owner_pane={} owner_generation={} owner_caller={} owner_reason={} owner_pane_alive={}",
+                    file_path, pane, pane_id, generation, caller, reason, alive
+                ),
+            );
+            if !alive {
+                anyhow::bail!(
+                    "{caller}/{reason} committed actor generation {generation} for {file_path} on pane {pane_id}, which is gone; route will not bind pane {pane} over that owner. Run `agent-doc start {file_path}` to recover"
+                );
+            }
+            eprintln!(
+                "[route] {caller}/{reason} owns {file_path} at generation {generation} on pane {pane_id}; following it instead of rebinding pane {pane}"
+            );
+            Ok(pane_id)
         }
     }
 }

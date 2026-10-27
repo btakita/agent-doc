@@ -3116,6 +3116,88 @@ mod tests {
             .expect("fresh pane should be registered after the blocked handoff is ignored");
         assert_eq!(entry.pane, new_pane);
     }
+    /// `#dispatchrebindaudit`: the waiting route path re-validates the fresh pane
+    /// after the launched `agent-doc start` owns the actor generation. When an
+    /// owner (a supervisor restart) has since committed a newer generation for a
+    /// different live pane, the route follows that pane and writes nothing; it
+    /// must not re-project the fresh pane as `Ready` over the owner's record.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn resolve_fresh_dispatch_target_follows_an_owner_instead_of_rebinding_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-fresh-start-owner-follow");
+        let base_pane = iso
+            .new_session(&format!("owner-{}", std::process::id()), dir.path())
+            .unwrap();
+        let owner_pane = iso.split_window(&base_pane, dir.path(), "-h").unwrap();
+
+        let doc = dir.path().join("fresh-start-owner-follow.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-fresh-start-owner-follow";
+        let fresh_pane = "%370";
+
+        sessions::register_full_with_cwd_in(
+            dir.path(),
+            session_id,
+            fresh_pane,
+            &file_path,
+            12345,
+            "@fresh",
+            dir.path().to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            session_id,
+            &owner_pane,
+            "@owner",
+            2,
+        )
+        .unwrap();
+
+        let resolved = resolve_fresh_dispatch_target_after_ready_wait(
+            &iso, session_id, fresh_pane, &file_path, None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved, owner_pane,
+            "the route must follow the owner that superseded the fresh pane"
+        );
+        let record = agent_doc_session_actor_io::load_record_in(dir.path(), &file_path)
+            .unwrap()
+            .expect("actor record");
+        assert_eq!(record.pane_id, owner_pane);
+        assert_eq!(record.generation, 2);
+        assert_eq!(
+            record.state,
+            agent_doc_controller::actor::ActorState::Starting
+        );
+        assert_eq!(
+            record.last_transition.caller, "start",
+            "the route must not write over the owner's record"
+        );
+
+        // The same owner on a pane that is gone fails closed instead of binding
+        // the fresh pane over it.
+        iso.kill_pane(&owner_pane).unwrap();
+        let err = resolve_fresh_dispatch_target_after_ready_wait(
+            &iso, session_id, fresh_pane, &file_path, None,
+        )
+        .expect_err("a dead owner pane must fail closed");
+        assert!(err.to_string().contains("which is gone"), "{err:#}");
+        assert_eq!(
+            agent_doc_session_actor_io::load_record_in(dir.path(), &file_path)
+                .unwrap()
+                .expect("actor record")
+                .last_transition
+                .caller,
+            "start"
+        );
+    }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn failed_route_cleanup_preserves_live_registered_owner() {

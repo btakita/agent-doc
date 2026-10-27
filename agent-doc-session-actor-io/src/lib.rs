@@ -263,6 +263,69 @@ pub fn project_binding_in(
     })
 }
 
+/// The generation a binding write would supersede for `file`: the actor
+/// record's, or the legacy session-log inference when no record exists. A
+/// fenced binding ([`project_binding_fenced_in`]) decides against this value.
+pub fn binding_generation_in(base_dir: &Path, file: &str, session_id: &str) -> Result<u64> {
+    current_generation_in(base_dir, file, Some(session_id))
+}
+
+/// The binding a fenced write decided against (`#dispatchrebindaudit`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BindingFence {
+    /// The actor generation the caller observed when it decided to bind.
+    pub prior_generation: u64,
+    /// Whether that observed record already named the pane being bound.
+    pub prior_names_pane: bool,
+}
+
+/// [`project_binding_in`] fenced on the record the caller decided against
+/// (`#dispatchrebindaudit`).
+///
+/// `project_binding_in` re-reads the generation it supersedes, so a writer
+/// that decided from an earlier read silently binds over whatever committed
+/// in between: a supervisor's `start_session` landing there was overwritten
+/// as `Ready`. This variant compare-and-swaps on `fence.prior_generation`, so
+/// any commit after the caller's decision fails the write with a generation
+/// compare-and-swap error and the caller re-decides against the newer record.
+#[allow(clippy::too_many_arguments)]
+pub fn project_binding_fenced_in(
+    base_dir: &Path,
+    file: &str,
+    session_id: &str,
+    pane_id: &str,
+    window_id: &str,
+    caller: &str,
+    reason: &str,
+    fence: BindingFence,
+) -> Result<OwnershipGeneration> {
+    let generation = if fence.prior_names_pane {
+        fence.prior_generation.max(1)
+    } else {
+        fence.prior_generation.saturating_add(1).max(1)
+    };
+    let harness = detect_document_harness_in(base_dir, file);
+    let _ = store_record_in(
+        base_dir,
+        file,
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id,
+            harness: &harness,
+            state: ActorState::Ready,
+            caller,
+            reason,
+            generation,
+            expected_prior_generation: Some(fence.prior_generation),
+        },
+    )?;
+    Ok(OwnershipGeneration {
+        prior_generation: fence.prior_generation,
+        new_generation: generation,
+    })
+}
+
 pub fn record_session_start_direct(
     file: &Path,
     session_id: &str,

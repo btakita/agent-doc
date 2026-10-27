@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-memory"
-version = "0.35.556"
+version = "0.35.557"
 edition = "2024"
 description = "Pure semantic memory ranking and event-shaping helpers for agent-doc"
 license = "Apache-2.0"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_memory"
 
 [dependencies]
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.556" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.556" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.557" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.557" }
 serde = { version = "1", features = ["derive"] }
 tsift-memory = "0.1.70"

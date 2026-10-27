@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-zed-lsp-io"
-version = "0.35.556"
+version = "0.35.557"
 edition = "2024"
 description = "Supplemental Markdown language server for agent-doc Zed integration"
 license = "Apache-2.0"
@@ -8,12 +8,12 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.556" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.556" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.556" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.556" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.556" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.556" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.557" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.557" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.557" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.557" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.557" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.557" }
 anyhow = "1"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }

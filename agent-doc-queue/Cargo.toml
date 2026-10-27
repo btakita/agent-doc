@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-queue"
-version = "0.35.556"
+version = "0.35.557"
 edition = "2024"
 description = "Pure queue scheduling and drain policy for agent-doc"
 license = "Apache-2.0"
@@ -11,18 +11,18 @@ publish = false
 name = "agent_doc_queue"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.556" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.556" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.556" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.556" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.556" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.556" }
-agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.556" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.556" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.556" }
-agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.556" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.556" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.556" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.557" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.557" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.557" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.557" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.557" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.557" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.557" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.557" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.557" }
+agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.557" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.557" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.557" }
 anyhow = "1"
 lazily = { version = "0.61.0", features = ["thread-safe"] }
 libc = "0.2"

@@ -2,6 +2,61 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.557
+
+- **The supervisor and headless launches find an installed harness that is missing from PATH** (GH #380). When a bare
+  `claude`, `codex`, `opencode` or `grok` is not on the child PATH (for example the Coder workspace default, which has
+  no `~/.local/bin`), agent-doc looks in the usual install directories, launches the binary by that path, and adds its
+  directory to the end of the child PATH. When nothing is found, the error lists every directory searched.
+- **A queue head that names a project preset drains as that preset** (GH #381). A preset defined only in
+  `.agent-doc/project.md` no longer reads as a missing backlog item or a missing Todo backlink.
+- **Queue claims stay with their own work.** A strike ends a claim instead of passing it to the next row, claims never
+  move across queues, and a claim on a live row in any queue counts as open. Deleting a claimed row while adding a
+  different row in its place now cancels the claim (the owner gets `cancel_claimed`) instead of handing it to the new
+  row; a same-id rewrite or a close text edit still follows. A Todo added in the same closeout that resolves the item
+  it cites stays open, with no duplicate.
+- **Route, sync and controller writes no longer overwrite an owner's actor record.** Post-launch and pre-dispatch
+  rebinds, sync's binding and window refreshes, the route's lifecycle writes, and the controller's stale-actor closes
+  and prune all decide from one read and write only if the record has not changed since (generation plus a record
+  revision). A busy owner is no longer marked `Ready`, a restart that lands mid-write is kept, and a pruned document
+  that a start re-opened keeps its new actor.
+- **A queued `/clear` can no longer be typed into a turn that just started.** The deferred clear and the `/clear`
+  key read the running and pending turn receipts as one snapshot. During an admin queue drain a stale `Busy` now always
+  heals, and the background orphan drain waits for a supervisor that is mid re-exec instead of skipping the pending
+  auto-clear between queue items. A claim no longer races the supervisor it starts.
+- **Commands resolve a document's store from the document, never the current directory.** `start`, `claim`, sync's
+  recovered-owner rebind and project config loading use the document's project, or its parent directory when it has
+  none, and the debug log honors the root ceiling.
+- **`agent-doc commit` outside a git repository fails** with a clear message instead of reporting "already matches
+  HEAD"; `compact --commit` refuses the same way before changing anything.
+- **`agent-doc gc --retired-stores`** lists (`--dry-run`) or removes the retired `live-buffer/` store. Plain `gc` and
+  the daily preflight gc only report it.
+- **The status-sync checkpoint's `agent-doc commit` succeeds while subagent completion notices are pending.**
+- **Agents cannot kill the operator's live tmux server.** A PreToolUse guard in every harness's user layer refuses
+  shell commands that would, and subagent briefs require `env -u TMUX` plus a private socket.
+- **No-argument `/agent-doc` runs on the pane's claimed document.** `agent-doc resolve-pane-document` is renamed
+  `agent-doc document`, and the MCP `agent_doc_admit` tool admits the pane's claimed document when no file is named.
+- **Queue upkeep.** `agent-doc queue repair-stale-completion` retires leftover completion cells and receipts, an id-less
+  `agent:run` or `agent:loop` is named by its kind, and an explicit `id=` on a Todo always wins and never takes a tracked
+  id. A GH #376 measured route is ordered after its forward's own surface sync.
+- **Faster editor typing.** The native replica flush is proportional to the edit and folds remote ops into the order
+  index as they arrive; the JetBrains flush-prepare step no longer does per-character work over the whole document.
+- **JetBrains:** GH #339 shell stage R1 is complete (shell forwarders, digests and activation receipts, project
+  lifecycle and Tier A listeners, fenced EDT tasks, controller identity, Fleet RPC delegation). Run Agent Doc route
+  output, Clear/Restart session command output and exchange prompt-prefix repair moved behind the native boundary. A
+  restart-only plugin upgrade prompts for the IDE restart, and the editor-tree focus listener waits until the split
+  tree exists.
+- **VS Code:** Clear/Restart session command output is read behind the native boundary, a stale VSIX prompts for an
+  update with the measured layout, Remote Dev parity (workspace `extensionKind`, a role=workspace activation receipt,
+  workspace-host install, and a remote smoke test), the koffi FFI runtime ships in the VSIX, and Rust-owned C strings
+  stay pointers at the koffi boundary (fixes a crash).
+- **Zed:** registration identity, in-place binary handoff, and document-only routing.
+- **Tests are hermetic on CI and in worktrees:** the VS Code koffi round-trip test builds its own project, codex
+  command tests use a fake `codex`, prune tests use their own project root, and isolated tmux test servers share one
+  socket with their clients.
+- **Editor packages.** JetBrains classic, 2026.2, and 2026.3 are 0.2.862, 0.2.863, and 0.2.864; VS Code is 0.2.89; Zed
+  is 0.1.2. Modular IDEs still require a restart to load the replaced plugin.
+
 ## 0.35.556
 
 - **Getting started is documented and tested.** The README opens with a Getting started path: install, `agent-doc

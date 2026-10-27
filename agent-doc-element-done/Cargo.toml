@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-done"
-version = "0.35.556"
+version = "0.35.557"
 edition = "2024"
 description = "Done/archive element descriptor for agent-doc"
 license = "Apache-2.0"
@@ -12,5 +12,5 @@ name = "agent_doc_element_done"
 
 [dependencies]
 anyhow = "1"
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.556" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.556" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.557" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.557" }

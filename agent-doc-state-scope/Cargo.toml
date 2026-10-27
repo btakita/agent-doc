@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-state-scope"
-version = "0.35.556"
+version = "0.35.557"
 edition = "2024"
 description = "Lifetime-typed lazily scopes (#stategraphjoin) shared across agent-doc crates"
 license = "Apache-2.0"

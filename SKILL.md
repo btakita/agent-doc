@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: user invokes /agent-doc <file>, or a bare `/agent-doc` (the file this tmux pane claims). Requires a markdown session document, installed CLI, and write+commit every cycle."
 user-invocable: true
 argument-hint: "[file]"
-agent-doc-version: "0.35.556"
+agent-doc-version: "0.35.557"
 ---
 
 # agent-doc

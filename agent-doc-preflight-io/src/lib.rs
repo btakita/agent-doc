@@ -476,22 +476,17 @@ fn run_todo_id_maintenance_with_options(
     }
     let mut ids = Vec::with_capacity(id_outcome.assigned.len());
     for assignment in &id_outcome.assigned {
-        let link = match assignment.linked.as_deref() {
-            Some(component) => format!(" (reuses agent:{component} #{})", assignment.id),
-            None => String::new(),
-        };
         let short: String = assignment.action.chars().take(60).collect();
         eprintln!(
-            "[preflight] todo: assigned own id [#{}]{link} to \"{short}\" (#todoidbackfill)",
+            "[preflight] todo: assigned own id [#{}] to \"{short}\" (#todoidbackfill)",
             assignment.id
         );
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "todo_id_assigned file={} id={} linked={}",
+                "todo_id_assigned file={} id={}",
                 file.display(),
                 assignment.id,
-                assignment.linked.as_deref().unwrap_or("none")
             ),
         );
         ids.push(assignment.id.clone());

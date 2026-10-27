@@ -1598,6 +1598,15 @@ pub fn gate(file: &Path, id: &str) -> Result<()> {
 pub fn review_add(file: &Path, item: &str) -> Result<Option<String>> {
     let full_content = read_command_document(file, "review_add")?;
     let (full_content, comp) = ensure_review_component_in_document(&full_content)?;
+    // `#todoaddidhijack`: like `--backlog-add` / `--icebox-add`, an explicit
+    // review id must not take an id another active source already owns. A
+    // replay of this very add (same id, same text, already in agent:review)
+    // keeps its existing no-op handling below.
+    let replay = backlog::add_already_satisfied(&full_content, item)
+        .is_some_and(|satisfied| element::is_review_component(&satisfied.component));
+    if !replay {
+        backlog::ensure_new_item_explicit_id_available(&full_content, item)?;
+    }
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
     let reserved = reserved_identity_ids(file, &full_content)?;
@@ -1651,13 +1660,13 @@ pub fn todo_link_index_in_content(
 ///
 /// Every existing todo line is preserved byte-for-byte, and an action already
 /// present (in any checkbox state) is a no-op, so a replayed closeout never
-/// duplicates or resurrects a todo. The own id REUSES the one open
-/// `agent:review` / `agent:backlog` / `agent:icebox` id the action cites (or an
-/// explicit `id=<open id>`; `#todoidlayer`: a caller-chosen `id=` naming no
-/// tracked work is a surrogate only when the action does not layer on exactly
-/// one tracked item), else is MINTED like a backlog id, collision-free against
-/// the document's ids and every tracked id the done archive holds. An explicit
-/// id naming resolved work is rejected. Returns whether a line was appended.
+/// duplicates or resurrects a todo. `#todoaddidhijack`: the own id is the
+/// caller's explicit `id=`, which always wins, else is MINTED like a backlog
+/// id, collision-free against the document's ids and every tracked id the done
+/// archive holds; it is never the id of open tracked work (an explicit id that
+/// an open review/backlog/icebox item owns, or that names resolved work, is
+/// rejected). An action citing exactly one open tracked item links to it with
+/// `(source: agent:<component> [#<id>])`. Returns whether a line was appended.
 pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
     let full_content = read_command_document(file, "todo_add")?;
     let doc_id = agent_doc_hash::document_id_for_path(file);
@@ -1682,16 +1691,13 @@ pub fn todo_add(file: &Path, text: &str) -> Result<bool> {
         &reserved,
         &links,
     )?;
-    let mut id_label = match (outcome.id.as_deref(), outcome.linked.as_deref()) {
-        (Some(id), Some(component)) => format!(" [#{id}] (reuses agent:{component} #{id})"),
+    let id_label = match (outcome.id.as_deref(), outcome.source.as_ref()) {
+        (Some(id), Some((source, component))) => {
+            format!(" [#{id}] (source: agent:{component} #{source})")
+        }
         (Some(id), None) => format!(" [#{id}]"),
         (None, _) => String::new(),
     };
-    if let Some(requested) = outcome.requested_id_unused.as_deref() {
-        id_label.push_str(&format!(
-            " (requested id={requested} not used: a todo about one tracked item layers on its id, #todoidlayer)"
-        ));
-    }
     if outcome.inserted {
         persist_pending_write(file, &full_content, &outcome.content)?;
         if outcome.source_reference_added {
@@ -3823,9 +3829,10 @@ mod tests {
         )));
         let after = fs::read_to_string(&doc).unwrap();
         let id = todo_own_id(&after, "Verify [#aa11] in a live pane");
-        // `#todoids`: the action cites exactly one open review gate, so the
-        // todo reuses that gate's id as its own (never an unrelated one).
-        assert_eq!(id, "aa11", "{after}");
+        // `#todoaddidhijack`: the action cites exactly one open review gate,
+        // so the todo links to it by locator under its own minted id; it never
+        // takes the gate's id.
+        assert_ne!(id, "aa11", "{after}");
         assert!(
             after.contains(&format!(
                 "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane (source: agent:review [#aa11])\n<!-- /agent:todo -->\n\n<!-- agent:review -->"

@@ -7322,6 +7322,44 @@ mod tests {
         }
     }
 
+    /// `#todoaddidhijack`: the tracked-work add paths share the todo rule —
+    /// an explicit `id=` always wins over a `#<id>` citation in the text, even one
+    /// naming an open item in another component, and an explicit id an open
+    /// item in ANOTHER component owns is refused (the review/icebox/backlog
+    /// guard every add path runs).
+    #[test]
+    fn todoaddidhijack_explicit_tracked_id_wins_and_never_takes_an_open_id() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [/] [#jbshrinkrestarts] Shrink JetBrains restarts\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:review -->\n",
+            "- [/] [#gatex] launcher policy decision\n",
+            "<!-- /agent:review -->\n",
+            "<!-- agent:icebox -->\n<!-- /agent:icebox -->\n",
+        );
+        let live = "id=jb339r1decision Decide R1 once #jbshrinkrestarts reports its benchmark";
+        assert_eq!(explicit_custom_id(live).as_deref(), Some("jb339r1decision"));
+        assert!(explicit_new_item_id_collision(doc, live).is_none());
+        let (body, id) = op_add("", live, DOC_ID, false).unwrap();
+        assert_eq!(id, "jb339r1decision");
+        assert!(
+            body.contains("[#jb339r1decision] Decide R1 once #jbshrinkrestarts reports"),
+            "{body}"
+        );
+        for (form, owner) in [
+            ("id=jbshrinkrestarts icebox copy", "agent:backlog"),
+            ("[#jbshrinkrestarts] review copy", "agent:backlog"),
+            ("id=gatex backlog copy", "agent:review"),
+        ] {
+            let collision = explicit_new_item_id_collision(doc, form)
+                .unwrap_or_else(|| panic!("{form} must be refused"));
+            assert_eq!(collision.sources, vec![owner.to_string()], "{form}");
+            let err = ensure_new_item_explicit_id_available(doc, form).unwrap_err();
+            assert!(err.to_string().contains("refusing to add item with explicit id"), "{err}");
+        }
+    }
+
     #[test]
     fn a_derived_id_dodges_ids_reserved_by_other_sources() {
         let doc = concat!(

@@ -1331,12 +1331,13 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
         "{content}"
     );
     let id = todo_item_id(&content, "Verify [#rvw1] in a live pane");
-    // `#todoids`: the action cites exactly one open review gate, so the todo
-    // REUSES that gate's id instead of minting a second identity for it.
-    assert_eq!(id, "rvw1", "the todo reuses the open gate id it cites");
+    // `#todoaddidhijack`: the action cites exactly one open review gate, so
+    // the todo LINKS to it by the canonical locator under its own minted id;
+    // it never takes the gate's id.
+    assert_ne!(id, "rvw1", "a todo never takes an open tracked item's id");
     assert!(
-        stderr.contains("(reuses agent:review #rvw1)"),
-        "the receipt names the reused id: {stderr}"
+        stderr.contains(&format!("[#{id}] (source: agent:review #rvw1)")),
+        "the receipt names the linked source: {stderr}"
     );
     assert_eq!(
         component_body(&content, "todo"),
@@ -1615,12 +1616,22 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
     let todo = component_body(&content, "todo").to_string();
     let lines: Vec<&str> = todo.lines().collect();
     assert_eq!(lines.len(), 3, "{todo}");
-    assert_eq!(
-        lines[0],
-        format!(
-            "- [ ] [#httpsdocsgoogle] {reauth} (source: agent:backlog [#httpsdocsgoogle])"
-        )
-    );
+    // `#todoaddidhijack`: the reauth row cites the open backlog item, so it is
+    // LINKED by the canonical locator under its own minted id — it never takes
+    // `httpsdocsgoogle`.
+    let reauth_id = lines[0]
+        .strip_prefix("- [ ] [#")
+        .and_then(|rest| {
+            rest.split_once(&format!(
+                "] {reauth} (source: agent:backlog [#httpsdocsgoogle])"
+            ))
+        })
+        .map(|(id, tail)| {
+            assert!(tail.is_empty(), "{}", lines[0]);
+            id.to_string()
+        })
+        .unwrap_or_else(|| panic!("minted, source-linked reauth row expected: {}", lines[0]));
+    assert_ne!(reauth_id, "httpsdocsgoogle");
     assert_eq!(
         lines[1], "- [ ] #tdbare Keep my bare id",
         "an owned row is never re-id'd"
@@ -1643,7 +1654,7 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
     );
 
     // The closeout completes a row by its backfilled id, and resolving the
-    // backlog item the reauth row prompts for checks that row off too.
+    // backlog item the reauth row links to checks that row off too.
     let write = |args: &[&str]| {
         let mut full = vec![
             "write",
@@ -1662,7 +1673,7 @@ fn preflight_assigns_own_ids_to_id_less_todo_rows_and_closeout_completes_them() 
     );
     let todo = component_body(&fs::read_to_string(&doc).unwrap(), "todo").to_string();
     assert!(
-        todo.contains(&format!("- [x] [#httpsdocsgoogle] {reauth}")),
+        todo.contains(&format!("- [x] [#{reauth_id}] {reauth}")),
         "{todo}"
     );
     assert!(
@@ -1973,9 +1984,10 @@ fn free_text_queue_head_is_promoted_then_flagged_without_a_todo_backlink() {
     }), "{stdout}");
 }
 
-/// `#todoids` end to end: a todo that reuses a review gate's id is the
+/// `#todoids` end to end: a todo linked to a review gate (by its canonical
+/// source locator, under its own minted id, `#todoaddidhijack`) is the
 /// operator prompt for that gate.
-/// 1. `--todo-add` citing the open gate reuses its id; a second add for the
+/// 1. `--todo-add` citing the open gate links to it; a second add for the
 ///    same gate folds into it; an explicit id naming resolved work is refused.
 /// 2. The operator checks the box in the editor (here: on disk). Preflight
 ///    recognises it with no agent write and signals that the gate is ready to
@@ -2006,9 +2018,16 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         exchange,
     );
     let content = fs::read_to_string(&doc).unwrap();
+    let todo_a = todo_item_id(&content, "Decide the launcher policy (#gatea)");
+    let todo_b = todo_item_id(&content, "Verify [#gateb] in the 263 IDE");
+    for own in [&todo_a, &todo_b] {
+        assert!(!["gatea", "gateb"].contains(&own.as_str()), "{content}");
+    }
     assert_eq!(
         component_body(&content, "todo"),
-        "- [ ] [#gatea] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])"
+        format!(
+            "- [ ] [#{todo_a}] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#{todo_b}] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])"
+        )
     );
     // A second todo for an already-prompted gate folds into the open item.
     let again = write(&["--backlog-only", "--todo-add", "Verify [#gateb] again"], "");
@@ -2018,13 +2037,13 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
 
     // 2. The operator checks gatea's box; no agent write happens.
     let checked = fs::read_to_string(&doc).unwrap().replace(
-        "- [ ] [#gatea] Decide",
-        "- [x] [#gatea] Decide",
+        &format!("- [ ] [#{todo_a}] Decide"),
+        &format!("- [x] [#{todo_a}] Decide"),
     );
     fs::write(&doc, &checked).unwrap();
     // Preflight reads the same document in a fresh project (the write cycles
     // above were never committed, which preflight would otherwise recover first).
-    // The OPEN `[#gateb]` todo stays: a todo own id is tracked, so the
+    // The OPEN gateb todo stays: a todo own id is tracked, so the
     // shadow-backlog guard admits it, and a todo linked to OPEN work signals
     // nothing until the operator acts.
     let (_preflight_tmp, preflight_doc) = setup_doc("");
@@ -2048,7 +2067,7 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         .iter()
         .find(|signal| signal["kind"] == "operator_done_review_open")
         .unwrap_or_else(|| panic!("operator_done_review_open missing: {stdout}"));
-    assert_eq!(signal["todo"], "gatea");
+    assert_eq!(signal["todo"], todo_a.as_str());
     assert!(
         signal["action"].as_str().unwrap().contains("--review-resolve gatea"),
         "{stdout}"
@@ -2057,22 +2076,25 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     // operator's check survives.
     write(
         &[],
-        "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#gatea] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#gateb] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])\n<!-- /patch:todo -->\n",
+        &format!(
+            "<!-- patch:exchange -->\nstale\n<!-- /patch:exchange -->\n<!-- patch:todo -->\n- [ ] [#{todo_a}] Decide the launcher policy (#gatea) (source: agent:review [#gatea])\n- [ ] [#{todo_b}] Verify [#gateb] in the 263 IDE (source: agent:review [#gateb])\n<!-- /patch:todo -->\n"
+        ),
     );
     assert!(
         component_body(&fs::read_to_string(&doc).unwrap(), "todo")
-            .starts_with("- [x] [#gatea] Decide"),
+            .starts_with(&format!("- [x] [#{todo_a}] Decide")),
         "an agent write must not revert the operator's check"
     );
 
     // 3. Resolving gateb checks its linked todo off in the same closeout.
     let resolved = write(&["--backlog-only", "--review-resolve", "gateb"], "");
     let stderr = String::from_utf8_lossy(&resolved.get_output().stderr);
-    assert!(stderr.contains("[todo] auto-done: #gateb"), "{stderr}");
+    assert!(stderr.contains(&format!("[todo] auto-done: #{todo_b}")), "{stderr}");
     assert!(!stderr.contains("(#tododone): this closeout"), "{stderr}");
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        component_body(&content, "todo").contains("- [x] [#gateb] Verify [#gateb] in the 263 IDE"),
+        component_body(&content, "todo")
+            .contains(&format!("- [x] [#{todo_b}] Verify [#gateb] in the 263 IDE")),
         "{content}"
     );
     let ops_log = fs::read_to_string(
@@ -2080,7 +2102,8 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
     )
     .unwrap_or_default();
     assert!(
-        ops_log.contains("todo_auto_done") && ops_log.contains("id=gateb reason=linked_work_resolved"),
+        ops_log.contains("todo_auto_done")
+            && ops_log.contains(&format!("id={todo_b} reason=linked_work_resolved")),
         "{ops_log}"
     );
     // An explicit todo id naming resolved work is moot and refused.
@@ -2097,19 +2120,22 @@ fn todo_ids_link_review_gates_and_round_trip_through_preflight_and_closeout() {
         .failure();
 }
 
-/// `#todoidlayer` end to end: a todo is a visibility layer over the one
-/// review/backlog/icebox item it surfaces an operator decision for, so its id
-/// reuses that item's id. A surrogate id is written only for an action that
-/// cites several tracked items or none.
-/// 1. `--todo-add` layers on a review gate even when the caller asked for a
-///    surrogate `id=`, layers on a parked icebox item, and gives surrogates to
-///    a two-item action and an unassociated action.
-/// 2. The operator checks the icebox layer; preflight signals
+/// `#todoaddidhijack` end to end: a todo is a visibility layer over the one
+/// review/backlog/icebox item it surfaces an operator decision for, but its
+/// own id is its OWN identity — an explicit `id=` always wins, an id an open
+/// tracked item owns is refused, and a cited `#<id>` citation links by the canonical
+/// `(source: agent:<component> [#<id>])` locator.
+/// 1. `--todo-add` keeps an explicit custom id beside a cited review gate,
+///    mints for a cited parked icebox item, a two-item action, and an
+///    unassociated action.
+/// 2. The operator checks the icebox-linked todo; preflight signals
 ///    `operator_done_icebox_open` and never moves or closes the item itself.
-/// 3. `--done <icebox id>` resolves the icebox item (not the todo sharing the
-///    id), and the same closeout auto-completes the layered todo.
+/// 3. `--done <icebox id>` resolves the icebox item, and the same closeout
+///    auto-completes the linked todo.
+/// 4. An explicit `id=` that an open tracked item owns is refused without
+///    writing.
 #[test]
-fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise() {
+fn todo_ids_never_take_a_tracked_id_and_link_by_source_locator() {
     let (_tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#coldwork] parked idea");
     let write = |args: &[&str], stdin: &str| {
         let mut full = vec!["write", doc.to_str().unwrap(), "--force-disk"];
@@ -2132,38 +2158,39 @@ fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise()
         "<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n",
     );
     let stderr = String::from_utf8_lossy(&added.get_output().stderr);
-    assert!(
-        stderr.contains("[#gatex] (reuses agent:review #gatex) (requested id=tdgatex not used"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("[#coldwork] (reuses agent:icebox #coldwork)"), "{stderr}");
+    assert!(stderr.contains("[#tdgatex] (source: agent:review #gatex)"), "{stderr}");
+    assert!(!stderr.contains("not used"), "{stderr}");
     let content = fs::read_to_string(&doc).unwrap();
     let todo = component_body(&content, "todo");
     let lines: Vec<&str> = todo.lines().collect();
     assert_eq!(lines.len(), 4, "{todo}");
     assert_eq!(
         lines[0],
-        "- [ ] [#gatex] Decide the launcher policy (#gatex) (source: agent:review [#gatex])"
+        "- [ ] [#tdgatex] Decide the launcher policy (#gatex) (source: agent:review [#gatex])"
     );
+    let cold = todo_item_id(&content, "Thaw or drop the parked idea (#coldwork)?");
+    assert!(stderr.contains(&format!("[#{cold}] (source: agent:icebox #coldwork)")), "{stderr}");
     assert_eq!(
         lines[1],
-        "- [ ] [#coldwork] Thaw or drop the parked idea (#coldwork)? (source: agent:icebox [#coldwork])"
+        format!("- [ ] [#{cold}] Thaw or drop the parked idea (#coldwork)? (source: agent:icebox [#coldwork])")
     );
-    assert!(!todo.contains("tdgatex"), "{todo}");
     let two = todo_item_id(&content, "Decide #gatex before thawing #coldwork");
     let none = todo_item_id(&content, "Rotate the deploy key");
-    for surrogate in [&two, &none] {
+    for own in [&cold, &two, &none] {
         assert!(
-            !["gatex", "coldwork", "open"].contains(&surrogate.as_str()),
-            "surrogate {surrogate} must not reuse a tracked id: {todo}"
+            !["gatex", "coldwork", "open"].contains(&own.as_str()),
+            "todo id {own} must not take a tracked id: {todo}"
         );
     }
-    // The icebox item is still parked: layering never moves it.
+    // The icebox item is still parked: linking never moves it.
     assert!(component_body(&content, "icebox").contains("- [ ] [#coldwork] parked idea"));
 
-    // 2. The operator checks the icebox layer; preflight (fresh project, the
-    //    write cycles above were never committed) signals it.
-    let checked = content.replace("- [ ] [#coldwork] Thaw", "- [x] [#coldwork] Thaw");
+    // 2. The operator checks the icebox-linked todo; preflight (fresh project,
+    //    the write cycles above were never committed) signals it.
+    let checked = content.replace(
+        &format!("- [ ] [#{cold}] Thaw"),
+        &format!("- [x] [#{cold}] Thaw"),
+    );
     let (_preflight_tmp, preflight_doc) = setup_doc("");
     fs::write(&preflight_doc, &checked).unwrap();
     let preflight = agent_doc()
@@ -2185,7 +2212,7 @@ fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise()
         .iter()
         .find(|signal| signal["kind"] == "operator_done_icebox_open")
         .unwrap_or_else(|| panic!("operator_done_icebox_open missing: {stdout}"));
-    assert_eq!(signal["todo"], "coldwork");
+    assert_eq!(signal["todo"], cold.as_str());
     assert!(
         signal["action"].as_str().unwrap().contains("--done coldwork"),
         "{stdout}"
@@ -2196,26 +2223,129 @@ fn todo_ids_layer_on_one_review_backlog_or_icebox_item_and_surrogate_otherwise()
         "preflight never moves or closes parked work from a checkbox"
     );
 
-    // 3. `--done coldwork` resolves the icebox item, and the layered todo is
+    // 3. `--done coldwork` resolves the icebox item, and the linked todo is
     //    auto-completed in the same closeout.
     let done = write(&["--backlog-only", "--done", "coldwork"], "");
     let stderr = String::from_utf8_lossy(&done.get_output().stderr);
-    assert!(stderr.contains("[todo] auto-done: #coldwork"), "{stderr}");
-    assert!(!stderr.contains("--done named its own id"), "{stderr}");
+    assert!(stderr.contains(&format!("[todo] auto-done: #{cold}")), "{stderr}");
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
         !component_body(&content, "icebox").contains("- [ ] [#coldwork]"),
         "the icebox item is resolved: {content}"
     );
     assert!(
-        component_body(&content, "todo")
-            .contains("- [x] [#coldwork] Thaw or drop the parked idea (#coldwork)?"),
+        component_body(&content, "todo").contains(&format!(
+            "- [x] [#{cold}] Thaw or drop the parked idea (#coldwork)?"
+        )),
         "{content}"
     );
     assert!(
-        component_body(&content, "todo").contains("- [ ] [#gatex] Decide the launcher policy"),
-        "the review layer stays open: {content}"
+        component_body(&content, "todo").contains("- [ ] [#tdgatex] Decide the launcher policy"),
+        "the review-linked todo stays open: {content}"
     );
+
+    // 4. An explicit id the open review gate owns is refused, nothing written.
+    let before = fs::read_to_string(&doc).unwrap();
+    let refused = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--backlog-only",
+            "--todo-add",
+            "id=gatex Decide the launcher policy again",
+        ])
+        .assert()
+        .failure();
+    let stderr = String::from_utf8_lossy(&refused.get_output().stderr);
+    assert!(
+        stderr.contains("already owned by the open agent:review item [#gatex]")
+            && stderr.contains("#todoaddidhijack"),
+        "{stderr}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+}
+
+/// `#todoaddidhijack`, the exact live 2026-10-26 closeout shape: `--done`,
+/// `--icebox-add id=...`, and `--todo-add id=<custom> ...` whose action text
+/// mentions the open, claimed backlog item `#jbshrinkrestarts`. The todo must
+/// get its explicit id `jb339r1decision`, never `jbshrinkrestarts`; the backlog
+/// item keeps sole ownership of its id.
+#[test]
+fn todo_add_explicit_id_wins_over_a_cited_open_backlog_id_in_a_live_closeout() {
+    let (_tmp, doc) = setup_doc_with_icebox(
+        "- [/] [#jbshrinkrestarts] Shrink JetBrains restarts and report the benchmark\n- [ ] [#jb339shelldesign] GH #339 restart-free shell design",
+        "- [ ] [#parked] parked idea",
+    );
+    let output = agent_doc()
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--force-disk",
+            "--done",
+            "jb339shelldesign",
+            "--icebox-add",
+            "id=jbfrontendswap Swap the JetBrains frontend loader after R1",
+            "--todo-add",
+            "id=jb339r1decision Decide whether to queue GH #339 shell stage R1 (restart-free shell) once #jbshrinkrestarts reports its benchmark and moves. Same decision: restate the \"Exact-263 decision\" reopen rule",
+        ])
+        .write_stdin("<!-- patch:exchange -->\nok\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    let content = fs::read_to_string(&doc).unwrap();
+    let todo = component_body(&content, "todo");
+    assert!(
+        todo.starts_with("- [ ] [#jb339r1decision] Decide whether to queue GH #339 shell stage R1"),
+        "the explicit id wins: {todo}\n{stderr}"
+    );
+    assert!(!todo.contains("[ ] [#jbshrinkrestarts]"), "{todo}");
+    assert!(
+        todo.trim_end().ends_with("(source: agent:backlog [#jbshrinkrestarts])"),
+        "the cited item stays a reference, linked by locator: {todo}"
+    );
+    assert!(stderr.contains("[#jb339r1decision] (source: agent:backlog #jbshrinkrestarts)"), "{stderr}");
+    assert!(
+        component_body(&content, "icebox").contains("[#jbfrontendswap] Swap the JetBrains frontend loader"),
+        "{content}"
+    );
+    assert!(
+        component_body(&content, "backlog").contains("- [/] [#jbshrinkrestarts] Shrink JetBrains restarts"),
+        "the backlog item keeps its id: {content}"
+    );
+}
+
+/// `#todoaddidhijack`: `--review-add` runs the same explicit-id guard as
+/// `--backlog-add` / `--icebox-add`, so a review gate never takes the id an
+/// open backlog item owns; replaying an identical review add stays a no-op.
+#[test]
+fn review_add_refuses_an_explicit_id_an_open_backlog_item_owns() {
+    let (_tmp, doc) = setup_doc_with_icebox("- [ ] [#open] backlog task", "- [ ] [#parked] parked idea");
+    let before = fs::read_to_string(&doc).unwrap();
+    for item in ["id=open needs a live check", "id=parked thaw decision"] {
+        let refused = agent_doc()
+            .args(["write", doc.to_str().unwrap(), "--force-disk", "--backlog-only", "--review-add", item])
+            .assert()
+            .failure();
+        let stderr = String::from_utf8_lossy(&refused.get_output().stderr);
+        assert!(stderr.contains("refusing to add item with explicit id"), "{item}: {stderr}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before, "{item}");
+    }
+    for _ in 0..2 {
+        agent_doc()
+            .args([
+                "write",
+                doc.to_str().unwrap(),
+                "--force-disk",
+                "--backlog-only",
+                "--review-add",
+                "id=gatey needs a live check",
+            ])
+            .assert()
+            .success();
+    }
+    let content = fs::read_to_string(&doc).unwrap();
+    assert_eq!(component_body(&content, "review").matches("[#gatey]").count(), 1, "{content}");
 }
 
 /// `#tododupdone`, anonymized from the live 2026-10-15 session: a `patch:todo`

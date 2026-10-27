@@ -624,22 +624,19 @@ document has none (right below `agent:backlog`), keeps every existing checklist
 item, and skips an action that is already listed. A missing `agent:todo`
 component is never a reason to skip the TODO.
 
-**Todo ids (`#todoids`, `#todoidlayer`).** Every todo you add carries an own
-id, and todo ids LAYER on tracked-work ids: a todo is the visibility layer for
-an operator decision on a backlog, review, or icebox item, so when the action
-cites exactly one open `agent:review`, `agent:backlog`, or `agent:icebox` id,
-the todo REUSES it — the example above becomes `- [ ] [#gate1] Verify [#gate1]
-in a live pane (source: agent:review [#gate1])`, the actionable operator prompt
-and canonical source locator for that gate. To surface a
-decision on a tracked item, cite its id in the action and let the binary layer
-on it; do not coin a `td...` id for it. A second add for an id an open todo
-already owns is a no-op (edit it with `--todo-edit` instead). A surrogate id is
-minted only when the action cites several open tracked items or none (or as a
-follow-up when a checked todo already owns the one id). `id=<id> ` reuses open
-work, or picks a custom surrogate only when the action does not layer on
-exactly one tracked item (otherwise the receipt prints `requested id=<id> not
-used` and the todo takes the tracked id), and is rejected when `<id>` is
-already resolved. Prefer
+**Todo ids (`#todoids`, `#todoaddidhijack`).** Every todo you add carries an
+own id that is its OWN identity: your explicit `id=<id> ` always wins, else the
+binary mints one. A todo never takes the id of an open `agent:review`,
+`agent:backlog`, or `agent:icebox` item, and a `#<id>` citation in the action stays a
+reference. To surface a decision on a tracked item, cite its id in the action:
+when the action cites exactly one open tracked item the binary links the todo
+to it with the canonical source locator — the example above becomes
+`- [ ] [#t1a2] Verify [#gate1] in a live pane (source: agent:review [#gate1])`
+— so checking the box reports the prerequisite done and resolving the item
+checks the todo off. A second add without `id=` for an item an open todo
+already links is a no-op (edit it with `--todo-edit` instead). `id=<id> ` is
+refused when an open tracked item already owns `<id>` (pick a new todo id and
+cite the item) and when `<id>` is already resolved. Prefer
 `--todo-add` over `patch:todo` for new items because it expresses the identity
 directly. A strict closeout still assigns an own id to an id-less `patch:todo`
 row before commit (`#todoidcloseout`); the committed row never waits for the

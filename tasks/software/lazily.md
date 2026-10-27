@@ -25,7 +25,6 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 
@@ -1021,13 +1020,32 @@ I also told it about the known false-green traps: RTK masking exit codes, stale 
 The item stays open until that report is integrated. I updated the backlog text to name generation 4 instead of the dead generation-3 worker.
 
 The exchange is ~960 lines across 52 responses. I am not compacting it because the queue is active and there is no auto-compact opt-in.
+
+### Re: tmux/kitty crash dispatch and audit resume — opus-5.5 · 2026-10-26T22:31-04:00
+
+**`#tmuxkittyterminal` has been dispatched.** It was claimed as generation 1 for `subagent:tmuxkittycrash` and bound to a background Claude worker, so the row shows `🚧`. The worker has the verbatim authorization (`#spec-test-commit-push`) and a fresh worktree at `~/worktrees/agent-doc-tmuxkittycrash` on `fix/tmuxkittycrash`, outside agent-loop. Its tasks:
+
+- Gather evidence from the 21:30–22:40 window: user and kernel journal (OOM, segfaults, coredumps, fd/pid exhaustion), `coredumpctl`, and agent-doc ops/supervisor logs (reap, kill, respawn, recycle, session-creation storms).
+- Check whether leaked controllers or tmux sessions have accumulated again. That is the known test-fixture leak class.
+- Separate observed causes from guesses, fix the agent-doc cause with spec and deterministic tests, then commit and push.
+
+It runs inside the tmux server that crashed, so it is barred from killing, reaping, recycling or signalling live tmux or kitty processes. Any reproduction must use an isolated `tmux -L` socket. If the evidence shows agent-doc was not the cause, it will say so instead of forcing a fix.
+
+**The `#lzcorecireachaudit` generation-4 worker has been resumed.** The crash took down the session hosting it at about 22:24, mid-audit. It had already made real progress in `~/worktrees/lzcorecireachaudit4/`:
+
+- unpushed commits in lazily-cpp (`b403df4`) and lazily-py (`87c217e`);
+- uncommitted CI-reach edits in lazily-js, lazily-py and lazily-spec (`Makefile`, `core-ci-reach.json`, `check-core-ci-reach.mjs`, `docs/core-cohorts.md`).
+
+I resumed the same worker from its transcript, so its claim and binding are unchanged. I refreshed the claim. It must re-run any gate whose result was not captured before the crash, rebase on any new `origin/main`, and stay off the default tmux socket while the crash investigation runs.
+
+Both items stay open until their reports are integrated. The exchange is ~990 lines across 53 responses; I am not compacting it because the queue is active and there is no auto-compact opt-in.
 <!-- agent:boundary:e199c066 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- ~~do [#lzambienttokenresolve]~~
+- 🚧 [#subagent:tmuxkittycrash#1] do [#tmuxkittyterminal]
 - 🚧 [#subagent:corecireachaudit4#4] do [#lzcorecireachaudit]: Why is this blocked?
 <!-- /agent:queue -->
 
@@ -1040,7 +1058,8 @@ The exchange is ~960 lines across 52 responses. I am not compacting it because t
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] ⚠️ [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
+- [ ] [#tmuxkittyterminal] tmux + the kitty terminal crashed. Fix agent-doc causes. This may have to do with reaping tmux sessions?
+- [ ] 🚧 [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 4 Claude worker subagent:corecireachaudit4 is running the audit in per-repo worktrees under ~/worktrees/lzcorecireachaudit4-*; generations 2 and 3 were lost without a report)
 <!-- /agent:backlog -->
 
 ## Review

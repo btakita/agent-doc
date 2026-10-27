@@ -20580,15 +20580,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                         continue;
                     }
                 };
-                let (unfiltered, head, claimed_head_skipped) =
-                    orphan_drain_head_for_content(
-                        &content,
-                        queue_unresolved_prompts,
-                        &claimed,
-                        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
-                            &content, &file,
-                        ),
-                    );
+                let (unfiltered, head, claimed_head_skipped) = orphan_drain_head_for_content(
+                    &content,
+                    queue_unresolved_prompts,
+                    &claimed,
+                    &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                        &content, &file,
+                    ),
+                );
                 if let Some(revision) = gate_revision.clone() {
                     // Cache the document-derived answer, never the claim-filtered
                     // projection: claims change without moving the CRDT revision.
@@ -20608,15 +20607,14 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
                         continue;
                     }
                 };
-                let (_, head, claimed_head_skipped) =
-                    orphan_drain_head_for_content(
-                        &content,
-                        queue_unresolved_prompts,
-                        &claimed,
-                        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
-                            &content, &file,
-                        ),
-                    );
+                let (_, head, claimed_head_skipped) = orphan_drain_head_for_content(
+                    &content,
+                    queue_unresolved_prompts,
+                    &claimed,
+                    &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                        &content, &file,
+                    ),
+                );
                 (head, claimed_head_skipped)
             }
         };
@@ -26860,9 +26858,87 @@ fn ensure_start_session_pane_not_claimed_by_other_actor(
     session_id: &str,
     pane_id: &str,
 ) -> Result<()> {
+    ensure_start_session_pane_not_claimed_by_other_actor_with_hook(
+        project_root,
+        document_id,
+        session_id,
+        pane_id,
+        &mut |_| {},
+    )
+}
+
+/// [`ensure_start_session_pane_not_claimed_by_other_actor`] with a hook between
+/// the stale-alias decision and each fenced close.
+///
+/// `#controllerclosefence`: each alias is decided (no live claim) from one read
+/// of it and its [`ActorRevision`](agent_doc_controller::actor::ActorRevision),
+/// and closed fenced on both. A same-generation commit in between (the alias's
+/// owner coming up `Ready`, a `Busy`) fails the close; the check re-runs against
+/// the newer records, so a now-live alias refuses the start instead of being
+/// closed as stale.
+fn ensure_start_session_pane_not_claimed_by_other_actor_with_hook(
+    project_root: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    between_decision_and_close: &mut dyn FnMut(&agent_doc_controller::actor::ActorRecord),
+) -> Result<()> {
     if pane_id.is_empty() {
         return Ok(());
     }
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let stale_aliases =
+            start_session_stale_pane_aliases(project_root, document_id, session_id, pane_id)?;
+        let mut fence_lost = None;
+        for (existing, revision) in stale_aliases {
+            between_decision_and_close(&existing);
+            if let Err(err) = close_stale_start_session_pane_alias(
+                project_root,
+                document_id,
+                pane_id,
+                &existing,
+                revision,
+            ) {
+                if !agent_doc_session_actor_io::binding_fence_lost(&err) {
+                    return Err(err);
+                }
+                fence_lost = Some(err);
+                break;
+            }
+        }
+        let Some(err) = fence_lost else {
+            return Ok(());
+        };
+        agent_doc_ops_log_io::log_op(
+            Path::new(document_id),
+            &format!(
+                "controller_start_session_pane_alias_close_fence_lost document_id={document_id} pane={pane_id} attempt={attempt} error={err:#} (#controllerclosefence)"
+            ),
+        );
+        if attempt >= ACTOR_CLOSE_FENCE_ATTEMPTS {
+            return Err(err.context(format!(
+                "start_session pane alias for {pane_id} kept changing after {attempt} close attempts"
+            )));
+        }
+    }
+}
+
+/// The non-closed cross-document aliases of `pane_id` that hold no live claim,
+/// each with the revision its decision was read at. Refuses the start when an
+/// alias still holds a live claim.
+fn start_session_stale_pane_aliases(
+    project_root: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+) -> Result<
+    Vec<(
+        agent_doc_controller::actor::ActorRecord,
+        agent_doc_controller::actor::ActorRevision,
+    )>,
+> {
     let store = load_actor_store(project_root)?;
     let registry = agent_doc_session_registry_io::load_in(project_root).with_context(|| {
         format!(
@@ -26872,9 +26948,22 @@ fn ensure_start_session_pane_not_claimed_by_other_actor(
     let conn = open_state_db(project_root)?;
     let now = timestamp_secs();
     let mut stale_aliases = Vec::new();
-    for existing in store.values().filter(|record| {
+    let snapshot_aliases = store.values().filter(|record| {
         record.pane_id == pane_id && record.state != agent_doc_controller::actor::ActorState::Closed
-    }) {
+    });
+    for snapshot in snapshot_aliases {
+        // Decide from a fresh read carrying the revision the close is fenced on.
+        let (Some(existing), revision) =
+            load_actor_record_with_revision_from_conn(&conn, &snapshot.document_id)?
+        else {
+            continue;
+        };
+        if existing.pane_id != pane_id
+            || existing.state == agent_doc_controller::actor::ActorState::Closed
+        {
+            continue;
+        }
+        let existing = &existing;
         if document_ids_equivalent(project_root, &existing.document_id, document_id) {
             continue;
         }
@@ -26909,12 +26998,9 @@ fn ensure_start_session_pane_not_claimed_by_other_actor(
                 existing.state.as_str()
             );
         }
-        stale_aliases.push(existing.clone());
+        stale_aliases.push((existing.clone(), revision));
     }
-    for existing in stale_aliases {
-        close_stale_start_session_pane_alias(project_root, document_id, pane_id, &existing)?;
-    }
-    Ok(())
+    Ok(stale_aliases)
 }
 
 fn start_session_cross_document_alias_has_live_claim(
@@ -26952,6 +27038,7 @@ fn close_stale_start_session_pane_alias(
     owner_document_id: &str,
     pane_id: &str,
     existing: &agent_doc_controller::actor::ActorRecord,
+    existing_revision: agent_doc_controller::actor::ActorRevision,
 ) -> Result<()> {
     let mut closed = existing.clone();
     closed.state = agent_doc_controller::actor::ActorState::Closed;
@@ -26964,7 +27051,13 @@ fn close_stale_start_session_pane_alias(
         prior_generation: existing.generation,
         new_generation: existing.generation,
     };
-    store_actor_record(project_root, Some(existing.generation), &closed).with_context(|| {
+    store_actor_record_fenced(
+        project_root,
+        existing.generation,
+        existing_revision,
+        &closed,
+    )
+    .with_context(|| {
         format!(
             "failed to close stale start_session pane alias for {} on {}",
             existing.document_id, pane_id
@@ -62323,6 +62416,99 @@ mod tests {
             store.get(&owner_doc_id).unwrap().state,
             agent_doc_controller::actor::ActorState::Closed
         );
+    }
+
+    /// `#controllerclosefence`: start_session decides an alias is stale (no
+    /// live claim) and closes it later. The alias's own supervisor coming up
+    /// in between (a live registry claim plus a same-generation
+    /// `Starting`→`Ready`) keeps the generation, so a generation-only fence
+    /// closed the now-live alias. The revision fence fails that close, the
+    /// check re-runs, and the start is refused instead.
+    #[test]
+    fn start_session_alias_close_is_fenced_against_a_same_generation_owner_coming_up() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let owner_doc = dir.path().join("tasks/owner.md");
+        let candidate_doc = dir.path().join("tasks/candidate.md");
+        std::fs::write(
+            &owner_doc,
+            "---\nagent_doc_session: owner\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &candidate_doc,
+            "---\nagent_doc_session: candidate\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let owner_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &owner_doc.to_string_lossy(),
+        );
+        let candidate_doc_id = agent_doc_session_actor_io::canonical_document_id_in(
+            &bootstrap.project_root,
+            &candidate_doc.to_string_lossy(),
+        );
+        let mut starting =
+            ready_actor_for_start_alias_test(&bootstrap, &owner_doc_id, "owner", 4, "%71", "@7");
+        starting.state = agent_doc_controller::actor::ActorState::Starting;
+        store_actor_record(&bootstrap.project_root, None, &starting).unwrap();
+
+        let mut came_up = false;
+        let err = ensure_start_session_pane_not_claimed_by_other_actor_with_hook(
+            &bootstrap.project_root,
+            &candidate_doc_id,
+            "candidate",
+            "%71",
+            &mut |decided| {
+                if came_up {
+                    return;
+                }
+                came_up = true;
+                assert_eq!(
+                    decided.state,
+                    agent_doc_controller::actor::ActorState::Starting
+                );
+                save_registry_entry_for_alias_test(
+                    &bootstrap.project_root,
+                    &owner_doc_id,
+                    "owner",
+                    "%71",
+                    "@7",
+                    &owner_doc,
+                    std::process::id(),
+                );
+                let mut ready = decided.clone();
+                ready.state = agent_doc_controller::actor::ActorState::Ready;
+                ready.last_transition.caller = "supervisor".to_string();
+                ready.last_transition.reason = "ready".to_string();
+                ready.last_transition.timestamp = timestamp_secs();
+                ready.last_transition.prior_generation = decided.generation;
+                store_actor_record(&bootstrap.project_root, Some(decided.generation), &ready)
+                    .unwrap();
+            },
+        )
+        .expect_err("the alias came up live after the decision, so the start must be refused");
+        assert!(
+            came_up,
+            "the hook must run between the decision and the close"
+        );
+        assert!(
+            format!("{err:#}").contains("refusing start_session cross-document actor pane alias"),
+            "the re-decision must see the live alias: {err:#}"
+        );
+
+        let owner_after = load_actor_record(&bootstrap.project_root, &owner_doc_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            owner_after.state,
+            agent_doc_controller::actor::ActorState::Ready,
+            "the live alias must not be closed as stale"
+        );
+        assert_eq!(owner_after.pane_id, "%71");
+        assert_eq!(owner_after.generation, 4);
     }
 
     #[test]

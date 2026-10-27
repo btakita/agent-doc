@@ -186,7 +186,7 @@ may republish the retained intent, but remains subject to the same rule.
   joined into the desired layout (`#layoutbindstale`).
 - Route auto-start may not create a duplicate hidden fallback pane just because split/join heuristics failed. A shared `agent-doc` window may supply a split-only cross-project anchor when every visible pane proves process-tree ownership of a different agent-doc document; this does not rebind or inject into the anchor. If any visible pane has unknown ownership, one appears to own the requested document without authoritative registration, or `split-window` fails beside the chosen anchor, route must fail closed with tmux cleanup commands instead of creating and stashing a second pane.
 - Before route or sync auto-start allocates a pane, it must resolve the live same-document owner independently of the registry row. A proven live owner wins over a missing, dead, or stale registry pane and is reused; startup must not allocate a launcher that can discover and refuse the existing owner only after the duplicate pane exists. This shared rule applies to JetBrains, Zed, VS Code, and CLI-triggered routing.
-- Once route has created a fresh pane for a document, that pane stays authoritative for the reroute. A concurrent geometry-only registry rebind must not hand dispatch back to an older same-session pane and make the fresh pane disposable.
+- Once route has created a fresh pane for a document, that pane stays authoritative for the reroute. A concurrent geometry-only registry rebind must not hand dispatch back to an older same-session pane and make the fresh pane disposable. Only a projection rebind is reclaimed this way: an owner or operator that committed a newer generation for another pane wins, and the route follows it (`#dispatchrebindaudit`, see route-owned startup under `sync`).
 - Route must never transiently register an existing pane to a different file just to probe readiness. If a candidate pane is already bound to another document, reroute fails closed instead of emitting a temporary cross-file `session_superseded` / `session_end origin=registry_rebind`.
 - Actor-store binding must fail closed when the target pane has a non-closed record for another document. Cross-document cleanup is a repair-only operation, not part of normal route/start ownership transfer.
 - Route progress diagnostics must be UTF-8 safe when trimming captured tmux lines for stderr/status output. Prompt/status lines containing Unicode glyphs such as `…` or `·` must never panic the binary during a live reroute.
@@ -993,6 +993,25 @@ N+1`. Scoped test processes can set
 `AGENT_DOC_TEST_ROUTE_START_POST_LAUNCH_BARRIER` to hold the provisioner after
 the launch until the child has committed, which makes any such write
 deterministic.
+- The waiting route path and every route path that restarts a supervisor bind
+through the fenced post-launch bind (`#dispatchrebindaudit`): the fresh-pane
+re-validation after the ready wait (`resolve_fresh_dispatch_target_after_ready_wait`),
+the post-restart rebinds in `launch_contract.rs` and `pane_resolution.rs`, and the
+restart-handoff adoption in `restart_handoff.rs`. The owner (the launched child
+or the restarted supervisor) holds the actor generation from its launch on, so
+the route never writes over the owner's record. When the authoritative actor
+already binds the session to the pane, nothing is written and the owner's state
+(`Starting`, `Busy`, or a `Closed` it wrote) stands. When a projection write (a
+`route` or `sync` dispatch bind; sync's supervisor-backed `recover_owner` is not
+one) moved the binding off a pane the route created, the route reclaims the
+pane, compare-and-swapped on the generation it decided against: a commit in
+between, such as a supervisor restart's `start_session`, fails the write and
+the route re-decides against the newer record instead of re-projecting it as
+`Ready`. When an owner (`start`, `supervisor`) or an operator (`claim`,
+`admin`, `session`) committed the current generation for another live pane,
+the route follows that pane and writes nothing; a gone owner pane fails the
+route closed. Pre-launch provisioning binds and pre-dispatch rebinds of an
+already-running pane keep the plain `route`/`dispatch_bind` projection.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to

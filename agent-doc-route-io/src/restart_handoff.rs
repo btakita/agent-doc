@@ -1,6 +1,6 @@
 //! Route restart handoff polling.
 
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_target::{PostLaunchDispatchBind, bind_dispatch_target_after_owner_launch};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tmux_router::Tmux;
@@ -52,13 +52,27 @@ pub fn wait_for_busy_restart_handoff(
             agent_doc_tmux::AssociatedPaneResolution::Selected { winner, .. }
                 if winner.pane_id != previous_pane && !winner.is_stash() =>
             {
-                if let Err(err) =
-                    register_dispatch_target(tmux, session_id, &winner.pane_id, file_path)
-                {
-                    eprintln!(
+                // `#dispatchrebindaudit`: the supervisor restart is in flight and
+                // owns the actor generation. Project the handoff pane only over a
+                // projection binding, fenced; while the restarting owner's record
+                // still names another pane, wait for the restart to publish its
+                // own binding instead of writing over it.
+                match bind_dispatch_target_after_owner_launch(
+                    tmux,
+                    session_id,
+                    &winner.pane_id,
+                    file_path,
+                ) {
+                    Ok(PostLaunchDispatchBind::OwnerSuperseded { .. }) => {
+                        std::thread::sleep(poll);
+                        continue;
+                    }
+                    Ok(PostLaunchDispatchBind::OwnerBound)
+                    | Ok(PostLaunchDispatchBind::Reclaimed { .. }) => {}
+                    Err(err) => eprintln!(
                         "[route] warning: failed to project restart handoff pane {} into the registry for {}: {}",
                         winner.pane_id, file_path, err
-                    );
+                    ),
                 }
                 eprintln!(
                     "[route] supervisor restart for {} has not refreshed the registry yet, but a unique associated pane {} is alive via {} — adopting it as the handoff target before retry",

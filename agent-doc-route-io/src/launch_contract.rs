@@ -12,7 +12,7 @@ use crate::authoritative_actor::{
     ManagedCapabilityProofStatus, load_authoritative_actor_for_registered_pane,
     managed_capability_proof_status, tracked_harness_clear_requires_fresh_restart,
 };
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_recovery::settle_post_launch_dispatch_target;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::wait_for_agent_ready;
 use crate::supervisor_runtime::{
@@ -350,8 +350,8 @@ fn reapply_harness_launch_contract_after_clear(
             harness.binary, dispatch_pane,
         );
     }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    Ok(dispatch_pane)
+    // `#dispatchrebindaudit`: the restarted supervisor owns the actor generation.
+    settle_post_launch_dispatch_target(tmux, session_id, &dispatch_pane, file_path)
 }
 
 fn reapply_capability_contract_before_reuse(
@@ -476,8 +476,8 @@ fn reapply_capability_contract_before_reuse(
             file.display()
         ),
     }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
-    Ok(dispatch_pane)
+    // `#dispatchrebindaudit`: the restarted supervisor owns the actor generation.
+    settle_post_launch_dispatch_target(tmux, session_id, &dispatch_pane, file_path)
 }
 
 #[allow(clippy::too_many_arguments)]

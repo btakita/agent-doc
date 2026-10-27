@@ -28,7 +28,7 @@ use crate::dispatch_only::{
 };
 use crate::dispatch_recovery::{
     StartingPaneRecoveryWaitOptions, resolve_fresh_dispatch_target_after_ready_wait,
-    wait_for_starting_pane_recovery_target,
+    settle_post_launch_dispatch_target, wait_for_starting_pane_recovery_target,
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
@@ -1721,6 +1721,11 @@ pub fn recover_dispatch_only_authoritative_waiting_input(
             resolve_fresh_dispatch_target_after_ready_wait(tmux, session_id, pane, file_path, None)?
         }
     };
+    // `#dispatchrebindaudit`: the supervisor was just restarted fresh, so it owns
+    // the actor generation. Bind only through the fenced post-launch bind, which
+    // never writes over the restarted owner's record.
+    let dispatch_pane =
+        settle_post_launch_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
 
     rescue_from_stash(
         tmux,
@@ -1730,7 +1735,6 @@ pub fn recover_dispatch_only_authoritative_waiting_input(
         target_session,
         split_before,
     );
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     dispatch_only_send_reopen(
         tmux,
         file,

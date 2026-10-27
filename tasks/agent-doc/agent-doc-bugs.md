@@ -208,6 +208,21 @@ The release batch was your four prerequisites (`#krwr`, `#autoclearorphandrain`,
 - Icebox: `#orphandrainprobe`. The drain's liveness probe misses supervisors started without `--route-owned`.
 - Icebox: `#retireddirsgc`. More retired `.agent-doc` dirs could join `--retired-stores`, and whether to collapse or flag a plain twin of a claimed row is still undecided.
 - Waiting on you: Todo `#yeja`, how to handle `~/.agent-doc`.
+
+### Re: do [#compactabsorbsedit], do [#cwdfallbackrest] — opus-5 · 2026-10-27T13:10-04:00
+
+Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locally. They're not in a release yet; the next one after v0.35.557 will include them. On the merge, `make check` passed 11934/11934 and `make tmux-ci` passed 207.
+
+| Item | Commit | Fix |
+|---|---|---|
+| `#compactabsorbsedit` | `63cbc266b0` | **You ran that compact**, from JetBrains "Compact Exchange" at 08:48:48 EDT. Compaction built its commit from the editor text, so your unanswered queue rows in other sections were committed with it. The unanswered-edit guard only fires when the snapshot equals HEAD, and compaction checkpoints first. A compact with commit now commits only the exchange it compacted. Your other edits stay live and uncommitted, and the next preflight still attributes them to you as `[user+]`. **Behaviour change:** scratch text outside the exchange, and a queue-row deletion made while the editor was paused, also stay out of the commit now. |
+| `#cwdfallbackrest` | `c7e7de85fc` | The remaining document reads now resolve from the document's store: resync's registry root, preferred-window pin and WrongSession check, `terminal`'s registry and pin, claim's dead-`--window` fallback, and template-io's config walk, which now also honors the root ceiling. A targeted resync of a document with no project no longer touches the current directory's project. New tests check every byte of that project's `.agent-doc` is unchanged. |
+
+**Filed to the icebox** (long-tail, not queued):
+- `#cwdfallbacktail`: `resolve_pane_cwd` outside git, relative registry entries resolved against the cwd, and `terminal` ignoring `AGENT_DOC_TMUX_SOCKET`.
+- `#compactrequester`: log who requested a compact, and decide whether operator edits inside the exchange should still be archived.
+
+`#restartagentharness` (your Restart Agent → Grok Build report) is running in its own worktree.
 <!-- agent:boundary:a358906c -->
 <!-- /agent:exchange -->
 
@@ -215,16 +230,9 @@ The release batch was your four prerequisites (`#krwr`, `#autoclearorphandrain`,
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#cwdfallbackrest]
-- do [#compactabsorbsedit]
-- ~~do [#tracingrootceiling]~~
-- ~~do [#commitoutsidegit]~~
-- ~~do [#livebuffergc]~~
-- ~~do [#autoclearorphandrain]~~
-- ~~do [#loadprojectfordoccwd]~~
-- ~~do [#queuerowdup]~~
-- ~~[#krwr]: deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit~~
-- ~~release + publish after "deleting a claimed queue row while adding a different row..." + [#autoclearorphandrain] [#loadprojectfordoccwd] [#queuerowdup] is integrated.~~
+- ~~do [#cwdfallbackrest]~~
+- ~~do [#compactabsorbsedit]~~
+- 🚧 [#subagent:restartagentharness#1] I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -238,14 +246,12 @@ The release batch was your four prerequisites (`#krwr`, `#autoclearorphandrain`,
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
-- [ ] [#krwr] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).
+- [x] [#krwr] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).
 - [x] [#ddj8] Decide whether ~/.agent-doc/ (which holds state.db) should make $HOME a project root: today any pane under $HOME with no closer .agent-doc/ resolves $HOME as its project root (found by #prunetestisolation; cf. the earlier ~/.tsift-made-$HOME-a-workspace fix).
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#cwdfallbackrest] Remaining process-cwd fallbacks for a document with a known store (same class as #startcwdfallback / #claimwrongstore / #loadprojectfordoccwd): agent-doc-sync-io/src/resync.rs:267 resolve_registry_root falls back to current_dir() for a rootless target and resync.rs:380/:623 read the cwd's project_tmux_session(); src/terminal.rs reads the cwd registry (199) and cwd tmux_session pin (resolve_session_name, 306); claim's find_alive_project_window (--window fallback) reads the cwd registry; agent-doc-template-io load_project_from_doc (src/lib.rs:528-548) walks up for .agent-doc/config.toml ignoring the root ceiling. Resolve each from project_root_or_file_parent / ceiling-aware discovery.
-- [ ] [#compactabsorbsedit] A compact exchange commit (controller_compact_document commit=true at 2026-10-27T12:48:49Z) absorbed an unanswered operator queue edit into the snapshot mid-turn, while a commit_document 57s earlier had refused the same drift as an unanswered edit; the absorbed rows then counted as intended repeats. Compaction's commit must apply the same unanswered-edit guard as commit_document (or leave operator-authored drift uncommitted).
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->
@@ -255,6 +261,8 @@ The release batch was your four prerequisites (`#krwr`, `#autoclearorphandrain`,
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#cwdfallbacktail] Leftover cwd uses found by #cwdfallbackrest: (1) agent_doc_git_io::dirs::resolve_pane_cwd falls back to the process cwd for a document outside any git repo, and claim/route record it as the registry entry's cwd (should likely be the canonical parent); (2) agent-doc-sync ResyncTargetMatcher / resolve_absolute_file_path resolve relative registry entries against the process cwd (filter_registry_for_target, targeted prune) instead of the store; (3) terminal::run builds Tmux::default() instead of configured_tmux(), ignoring AGENT_DOC_TMUX_SOCKET and the configured tmux binary (also why terminal has no CLI test).
+- [ ] [#compactrequester] From #compactabsorbsedit: controller_compact_document does not log who requested the compact (editor action, CLI, agent); add a requester= field. Also review whether operator edits inside the exchange before the boundary marker should still be archived and committed by compaction.
 - [ ] [#orphandrainprobe] The orphan-drain liveness probe (supervisor_pid_for_doc) only matches 'start --route-owned', so a plain 'agent-doc start doc.md' supervisor (which runs an idle watch) reads as orphaned on every tick and only route-time deferral (GH #307, #autoclearorphandrain) prevents a double drive. Decide whether the drain should use start_supervisor_document_from_args (keeping kill paths route-owned only) and its effect on the GH #307 fallback. Also: tmux_session_policy_for_scope / sync_scope_root (agent-doc-sync/src/lib.rs:623) and route session_resolution.rs:41/223 read the cwd pin with no document (likely process/layout level).
 - [ ] [#retireddirsgc] Other apparently retired directories under real .agent-doc stores (patches/, plugin-owner/, ack-content/, op-capture/; already forbidden by the hot-path guard) could join #livebuffergc's agent-doc gc --retired-stores list after the same retirement check. Also undecided (#queuerowdup): should a committed plain 'do [#id]' twin of a claimed row be collapsed or flagged (collapsing deletes operator-typed text)?
 - [ ] [#homerootguard] Option (a) from the #ddj8 research, pending the operator's choice: never treat $HOME, / or the temp dir as an agent-doc project root (agent-doc-fs/src/lib.rs:44-61 find_project_root plus the JetBrains PatchWatcher.kt:288-297 / TurnStateBridge.kt:295 / CrdtReplicaManager.kt:5104 and VS Code extension.ts:318 root walkers, which also ignore the root ceiling) unless an override such as AGENT_DOC_ALLOW_HOME_ROOT=1 is set or ~/.git exists; move user-level logs to $XDG_STATE_HOME/agent-doc.

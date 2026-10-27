@@ -36,6 +36,20 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - `Recycle Supervisor` runs `agent-doc session restart-supervisor <relative-path>` and keeps recycle ownership in the binary/supervisor path. The command ID remains `agentDoc.restartSession`. If the binary refuses because the pane is busy or the authoritative actor is still starting, VS Code shows typed restart recovery actions and the confirmed interrupt path invokes `agent-doc session restart-supervisor --force <relative-path>`.
 - `Copy Session Diagnostics` runs `agent-doc session doctor <relative-path>` and copies the exact output for bug reports.
 - `About Agent Doc` (`agentDoc.about`, command palette, markdown editor context menu, and the popup's More Actions) runs `agent-doc version --json` (falling back to `--version`) with the same `resolveAgentDoc()` binary as every other command, reads the already-loaded library through `native.nativeAboutSnapshot()` (`agent_doc_version()` and `agent_doc_build_info_json()`; never loads or reloads), and shows a modal message with a Copy action. The plugin version is `EDITOR_PLUGIN_VERSION`. Mismatch rules follow `editors/SPEC.md` section 6b.
+- **Stale extension prompt (`#vscodeupgradelayout`):** on activation, on every
+  change to its own extensions directory's `extensions.json` or `.obsolete`,
+  and on `vscode.extensions.onDidChange`, the extension compares its running
+  `packageJSON.version` with the agent-doc generation that manifest lists
+  (directories `.obsolete` marks are skipped; an entry whose directory is gone
+  is ignored). Any other installed version, including a downgrade, shows one
+  warning per installed generation per extension-host lifetime. Locally it
+  offers Restart Extensions (opening the extension page, where VS Code shows
+  its own Restart Extensions action; VS Code has no command that loads the
+  update in place, and Developer: Restart Extension Host restarts the stale
+  generation) and Reload Window. A remote (`vscode.env.remoteName`, e.g. Coder
+  Remote-SSH) or web host offers only Reload Window, the remedy VS Code 1.88
+  documents for remote connections. `pluginUpgrade.ts` holds the pure verdict
+  and prompt; `pluginUpgrade.test.ts` covers them.
 - `Dashboard` (`agentDoc.dashboard`, `gvqv`) is a command-palette command with no markdown gate and popup item `[14]`. It runs `agent-doc dashboard --write` from the cleanup root (focused markdown document's project root, else the first workspace folder), then opens `markdown.showPreview` on `<root>/.agent-doc/dashboard.md`, falling back to the text editor. The project controller keeps the projection current and the preview follows its atomic rewrites; the native `agent_doc_is_session_document` classifier rejects it, so it is never registered or tab-synced. `dashboard.test.ts` covers the arguments, path, palette contribution, and popup reachability.
 
 ## Tab Sync Compatibility
@@ -47,6 +61,28 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
   binary's automatic-caller safety policy, so a missing visible pane is created
   without an explicit `Load Tmux Window`; background open files are not added
   to the desired columns.
+- **Measured group layout (`#vscodeupgradelayout`, `editors/SPEC.md` § 13):**
+  every layout capture (automatic surface, Run Agent Doc route, manual sync,
+  rename sync, and the `--position` of Claim and Initialize Session) awaits
+  `vscode.getEditorLayout` and reports evidence (the grid, the tab-group count,
+  each visible editor's `viewColumn` and project markdown document, the focused
+  group) to the native `editor_group_layout` derivation of
+  `agent_doc_editor_derive_json`. The grid's orientation and nested sizes give
+  each group's origin; groups sharing a left edge (within 1% of the editor
+  width) stack top to bottom in one column, so a vertical split is one column
+  and a claim position can be `top`/`bottom`. Every measured group is a column,
+  including an empty placeholder. Measured columns publish with
+  `column_order: editor`. A grid whose group count differs from the tab groups
+  (an auxiliary editor window, whose groups `getEditorLayout` does not
+  describe) or that misses a visible view column falls back to ordinal
+  `viewColumn` columns with `column_order: unknown`; with no grid at all the
+  ordinal columns keep their pre-measurement `editor` meaning. `groupLayout.ts`
+  holds the frozen TypeScript floor for a library that cannot answer; both
+  answer every case of
+  `test-fixtures/editor-derivations/editor_group_layout.json`. A surface
+  measurement that a newer editor edge superseded while awaiting the renderer
+  is dropped by the generation guard. `tabGroups.onDidChangeTabGroups` is a
+  layout trigger beside the active and visible editor changes.
 - Repeated clicks between already-open split editors must continue to move tmux focus. The immediate focus handoff is deduped only against the last immediate active editor path, not against the last completed automatic sync state, so rapid A -> B -> A switches cannot be skipped by a stale debounced sync snapshot.
 - Automatic sync subprocesses use a short timeout with exponential retry backoff. A slow tmux/controller repair must not cause repeated 30s automatic sync attempts while the user is only changing focus or tabs. Manual `Sync Tmux Layout` and `Load Tmux Window` use the Project Controller `sync_tmux_layout` receipt path.
 - Native-library reload is one coalesced completion event. Manual `Sync Tmux Layout` waits for that event before entering the native bridge, and the reload owner republishes the current editor surface after every open CRDT replica has reattached. A tab switch in either direction during reload therefore converges after handoff instead of being dropped.

@@ -305,6 +305,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "attach_failure_diagnosis",
     "route_outcome",
     "exchange_prefix_repair",
+    "editor_group_layout",
 ];
 
 #[derive(serde::Deserialize)]
@@ -425,6 +426,15 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             serde_json::to_value(agent_doc_editor_surface::derive_exchange_prefix_repair(
                 &evidence,
             ))?
+        }
+        "editor_group_layout" => {
+            // `#vscodeupgradelayout`: the VS Code editor-group grid
+            // (`vscode.getEditorLayout`, tab groups, visible editors) as split
+            // columns, orientation, and claim position, so a layout rule change
+            // needs no VSIX and no Restart Extensions / Reload Window.
+            let evidence: agent_doc_editor_surface::GroupLayoutEvidence =
+                serde_json::from_value(input).context("parse editor group layout evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::resolve_group_layout(&evidence))?
         }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",
@@ -629,6 +639,50 @@ mod tests {
                 expected["observed_line"],
                 "{name}: observed_line"
             );
+        }
+    }
+
+    /// `#vscodeupgradelayout`: the native `editor_group_layout` derivation
+    /// answers every shared parity case. The VS Code extension's frozen
+    /// TypeScript floor answers the same file in `groupLayout.test.ts`, so the
+    /// two cannot drift silently.
+    #[test]
+    fn vscode_editor_group_layout_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/vscode/test-fixtures/editor-derivations/editor_group_layout.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 15, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request =
+                serde_json::json!({"derivation": "editor_group_layout", "input": case["input"]});
+            let answer = derive_editor_from_json(&request.to_string()).unwrap();
+            assert_eq!(answer["derivation"], "editor_group_layout", "{name}");
+            let output = &answer["output"];
+            let columns: Vec<serde_json::Value> = output["columns"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|column| column["files"].clone())
+                .collect();
+            let expected = &case["expected"];
+            assert_eq!(
+                serde_json::Value::Array(columns),
+                expected["columns"],
+                "{name}: columns"
+            );
+            for field in [
+                "column_order",
+                "source",
+                "orientation",
+                "position",
+                "reason",
+                "observed_line",
+            ] {
+                assert_eq!(output[field], expected[field], "{name}: {field}");
+            }
         }
     }
 

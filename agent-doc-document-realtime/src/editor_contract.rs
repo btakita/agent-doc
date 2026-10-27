@@ -105,11 +105,16 @@ mod tests {
         include_str!("../../editors/vscode/src/extension.ts"),
         include_str!("../../editors/vscode/src/crdtReplica.ts"),
         include_str!("../../editors/vscode/src/ideTerminal.ts"),
+        include_str!("../../editors/vscode/src/groupLayout.ts"),
+        include_str!("../../editors/vscode/src/pluginUpgrade.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
     const ZED_LSP_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/lib.rs");
     const EDITORS_SPEC: &str = include_str!("../../editors/SPEC.md");
     const VSCODE_MANIFEST: &str = include_str!("../../editors/vscode/package.json");
+    /// The `agent_doc_editor_derive_json` dispatcher (GH #326).
+    const EDITOR_DERIVATION_SOURCE: &str =
+        include_str!("../../agent-doc-editor-surface-io/src/lib.rs");
 
     #[derive(Debug)]
     struct FeatureParity<'a> {
@@ -451,10 +456,52 @@ mod tests {
             vscode.contains("const orientation: 'h' | 'v' = 'h';"),
             "the VS Code layout cell must match the split-orientation capture",
         );
+        let measures_layout =
+            vscode.contains("executeCommand<EditorGroupLayout>('vscode.getEditorLayout')");
+        assert_eq!(
+            row("VS Code local")[4].contains("`vscode.getEditorLayout` measures the grid"),
+            measures_layout,
+            "the VS Code layout cell must match whether getEditorLayout is captured",
+        );
         assert_eq!(
             row("VS Code local")[4].contains("`vscode.getEditorLayout` command is unused"),
-            !vscode.contains("vscode.getEditorLayout"),
+            !measures_layout,
             "the VS Code layout cell must match whether getEditorLayout is captured",
+        );
+        // `#vscodeupgradelayout`: the grouping rules are a native derivation
+        // only while the extension asks `agent_doc_editor_derive_json` for one.
+        let native_grouping = vscode.contains("GROUP_LAYOUT_DERIVATION = 'editor_group_layout'")
+            && vscode.contains("lib.func('agent_doc_editor_derive_json'")
+            && EDITOR_DERIVATION_SOURCE.contains("\"editor_group_layout\" => {");
+        assert_eq!(
+            row("VS Code local")[4].contains("native `editor_group_layout` derivation"),
+            native_grouping,
+            "the VS Code layout cell must match whether the grouping rules are native",
+        );
+        assert_eq!(
+            row("VS Code local")[4].contains("not a native derivation"),
+            !native_grouping,
+            "the VS Code layout cell must match whether the grouping rules are native",
+        );
+        // The stale-VSIX check reads the extension's own extensions directory.
+        let detects_stale_vsix = vscode.contains("path.join(extensionsDir, 'extensions.json')")
+            && vscode.contains("staleExtensionVerdict(running, installedExtension(");
+        assert_eq!(
+            row("VS Code local")[3].contains("is not detected"),
+            !detects_stale_vsix,
+            "the VS Code proof cell must match whether a stale VSIX is detected",
+        );
+        assert_eq!(
+            row("VS Code local")[3].contains("extensions directory's `extensions.json`"),
+            detects_stale_vsix,
+            "the VS Code proof cell must match whether a stale VSIX is detected",
+        );
+        let offers_remote_reload = vscode.contains("command: 'workbench.action.reloadWindow'")
+            && vscode.contains("needsWindowReload(host.remoteName");
+        assert_eq!(
+            row("VS Code on Coder")[3].contains("offered only Reload Window"),
+            detects_stale_vsix && offers_remote_reload,
+            "the VS Code remote proof cell must match the remote reload prompt",
         );
         assert_eq!(
             row("Zed local")[3].contains("`replica_register` carries only `editor_pid`"),

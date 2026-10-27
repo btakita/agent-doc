@@ -33,6 +33,7 @@ pub mod editor_view_policy;
 pub mod endpoint_retirement;
 pub mod exchange_prefix_repair;
 pub mod graph;
+pub mod group_layout;
 pub mod installation_focus;
 pub mod navigation_lane;
 pub mod pane_placement;
@@ -63,6 +64,10 @@ pub use exchange_prefix_repair::{
     ExchangePrefixRepair, ExchangePrefixRepairEvidence, derive_exchange_prefix_repair,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
+pub use group_layout::{
+    EditorGroupLayout, EditorGroupLayoutNode, GROUP_COLUMN_X_TOLERANCE, GroupEditorEvidence,
+    GroupLayoutEvidence, GroupLayoutResolution, resolve_group_layout,
+};
 pub use installation_focus::{
     FocusOwner, InstallationFocus, InstallationFocusOwner, SurfaceAuthority,
     claims_installation_focus, editor_installation,

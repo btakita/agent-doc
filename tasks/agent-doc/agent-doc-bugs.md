@@ -223,16 +223,33 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 - `#compactrequester`: log who requested a compact, and decide whether operator edits inside the exchange should still be archived.
 
 `#restartagentharness` (your Restart Agent → Grok Build report) is running in its own worktree.
-<!-- agent:boundary:a358906c -->
+> **Queue prompt:** I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.
+
+### Re: Restart Agent kept Claude Code — and lazily.md lost your edits — opus-5 · 2026-10-27T13:17-04:00
+
+**Your `tasks/software/lazily.md` edits were overwritten. Recover them from JetBrains Local History**, from the version before 13:09 EDT. That version has `agent: grok`, `queue: go` and your queue edits. The file on disk now holds a stale copy written at 13:10:19 EDT; it says `agent: claude`, at 128,777 bytes. No copy of your version survives in agent-doc's stores. I haven't touched the file, because the editor's text is the authority there and the IDE is the safe recovery path. I added a Todo for this.
+
+**What happened** (agent-loop `.agent-doc/logs/ops.log`, times UTC):
+1. **16:07:54.** A retained captured-response write (`crdt_cp_write source=retained_transition_projection_effect`, text `f22b45…`) landed while you were typing. The editor's update was quarantined (`StructuralQuarantined`) and never recovered: 117 refusals by 17:01. Meanwhile the logs claimed `delivery_converged=true diverged=false`.
+2. **16:31–16:34.** Your five Restart Agent presses all read `agent: claude` from that stale controller copy, so Claude Code relaunched. Harness resolution itself is correct: the document's `agent:` wins. It was reading the wrong copy.
+3. **17:09:03.** The editor still projected your version (`8d23a9…`).
+4. **17:09:04.** The retained projection re-asserted `f22b45…`.
+5. **About 17:09.** My `make install` reloaded the editor library. The new editor replicas re-registered from that stale text, and the stale copy reached disk at 17:10:19. So my install triggered the final overwrite, but the overwrite itself comes from the retained-projection bug.
+
+**Filed and to be dispatched as urgent: `#retainedprojectionclobber`.** A retained captured projection must never overwrite text you wrote; your ops have to roll forward onto it. Quarantine recovery must either converge or fail loudly, and agent-doc must stop reporting "converged" while an editor is quarantined.
+
+**The Restart Agent worker** (branch `fix/restartagentharness`, `fe32f5a781`, not merged yet) makes Restart Agent refuse and name both agent values when the editor and the controller disagree, instead of quietly relaunching the old harness. It doesn't make the switch work while the sync is stuck, so I'm holding it to merge with the clobber fix. It also changes Kotlin, so it needs a JetBrains plugin version bump. Your Restart Agent row stays open until the switch actually works.
+<!-- agent:boundary:fc531cdc -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#retainedprojectionclobber]
 - ~~do [#cwdfallbackrest]~~
 - ~~do [#compactabsorbsedit]~~
-- 🚧 [#subagent:restartagentharness#1] I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.
+- ~~I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

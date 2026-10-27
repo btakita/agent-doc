@@ -874,7 +874,10 @@ pub fn auto_start_in_session_with_lock_mode(
 
     evict_previous_stash_pane(tmux, session_id, &new_pane, session_name, harness);
 
-    // Register immediately so subsequent route calls find this pane
+    // Register immediately so subsequent route calls find this pane. This is
+    // the provisioner's only binding write: it runs under the startup locks and
+    // before the launch, so it cannot race the child's generation advance
+    // (`#claimpanecasrace`).
     register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
     // Publish a provisional Starting actor while the startup locks still own
     // admission. A newer layout generation can now reuse this pane before the
@@ -976,7 +979,12 @@ pub fn auto_start_in_session_with_lock_mode(
         &new_pane,
         "route_owned_start_target_not_visible",
     );
+    let post_launch_barrier =
+        crate::startup_post_launch_barrier::PostLaunchBarrier::arm(&registry_base_dir, file)?;
     launch_route_owned_start(tmux, file, &new_pane, &cwd, &start_cmd, &harness.binary)?;
+    if let Some(barrier) = post_launch_barrier {
+        barrier.await_child_generation(file)?;
+    }
 
     eprintln!(
         "[route] Started {} for {} in pane {} (session {})",
@@ -1296,8 +1304,16 @@ pub fn auto_start_in_session_with_lock_mode(
         }
     }
 
+    // `#claimpanecasrace`: a provision (`skip_wait`) returns the pane it bound
+    // before the launch and writes nothing more. From the launch on, the child
+    // `agent-doc start` owns the controller actor generation. A second
+    // `register_dispatch_target` here re-projected the binding as `Ready`
+    // (`route`/`dispatch_bind`) after the child's `start_session`: it
+    // overwrote the child's `Starting` record, or, when the child's commit
+    // landed between that write's generation read and its store, failed the
+    // whole provision (`agent-doc claim` on an occupied pane) with `controller
+    // actor generation compare-and-swap failed: expected 1, found 2`.
     let final_pane = if skip_wait {
-        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         new_pane
     } else {
         resolve_fresh_dispatch_target_after_ready_wait(

@@ -34306,11 +34306,57 @@ fn test_cli_claim_occupied_pane_persists_generated_identity_before_provisioning(
         .arg("claim")
         .arg(&incoming)
         .args(["--pane", &pane]);
+    // `#claimpanecasrace`: hold the claim after it launches the new pane's
+    // `agent-doc start` until that child has advanced the controller actor
+    // generation. Everything the claim does after the launch then runs after
+    // the child's `start_session`, every run: a provisioner write after the
+    // launch is no longer a 1-in-60 compare-and-swap failure but a
+    // deterministic one, caught below.
+    claim.env(
+        agent_doc_route_io::startup_post_launch_barrier::TEST_POST_LAUNCH_BARRIER_ENV,
+        "1",
+    );
     tmux.configure(&mut claim);
     let output = claim.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stderr}");
     assert!(stderr.contains("provisioning a new pane"), "{stderr}");
+    assert!(
+        fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default()
+            .contains("route_startup_test_post_launch_barrier_released"),
+        "the post-launch barrier must have held the claim until the child's start_session: {stderr}"
+    );
+    // The provisioner binds the pane before the launch; from the launch on the
+    // child owns the actor generation. No provisioner (`route`/`claim`)
+    // transition may follow the child's first `start` transition.
+    let document_id = incoming
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let conn = agent_doc_sqlite::state_store::open_state_db(tmp.path()).unwrap();
+    let transitions =
+        agent_doc_sqlite::state_store::load_actor_transitions_from_db(&conn, &document_id).unwrap();
+    let summary: Vec<String> = transitions
+        .iter()
+        .map(|t| {
+            format!(
+                "{}:{}->{}:{}",
+                t.caller, t.prior_generation, t.new_generation, t.reason
+            )
+        })
+        .collect();
+    let first_start = transitions
+        .iter()
+        .position(|t| t.caller == "start")
+        .unwrap_or_else(|| panic!("the child never published start_session: {summary:?}"));
+    assert!(
+        transitions[first_start..]
+            .iter()
+            .all(|t| t.caller != "route" && t.caller != "claim"),
+        "claim wrote the actor after launching the child start, racing its generation advance: {summary:?}"
+    );
     let content = fs::read_to_string(&incoming).unwrap();
     let recorded = agent_doc_frontmatter::frontmatter::session_id_from_content(&content).unwrap();
     assert!(

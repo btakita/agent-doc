@@ -895,6 +895,7 @@ When the user navigates to a document in the editor:
 - For nested-project documents sharing that window, accepts a pane from another project as a split-only anchor only when every visible pane's process tree proves a different agent-doc document owner; unknown or same-document ownership stays fail-closed
 - Registers the session→pane **Binding** in the controller state transaction
    - Starts Claude asynchronously in the new pane
+   - Registers before the launch and never after it: from the launch on, the child `agent-doc start` owns the document's actor generation, so a provision returns the pane it bound without writing the binding again (`#claimpanecasrace`)
 
 ### Cross-Repository Owner Guard (`#cross-repo-owner-guard`)
 

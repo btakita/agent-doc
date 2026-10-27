@@ -291,6 +291,10 @@ may republish the retained intent, but remains subject to the same rule.
   every provisioning branch, including occupied-pane and cross-root fallbacks.
   Its generated-ID diagnostic, route registration, and the new supervisor's
   frontmatter must describe the same identity.
+- A provisioning claim binds the new pane before it launches the pane's
+  `agent-doc start` and writes no actor state after the launch; the new
+  supervisor's `start_session` owns the next generation (`#claimpanecasrace`,
+  see route-owned startup under `sync`).
 - Claims a document for a tmux pane that is already running the harness.
 - `--new-pane` is a provisioning mode, not a force/reuse mode. It bypasses current-pane resolution and cross-session validation, provisions exactly one pane in the project's configured tmux session (or the normal auto-detected session when unconfigured), and binds the new document there. It conflicts with `--position`, `--window`, `--pane`, `--force`, and `--isolate`, so it cannot silently replace or migrate the operator's current pane/window.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.
@@ -974,6 +978,21 @@ startup admission and before sending the child start command. A concurrent
 layout generation must reuse that actor binding while process-tree ownership is
 still materializing; an alive registry pane without either proof remains
 non-authoritative. Standalone startup retains its no-controller path.
+- Route-owned startup hands the controller actor generation to the child it
+launches (`#claimpanecasrace`). The provisioner's binding write (registry
+projection plus the actor binding) and, under Project Controller authority, its
+provisional `Starting` actor happen under the startup locks and before the
+launch. After the launch the provisioner never writes the actor or the binding
+again: the child's `start_session` owns every later generation advance, and a
+provision (`skip_wait`) returns the pane it bound before the launch. A
+post-launch provisioner write races that advance: it either overwrites the
+child's `Starting` record as `Ready` or, when the child commits inside the
+write's read-then-store window, fails the provision (an occupied-pane `claim`)
+with `controller actor generation compare-and-swap failed: expected N, found
+N+1`. Scoped test processes can set
+`AGENT_DOC_TEST_ROUTE_START_POST_LAUNCH_BARRIER` to hold the provisioner after
+the launch until the child has committed, which makes any such write
+deterministic.
 - If a registered pane is stashed, sync must rescue it back into the visible `agent-doc` window rather than treating the stash copy as disposable.
 - An active actor pane outside the exact visible editor projection is
   detachable, not terminal layout ownership. Reconciliation moves it to

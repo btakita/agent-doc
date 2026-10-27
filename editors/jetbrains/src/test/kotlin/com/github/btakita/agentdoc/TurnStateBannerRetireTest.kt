@@ -42,13 +42,15 @@ class TurnStateBannerRetireTest {
 
     @Test
     fun `plugin unload retires strips after the generation is marked retired`() {
+        // GH #339 R1: the shell's unload service retires the implementation generation, whose
+        // `retire` (AgentDocProjectLifecycle) removes the strips.
         val source = Files.readString(
             listOf(
-                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
-                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt"),
+                Paths.get("src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
+                Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt"),
             ).first { Files.exists(it) },
         )
-        val cleanup = source.substring(source.indexOf("class PluginUnloadCleanupService"))
+        val cleanup = source.substring(source.indexOf("fun retire()"))
         val retireGeneration = cleanup.indexOf("PluginGeneration.retire()")
         val retireStrips = cleanup.indexOf("TurnStateBannerProvider.retireStrips()")
 

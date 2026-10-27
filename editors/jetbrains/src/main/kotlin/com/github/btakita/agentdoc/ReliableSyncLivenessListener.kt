@@ -281,12 +281,12 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         fun install(project: Project, lifecycle: Disposable): ReliableSyncLivenessListener =
             instances.computeIfAbsent(project) {
                 ReliableSyncLivenessListener(project).also { listener ->
-                    project.messageBus
-                        .connect(lifecycle)
-                        .subscribe(
-                            FileEditorManagerListener.FILE_EDITOR_MANAGER,
-                            listener,
-                        )
+                    GenerationListeners.subscribe(
+                        project,
+                        FileEditorManagerListener.FILE_EDITOR_MANAGER,
+                        listener,
+                        lifecycle,
+                    )
                 }
             }
 

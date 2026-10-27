@@ -60,7 +60,9 @@ tasks.named<Jar>("jar") {
 sourceSets {
     main {
         kotlin.srcDir("../../jetbrains/src/main/kotlin")
-        kotlin.exclude("**/PluginLifecycleListener.kt")
+        // GH #339 R1: the project-lifecycle implementation is compiled from the generated copy
+        // below; the shell's PluginLifecycleListener.kt is compiled as is.
+        kotlin.exclude("**/AgentDocProjectLifecycle.kt")
         // GH #339 R1: `agent.doc.shared` owns the one copy, shared with the frontend module.
         kotlin.exclude("com/github/btakita/agentdoc/shell/receipt/**")
         java.srcDir("../../jetbrains/src/main/java")
@@ -78,10 +80,10 @@ val generatedSources = layout.buildDirectory.dir("generated/agent-doc-backend-so
 
 val generateModularLifecycle by tasks.registering {
     val legacyLifecycle = layout.projectDirectory.file(
-        "../../jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PluginLifecycleListener.kt",
+        "../../jetbrains/src/main/kotlin/com/github/btakita/agentdoc/AgentDocProjectLifecycle.kt",
     )
     val output = generatedSources.map {
-        it.file("com/github/btakita/agentdoc/PluginLifecycleListener262Generated.kt")
+        it.file("com/github/btakita/agentdoc/AgentDocProjectLifecycle262Generated.kt")
     }
     inputs.file(legacyLifecycle)
     outputs.file(output)
@@ -109,7 +111,7 @@ val generateModularLifecycle by tasks.registering {
         val classicBlock = original.substring(start, end)
         val requiredClassicEdges = listOf(
             "val editorTabSync = EditorTabSyncListener.install(project)",
-            "FileEditorManagerListener.FILE_EDITOR_MANAGER,\n                editorTabSync,",
+            "FileEditorManagerListener.FILE_EDITOR_MANAGER,\n            editorTabSync,\n            lifecycle,",
             "EditorFocusSyncListener.install(project, editorTabSync)",
             "editorTabSync.onIdeActivated(project)",
             "ApplicationActivationListener.TOPIC",

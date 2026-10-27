@@ -98,7 +98,7 @@ class DocumentCloseDecisionTest {
 
     @Test
     fun `fileClosed routes the replica release and liveness close through the decision`() {
-        val lifecycle = source("PluginLifecycleListener.kt")
+        val lifecycle = source("AgentDocProjectLifecycle.kt")
         val closed = lifecycle.substringAfter("override fun fileClosed(source: FileEditorManager, file: VirtualFile)")
             .substringBefore("\n                    }")
         assertTrue(closed.contains("TypingTracker.onEditorClosed(project, source, file)"))
@@ -140,7 +140,7 @@ class DocumentCloseDecisionTest {
 
     @Test
     fun `selecting an open document re-attaches a missing replica`() {
-        val lifecycle = source("PluginLifecycleListener.kt")
+        val lifecycle = source("AgentDocProjectLifecycle.kt")
         val selection = lifecycle.substringAfter("override fun selectionChanged(event: FileEditorManagerEvent)")
             .substringBefore("override fun fileOpened")
         assertTrue(selection.contains("CrdtReplicaManager.ensureOpenDocumentReplica(project, file.path, \"selection\")"))

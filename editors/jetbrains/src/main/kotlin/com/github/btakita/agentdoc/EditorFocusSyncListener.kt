@@ -22,7 +22,6 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.IdeFocusManager
-import com.intellij.util.messages.MessageBusConnection
 import java.awt.AWTEvent
 import java.awt.Component
 import java.awt.Container
@@ -181,7 +180,9 @@ class EditorFocusSyncListener private constructor(
     private val disposed = AtomicBoolean(false)
     private val listenerInstalled = AtomicBoolean(false)
     private val editorsRoot = AtomicReference<Container?>(null)
-    private val readinessConnection = AtomicReference<MessageBusConnection?>(null)
+    // GH #339 R1 Tier A: the readiness subscription is staged under its own disposable, which
+    // stands in for the connection the direct subscription used to disconnect.
+    private val readinessConnection = AtomicReference<Disposable?>(null)
 
     private val editorTreeAttachment =
         DeferredEditorTreeAttachment(
@@ -254,8 +255,8 @@ class EditorFocusSyncListener private constructor(
         // per-editor mouse listener can miss a restored split when its editor
         // was created during project/plugin startup before attachment completed
         // (`#panefocussplit`). Project filtering remains in the event handler.
-        factory.eventMulticaster.addEditorMouseListener(mouseListener, this)
-        factory.addEditorFactoryListener(
+        GenerationListeners.addEditorMouseListener(mouseListener, this)
+        GenerationListeners.addEditorFactoryListener(
             object : EditorFactoryListener {
                 override fun editorCreated(event: EditorFactoryEvent) = attach(event.editor)
             },
@@ -280,12 +281,14 @@ class EditorFocusSyncListener private constructor(
 
     private fun awaitEditorSplitters() {
         if (disposed.get() || project.isDisposed) return
-        val connection = project.messageBus.connect(this)
+        val connection = Disposer.newDisposable("agent-doc editor-tree readiness")
+        Disposer.register(this, connection)
         if (!readinessConnection.compareAndSet(null, connection)) {
-            connection.disconnect()
+            Disposer.dispose(connection)
             return
         }
-        connection.subscribe(
+        GenerationListeners.subscribe(
+            project,
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             object : FileEditorManagerListener {
                 override fun fileOpened(source: FileEditorManager, file: VirtualFile) =
@@ -294,13 +297,14 @@ class EditorFocusSyncListener private constructor(
                 override fun selectionChanged(event: FileEditorManagerEvent) =
                     retryEditorTreeAttachment()
             },
+            connection,
         )
     }
 
     private fun retryEditorTreeAttachment() {
         onEdt {
             if (editorTreeAttachment.tryAttach()) {
-                readinessConnection.getAndSet(null)?.disconnect()
+                readinessConnection.getAndSet(null)?.let(Disposer::dispose)
             }
         }
     }
@@ -352,7 +356,7 @@ class EditorFocusSyncListener private constructor(
         if (!disposed.compareAndSet(false, true)) return
         settledTreeFocusProbe.close()
         editorTreeAttachment.close()
-        readinessConnection.getAndSet(null)?.disconnect()
+        readinessConnection.getAndSet(null)?.let(Disposer::dispose)
         if (!listenerInstalled.compareAndSet(true, false)) {
             editorsRoot.set(null)
             return

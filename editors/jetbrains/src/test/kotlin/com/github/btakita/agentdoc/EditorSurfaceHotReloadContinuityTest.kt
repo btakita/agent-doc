@@ -24,7 +24,7 @@ class EditorSurfaceHotReloadContinuityTest {
 
     @Test
     fun `dynamic plugin replacement preserves the acknowledged surface until republish`() {
-        val lifecycle = source("PluginLifecycleListener.kt")
+        val lifecycle = source("AgentDocProjectLifecycle.kt")
         val replacementCleanup =
             lifecycle
                 .substringAfter("fun disposeOpenProjectsForDynamicUnload(): Int")

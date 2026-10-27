@@ -656,7 +656,10 @@ deterministic tests.
   (`state_store::store_actor_record_fenced_tx`): an owner's same-generation
   `Busy` landing between the decision and the write fails the write with the
   same `generation compare-and-swap failed` error as a generation bump, and the
-  writer re-decides against the newer record. The one write that does not move
+  writer re-decides against the newer record. The writer's store is the
+  document's own (its project's, or for a document with no `.agent-doc`
+  ancestor its canonical parent's), never the caller's cwd; a fence read in one
+  store says nothing about another (`#syncnorootfallback`). The one write that does not move
   the revision is tmux-router's `update_window_for_entry`, which rewrites only
   `window_id` of a non-closed row: a physical fact that changes no ownership
   decision. Any new writer that changes a row's pane, session, state, or

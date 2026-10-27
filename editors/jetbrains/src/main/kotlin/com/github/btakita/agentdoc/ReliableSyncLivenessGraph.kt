@@ -25,8 +25,16 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * A re-open mints a fresh presence tag, so it wins over a concurrent lagging
  * close that only observed the earlier tag (OR-set add-wins).
+ *
+ * GH #339 R1 controller identity: every `Register` carries [activationReceipt]'s
+ * `agent_doc_activation_receipt/v1` line, read when the op is built, so a native-reload
+ * republish reports the generation that is active then. The field is omitted when the
+ * supplier returns null, which keeps the wire shape an older controller reads.
  */
-class ReliableSyncLivenessGraph(private val pid: Long) {
+class ReliableSyncLivenessGraph(
+    private val pid: Long,
+    private val activationReceipt: () -> String? = { null },
+) {
     private class DocState {
         val orSet = OrSet()
         val tags = mutableListOf<String>()
@@ -216,6 +224,7 @@ addProperty("editor_kind", editorKind)
 addProperty("editor_version", editorVersion)
 add("capabilities", capabilities)
 addProperty("timestamp_ms", System.currentTimeMillis())
+activationReceipt()?.let { addProperty("activation_receipt", it) }
 }
 return JsonObject().apply { add("Register", inner) }
 }

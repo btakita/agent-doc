@@ -45,7 +45,10 @@ class ReliableSyncLivenessListener(private val project: Project) : FileEditorMan
         Retry,
     }
     private val pid: Long = ProcessHandle.current().pid()
-    private val graph = ReliableSyncLivenessGraph(pid)
+    // GH #339 R1: each registration carries this JVM's backend activation receipt.
+    private val graph = ReliableSyncLivenessGraph(pid) {
+        com.github.btakita.agentdoc.shell.ShellGenerationHost.getInstanceIfCreated()?.receipt()?.encode()
+    }
     private val projectRoots = ConcurrentHashMap<String, String>()
     private val pathTransitionFrames = PathTransitionFrameLedger()
 

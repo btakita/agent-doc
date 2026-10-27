@@ -50,6 +50,12 @@
   delivery cut, is never dropped as a refusing replica, and an unreachable
   in-place roll-forward is terminal after a bound instead of a silent retry.
   See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text).
+  Follow-ups (`#clobberfollowups`): a retained target waits while the editor
+  has attested typing over the visible cut that the relay has not ingested; no
+  commit seals a cut while a live replica is quarantined or the editor holds
+  unmerged visible text; `realtime_doc_resolve` derives `diverged` from the
+  quarantined live replicas; and `session-check` reports the operator-text
+  refusal and the terminal roll-forward refusal with their remedies.
 
 - Grok Build uses a native final-JSON backend and the existing managed
   supervisor lifecycle, with exact document-bound resume IDs and structural

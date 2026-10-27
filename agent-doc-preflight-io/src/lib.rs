@@ -8736,6 +8736,7 @@ mod tests {
                         delivery_converged: true,
                         delivery_version: 1,
                         semantics: None,
+                        quarantined_replicas: 0,
                     },
                     already_ensured,
                 ),
@@ -9467,6 +9468,7 @@ mod tests {
                     delivery_converged: true,
                     delivery_version: 1,
                     semantics: None,
+                    quarantined_replicas: 0,
                 }))
             }
         });
@@ -9497,6 +9499,7 @@ mod tests {
                 delivery_converged: true,
                 delivery_version: 2,
                 semantics: None,
+                quarantined_replicas: 0,
             }))
         });
         assert_eq!(calls, 2, "the controller error must consume a retry");
@@ -9615,6 +9618,7 @@ mod tests {
                     delivery_converged: true,
                     delivery_version: calls as u64,
                     semantics: None,
+                    quarantined_replicas: 0,
                 }))
             },
             |_, authority, disk, _| {

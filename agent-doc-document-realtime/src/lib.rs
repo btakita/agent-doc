@@ -48,8 +48,8 @@ pub fn editor_process_scope() -> &'static agent_doc_state_scope::ProcessScope {
 
 pub use read_authority::{
     BufferState, DocAuthority, ExternalDiskDecision, Reconciliation, ReconnectAuthority,
-    buffer_supersedes, current_doc, external_disk_decision, reconcile_current_doc,
-    reconnect_authority,
+    buffer_supersedes, crdt_relay_reconciliation, current_doc, external_disk_decision,
+    reconcile_current_doc, reconnect_authority,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

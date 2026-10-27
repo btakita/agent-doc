@@ -156,6 +156,28 @@ pub fn reconcile_current_doc(disk: &str, buffer: Option<&BufferState>) -> Reconc
     }
 }
 
+/// `#clobberfollowups` (3): the read authority for a live CRDT relay cut.
+///
+/// The live editor buffer is the authority, and the cut is `diverged` exactly
+/// when a live editor's updates are quarantined while it still owes the
+/// canonical projection (`RelayHub::quarantined_live_replicas`): that editor
+/// holds text this canonical lacks. Every `realtime_doc_resolve` answered by the
+/// relay derives `diverged` here instead of hard-coding `false`, which on
+/// 2026-10-27 reported `diverged=false` for an hour while the editor's typing
+/// was fenced.
+pub fn crdt_relay_reconciliation(
+    content: String,
+    reason: &'static str,
+    quarantined_replicas: usize,
+) -> Reconciliation {
+    Reconciliation {
+        authority: DocAuthority::EditorBuffer,
+        content,
+        diverged: quarantined_replicas > 0,
+        reason,
+    }
+}
+
 /// Convenience: the content the cycle should read as "current document".
 pub fn current_doc(disk: &str, buffer: Option<&BufferState>) -> String {
     reconcile_current_doc(disk, buffer).content
@@ -169,6 +191,19 @@ pub fn buffer_supersedes(prev: u64, next: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clobberfollowups_relay_cut_is_diverged_exactly_while_a_live_replica_is_quarantined() {
+        let converged = crdt_relay_reconciliation("canonical".to_string(), "crdt_relay_current", 0);
+        assert_eq!(converged.authority, DocAuthority::EditorBuffer);
+        assert_eq!(converged.content, "canonical");
+        assert!(!converged.diverged);
+        let quarantined =
+            crdt_relay_reconciliation("canonical".to_string(), "crdt_relay_current", 1);
+        assert_eq!(quarantined.authority, DocAuthority::EditorBuffer);
+        assert!(quarantined.diverged);
+        assert_eq!(quarantined.reason, "crdt_relay_current");
+    }
 
     #[test]
     fn editor_absent_uses_disk() {

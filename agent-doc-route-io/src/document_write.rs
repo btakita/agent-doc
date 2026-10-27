@@ -154,6 +154,7 @@ mod tests {
             delivery_converged,
             delivery_version: 1,
             semantics: None,
+            quarantined_replicas: 0,
         }
     }
 

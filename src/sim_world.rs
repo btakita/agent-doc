@@ -6136,6 +6136,7 @@ mod editor_commit_projection_model {
                     delivery_converged: self.delivery_converged,
                     delivery_version: u64::from(self.delivery_converged),
                     semantics: None,
+                    quarantined_replicas: 0,
                 },
                 Some(self.disk.as_bytes()),
             )

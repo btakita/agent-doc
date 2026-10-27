@@ -7456,6 +7456,38 @@ pub fn editor_holds_unmerged_visible_text(
     }
 }
 
+/// `#clobberfollowups` (4): the durable retained operator-text refusal for
+/// `file`, when it still describes the document: the live canonical is the
+/// visible cut the refused rebase was derived over. A newer cut is re-derived by
+/// the controller, so it no longer describes this refusal. A detached editor
+/// holds no cut; an authority that cannot be read keeps the durable fact (fail
+/// closed). Only consulted when a record exists.
+pub fn retained_operator_text_conflict(
+    file: &Path,
+) -> Option<
+    agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord,
+> {
+    let conflict = agent_doc_controller_io::retained_operator_text_conflict::observe(file)?;
+    retained_operator_text_conflict_holds(
+        &conflict,
+        &query_live_editor_authority(file, "retained_operator_text_conflict_probe"),
+    )
+    .then_some(conflict)
+}
+
+fn retained_operator_text_conflict_holds(
+    conflict: &agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord,
+    observed: &Result<agent_doc_crdt_relay_io::CurrentText>,
+) -> bool {
+    match observed {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => false,
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => {
+            conflict.matches_authority(text)
+        }
+        _ => true,
+    }
+}
+
 /// Whether the rejected editor route has been removed and document authority
 /// currently has no live replica to emit the retained write's next edge (GH
 /// #144).
@@ -9393,6 +9425,7 @@ fn try_resolve_current_doc_with_disk_inner(
             text,
             live_editors,
             delivery_converged,
+            quarantined_replicas,
             ..
         } => {
             if live_editors == 0 {
@@ -9407,16 +9440,15 @@ fn try_resolve_current_doc_with_disk_inner(
                     == ZeroLiveResolution::KeepEditorAuthority
                 {
                     record_editor_relay_authority(file, source, &text);
-                    let reconciliation = Reconciliation {
-                        authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
-                        content: text,
-                        diverged: false,
-                        reason: "crdt_relay_stale_lease_editor_open",
-                    };
+                    let reconciliation = agent_doc_document_realtime::crdt_relay_reconciliation(
+                        text,
+                        "crdt_relay_stale_lease_editor_open",
+                        quarantined_replicas,
+                    );
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
+                            "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={} quarantined_replicas={} editor_open=true recovery=keep_editor_authority_no_live_replica",
                             OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
                             reconciliation.reason,
@@ -9425,6 +9457,7 @@ fn try_resolve_current_doc_with_disk_inner(
                             source,
                             live_editors,
                             delivery_converged,
+                            quarantined_replicas,
                         ),
                     );
                     return Ok(reconciliation);
@@ -9462,16 +9495,15 @@ fn try_resolve_current_doc_with_disk_inner(
                 ));
             }
             record_editor_relay_authority(file, source, &text);
-            let reconciliation = Reconciliation {
-                authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
-                content: text,
-                diverged: false,
-                reason: "crdt_relay_current",
-            };
+            let reconciliation = agent_doc_document_realtime::crdt_relay_reconciliation(
+                text,
+                "crdt_relay_current",
+                quarantined_replicas,
+            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={}",
+                    "{} authority={} reason={} diverged={} file={} source={} answered_by=crdt_relay live_editors={} delivery_converged={} quarantined_replicas={}",
                     OpsLogEvent::RealtimeDocResolve,
                     reconciliation.authority.as_str(),
                     reconciliation.reason,
@@ -9480,6 +9512,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     source,
                     live_editors,
                     delivery_converged,
+                    quarantined_replicas,
                 ),
             );
             Ok(reconciliation)
@@ -9823,6 +9856,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 text,
                 live_editors,
                 delivery_converged,
+                quarantined_replicas,
                 ..
             }) => {
                 agent_doc_ops_log_io::log_op(
@@ -9840,17 +9874,16 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 // The rebuild restored the editor tier — resolve as editor
                 // authority and never touch disk.
                 record_editor_relay_authority(file, source, &text);
-                let reconciliation = Reconciliation {
-                    authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
-                    content: text,
-                    diverged: false,
-                    reason: "crdt_relay_current",
-                };
+                let reconciliation = agent_doc_document_realtime::crdt_relay_reconciliation(
+                    text,
+                    "crdt_relay_current",
+                    quarantined_replicas,
+                );
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
                         "{} authority={} reason={} diverged={} file={} \
-                         source={} answered_by=crdt_relay live_editors={} delivery_converged={} \
+                         source={} answered_by=crdt_relay live_editors={} delivery_converged={} quarantined_replicas={} \
                          recovery=editor_model_rebuilt",
                         OpsLogEvent::RealtimeDocResolve,
                         reconciliation.authority.as_str(),
@@ -9860,6 +9893,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                         source,
                         live_editors,
                         delivery_converged,
+                        quarantined_replicas,
                     ),
                 );
                 return Ok(reconciliation);
@@ -9929,6 +9963,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     text,
                     live_editors,
                     delivery_converged,
+                    quarantined_replicas,
                     ..
                 }) => {
                     agent_doc_ops_log_io::log_op(
@@ -9948,17 +9983,16 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     // resolution never reaches the disk question at all.
                     record_editor_relay_authority(file, source, &text);
                     clear_editor_replica_recovery_latches(file);
-                    let reconciliation = Reconciliation {
-                        authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
-                        content: text,
-                        diverged: false,
-                        reason: "crdt_relay_current",
-                    };
+                    let reconciliation = agent_doc_document_realtime::crdt_relay_reconciliation(
+                        text,
+                        "crdt_relay_current",
+                        quarantined_replicas,
+                    );
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
                             "{} authority={} reason={} diverged={} file={} \
-                             source={} answered_by=crdt_relay live_editors={} delivery_converged={} \
+                             source={} answered_by=crdt_relay live_editors={} delivery_converged={} quarantined_replicas={} \
                              recovery=missing_replica_terminal_rebuild",
                             OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
@@ -9968,6 +10002,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                             source,
                             live_editors,
                             delivery_converged,
+                            quarantined_replicas,
                         ),
                     );
                     return Ok(reconciliation);
@@ -11217,6 +11252,51 @@ mod tests {
         );
     }
 
+    /// `#clobberfollowups` (4): the durable operator-text refusal describes the
+    /// document only while the canonical is the cut it was derived over; an
+    /// unreadable authority keeps it (fail closed), a detached one drops it.
+    #[test]
+    fn clobberfollowups_operator_text_conflict_holds_only_over_its_own_cut() {
+        let conflict = agent_doc_controller_io::retained_operator_text_conflict::RetainedOperatorTextConflictRecord {
+            intent_id: "intent-1".to_string(),
+            target_hash: agent_doc_hash::content_hash("agent target\n"),
+            visible_hash: agent_doc_hash::content_hash("operator cut\n"),
+            delivery_version: 5,
+            lost_operator_lines: 1,
+            recorded_at_ms: 1,
+        };
+        let current = |text: &str| {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                text: text.to_string(),
+                live_editors: 1,
+                delivery_converged: true,
+                delivery_version: 5,
+                semantics: None,
+                quarantined_replicas: 0,
+            })
+        };
+        assert!(retained_operator_text_conflict_holds(
+            &conflict,
+            &current("operator cut\n")
+        ));
+        assert!(!retained_operator_text_conflict_holds(
+            &conflict,
+            &current("a newer operator cut\n")
+        ));
+        assert!(!retained_operator_text_conflict_holds(
+            &conflict,
+            &Ok(agent_doc_crdt_relay_io::CurrentText::Detached)
+        ));
+        assert!(retained_operator_text_conflict_holds(
+            &conflict,
+            &Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)
+        ));
+        assert!(retained_operator_text_conflict_holds(
+            &conflict,
+            &Err(anyhow::anyhow!("controller unavailable"))
+        ));
+    }
+
     #[test]
     fn retained_prewrite_can_compose_successor_only_from_exact_pending_base() {
         let retained = await_editor_replica_no_disk_write("retained pending projection".into());
@@ -11226,6 +11306,7 @@ mod tests {
             delivery_converged: false,
             delivery_version: 7,
             semantics: None,
+            quarantined_replicas: 0,
         };
         assert!(retained_prewrite_base_can_be_superseded(
             &retained,
@@ -11239,6 +11320,7 @@ mod tests {
             delivery_converged: false,
             delivery_version: 8,
             semantics: None,
+            quarantined_replicas: 0,
         };
         assert!(!retained_prewrite_base_can_be_superseded(
             &retained, "base", &drifted,
@@ -11905,6 +11987,7 @@ mod tests {
                 delivery_converged: true,
                 delivery_version: 7,
                 semantics: None,
+                quarantined_replicas: 0,
             }
         ));
     }

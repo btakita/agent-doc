@@ -26,6 +26,11 @@ import java.util.concurrent.TimeUnit
  * - `keystroke.replica_flush_1` / `keystroke.replica_flush_16`: CrdtReplicaManager's splice
  *   flush for a 1- and a 16-keystroke burst: [prepareLocalEditorEditsUtil], one
  *   `agent_doc_replica_apply_local` per splice, then the state vector and incremental diff.
+ * - `keystroke.replica_flush_after_remote`: the same 1-keystroke flush, each one the first after a
+ *   concurrent peer's one-character update was applied and projected the way
+ *   `CrdtReplicaForwarder.applyRemoteUpdate` does (`agent_doc_replica_apply_update`, then the state
+ *   vector and text). Only the flush is the case figure; the remote apply is its `.remote_apply`
+ *   step.
  * - `boundary.worker_hop`: one hand-off to a single-thread worker and back, the fixed cost of
  *   leaving the EDT for any native call.
  * - `boundary.derive_capabilities`: the smallest `agent_doc_editor_derive_json` round trip
@@ -106,6 +111,8 @@ internal class KeystrokeBenchmark(
         val warm: Int,
         val prepare: () -> Unit = {},
         val close: () -> Unit = {},
+        /** Times part of an operation itself, returning nanoseconds; otherwise the whole [op] is timed. */
+        val measure: (() -> Long)? = null,
         val op: () -> Any?,
     )
 
@@ -113,11 +120,21 @@ internal class KeystrokeBenchmark(
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "bench-native-worker").apply { isDaemon = true } }
         val flush1 = ReplicaFlush("keystroke.replica_flush_1", burst = 1)
         val flush16 = ReplicaFlush("keystroke.replica_flush_16", burst = 16)
+        val flushAfterRemote = ReplicaFlush("keystroke.replica_flush_after_remote", burst = 1, afterRemote = true)
+        val flushes = listOf(flush1, flush16, flushAfterRemote)
         val keystroke =
             listOf(
                 Case("keystroke.typing_report", iterations, warmup) { typingReport() },
                 Case(flush1.name, flushIterations, flushWarmup, flush1::open, flush1::close) { flush1.flush() },
                 Case(flush16.name, flushIterations, flushWarmup, flush16::open, flush16::close) { flush16.flush() },
+                Case(
+                    flushAfterRemote.name,
+                    flushIterations,
+                    flushWarmup,
+                    flushAfterRemote::open,
+                    flushAfterRemote::close,
+                    measure = flushAfterRemote::flush,
+                ) { flushAfterRemote.flush() },
                 Case("boundary.worker_hop", iterations, warmup) { worker.submit<Int> { 1 }.get() },
                 Case("boundary.derive_capabilities", iterations, warmup) {
                     NativeAdminControls.deriveEditor("capabilities", "{}") ?: error("derive_json unavailable")
@@ -153,6 +170,11 @@ internal class KeystrokeBenchmark(
                         recording = true
                         val samples = LongArray(case.count)
                         for (i in 0 until case.count) {
+                            val measure = case.measure
+                            if (measure != null) {
+                                samples[i] = measure()
+                                continue
+                            }
                             val started = System.nanoTime()
                             case.op()
                             samples[i] = System.nanoTime() - started
@@ -161,7 +183,7 @@ internal class KeystrokeBenchmark(
                         cases.getOrPut(case.name) { ArrayList() }.addAll(samples.asList())
                         roundMedians.getOrPut(case.name) { ArrayList() } += samples.sortedArray()[(samples.size - 1) / 2]
                     }
-                    if (phase === keystroke) for (flush in listOf(flush1, flush16)) flush.closeRound()
+                    if (phase === keystroke) for (flush in flushes) flush.closeRound()
                 }
             }
         } finally {
@@ -249,12 +271,21 @@ internal class KeystrokeBenchmark(
      * way the replica worker does: the state vector the forwarder diffs against, the splice
      * preparation, one `apply_local` per splice, and the incremental diff it would push. Every
      * flush types into the text the previous one produced. Each step is also its own case.
+     *
+     * With [afterRemote], a concurrent peer forked from the seed first types one character into
+     * the document head and its update is applied the way the forwarder applies a remote update,
+     * so every flush is the first local flush after a remote update. Returns the flush's nanoseconds.
      */
-    private inner class ReplicaFlush(val name: String, private val burst: Int) {
-        private val clientId = BENCH_CLIENT_ID_BASE + burst
+    private inner class ReplicaFlush(val name: String, private val burst: Int, private val afterRemote: Boolean = false) {
+        private val clientId = BENCH_CLIENT_ID_BASE + burst + if (afterRemote) 0x100 else 0
+        private val remoteClientId = clientId + 0x1000
         private val node = NativeReplicaNode()
+        private val remote = NativeReplicaNode()
         private var shadow = fixture
         private var anchor = typingAnchor(fixture)
+        /** The peer types at the end of the backlog, ahead of the operator anchor. */
+        private var remoteAnchorUtf16 = fixture.indexOf("<!-- /agent:backlog -->").coerceIn(0, anchor)
+        private var remoteAnchor = fixture.codePointCount(0, remoteAnchorUtf16)
         private var typed = 0L
         private val steps = linkedMapOf<String, LongArray>()
         private var stepCount = 0
@@ -263,13 +294,38 @@ internal class KeystrokeBenchmark(
             lib.agent_doc_replica_close(clientId)
             check(node.open(clientId, null)) { "replica_open failed" }
             check(node.applyLocal(clientId, 0, 0, fixture)) { "replica seed failed" }
+            if (afterRemote) {
+                lib.agent_doc_replica_close(remoteClientId)
+                val seed = node.encodeState() ?: error("replica encode failed")
+                check(remote.open(remoteClientId, seed)) { "remote replica_open failed" }
+            }
         }
 
         fun close() {
             node.close(clientId)
+            if (afterRemote) remote.close(remoteClientId)
         }
 
-        fun flush() {
+        /** The peer's one-character update, applied and projected as `applyRemoteUpdate` does. */
+        private fun applyRemoteKeystroke() {
+            val remoteBefore = remote.stateVector() ?: error("remote state vector unavailable")
+            check(remote.applyLocal(remoteClientId, remoteAnchor, 0, "r"))
+            val update = remote.diff(remoteBefore) ?: error("remote diff unavailable")
+            val started = System.nanoTime()
+            check(node.applyUpdate(clientId, update)) { "remote update failed" }
+            node.stateVector() ?: error("state vector unavailable")
+            val text = node.text() ?: error("text unavailable")
+            val elapsed = System.nanoTime() - started
+            remoteAnchor += 1
+            remoteAnchorUtf16 += 1
+            anchor += 1
+            check(text.length == shadow.length + 1 && text[remoteAnchorUtf16 - 1] == 'r') { "remote update landed elsewhere" }
+            shadow = text
+            if (recording) record("remote_apply", elapsed)
+        }
+
+        fun flush(): Long {
+            if (afterRemote) applyRemoteKeystroke()
             val edits = ArrayList<CapturedLocalEditorEdit>(burst)
             var length = shadow.length
             repeat(burst) {
@@ -307,6 +363,7 @@ internal class KeystrokeBenchmark(
                 record("diff", t4 - t3)
                 stepCount += 1
             }
+            return t4 - t0
         }
 
         private fun record(step: String, nanos: Long) {
@@ -382,7 +439,12 @@ internal class KeystrokeBenchmark(
 
         /** The cases the gate fails on; their `.<step>` breakdowns are reported only. */
         val GATED_CASES =
-            setOf("keystroke.typing_report", "keystroke.replica_flush_1", "keystroke.replica_flush_16")
+            setOf(
+                "keystroke.typing_report",
+                "keystroke.replica_flush_1",
+                "keystroke.replica_flush_16",
+                "keystroke.replica_flush_after_remote",
+            )
 
         fun compare(baseline: JsonObject, current: JsonObject): Verdict {
             val before = baseline.getAsJsonObject("cases")

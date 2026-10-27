@@ -251,6 +251,189 @@ pub struct EditorRegistration {
     pub editor_version: String,
     pub capabilities: Vec<String>,
     pub timestamp_ms: u64,
+    /// The editor process's `agent_doc_activation_receipt/v1` line
+    /// ([`ActivationReceipt`]), carried verbatim so a later controller can still
+    /// read an older receipt. Absent from editors that predate receipts, and
+    /// omitted on the wire when absent so an older controller reads the same
+    /// registration it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_receipt: Option<String>,
+}
+
+impl EditorRegistration {
+    /// Parse [`Self::activation_receipt`]. `None` when the editor sent none;
+    /// `Some(Err(_))` when it sent a line this controller cannot read.
+    pub fn activation(&self) -> Option<Result<ActivationReceipt, ActivationReceiptError>> {
+        self.activation_receipt
+            .as_deref()
+            .map(ActivationReceipt::parse)
+    }
+}
+
+/// Prefix of every activation receipt line (`editors/jetbrains/SPEC.md`,
+/// "Restart-free implementation generations").
+pub const ACTIVATION_RECEIPT_PREFIX: &str = "agent_doc_activation_receipt/v1";
+
+/// The process role a receipt reports.
+///
+/// JetBrains Remote Dev has two roles (`backend`, `frontend`), and its
+/// activation fence compares them. A VS Code extension runs whole in one
+/// extension host, so it reports the single role `workspace` and there is
+/// nothing to compare across processes (`editors/SPEC.md` section 13).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivationRole {
+    Backend,
+    Frontend,
+    Workspace,
+}
+
+impl ActivationRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Backend => "backend",
+            Self::Frontend => "frontend",
+            Self::Workspace => "workspace",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "backend" => Some(Self::Backend),
+            "frontend" => Some(Self::Frontend),
+            "workspace" => Some(Self::Workspace),
+            _ => None,
+        }
+    }
+}
+
+/// One `agent_doc_activation_receipt/v1` line: what one editor process reports
+/// about the generation it runs after an activation.
+///
+/// The line is version-neutral `key=value` text separated by single spaces,
+/// with `none` for an absent optional value:
+///
+/// ```text
+/// agent_doc_activation_receipt/v1 role=<role> jvm=<instance-uuid> shell=<digest> spi=<n> impl_version=<v|none> impl_sha256=<hex|none> generation=<n> epoch=<n>
+/// ```
+///
+/// The `jvm` key names the reporting process instance for every role (for
+/// `role=workspace` it is the VS Code extension host's activation id). Keys a
+/// later shell adds are ignored, so a newer receipt still parses here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ActivationReceipt {
+    pub role: ActivationRole,
+    /// Wire key `jvm`: the reporting process instance id.
+    pub instance: String,
+    pub shell: String,
+    pub spi: u32,
+    pub impl_version: Option<String>,
+    pub impl_sha256: Option<String>,
+    /// Local to one process; never compared across processes.
+    pub generation: u64,
+    pub epoch: u64,
+}
+
+/// Why an activation receipt line could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActivationReceiptError {
+    NotAReceipt,
+    MalformedField(String),
+    DuplicateField(String),
+    MissingField(&'static str),
+    InvalidValue { field: &'static str, value: String },
+}
+
+impl std::fmt::Display for ActivationReceiptError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotAReceipt => write!(f, "not an {ACTIVATION_RECEIPT_PREFIX} line"),
+            Self::MalformedField(field) => write!(f, "malformed receipt field `{field}`"),
+            Self::DuplicateField(key) => write!(f, "receipt repeats `{key}`"),
+            Self::MissingField(key) => write!(f, "receipt is missing `{key}`"),
+            Self::InvalidValue { field, value } => {
+                write!(f, "receipt `{field}` has invalid value `{value}`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ActivationReceiptError {}
+
+impl ActivationReceipt {
+    const NONE: &'static str = "none";
+
+    pub fn parse(line: &str) -> Result<Self, ActivationReceiptError> {
+        let body = line
+            .trim()
+            .strip_prefix(ACTIVATION_RECEIPT_PREFIX)
+            .and_then(|rest| rest.strip_prefix(' '))
+            .ok_or(ActivationReceiptError::NotAReceipt)?;
+        let mut fields = BTreeMap::new();
+        for field in body.split(' ') {
+            let (key, value) = field
+                .split_once('=')
+                .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+                .ok_or_else(|| ActivationReceiptError::MalformedField(field.to_string()))?;
+            if fields.insert(key, value).is_some() {
+                return Err(ActivationReceiptError::DuplicateField(key.to_string()));
+            }
+        }
+        let field = |key: &'static str| {
+            fields
+                .get(key)
+                .copied()
+                .ok_or(ActivationReceiptError::MissingField(key))
+        };
+        let optional =
+            |key: &'static str| field(key).map(|value| (value != Self::NONE).then(|| value.to_string()));
+        let number = |key: &'static str| {
+            let value = field(key)?;
+            value
+                .parse::<u64>()
+                .map_err(|_| ActivationReceiptError::InvalidValue {
+                    field: key,
+                    value: value.to_string(),
+                })
+        };
+        let role_value = field("role")?;
+        let role =
+            ActivationRole::parse(role_value).ok_or_else(|| ActivationReceiptError::InvalidValue {
+                field: "role",
+                value: role_value.to_string(),
+            })?;
+        let spi_value = field("spi")?;
+        let spi = spi_value
+            .parse::<u32>()
+            .map_err(|_| ActivationReceiptError::InvalidValue {
+                field: "spi",
+                value: spi_value.to_string(),
+            })?;
+        Ok(Self {
+            role,
+            instance: field("jvm")?.to_string(),
+            shell: field("shell")?.to_string(),
+            spi,
+            impl_version: optional("impl_version")?,
+            impl_sha256: optional("impl_sha256")?,
+            generation: number("generation")?,
+            epoch: number("epoch")?,
+        })
+    }
+
+    pub fn encode(&self) -> String {
+        format!(
+            "{ACTIVATION_RECEIPT_PREFIX} role={} jvm={} shell={} spi={} impl_version={} impl_sha256={} generation={} epoch={}",
+            self.role.as_str(),
+            self.instance,
+            self.shell,
+            self.spi,
+            self.impl_version.as_deref().unwrap_or(Self::NONE),
+            self.impl_sha256.as_deref().unwrap_or(Self::NONE),
+            self.generation,
+            self.epoch,
+        )
+    }
 }
 
 /// One liveness event pushed editor-plugin → controller on the reliable-sync plane.
@@ -931,6 +1114,7 @@ mod tests {
             editor_version: "0.2.270".into(),
             capabilities: vec!["operator_text_authority_v1".into()],
             timestamp_ms: 10,
+            activation_receipt: None,
         };
         projection.apply(&LivenessOp::Register(registration.clone()));
         assert!(projection.live_registrations("docA").is_empty());
@@ -950,6 +1134,105 @@ mod tests {
         assert!(projection.live_registrations("docA").is_empty());
     }
 
+    /// `#vscoderemoteparity`: a VS Code extension host reports one
+    /// `role=workspace` receipt in its registration; the controller reads it
+    /// with the same parser as the JetBrains roles.
+    #[test]
+    fn workspace_activation_receipt_round_trips_through_the_registration() {
+        let line = "agent_doc_activation_receipt/v1 role=workspace jvm=6f1c shell=ab12 spi=0 \
+                    impl_version=0.35.500 impl_sha256=cd34 generation=2 epoch=2";
+        let receipt = ActivationReceipt::parse(line).expect("workspace receipt parses");
+        assert_eq!(
+            receipt,
+            ActivationReceipt {
+                role: ActivationRole::Workspace,
+                instance: "6f1c".into(),
+                shell: "ab12".into(),
+                spi: 0,
+                impl_version: Some("0.35.500".into()),
+                impl_sha256: Some("cd34".into()),
+                generation: 2,
+                epoch: 2,
+            }
+        );
+        assert_eq!(receipt.encode(), line);
+
+        let registration = EditorRegistration {
+            document_hash: "docA".into(),
+            pid: 100,
+            path: "/workspace/doc.md".into(),
+            editor_id: "vscode-100".into(),
+            editor_kind: "vscode".into(),
+            editor_version: "0.2.84".into(),
+            capabilities: Vec::new(),
+            timestamp_ms: 10,
+            activation_receipt: Some(line.into()),
+        };
+        let wire = serde_json::to_string(&LivenessOp::Register(registration.clone())).unwrap();
+        let LivenessOp::Register(decoded) = serde_json::from_str(&wire).unwrap() else {
+            panic!("register op decodes as register");
+        };
+        assert_eq!(decoded, registration);
+        assert_eq!(decoded.activation(), Some(Ok(receipt)));
+    }
+
+    #[test]
+    fn registration_without_a_receipt_keeps_its_legacy_wire_shape() {
+        let legacy = r#"{"Register":{"document_hash":"docA","pid":7,"path":"/tmp/doc.md","editor_id":"jb-7","editor_kind":"jetbrains","editor_version":"0.2.270","capabilities":[],"timestamp_ms":1}}"#;
+        let LivenessOp::Register(registration) = serde_json::from_str(legacy).unwrap() else {
+            panic!("legacy register op decodes");
+        };
+        assert_eq!(registration.activation_receipt, None);
+        assert_eq!(registration.activation(), None);
+        assert_eq!(
+            serde_json::to_string(&LivenessOp::Register(registration)).unwrap(),
+            legacy,
+            "an absent receipt must not change what an older controller reads",
+        );
+    }
+
+    #[test]
+    fn activation_receipt_parse_matches_the_jetbrains_design_and_fails_closed() {
+        let backend = ActivationReceipt::parse(
+            "agent_doc_activation_receipt/v1 role=backend jvm=u1 shell=s1 spi=3 \
+             impl_version=none impl_sha256=none generation=4 epoch=9 later_key=ignored",
+        )
+        .expect("a receipt with a later key still parses");
+        assert_eq!(backend.role, ActivationRole::Backend);
+        assert_eq!((backend.impl_version, backend.impl_sha256), (None, None));
+        assert_eq!((backend.spi, backend.generation, backend.epoch), (3, 4, 9));
+
+        let full = "agent_doc_activation_receipt/v1 role=workspace jvm=u shell=s spi=0 impl_version=none impl_sha256=none generation=0 epoch=0";
+        assert!(ActivationReceipt::parse(full).is_ok());
+        assert_eq!(
+            ActivationReceipt::parse("agent_doc_activation_receipt/v2 role=workspace"),
+            Err(ActivationReceiptError::NotAReceipt)
+        );
+        assert_eq!(
+            ActivationReceipt::parse(&full.replace(" epoch=0", "")),
+            Err(ActivationReceiptError::MissingField("epoch"))
+        );
+        assert_eq!(
+            ActivationReceipt::parse(&format!("{full} role=frontend")),
+            Err(ActivationReceiptError::DuplicateField("role".into()))
+        );
+        assert_eq!(
+            ActivationReceipt::parse(&full.replace("role=workspace", "role=client")),
+            Err(ActivationReceiptError::InvalidValue {
+                field: "role",
+                value: "client".into()
+            })
+        );
+        assert_eq!(
+            ActivationReceipt::parse(&full.replace("generation=0", "generation=")),
+            Err(ActivationReceiptError::MalformedField("generation=".into()))
+        );
+        assert!(matches!(
+            ActivationReceipt::parse(&full.replace("spi=0", "spi=x")),
+            Err(ActivationReceiptError::InvalidValue { field: "spi", .. })
+        ));
+    }
+
     #[test]
     fn editor_registration_advances_by_timestamp_before_metadata_order() {
         let mut projection = LivenessProjection::new();
@@ -967,6 +1250,7 @@ mod tests {
             editor_version: "9.9.9".into(),
             capabilities: vec!["z-old".into()],
             timestamp_ms: 10,
+            activation_receipt: None,
         };
         let newer = EditorRegistration {
             path: "/tmp/a-new.md".into(),
@@ -1018,6 +1302,7 @@ mod tests {
                 editor_version: "test".into(),
                 capabilities: vec![],
                 timestamp_ms: 1,
+                activation_receipt: None,
             }));
         }
 
@@ -1582,6 +1867,7 @@ mod tests {
             editor_version: "2024.2".into(),
             capabilities: vec![],
             timestamp_ms: 1,
+            activation_receipt: None,
         }));
 
         // Ghost: with no death fact the crashed editor reads as fully live.
@@ -1715,6 +2001,7 @@ mod tests {
             editor_version: "0.2.464".into(),
             capabilities: Vec::new(),
             timestamp_ms: ts,
+            activation_receipt: None,
         }
     }
 

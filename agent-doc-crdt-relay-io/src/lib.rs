@@ -7514,6 +7514,7 @@ mod tests {
             editor_version: "test".to_string(),
             capabilities: Vec::new(),
             timestamp_ms,
+            activation_receipt: None,
         };
         let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
         plane.apply_local(&LivenessOp::Open {
@@ -8512,6 +8513,7 @@ mod tests {
                 editor_version: version.into(),
                 capabilities: Vec::new(),
                 timestamp_ms: pid,
+                activation_receipt: None,
             }
         };
         let (routes, mismatches) = generation_fenced_native_save_routes(vec![
@@ -8560,6 +8562,7 @@ mod tests {
                 editor_version: version.into(),
                 capabilities: Vec::new(),
                 timestamp_ms: pid,
+                activation_receipt: None,
             }
         };
         let (routes, mismatches) = generation_fenced_native_save_routes(vec![
@@ -8613,6 +8616,7 @@ mod tests {
                 editor_version: version.into(),
                 capabilities: Vec::new(),
                 timestamp_ms: pid,
+                activation_receipt: None,
             }
         };
         let (live, dead) = partition_live_editor_registrations(
@@ -8733,6 +8737,7 @@ mod tests {
             editor_version: "test".to_string(),
             capabilities: Vec::new(),
             timestamp_ms,
+            activation_receipt: None,
         };
         let initial = vec![
             LivenessOp::Open {
@@ -11669,6 +11674,7 @@ mod tests {
                 editor_version: "0.0.0-test".into(),
                 capabilities: Vec::new(),
                 timestamp_ms: 1,
+                activation_receipt: None,
             };
         let pid = u64::from(std::process::id());
         let current = format!("jetbrains-{pid}-current");

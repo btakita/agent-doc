@@ -81,6 +81,7 @@ import {
     type ReplicaTextChange,
 } from './crdtReplica.js';
 import { registerReliableSyncLiveness } from './reliableSyncLiveness.js';
+import { recordActivatedShell } from './activationReceipt.js';
 import { NativeReloadGate } from './nativeReloadGate.js';
 import {
 decideIdeTerminalAttach,
@@ -407,7 +408,15 @@ async function prepareIdeTerminal(cwd: string, relativePath: string): Promise<vo
             existing?.sendText(receipt.attachCommand, true);
             return;
         case IdeTerminalAttachDecision.CreateAndAttach: {
-            const terminal = vscode.window.createTerminal({ name: 'agent-doc', cwd });
+            // The attached tmux client inherits the same IDE observation the
+            // CLI gets, so a remote smoke test can read `remoteName` from it.
+            const terminal = vscode.window.createTerminal({
+                name: 'agent-doc',
+                cwd,
+                ...(vscode.env.remoteName
+                    ? { env: { AGENT_DOC_VSCODE_REMOTE_NAME: vscode.env.remoteName } }
+                    : {}),
+            });
             terminal.show(false);
             terminal.sendText(receipt.attachCommand, true);
             return;
@@ -3549,6 +3558,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Sidecar-retirement Phase 3C (design B): report this editor's open-set to the
     // reliable-sync liveness plane via a lazily-js OrSet graph → FFI push. No-op
     // unless the controller dual-run flag is on.
+    // The registration carries this host's `role=workspace` activation receipt,
+    // whose shell digest is the bundle this host loaded (`activationReceipt.ts`).
+    recordActivatedShell(path.join(
+        context.extensionPath,
+        String(context.extension.packageJSON?.main ?? 'out/extension.js'),
+    ));
     registerReliableSyncLiveness(context, EDITOR_ID);
 
     // Coordinate Project Controller turn state into the status bar. Refresh on

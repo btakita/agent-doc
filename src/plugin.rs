@@ -9,6 +9,7 @@
 //! - `list()` — scans JetBrains plugin directories for the versioned agent-doc JAR and queries `code --list-extensions` for the VS Code extension; prints found entries to stdout.
 //! - JetBrains plugin directories are discovered from versioned IDE data roots (`~/.local/share/JetBrains/<Product><Version>/` on Linux, `~/Library/Application Support/JetBrains/<Product><Version>/` on macOS). Config roots and unrelated JetBrains service directories are excluded. Callers can select an exact target with `--plugins-dir`; ambiguous non-interactive discovery fails with rerun guidance instead of waiting on stdin.
 //! - VS Code CLI detection order: `cursor` → `codium` → `code` (first that succeeds `--version`). Absence is reported as a missing prerequisite before any download, never discarded and re-spawned as `code`.
+//! - VS Code installs also reach every workspace extension host on the machine (`#vscoderemoteparity`): `code-server` on `PATH`, and the newest Remote-SSH server install under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscode-server-insiders`, `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. Both server layouts are probed (`bin/<commit>/bin/<cli>` and `cli/servers/<id>/server/bin/<cli>`). `install`, `update`, `update_all_installed` and `list` use the same targets; an install attempts every target before reporting failures, and fails before downloading only when no desktop CLI and no workspace host exists.
 //! - Asset selection matches complete versioned package shapes and prefers a signed variant. JetBrains targets prove their platform build from the versioned IDE data root: 242-261 select `agent-doc-jetbrains-<version>.zip`, exact 262 selects `agent-doc-jetbrains-262-<version>.zip`, and an unprovable/unsupported target fails before replacement. Local installs read the selected package's own `gradle.properties`; VS Code installs require the VSIX version to match `package.json` exactly.
 //! - Downloaded editor packages are verified before installation against the release's `EDITOR-PACKAGES.sha256` manifest, falling back to GitHub's per-asset `digest`. A declared digest that disagrees with the bytes fails closed.
 //!
@@ -34,6 +35,8 @@
 //! - update_already_current: JetBrains plugin at matching version → early Ok, no download
 //! - list_no_plugins: no IDE dirs, `code` absent → stderr "No agent-doc editor plugins found", Ok
 //! - detect_code_cmd: cursor available → returns "cursor"; only code available → returns "code"; none available → `None`, and the caller fails with install guidance before downloading
+//! - vscode_server_targets: a Remote-SSH root with servers in both layouts → one target for the newest, installing with `--extensions-dir <root>/extensions`; a non-executable CLI or empty root → no target
+//! - vscode_install_targets: no desktop CLI but a workspace host → the workspace host alone; neither → empty, and install fails with guidance naming `code-server` and `~/.vscode-server`
 //! - find_asset_prefers_signed: release with both signed and unsigned *versioned* zips → signed asset selected in either API order
 //! - editor package integrity: a manifest or API digest that disagrees with the downloaded bytes refuses the install
 //! - find_local_zip_prefers_signed: dist dir with both zips → signed path returned
@@ -887,22 +890,193 @@ fn detect_code_cmd() -> Option<&'static str> {
 fn available_code_cmds() -> Vec<&'static str> {
     ["cursor", "codium", "code"]
         .into_iter()
-        .filter(|cmd| {
-            std::process::Command::new(cmd)
-                .arg("--version")
-                .output()
-                .is_ok_and(|o| o.status.success())
+        .filter(|cmd| command_answers_version(cmd))
+        .collect()
+}
+
+fn command_answers_version(program: &str) -> bool {
+    std::process::Command::new(program)
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// One extension host's extensions directory that `--install-extension` and
+/// `--list-extensions` can reach (`#vscoderemoteparity`).
+///
+/// The extension declares `"extensionKind": ["workspace"]`, so on Coder or a
+/// Remote-SSH host it must be installed where the workspace extension host
+/// loads it, beside the agent-doc binary and tmux, not in the operator's local
+/// UI. A desktop CLI (`cursor`, `codium`, `code`) reaches its own extension
+/// host; inside a remote VS Code terminal `code` is the remote CLI and reaches
+/// the workspace host too. Outside such a terminal (an SSH session, a Coder
+/// startup script) only the server's own CLI can reach it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VsCodeInstallTarget {
+    /// How reports name this target: the CLI, or `remote-ssh:<server root>`.
+    label: String,
+    program: PathBuf,
+    /// Arguments before the action, such as `--extensions-dir <dir>`.
+    leading_args: Vec<String>,
+}
+
+impl VsCodeInstallTarget {
+    fn cli(cmd: &str) -> Self {
+        Self {
+            label: cmd.to_string(),
+            program: PathBuf::from(cmd),
+            leading_args: Vec::new(),
+        }
+    }
+
+    fn command(&self) -> std::process::Command {
+        let mut command = std::process::Command::new(&self.program);
+        command.args(&self.leading_args);
+        command
+    }
+
+    fn display(&self) -> String {
+        std::iter::once(self.program.display().to_string())
+            .chain(self.leading_args.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// Server data roots the VS Code-family Remote-SSH servers create on the
+/// remote host. `VSCODE_AGENT_FOLDER` relocates `~/.vscode-server`.
+const VSCODE_SERVER_ROOTS: &[&str] = &[
+    ".vscode-server",
+    ".vscode-server-insiders",
+    ".vscodium-server",
+    ".cursor-server",
+];
+
+/// Server CLI script names inside a server install's `bin/` directory.
+const VSCODE_SERVER_CLIS: &[&str] = &[
+    "code-server",
+    "code-server-insiders",
+    "codium-server",
+    "cursor-server",
+];
+
+/// The newest server CLI installed under one Remote-SSH server root.
+///
+/// Two layouts exist: `<root>/bin/<commit>/bin/<cli>` (older servers) and
+/// `<root>/cli/servers/<Quality>-<commit>/server/bin/<cli>` (servers that the
+/// VS Code CLI manages). The newest install by modification time wins, since
+/// that is the server the next connection runs.
+fn newest_vscode_server_cli(root: &Path) -> Option<PathBuf> {
+    let mut installs = Vec::new();
+    for (parent, inner) in [
+        (root.join("bin"), PathBuf::from("bin")),
+        (root.join("cli/servers"), PathBuf::from("server/bin")),
+    ] {
+        let Ok(entries) = fs::read_dir(&parent) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let install = entry.path();
+            let Some(cli) = VSCODE_SERVER_CLIS
+                .iter()
+                .map(|name| install.join(&inner).join(name))
+                .find(|candidate| is_executable_file(candidate))
+            else {
+                continue;
+            };
+            let modified = fs::metadata(&install)
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(UNIX_EPOCH);
+            installs.push((modified, cli));
+        }
+    }
+    installs.into_iter().max().map(|(_, cli)| cli)
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
+}
+
+/// Remote-SSH server targets under `home` (and `agent_folder`, when set). Each
+/// installs into that server's `extensions` directory, the one its workspace
+/// extension host loads.
+fn vscode_server_targets_in(home: &Path, agent_folder: Option<&Path>) -> Vec<VsCodeInstallTarget> {
+    let mut roots: Vec<PathBuf> = agent_folder.map(Path::to_path_buf).into_iter().collect();
+    roots.extend(VSCODE_SERVER_ROOTS.iter().map(|name| home.join(name)));
+    let mut seen = BTreeSet::new();
+    roots
+        .into_iter()
+        .filter(|root| seen.insert(root.clone()))
+        .filter_map(|root| {
+            let cli = newest_vscode_server_cli(&root)?;
+            Some(VsCodeInstallTarget {
+                label: format!("remote-ssh:{}", root.display()),
+                program: cli,
+                leading_args: vec![
+                    "--extensions-dir".to_string(),
+                    root.join("extensions").display().to_string(),
+                ],
+            })
         })
         .collect()
 }
 
-fn missing_code_cli_message() -> &'static str {
-    "No VS Code-family CLI on PATH: tried `cursor`, `codium`, and `code`. \
-Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run."
+/// Every workspace extension host this machine serves: `code-server` (Coder's
+/// browser IDE) and each Remote-SSH server install (VS Code Desktop through
+/// Coder Remote or Remote-SSH).
+fn vscode_workspace_targets() -> Vec<VsCodeInstallTarget> {
+    let mut targets = Vec::new();
+    if command_answers_version("code-server") {
+        targets.push(VsCodeInstallTarget::cli("code-server"));
+    }
+    if let Some(home) = std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let agent_folder = std::env::var_os("VSCODE_AGENT_FOLDER")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
+        targets.extend(vscode_server_targets_in(&home, agent_folder.as_deref()));
+    }
+    targets
 }
 
-fn require_code_cmd() -> Result<&'static str> {
-    detect_code_cmd().context(missing_code_cli_message())
+/// The targets an install reaches: the first desktop CLI, as before, plus
+/// every workspace extension host on this machine.
+fn vscode_install_targets(
+    cli: Option<&str>,
+    workspace: Vec<VsCodeInstallTarget>,
+) -> Vec<VsCodeInstallTarget> {
+    cli.map(VsCodeInstallTarget::cli)
+        .into_iter()
+        .chain(workspace)
+        .collect()
+}
+
+fn missing_code_cli_message() -> &'static str {
+    "No VS Code-family CLI or workspace extension host found: tried `cursor`, `codium`, and `code` on PATH, \
+`code-server` on PATH, and a Remote-SSH server under ~/.vscode-server (or $VSCODE_AGENT_FOLDER), ~/.vscodium-server, or ~/.cursor-server. \
+Install the editor's shell command (VS Code / VSCodium: run `Shell Command: Install 'code' command in PATH` from the command palette; Cursor: `Install 'cursor' command`), or put the CLI on PATH, then re-run. \
+On a Coder or Remote-SSH workspace, connect VS Code once so its server is installed, or run from a remote VS Code terminal."
+}
+
+fn require_vscode_install_targets() -> Result<Vec<VsCodeInstallTarget>> {
+    let targets = vscode_install_targets(detect_code_cmd(), vscode_workspace_targets());
+    if targets.is_empty() {
+        bail!(missing_code_cli_message());
+    }
+    Ok(targets)
 }
 
 fn vscode_extension_version_from_output(output: &str) -> Option<String> {
@@ -913,30 +1087,89 @@ fn vscode_extension_version_from_output(output: &str) -> Option<String> {
     })
 }
 
-fn installed_vscode_extensions() -> (Vec<(&'static str, String)>, Vec<String>) {
+/// Every reachable target's `--list-extensions --show-versions` output.
+fn vscode_extension_listings() -> Vec<(VsCodeInstallTarget, Result<String>)> {
+    available_code_cmds()
+        .into_iter()
+        .map(VsCodeInstallTarget::cli)
+        .chain(vscode_workspace_targets())
+        .map(|target| {
+            let listing = target
+                .command()
+                .args(["--list-extensions", "--show-versions"])
+                .output()
+                .with_context(|| {
+                    format!(
+                        "Failed to run `{} --list-extensions --show-versions`",
+                        target.display()
+                    )
+                })
+                .and_then(|output| {
+                    if output.status.success() {
+                        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+                    } else {
+                        bail!(
+                            "`{} --list-extensions --show-versions` exited with {}",
+                            target.display(),
+                            output.status
+                        )
+                    }
+                });
+            (target, listing)
+        })
+        .collect()
+}
+
+fn installed_vscode_extensions() -> (Vec<(VsCodeInstallTarget, String)>, Vec<String>) {
     let mut installed = Vec::new();
     let mut errors = Vec::new();
-    for code in available_code_cmds() {
-        match std::process::Command::new(code)
-            .args(["--list-extensions", "--show-versions"])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
+    for (target, listing) in vscode_extension_listings() {
+        match listing {
+            Ok(stdout) => {
                 if let Some(version) = vscode_extension_version_from_output(&stdout) {
-                    installed.push((code, version));
+                    installed.push((target, version));
                 }
             }
-            Ok(output) => errors.push(format!(
-                "`{code} --list-extensions --show-versions` exited with {}",
-                output.status
-            )),
-            Err(error) => errors.push(format!(
-                "Failed to run `{code} --list-extensions --show-versions`: {error}"
-            )),
+            Err(error) => errors.push(format!("{error:#}")),
         }
     }
     (installed, errors)
+}
+
+/// Install one VSIX into one target.
+fn install_vsix_into(target: &VsCodeInstallTarget, vsix: &Path) -> Result<()> {
+    let status = target
+        .command()
+        .arg("--install-extension")
+        .arg(vsix)
+        .status()
+        .with_context(|| format!("Failed to run `{} --install-extension`", target.display()))?;
+    if !status.success() {
+        bail!(
+            "`{} --install-extension` exited with {status}",
+            target.display()
+        );
+    }
+    Ok(())
+}
+
+/// Install one VSIX into every target, attempting all before failing.
+fn install_vsix_into_all(targets: &[VsCodeInstallTarget], vsix: &Path) -> Result<()> {
+    let mut errors = Vec::new();
+    for target in targets {
+        match install_vsix_into(target, vsix) {
+            Ok(()) => eprintln!("Extension installed via `{}`.", target.label),
+            Err(error) => errors.push(format!("{}: {error:#}", target.label)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!(
+            "VS Code extension install failed:\n{}",
+            errors.join("\n")
+        )
+    }
 }
 
 fn packaged_plugin_version(name: &str, prefix: &str, extension: &str) -> Option<String> {
@@ -946,28 +1179,17 @@ fn packaged_plugin_version(name: &str, prefix: &str, extension: &str) -> Option<
 }
 
 fn install_vscode(release: &Value) -> Result<()> {
-    let code = require_code_cmd()?;
-    install_vscode_with_cmd(release, code)
+    let targets = require_vscode_install_targets()?;
+    install_vscode_into_targets(release, &targets)
 }
 
-fn install_vscode_with_cmd(release: &Value, code: &str) -> Result<()> {
+fn install_vscode_into_targets(release: &Value, targets: &[VsCodeInstallTarget]) -> Result<()> {
     let asset = find_asset(release, "agent-doc", "vsix")?;
     eprintln!("Found asset: {}", asset.name);
     let tmp = download_to_temp(&asset)?;
     verify_editor_package(release, &asset, tmp.path())?;
-
-    let status = std::process::Command::new(code)
-        .args(["--install-extension"])
-        .arg(tmp.path())
-        .status()
-        .with_context(|| format!("Failed to run `{code} --install-extension`"))?;
-
-    if !status.success() {
-        bail!("`{code} --install-extension` exited with {status}");
-    }
-
-    let version = release_version(release);
-    eprintln!("Extension installed ({version}) via `{code}`.");
+    install_vsix_into_all(targets, tmp.path())?;
+    eprintln!("Extension version {}.", release_version(release));
     Ok(())
 }
 
@@ -3069,25 +3291,13 @@ fn verify_local_install_version(
 }
 
 fn install_vscode_local() -> Result<()> {
-    let code = require_code_cmd()?;
+    let targets = require_vscode_install_targets()?;
     let project_root = find_local_build_dir()?;
     let dist_dir = project_root.join("editors/vscode");
     let vsix = find_local_vscode_vsix(&dist_dir)?;
 
     eprintln!("Installing from local build: {}", vsix.display());
-
-    let status = std::process::Command::new(code)
-        .args(["--install-extension"])
-        .arg(&vsix)
-        .status()
-        .with_context(|| format!("Failed to run `{code} --install-extension`"))?;
-
-    if !status.success() {
-        bail!("`{code} --install-extension` exited with {status}");
-    }
-
-    eprintln!("Extension installed via `{code}`.");
-    Ok(())
+    install_vsix_into_all(&targets, &vsix)
 }
 
 fn find_local_vscode_vsix(dist_dir: &std::path::Path) -> Result<PathBuf> {
@@ -3723,7 +3933,8 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
         }
     }
 
-    for (code, installed_version) in vscode_targets {
+    for (target, installed_version) in vscode_targets {
+        let code = target.label.as_str();
         match fetch_release_for_asset("agent-doc", "vsix") {
             Ok(release) => match find_asset(&release, "agent-doc", "vsix").and_then(|asset| {
                 packaged_plugin_version(asset.name, "agent-doc-", ".vsix")
@@ -3737,7 +3948,10 @@ pub fn update_all_installed() -> Result<PluginReconcileReport> {
                         (Some(installed), Some(available)) if installed >= available => {
                             Some(PluginTargetOutcome::Unchanged)
                         }
-                        (Some(_), Some(_)) => match install_vscode_with_cmd(&release, code) {
+                        (Some(_), Some(_)) => match install_vscode_into_targets(
+                            &release,
+                            std::slice::from_ref(&target),
+                        ) {
                             Ok(()) => Some(PluginTargetOutcome::Installed),
                             Err(error) => {
                                 errors.push(format!("{code}: {error:#}"));
@@ -3828,6 +4042,10 @@ mod tests {
         packaged_plugin_version, release_version, releases_page_url, replace_jetbrains_plugin_tree,
         unchanged_jetbrains_install_outcome_at, verify_local_install_version,
         vscode_extension_version_from_output,
+    };
+    use super::{
+        VsCodeInstallTarget, install_vsix_into_all, vscode_install_targets,
+        vscode_server_targets_in,
     };
     use super::{install_jetbrains_package_bytes, java_candidates_for_ide, resolve_java_for_ide};
     use serde_json::json;
@@ -4417,9 +4635,119 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         );
     }
 
+    #[cfg(unix)]
+    fn executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// `#vscoderemoteparity`: `plugin install vscode` reaches the Remote-SSH
+    /// workspace extension host through the server's own CLI, in both server
+    /// layouts, installing into that server's `extensions` directory.
+    #[cfg(unix)]
+    #[test]
+    fn vscode_server_targets_find_the_newest_server_in_each_root() {
+        let home = TempDir::new().unwrap();
+        let vscode = home.path().join(".vscode-server");
+        let older = vscode.join("bin/1111/bin/code-server");
+        let newer = vscode.join("cli/servers/Stable-2222/server/bin/code-server");
+        executable(&older, "#!/bin/sh\n");
+        executable(&newer, "#!/bin/sh\n");
+        let stamp = |dir: &Path, secs| {
+            filetime::set_file_mtime(dir, filetime::FileTime::from_unix_time(secs, 0)).unwrap()
+        };
+        stamp(&vscode.join("bin/1111"), 1_000);
+        stamp(&vscode.join("cli/servers/Stable-2222"), 2_000);
+        // A server whose CLI is not executable, and a root with no server, are skipped.
+        let codium = home.path().join(".vscodium-server/bin/3333/bin/codium-server");
+        fs::create_dir_all(codium.parent().unwrap()).unwrap();
+        fs::write(&codium, "#!/bin/sh\n").unwrap();
+        fs::create_dir_all(home.path().join(".cursor-server/extensions")).unwrap();
+
+        let targets = vscode_server_targets_in(home.path(), None);
+        assert_eq!(
+            targets,
+            vec![VsCodeInstallTarget {
+                label: format!("remote-ssh:{}", vscode.display()),
+                program: newer.clone(),
+                leading_args: vec![
+                    "--extensions-dir".into(),
+                    vscode.join("extensions").display().to_string(),
+                ],
+            }]
+        );
+
+        // `VSCODE_AGENT_FOLDER` relocates the server root, and is never listed twice.
+        let relocated = home.path().join("agent-folder");
+        let relocated_cli = relocated.join("bin/4444/bin/code-server");
+        executable(&relocated_cli, "#!/bin/sh\n");
+        let targets = vscode_server_targets_in(home.path(), Some(&relocated));
+        assert_eq!(
+            targets.iter().map(|target| target.program.clone()).collect::<Vec<_>>(),
+            vec![relocated_cli, newer.clone()]
+        );
+        let targets = vscode_server_targets_in(home.path(), Some(&vscode));
+        assert_eq!(targets.len(), 1, "{targets:?}");
+    }
+
+    #[test]
+    fn vscode_install_reaches_the_desktop_cli_and_every_workspace_host() {
+        let server = VsCodeInstallTarget {
+            label: "remote-ssh:/home/u/.vscode-server".into(),
+            program: PathBuf::from("/home/u/.vscode-server/bin/c/bin/code-server"),
+            leading_args: vec!["--extensions-dir".into(), "/home/u/.vscode-server/extensions".into()],
+        };
+        let code_server = VsCodeInstallTarget::cli("code-server");
+        assert_eq!(
+            vscode_install_targets(Some("code"), vec![code_server.clone(), server.clone()]),
+            vec![VsCodeInstallTarget::cli("code"), code_server, server.clone()]
+        );
+        // A headless Coder workspace has no desktop CLI; the server alone is enough.
+        assert_eq!(vscode_install_targets(None, vec![server.clone()]), vec![server]);
+        assert!(vscode_install_targets(None, Vec::new()).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vscode_install_attempts_every_target_before_failing() {
+        let dir = TempDir::new().unwrap();
+        let log = dir.path().join("calls.log");
+        let recorder = dir.path().join("server/bin/code-server");
+        executable(
+            &recorder,
+            &format!("#!/bin/sh\necho \"$@\" >> '{}'\n", log.display()),
+        );
+        let failing = dir.path().join("broken/bin/code-server");
+        executable(&failing, "#!/bin/sh\nexit 3\n");
+        let vsix = dir.path().join("agent-doc-0.2.84.vsix");
+        fs::write(&vsix, b"vsix").unwrap();
+        let target = |label: &str, program: &Path| VsCodeInstallTarget {
+            label: label.into(),
+            program: program.to_path_buf(),
+            leading_args: vec!["--extensions-dir".into(), "/srv/ext".into()],
+        };
+
+        let error = install_vsix_into_all(
+            &[target("broken", &failing), target("remote-ssh:/srv", &recorder)],
+            &vsix,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("broken:"), "{error:#}");
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            format!("--extensions-dir /srv/ext --install-extension {}\n", vsix.display()),
+            "a failing target must not stop the next one",
+        );
+        install_vsix_into_all(&[target("remote-ssh:/srv", &recorder)], &vsix).unwrap();
+    }
+
     #[test]
     fn the_missing_code_cli_message_names_the_prerequisite_not_the_vsix() {
         let message = missing_code_cli_message();
+        assert!(message.contains("code-server"), "{message}");
+        assert!(message.contains(".vscode-server"), "{message}");
         assert!(message.contains("cursor"), "{message}");
         assert!(message.contains("codium"), "{message}");
         assert!(message.contains("PATH"), "{message}");
@@ -7228,17 +7556,25 @@ pub fn list() -> Result<()> {
     }
 
     // VS Code. No CLI is not an error here — `list` reports what is installed,
-    // and an absent editor simply contributes nothing.
-    if let Some(code) = detect_code_cmd()
-        && let Ok(output) = std::process::Command::new(code)
-            .args(["--list-extensions", "--show-versions"])
-            .output()
-        && output.status.success()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    // and an absent editor simply contributes nothing. The first desktop CLI
+    // prints as before; each workspace extension host names itself.
+    let clis = available_code_cmds();
+    let desktop = clis.first().copied();
+    for (target, listing) in vscode_extension_listings() {
+        let is_cli = clis.contains(&target.label.as_str());
+        if is_cli && Some(target.label.as_str()) != desktop {
+            continue;
+        }
+        let Ok(stdout) = listing else {
+            continue;
+        };
         for line in stdout.lines() {
             if line.to_lowercase().contains("agent-doc") {
-                println!("vscode     {}", line);
+                if is_cli {
+                    println!("vscode     {}", line);
+                } else {
+                    println!("vscode     {}  {}", line, target.label);
+                }
                 found = true;
             }
         }

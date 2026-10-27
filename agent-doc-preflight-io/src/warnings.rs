@@ -1508,6 +1508,7 @@ mod tests {
             editor_version: version.to_string(),
             capabilities: Vec::new(),
             timestamp_ms: 0,
+            activation_receipt: None,
         }
     }
 
@@ -2093,6 +2094,7 @@ mod tests {
                     editor_version: "0.2.100".to_string(),
                     capabilities: Vec::new(),
                     timestamp_ms: 1,
+                    activation_receipt: None,
                 },
             ),
         ];

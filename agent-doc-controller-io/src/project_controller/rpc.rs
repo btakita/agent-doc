@@ -47395,6 +47395,7 @@ mod tests {
                 editor_version: "0.2.283".into(),
                 capabilities,
                 timestamp_ms: 1,
+                activation_receipt: None,
             };
 
         assert_eq!(
@@ -62500,6 +62501,7 @@ mod tests {
                         editor_version: "test".to_string(),
                         capabilities: Vec::new(),
                         timestamp_ms: 1,
+                        activation_receipt: None,
                     }),
                 ],
             ),
@@ -63226,6 +63228,7 @@ mod tests {
             editor_version: "test".to_string(),
             capabilities: vec![],
             timestamp_ms: 1,
+            activation_receipt: None,
         };
         {
             let mut plane = controller_liveness_plane().lock();
@@ -63368,6 +63371,7 @@ mod tests {
                         editor_version: "test".to_string(),
                         capabilities: vec![],
                         timestamp_ms: 1,
+                        activation_receipt: None,
                     },
                 ),
             ]);
@@ -63477,6 +63481,7 @@ mod tests {
                             editor_version: "test".to_string(),
                             capabilities: vec![],
                             timestamp_ms: 1,
+                            activation_receipt: None,
                         },
                     ),
                 ]);
@@ -63722,6 +63727,7 @@ body
                     .to_string(),
             ],
             timestamp_ms,
+            activation_receipt: None,
         };
         let request = |frame: Option<lazily::IpcMessage>, flush: bool| ControllerRequest {
             command: "reliable_sync_outbox".to_string(),
@@ -63941,6 +63947,7 @@ body
                     editor_version: "0.2.464".into(),
                     capabilities: Vec::new(),
                     timestamp_ms: epoch,
+                    activation_receipt: None,
                 },
             )];
             agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(

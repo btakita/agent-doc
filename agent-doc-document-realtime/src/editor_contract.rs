@@ -105,11 +105,15 @@ mod tests {
         include_str!("../../editors/vscode/src/extension.ts"),
         include_str!("../../editors/vscode/src/crdtReplica.ts"),
         include_str!("../../editors/vscode/src/ideTerminal.ts"),
+        include_str!("../../editors/vscode/src/reliableSyncLiveness.ts"),
+        include_str!("../../editors/vscode/src/activationReceipt.ts"),
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
     const ZED_LSP_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/lib.rs");
     const EDITORS_SPEC: &str = include_str!("../../editors/SPEC.md");
     const VSCODE_MANIFEST: &str = include_str!("../../editors/vscode/package.json");
+    const PLUGIN_INSTALL_SOURCE: &str = include_str!("../../src/plugin.rs");
+    const VSCODE_REMOTE_SMOKE: &str = "scripts/vscode-remote-smoke.py";
 
     #[derive(Debug)]
     struct FeatureParity<'a> {
@@ -440,12 +444,51 @@ mod tests {
         // Each gap the matrix states is pinned to the adapter source, so closing
         // the gap fails here until the matrix is updated in the same change.
         let declares_kind = VSCODE_MANIFEST.contains("\"extensionKind\"");
+        let declares_workspace = VSCODE_MANIFEST
+            .contains("\"extensionKind\": [\n    \"workspace\"\n  ]");
         assert_eq!(
             row("VS Code on Coder")[1].contains("`extensionKind` undeclared"),
             !declares_kind,
             "the VS Code remote row must match package.json's extensionKind declaration",
         );
+        assert_eq!(
+            row("VS Code on Coder")[1].contains("`\"extensionKind\": [\"workspace\"]`"),
+            declares_workspace,
+            "the VS Code remote row must match package.json's workspace-only placement",
+        );
         let vscode = VSCODE_SOURCES.concat();
+        assert_eq!(
+            row("VS Code local")[3].contains("`role=workspace`"),
+            vscode.contains(
+                "activation_receipt: currentWorkspaceActivationReceipt(nativeActivationFacts())"
+            ),
+            "the VS Code proof cell must match whether the registration carries its receipt",
+        );
+        assert_eq!(
+            row("VS Code on Coder")[2].contains("does not probe `code-server`"),
+            !PLUGIN_INSTALL_SOURCE.contains("VsCodeInstallTarget::cli(\"code-server\")"),
+            "the VS Code remote upgrade cell must match whether install probes code-server",
+        );
+        assert_eq!(
+            row("VS Code on Coder")[2].contains("Remote-SSH server under `~/.vscode-server`"),
+            PLUGIN_INSTALL_SOURCE.contains("\".vscode-server\",")
+                && PLUGIN_INSTALL_SOURCE.contains("\"--extensions-dir\""),
+            "the VS Code remote upgrade cell must match whether install reaches the Remote-SSH server",
+        );
+        let smoke_script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(VSCODE_REMOTE_SMOKE)
+            .is_file();
+        assert_eq!(
+            row("VS Code on Coder")[5].contains(&format!("`{VSCODE_REMOTE_SMOKE}`")),
+            smoke_script,
+            "the VS Code remote status must name the remote smoke test only while it exists",
+        );
+        assert_eq!(
+            row("VS Code on Coder")[5].contains("no remote smoke test"),
+            !smoke_script,
+            "the VS Code remote status must not claim a missing smoke test",
+        );
         assert_eq!(
             row("VS Code local")[4].contains("hard-coded to horizontal"),
             vscode.contains("const orientation: 'h' | 'v' = 'h';"),

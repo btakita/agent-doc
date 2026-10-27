@@ -309,12 +309,13 @@ fn print_plane(status: &ControllerReliableSyncStatusResponse) {
     );
     for registration in &status.registrations {
         println!(
-            "  {} pid={} {} {} {}",
+            "  {} pid={} {} {} {}{}",
             registration.editor_id,
             registration.pid,
             registration.editor_kind,
             registration.editor_version,
-            registration.path
+            registration.path,
+            activation_summary(registration)
         );
     }
     println!(
@@ -323,6 +324,23 @@ fn print_plane(status: &ControllerReliableSyncStatusResponse) {
     );
     for doc in &status.registry_open_docs {
         println!("  {doc}");
+    }
+}
+
+/// The registration's activation receipt, as one suffix of its status line.
+fn activation_summary(
+    registration: &agent_doc_reliable_sync_io::liveness::EditorRegistration,
+) -> String {
+    match registration.activation() {
+        None => String::new(),
+        Some(Ok(receipt)) => format!(
+            "  activation: role={} generation={} epoch={} impl={}",
+            receipt.role.as_str(),
+            receipt.generation,
+            receipt.epoch,
+            receipt.impl_version.as_deref().unwrap_or("none"),
+        ),
+        Some(Err(error)) => format!("  activation: unreadable ({error})"),
     }
 }
 
@@ -557,6 +575,25 @@ mod tests {
     }
 
     #[test]
+    fn status_line_reports_the_workspace_activation_receipt() {
+        let mut vscode = registration("/p/a.md", "0.2.84");
+        assert_eq!(activation_summary(&vscode), "");
+        vscode.activation_receipt = Some(
+            "agent_doc_activation_receipt/v1 role=workspace jvm=u shell=s spi=0 impl_version=0.35.500 impl_sha256=h generation=1 epoch=1"
+                .to_string(),
+        );
+        assert_eq!(
+            activation_summary(&vscode),
+            "  activation: role=workspace generation=1 epoch=1 impl=0.35.500"
+        );
+        vscode.activation_receipt = Some("agent_doc_activation_receipt/v1 role=workspace".into());
+        assert_eq!(
+            activation_summary(&vscode),
+            "  activation: unreadable (receipt is missing `spi`)"
+        );
+    }
+
+    #[test]
     fn rejected_observation_is_not_evaluated() {
         let status = status_with_visible(false, vec!["/p/a.md".to_string()]);
         assert!(project_visible_documents(Path::new("/p"), &status).is_none());
@@ -582,6 +619,7 @@ mod tests {
             editor_version: version.to_string(),
             capabilities: Vec::new(),
             timestamp_ms: 0,
+            activation_receipt: None,
         }
     }
 

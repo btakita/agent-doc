@@ -263,13 +263,13 @@ the last column below.
 |---|---|---|---|---|---|
 | JetBrains classic (242-261, local IDE) | One IDE JVM: the plugin jar and the JNA-loaded native library. | `agent-doc plugin install` uses the classic attach launcher, which runs a `DynamicPlugins` unload and reload on compatible builds and falls back to a restart prompt. Native derivations hot-reload. | Single process. The controller registration carries the plugin version; `#pluginactivationprobe` reads the loaded generation; a sticky restart balloon shows when the installed jar differs from the loaded one. | `window_layout` derivation from the frame's splitter coordinates. The rules are native, so changing them needs no restart. | supported; native hot reload conditional |
 | JetBrains split mode (exact 262 / exact 263) | Two JVMs with one ZIP installed on both. The Remote Dev backend runs `agent.doc.backend` and the native library. The JetBrains Client runs `agent.doc.frontend`, which measures the main window. `agent.doc.shared` holds the Fleet RPC contract. | Restart-only: the 263.7031.23 module-graph refusal (GH #299), and no cross-JVM handoff to the frontend (GH #333, GH #339 decision). Marketplace is the only stock channel that updates both peers. Native derivations hot-reload while the source digest is unchanged. The proposed path is the shell plus child loader (R1-R4) under the `SHELL_ONLY` frontend policy. | Shipped: the backend holds `frontend_authority_absent_or_generation_mismatched` readiness. Designed, with a test-only spike: one receipt per JVM plus the backend/frontend activation fence. | `client_measured_layout` (GH #320 option B), forwarded through `jetbrains-rd@<installation>`. Zero-column routes use it (GH #376). Flat backend evidence is focus/liveness-only. | supported; plugin restart-bound; receipts designed, not shipped |
-| VS Code local | One Node extension host on the local machine: the TypeScript extension and the koffi-loaded native library. The renderer belongs to VS Code itself. | VSIX through `agent-doc plugin install vscode` (`cursor`, `codium` or `code --install-extension`). Since 1.88, VS Code offers to restart extensions instead of reloading the window after an update. The native library hot-reloads (per-mtime shadow copy and the `reload_library` intent). | Single process. Registration carries `EDITOR_PLUGIN_VERSION`, and About shows the loaded native generation. `installed_plugin_version` covers JetBrains only, so a VSIX that is installed but not yet running is not detected, and VS Code shows no prompt to reload. | Ordinal `tabGroups`/`viewColumn` columns, with the split orientation hard-coded to horizontal and no geometry. The `vscode.getEditorLayout` command is unused. The layout rules are TypeScript, not a native derivation, so changing them needs a reload. | supported; native hot reload conditional |
-| VS Code on Coder / remote | UI on the operator's machine (VS Code Desktop through the Coder Remote extension over Remote-SSH) or in the browser (code-server, VS Code Web). agent-doc must run in the remote (workspace) extension host, beside the agent-doc binary, `libagent_doc.so`, tmux and the controller. `package.json` leaves `extensionKind` undeclared. | Install into the workspace host: Coder documents `code --extensions-dir ~/.vscode-server/extensions --install-extension` and `code-server --install-extension`. The 1.88 notes say a remote connection still needs a window reload to update extensions. `agent-doc plugin install vscode` does not probe `code-server`. | As local: there is no agent-doc frontend half, so nothing has to be compared across processes. `vscode.env.remoteName` reaches the binary as `AGENT_DOC_VSCODE_REMOTE_NAME`. The installed-versus-running gap is the same as local. | Same API as local. VS Code proxies tab and editor state from the UI into the workspace host, so no frontend forward is needed. Same orientation and geometry gap. | documented in the Coder runbook; no remote smoke test |
+| VS Code local | One Node extension host on the local machine: the TypeScript extension and the koffi-loaded native library. The renderer belongs to VS Code itself. | VSIX through `agent-doc plugin install vscode` (`cursor`, `codium` or `code --install-extension`, plus any workspace host on the same machine, as in the next row). Since 1.88, VS Code offers to restart extensions instead of reloading the window after an update. The native library hot-reloads (per-mtime shadow copy and the `reload_library` intent). | Single process. Registration carries `EDITOR_PLUGIN_VERSION` and one `agent_doc_activation_receipt/v1` line with `role=workspace`: the sha256 of the loaded bundle as `shell`, the native library's version and sha256 as `impl_version` and `impl_sha256`, and the count of native loads as `generation` and `epoch`. A native reload re-sends the registration. `agent-doc reliable-sync-status` prints the parsed receipt. About shows the loaded native generation. `installed_plugin_version` covers JetBrains only, so a VSIX that is installed but not yet running is not detected, and VS Code shows no prompt to reload. | Ordinal `tabGroups`/`viewColumn` columns, with the split orientation hard-coded to horizontal and no geometry. The `vscode.getEditorLayout` command is unused. The layout rules are TypeScript, not a native derivation, so changing them needs a reload. | supported; native hot reload conditional |
+| VS Code on Coder / remote | UI on the operator's machine (VS Code Desktop through the Coder Remote extension over Remote-SSH) or in the browser (code-server, VS Code Web). agent-doc must run in the remote (workspace) extension host, beside the agent-doc binary, `libagent_doc.so`, tmux and the controller. `package.json` declares `"extensionKind": ["workspace"]`, so VS Code runs it there. | Install into the workspace host: Coder documents `code --extensions-dir ~/.vscode-server/extensions --install-extension` and `code-server --install-extension`. The 1.88 notes say a remote connection still needs a window reload to update extensions. `agent-doc plugin install vscode`, `plugin update` and `plugin list` reach the workspace host: `code-server` on `PATH`, and the newest Remote-SSH server under `~/.vscode-server` (or `$VSCODE_AGENT_FOLDER`), `~/.vscodium-server` or `~/.cursor-server`, through that server's own CLI with `--extensions-dir <root>/extensions`. | As local: one `role=workspace` receipt, because there is no agent-doc frontend half and nothing has to be compared across processes. `vscode.env.remoteName` reaches the binary, and the `agent-doc` terminal the extension creates, as `AGENT_DOC_VSCODE_REMOTE_NAME`. The installed-versus-running gap is the same as local. | Same API as local. VS Code proxies tab and editor state from the UI into the workspace host, so no frontend forward is needed. Same orientation and geometry gap. | documented in the Coder runbook; remote smoke test scripted (`scripts/vscode-remote-smoke.py`); its install, register and remote-host steps passed against a local code-server 4.143.1 and the VS Code Server 1.143.1 CLI, and it has not yet run on a Coder workspace |
 | Zed local | A sandboxed WASM extension (`wasm32-wasip2`) inside Zed, which only resolves the `agent-doc zed-lsp` command. The language server is a separate agent-doc process speaking LSP over stdio. | Zed watches its installed-extensions directory and reloads a changed extension, removing and re-registering its language servers, without restarting Zed. agent-doc ships only as a dev extension. A new agent-doc binary takes effect only when Zed starts the language server again. `zed-lsp` has no native hot reload. | The LSP `serverInfo.version` field. `replica_register` carries only `editor_pid`: no editor kind, plugin version or capabilities. | None. Neither the extension API nor LSP exposes panes, splits or the focused editor. | staged (all capabilities); native hot reload staged |
 | Zed remote | Zed UI locally. A headless Zed server on the remote, which must exactly match the local Zed version, runs language servers, tasks and terminals. Locally installed extensions (dev extensions by content fingerprint) are synced to the remote. `zed-lsp` resolves from the remote worktree `PATH`, so it runs beside the controller. | Zed syncs extensions by id and version and loads them on the remote host. Zed replaces its own remote server to match the client. The agent-doc binary on the remote behaves as in local. | Zed's extension sync compares versions, not activation. agent-doc adds nothing beyond local. | None (as local). | staged; not qualified |
 
-The VS Code facts are from `editors/vscode/package.json` and
-`editors/vscode/src/`. `agent-doc-document-realtime/src/editor_contract.rs`
+The VS Code facts are from `editors/vscode/package.json`,
+`editors/vscode/src/`, and the VS Code install targets in `src/plugin.rs`. `agent-doc-document-realtime/src/editor_contract.rs`
 pins the adapter facts this matrix states as gaps, so closing a gap fails that
 test until the matrix is updated. The Zed facts are from `editors/zed` and
 `agent-doc-zed-lsp-io`.
@@ -288,13 +288,14 @@ agent-doc this means:
   solves does not arise.
 - Layout evidence already reaches the workspace host.
 
-What VS Code on Coder lacks is the rest of the JetBrains parity work:
+VS Code on Coder now declares its workspace placement, reports a
+`role=workspace` activation receipt, and installs into the workspace host.
+What it still lacks is the rest of the JetBrains parity work:
 
-- a declared workspace placement;
 - a proof that the running extension host matches the installed VSIX, with a
   reload prompt (a remote connection needs a window reload);
 - geometry-aware layout capture behind a native derivation;
-- an install path that reaches the workspace host.
+- a run of the remote smoke test on a real Coder workspace.
 
 **What does Zed's overall architecture imply?** Zed is a native application, and
 its extensions are sandboxed WASM. The extension API covers languages, language
@@ -317,17 +318,21 @@ shell. Parity therefore depends on three things:
 - **JetBrains:** the R1-R4 migration in `editors/jetbrains/SPEC.md` (shell,
   receipts, live swap). That work is already tracked there.
 - **VS Code (local and Coder):**
-  - declare `"extensionKind": ["workspace"]`;
+  - done: declare `"extensionKind": ["workspace"]`;
   - detect that the installed extension differs from the running one, and
     offer the host's own reload (Restart Extensions locally, Reload Window
     remotely);
-  - add a single-role `agent_doc_activation_receipt/v1` line (`role=workspace`)
-    to the registration;
+  - done: add a single-role `agent_doc_activation_receipt/v1` line
+    (`role=workspace`) to the registration, parsed by the controller
+    (`agent_doc_reliable_sync_io::liveness::ActivationReceipt`);
   - capture orientation and group sizes through `vscode.getEditorLayout` and
     move the grouping rules behind `agent_doc_editor_derive_json`;
-  - make `agent-doc plugin install vscode` reach the workspace extension host
-    (`code-server` and the Remote-SSH server);
-  - add a Coder remote smoke test.
+  - done: make `agent-doc plugin install vscode` reach the workspace extension
+    host (`code-server` and the Remote-SSH server);
+  - scripted, not yet run on Coder: the remote smoke test
+    (`scripts/vscode-remote-smoke.py`: install, register, remote host, tmux
+    attach, `remoteName`, layout sync; procedure in
+    `runbooks/coder-workspace.md`).
 - **Zed (local and remote):**
   - register kind, version and capabilities;
   - add a `zed-lsp` binary-generation swap, or a restart prompt;

@@ -17,12 +17,15 @@ import { randomUUID } from 'crypto';
 // esbuild inlines this at build time from the pinned lazily-js package (same
 // resolution the state-graph-mirror import uses).
 import { OrSet } from '@lazily-hub/lazily-js';
+import { currentWorkspaceActivationReceipt } from './activationReceipt.js';
 import {
     documentIdForPath,
     EDITOR_CAPABILITY_LIST,
     EDITOR_PLUGIN_KIND,
     EDITOR_PLUGIN_VERSION,
     isSessionDocument,
+    nativeActivationFacts,
+    onNativeGenerationChanged,
     reliableSyncLivenessEnqueue,
     reliableSyncLivenessFlush,
     resolveProjectPath,
@@ -30,9 +33,29 @@ import {
 
 /** This editor's open-set as lazily-js `OrSet`s, one per `document_hash`. */
 class LivenessGraph {
-    private readonly docs = new Map<string, { orSet: any; tags: string[] }>();
+    private readonly docs = new Map<string, { orSet: any; tags: string[]; path: string; editorId: string }>();
 
     constructor(private readonly pid: number) {}
+
+    /**
+     * The registration for one open document. It carries this extension
+     * host's single `role=workspace` activation receipt (`activationReceipt.ts`).
+     */
+    private registration(documentHash: string, path: string, editorId: string): object {
+        return {
+            Register: {
+                document_hash: documentHash,
+                pid: this.pid,
+                path,
+                editor_id: editorId,
+                editor_kind: EDITOR_PLUGIN_KIND,
+                editor_version: EDITOR_PLUGIN_VERSION,
+                capabilities: [...EDITOR_CAPABILITY_LIST].sort(),
+                timestamp_ms: Date.now(),
+                activation_receipt: currentWorkspaceActivationReceipt(nativeActivationFacts()),
+            },
+        };
+    }
 
     /** Mark `documentHash` opened once; returns null for a duplicate IDE event. */
     open(documentHash: string, path: string, editorId: string): string | null {
@@ -40,26 +63,34 @@ class LivenessGraph {
         const tag = randomUUID();
         let state = this.docs.get(documentHash);
         if (!state) {
-            state = { orSet: new OrSet(), tags: [] };
+            state = { orSet: new OrSet(), tags: [], path, editorId };
             this.docs.set(documentHash, state);
         }
+        state.path = path;
+        state.editorId = editorId;
         state.orSet.add(tag);
         state.tags.push(tag);
         return JSON.stringify([
             { Open: { document_hash: documentHash, pid: this.pid, tag } },
-            {
-                Register: {
-                    document_hash: documentHash,
-                    pid: this.pid,
-                    path,
-                    editor_id: editorId,
-                    editor_kind: EDITOR_PLUGIN_KIND,
-                    editor_version: EDITOR_PLUGIN_VERSION,
-                    capabilities: [...EDITOR_CAPABILITY_LIST].sort(),
-                    timestamp_ms: Date.now(),
-                },
-            },
+            this.registration(documentHash, path, editorId),
         ]);
+    }
+
+    /**
+     * Re-send the registration of every open document, so the controller sees
+     * the activation receipt of the native generation now loaded. A later
+     * `timestamp_ms` supersedes the earlier registration.
+     */
+    reregisterOpen(): Array<[string, string]> {
+        const batches: Array<[string, string]> = [];
+        for (const [documentHash, state] of this.docs) {
+            if (state.orSet.present() !== true) continue;
+            batches.push([
+                documentHash,
+                JSON.stringify([this.registration(documentHash, state.path, state.editorId)]),
+            ]);
+        }
+        return batches;
     }
 
     /** Mark `documentHash` closed; returns the `Close` op batch JSON, or null. */
@@ -148,9 +179,17 @@ export function registerReliableSyncLiveness(
         });
     };
 
+    const reregister = () => {
+        for (const [documentHash, opsJson] of graph.reregisterOpen()) {
+            const root = projectRoots.get(documentHash);
+            if (root) push(root, documentHash, opsJson);
+        }
+    };
+
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(reportOpen),
         vscode.workspace.onDidCloseTextDocument(reportClose),
+        { dispose: onNativeGenerationChanged(reregister) },
     );
 
     // Activation can occur after VS Code has restored editor tabs, in which case

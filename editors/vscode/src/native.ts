@@ -78,6 +78,11 @@ let loaded = false;
 let loadAttempted = false;
 let loadedPath: string | null = null;
 let loadedMtime: number = 0;
+// Activation-receipt facts for the loaded native generation (`activationReceipt.ts`).
+let nativeGeneration = 0;
+let nativeVersion: string | null = null;
+let nativeSha256: string | null = null;
+const nativeGenerationListeners = new Set<() => void>();
 let currentLockFile: string | null = null;
 const stateGenerations = new Map<string, number>();
 
@@ -271,6 +276,58 @@ function findLibrary(projectRoot?: string): string | null {
     return null;
 }
 
+/**
+ * Load one native generation and start hashing the exact file it mapped, off
+ * the critical path: the digest joins the activation receipt when it is ready.
+ */
+function loadNativeGeneration(canonicalPath: string, mtime: number): any {
+    const file = shadowCopyForLoad(canonicalPath, mtime);
+    const loadedLib = koffi.load(file);
+    nativeGeneration += 1;
+    nativeVersion = null;
+    nativeSha256 = null;
+    const generation = nativeGeneration;
+    const hash = crypto.createHash('sha256');
+    const stream = fs.createReadStream(file);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('error', () => { /* the receipt keeps impl_sha256=none */ });
+    stream.on('end', () => {
+        if (generation !== nativeGeneration) return;
+        nativeSha256 = hash.digest('hex');
+        notifyNativeGeneration();
+    });
+    return loadedLib;
+}
+
+function notifyNativeGeneration(): void {
+    for (const listener of nativeGenerationListeners) {
+        try {
+            listener();
+        } catch (e: any) {
+            console.warn(`[agent-doc/native] generation listener failed: ${e.message}`);
+        }
+    }
+}
+
+/** A reload (not the first load) changes what the registration must report. */
+function announceNativeGeneration(): void {
+    if (nativeGeneration > 1) setImmediate(notifyNativeGeneration);
+}
+
+/** The loaded native generation, as the activation receipt reports it. */
+export function nativeActivationFacts(): { version: string | null; sha256: string | null; generation: number } {
+    return { version: nativeVersion, sha256: nativeSha256, generation: nativeGeneration };
+}
+
+/**
+ * Run `listener` whenever the receipt's native facts change: a reload, or the
+ * loaded file's digest becoming known. Returns an unsubscribe function.
+ */
+export function onNativeGenerationChanged(listener: () => void): () => void {
+    nativeGenerationListeners.add(listener);
+    return () => nativeGenerationListeners.delete(listener);
+}
+
 function ensureLoaded(projectRoot?: string): boolean {
     if (loaded) {
         if (loadedPath && libMtimeChanged(loadedPath, loadedMtime)) {
@@ -279,10 +336,11 @@ function ensureLoaded(projectRoot?: string): boolean {
             resetBindings();
             try {
                 const currentMtime = fs.statSync(loadedPath).mtimeMs;
-                lib = koffi.load(shadowCopyForLoad(loadedPath, currentMtime));
+                lib = loadNativeGeneration(loadedPath, currentMtime);
                 loadedMtime = currentMtime;
                 writePidLock(loadedPath);
                 verifyVersion(loadedPath);
+                announceNativeGeneration();
             } catch (e: any) {
                 console.log(`[agent-doc/native] reload failed, keeping previous: ${e.message}`);
             }
@@ -308,11 +366,12 @@ function ensureLoaded(projectRoot?: string): boolean {
     try {
         loadedPath = libPath;
         loadedMtime = fs.statSync(libPath).mtimeMs;
-        lib = koffi.load(shadowCopyForLoad(libPath, loadedMtime));
+        lib = loadNativeGeneration(libPath, loadedMtime);
         loaded = true;
         writePidLock(libPath);
         process.on('exit', removePidLock);
         verifyVersion(libPath);
+        announceNativeGeneration();
         return true;
     } catch (e: any) {
         console.log(`[agent-doc/native] failed to load ${libPath}: ${e.message}`);
@@ -343,10 +402,11 @@ export function forceReloadLib(projectRoot?: string): boolean {
         removePidLock();
         resetBindings();
         const currentMtime = fs.statSync(target).mtimeMs;
-        lib = koffi.load(shadowCopyForLoad(target, currentMtime));
+        lib = loadNativeGeneration(target, currentMtime);
         loadedMtime = currentMtime;
         writePidLock(target);
         verifyVersion(target);
+        announceNativeGeneration();
         console.log(`[agent-doc/native] forceReload: reloaded from ${target}`);
         return true;
     } catch (e: any) {
@@ -801,6 +861,7 @@ function verifyVersion(libPath: string): void {
         if (ptr) {
             const version = koffi.decode(ptr, 'char', -1);
             _free_string(ptr);
+            nativeVersion = version;
             console.log(`[agent-doc/native] loaded libagent_doc v${version} from ${libPath}`);
         } else {
             console.log(`[agent-doc/native] agent_doc_version() returned null — possible ABI mismatch at ${libPath}`);

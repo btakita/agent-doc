@@ -706,6 +706,7 @@ pub fn seed_reliable_sync_editor_registration(file: &Path, tag: &str, capabiliti
                     .map(|capability| (*capability).to_string())
                     .collect(),
                 timestamp_ms,
+                activation_receipt: None,
             },
         ),
     ];

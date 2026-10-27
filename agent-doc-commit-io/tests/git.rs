@@ -6184,6 +6184,7 @@ Duplicate replay should stay live.
                             agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),
                         ],
                         timestamp_ms,
+                        activation_receipt: None,
                     },
                 ),
             ]);

@@ -6087,6 +6087,7 @@ mod tests {
                             agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY.to_string(),
                         ],
                         timestamp_ms: 1,
+                        activation_receipt: None,
                     },
                 ),
             ];

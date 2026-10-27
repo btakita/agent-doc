@@ -1239,6 +1239,7 @@ mod gh131nonipc_tests {
             editor_version: "test".to_string(),
             capabilities: Vec::new(),
             timestamp_ms: 42,
+            activation_receipt: None,
         };
         let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
         plane.apply_local(&LivenessOp::Open {

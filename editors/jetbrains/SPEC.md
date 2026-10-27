@@ -1735,6 +1735,17 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   project frame is inactive are inert. The process-wide AWT listener is paired with project/plugin
   disposal. Consecutive events for the same markdown path are deduped locally, but alternating paths
   such as A -> B -> A must each attempt the Project Controller focus handoff.
+- Installing split-editor focus sync must not require the editor split tree to exist yet. On
+  IntelliJ 2026.3 (263) `projectOpened` can run before the platform assigns
+  `FileEditorManagerImpl.mainSplitters`, and `getSplitters()` then throws
+  `UninitializedPropertyAccessException`. The install treats that exception, and
+  only that one, as "not built yet": the editor focus and editor-mouse listeners attach
+  immediately, and the editor-tree listener plus its seed of the already-focused split wait for
+  the project's first `FileEditorManager` `fileOpened` or `selectionChanged` event, attach once,
+  and then drop that subscription. Every event-time read of the split tree uses the same guard.
+  A focus-sync install that still fails is disposed, logged at error level, and left unrecorded so
+  a later install can retry; it must never abort the remaining `projectOpened` startup steps.
+  Platform cancellation still propagates.
 - Local operator splices are retained immediately but published after a 250 ms trailing quiet window, coalescing human typing bursts into one ordered durable push, broadcast, and settled projection while preserving the existing per-document retry fence.
 - The structural layout-change detector only reports a new editor surface observation into `EditorTabSyncListener`; it has no second CLI planner, lock, or tmux process. The JetBrains/native boundary validates and enqueues that observation without waiting for a controller probe or tmux consequence. One delivery worker serializes publications and controller-root handoff off the EDT; each controller's process-scoped graph replaces any not-yet-started surface with the newest one. Tab selection and structural changes therefore share one latest-wins surface graph, while component focus uses only the separate selection lane, without letting a blocked controller call freeze or disable the IDE bridge.
 - A failed editor-surface publication remains generation-fenced retry work. The

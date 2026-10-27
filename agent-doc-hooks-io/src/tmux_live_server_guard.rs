@@ -18,8 +18,9 @@
 //! its tmux client exited. The subagent's own `env.sh` did `unset TMUX`, but
 //! the cleanup command did not source it.
 //!
-//! The guard is narrow by design. It inspects shell commands only (`Bash`, and
-//! Grok Build's `run_terminal_command`/`Shell`, see [`SHELL_TOOL_NAMES`]), and only
+//! The guard is narrow by design. It inspects shell commands only (`Bash`, Grok
+//! Build's `run_terminal_command`, Cursor's `Shell`, OpenCode's `bash`, see
+//! [`SHELL_TOOL_NAMES`]), and only
 //! the commands that destroy tmux state: any `kill*` command (`kill-server`,
 //! `kill-session`, `kill-window`, `kill-pane`, `killp`, `killw`), and
 //! `respawn*`/`unlink*` with `-k`. It also inspects `pkill`/`killall` patterns
@@ -189,8 +190,10 @@ const MAX_SHELL_DEPTH: usize = 4;
 /// name, `run_terminal_command`, or `Shell` under its Cursor preset; it maps
 /// Claude names only in a `matcher`, never in the payload. Matching `Bash`
 /// alone left the guard loaded and inert in every Grok pane
-/// (`#tmuxguardclaudeuser`).
-pub const SHELL_TOOL_NAMES: &[&str] = &["Bash", "run_terminal_command", "Shell"];
+/// (`#tmuxguardclaudeuser`). Cursor reports `Shell`, both for its own hooks and
+/// for Claude settings hooks it imports. OpenCode's shell tool is `bash`, which
+/// agent-doc's OpenCode plugin adapter forwards as the tool name.
+pub const SHELL_TOOL_NAMES: &[&str] = &["Bash", "run_terminal_command", "Shell", "bash"];
 
 /// Whether `tool_name` is a harness shell tool this guard inspects.
 pub fn is_shell_tool(tool_name: &str) -> bool {
@@ -887,7 +890,7 @@ mod tests {
     #[test]
     fn grok_shell_tool_names_are_inspected_like_bash() {
         let ambient = inside_tmux();
-        for tool in ["run_terminal_command", "Shell"] {
+        for tool in ["run_terminal_command", "Shell", "bash"] {
             assert!(
                 matches!(
                     tmux_live_server_decision(

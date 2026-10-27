@@ -37,28 +37,75 @@ tmux, and tmux resolves the server as `-L`/`-S`, then `$TMUX`, then
 every Claude and Codex pane, and kitty, which runs `kitty -e tmux` and closed
 when its client exited.
 
-The `PreToolUse` command installed for Claude Code and Codex
-(`agent-doc hook coined-id-pre-tool-use`) runs this guard first, before the
-coined-id guard, in every pane, with or without a session document.
-`agent-doc skill install` wires it for both harnesses (`#tmuxguardclaudeinstall`):
-for Claude Code into the project's `.claude/settings.json`, and for Codex into
-the user-level `$CODEX_HOME/hooks.json` beside the other agent-doc Codex hooks.
-The entry has no matcher, because the handler filters by tool name itself. The
-install merges it: the operator's own `PreToolUse` entries, their matchers, and
-unrelated settings survive, and a re-run adds no duplicate. A Claude project
-where `agent-doc skill install --harness claude` never ran has no guard; the
-install does not write the operator's user-level `~/.claude/settings.json`.
+The `PreToolUse` command (`agent-doc hook coined-id-pre-tool-use`) runs this
+guard first, before the coined-id guard, in every pane, with or without a
+session document. A bare-root `agent-doc skill install` (no `--root`; `--all`
+covers every harness; `agent-doc init` runs the same install) wires it into each harness's user layer, so it covers
+every project on the machine, governed by a session document or not
+(`#tmuxguardclaudeinstall`, `#tmuxguardclaudeuser`):
+
+- **Claude Code:** `~/.claude/settings.json` (`$CLAUDE_CONFIG_DIR/settings.json`
+  when set) gets an unmatched `PreToolUse` entry and nothing else. The
+  consequential hooks (preflight, Stop, steering) stay project-scoped in
+  `.claude/settings.json`, which also keeps its own copy of the guard. Claude
+  Code runs a handler defined in more than one settings file once, so the two
+  copies do not double. The user layer also reaches subagents: settings-file
+  hooks fire for a subagent's tool calls.
+- **Codex:** `$CODEX_HOME/hooks.json`, beside the other agent-doc Codex hooks.
+- **Grok Build:** no file of its own. Grok runs the hooks in
+  `~/.claude/settings.json` (always) and in a trusted project's
+  `.claude/settings.json`.
+- **Cursor:** a native `beforeShellExecution` entry
+  (`{"command": "agent-doc hook coined-id-pre-tool-use"}`) in
+  `~/.cursor/hooks.json`, with `"version": 1` added when the file has none.
+  Cursor also imports `~/.claude/settings.json` while its third-party import
+  setting is on (the default), so the guard can run twice per shell call
+  there; both copies reach the same decision. The native entry keeps the guard
+  when that import is off.
+- **OpenCode:** OpenCode has no command-hook config. The plugin
+  `plugins/agent-doc-tool-guard.js` in `~/.config/opencode`
+  (`$XDG_CONFIG_HOME/opencode` when set) handles `tool.execute.before`. For the
+  `bash` tool it pipes a `PreToolUse` payload (`tool_name: "bash"`,
+  `tool_input` = the tool's args, `cwd` = `workdir` resolved against the
+  session directory) to the same command and throws when it exits 2, which
+  blocks the call. Any other outcome lets the call run: `agent-doc` missing
+  from `PATH`, a spawn error, the 10s timeout, or another exit status.
+
+Every merge keeps the operator's own entries, their matchers, and unrelated
+settings, and a re-run adds no duplicate. A run with `--root` writes no user
+layer, and neither does a test process whose runtime scope excludes the user
+config dir. A Claude user file that already holds project hooks
+(preflight, Stop, steering) from an older `turn-status install --user` keeps
+them. The install names them on stderr instead of removing them:
+Claude Code runs a handler defined in two settings files once, and each stays
+silent without an agent-doc cycle. `agent-doc turn-status install --user`
+writes only the turn-status hooks (`turn-status active`/`idle`) into the
+Claude user layer. The full project set is `skill install`'s. OpenCode loads
+`{plugin,plugins}/*.{ts,js}` (1.19.4), but its docs name only `plugins/`, so
+agent-doc writes its plugins there and removes its own byte-identical copy
+from the singular `plugin/` dir. A copy the operator edited stays.
+
+The handler reads every payload shape these harnesses send:
+`tool_name`/`tool_input` (Claude Code, Codex, Cursor `preToolUse`, the OpenCode
+adapter), Grok's camelCase `toolName`/`toolInput` when the snake_case aliases
+are absent, and Cursor's `beforeShellExecution`, whose command is the
+top-level `command` string, read as a `Shell` call. A payload carrying
+`cursor_version` or naming `beforeShellExecution` is Cursor's. Cursor's docs
+say a permission hook blocks on output that is not valid JSON, and they do
+not say whether empty output counts. So the handler answers a Cursor payload
+with `{"permission":"allow"}` on stdout, or with
+`{"permission":"deny","user_message":…,"agent_message":…}` plus the reason
+on stderr and exit 2. Claude Code, Codex, Grok and OpenCode get no stdout.
 The guard behaves as follows:
 
 - **Scope.** Only shell commands: tool name `Bash` (Claude Code, Codex),
-  `run_terminal_command`, or `Shell` (`#tmuxguardclaudeuser`). Grok Build
-  runs the hooks in `~/.claude/settings.json` and, once a folder is trusted,
-  the project's `.claude/settings.json`, but its payload names its own shell
-  tool (`run_terminal_command`, `Shell` under its Cursor preset) in
-  `toolName`/`toolInput`, with `tool_name`/`tool_input` as aliases. Grok maps
-  Claude tool names only in a `matcher`. The handler reads both key spellings
-  and treats every shell tool name alike; otherwise the guard would load in a
-  Grok pane and allow everything. The guard follows quote-aware segments,
+  `run_terminal_command` (Grok Build), `Shell` (Cursor, and Grok's Cursor
+  preset), or `bash` (the OpenCode adapter). Grok runs hooks from Claude
+  settings files but puts its own tool name in the payload and maps Claude
+  names (`Bash`) only in a `matcher`. Cursor's docs map `Bash` to `Shell` and
+  show `Shell` in payloads, but do not say which name an imported Claude hook
+  receives, so both are accepted. Matching `Bash` alone loaded the guard in
+  Grok panes and allowed everything. The guard follows quote-aware segments,
   prefix assignments, `env`/`sudo`/`command`/`exec`/`nohup`/`timeout`/`nice`/
   `rtk proxy` wrappers, and `sh -c`/`bash -lc` scripts. It inspects the tmux
   commands that destroy state: any `kill*` (`kill-server`, `kill-session`,
@@ -86,6 +133,32 @@ The guard behaves as follows:
   both `env -u TMUX` and `-L <unique-name>` (or `-S <path>`) on every tmux
   command against a test server, setup and teardown included, and the refusal
   reason names that form.
+
+### Harness wiring verified against (`#tmuxguardclaudeuser`)
+
+The wiring above depends on each harness's hook config location, payload
+shape, tool names, and blocking contract. None of that is a stable interface,
+and two harnesses already diverged from Claude's payload while loading
+Claude's files. Each row records the harness version installed where the
+wiring was checked, and the doc source. "Not installed" means the row rests
+on the docs and the release source alone.
+
+| Harness | Version checked (2026-10-27) | Source |
+|---|---|---|
+| Claude Code | 2.1.310 (installed) | https://code.claude.com/docs/en/hooks: hook locations, merge across settings levels, "If you define the same handler in more than one settings file, it runs once", hooks run inside subagents, exit 2 blocks `PreToolUse` |
+| Codex CLI | 0.164.0 (installed) | https://learn.chatgpt.com/docs/hooks (formerly developers.openai.com/codex/hooks): `~/.codex/hooks.json`, all layers load, shell tool "Match as `Bash`", exit 2 blocks |
+| Grok Build | 1.0.62 (installed) | bundled `~/.grok/docs/user-guide/10-hooks.md`: Hook Locations (`~/.claude/settings.json`, trusted project `.claude/settings.json`), Tool Name Aliases (matcher-only), Input (`toolName: "run_terminal_command"`, snake_case aliases), Exit Codes (2 denies) |
+| OpenCode | not installed; release v1.19.4 source | https://opencode.ai/docs/plugins/ (`plugins/` dirs, `tool.execute.before`, throw to block); `packages/plugin/src/index.ts` (`input.tool`, `output.args`), `packages/opencode/src/config/plugin.ts` (`{plugin,plugins}/*.{ts,js}`), `packages/opencode/src/tool/shell/id.ts` (tool id `bash`), `tool/shell/prompt.ts` (`command`, `workdir`) |
+| Cursor | not installed | https://cursor.com/docs/agent/hooks (`~/.cursor/hooks.json`, `beforeShellExecution` input `command`/`cwd`/`sandbox`, `preToolUse` `tool_name: "Shell"`, exit 2 blocks, invalid JSON blocks a permission hook); https://cursor.com/docs/reference/third-party-hooks (imports `~/.claude/settings.json` by default, maps `Bash` → `Shell`) |
+
+Re-verify the wiring for a harness whenever a new version of it ships:
+re-read its hook docs, run a payload for a destructive tmux command through
+the installed hook, and update this table. Where a harness's docs leave the
+payload uncertain, the adapter stays fail-open for everything except a
+recognized live-server kill. Cursor's empty-output case is the open
+uncertainty, and the explicit JSON reply above covers it. agent-doc has no
+mechanism today that reads harness versions, so nothing warns when a row goes
+stale; this rule is the reminder.
 
 The subagent brief (`agent-doc queue brief`) and the exchange-subagent dispatch
 guidance restate the full rule (`subagent_tmux_isolation_rule!`), including send-keys

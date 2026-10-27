@@ -1237,6 +1237,9 @@ fn install_codex_user_hook_artifacts() -> Result<()> {
     let Some(codex_dir) = codex_user_config_dir() else {
         return Ok(());
     };
+    if !user_layer_dir_writable(&codex_dir) {
+        return Ok(());
+    }
     install_codex_user_hook_artifacts_at(&codex_dir)
 }
 
@@ -1254,6 +1257,315 @@ fn codex_user_config_dir() -> Option<PathBuf> {
                 .filter(|value| !value.is_empty())
                 .map(|home| PathBuf::from(home).join(".codex"))
         })
+}
+
+/// Whether this process may write a harness's user-layer config dir.
+///
+/// Production processes have no test runtime scope, so this is always true.
+/// A test process is scoped to its temp tree: an install path that resolves the
+/// real `$HOME` (an `agent-doc init` or bare `skill install` driven by a test)
+/// skips the user layer instead of rewriting the operator's own config.
+fn user_layer_dir_writable(dir: &Path) -> bool {
+    agent_doc_fs::path_in_test_runtime_scope(dir)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Install the user-layer artifacts a bare-root install owns for `env`
+/// (`#codex-user-hook-owner`, `#tmuxguardclaudeuser`).
+fn install_user_hook_artifacts_for(env: agent_kit::detect::Environment) -> Result<()> {
+    use agent_kit::detect::Environment;
+    match env {
+        Environment::ClaudeCode => install_claude_user_hook_artifacts(),
+        Environment::Codex => install_codex_user_hook_artifacts(),
+        Environment::OpenCode => install_opencode_user_hook_artifacts(),
+        Environment::Cursor => install_cursor_user_hook_artifacts(),
+        _ => Ok(()),
+    }
+}
+
+fn install_user_hook_artifacts_all() -> Result<()> {
+    use agent_kit::detect::Environment;
+    for env in [
+        Environment::ClaudeCode,
+        Environment::Codex,
+        Environment::OpenCode,
+        Environment::Cursor,
+    ] {
+        install_user_hook_artifacts_for(env)?;
+    }
+    Ok(())
+}
+
+/// Claude Code's user config dir: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+fn claude_user_config_dir() -> Option<PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| home_dir().map(|home| home.join(".claude")))
+}
+
+fn install_claude_user_hook_artifacts() -> Result<()> {
+    let Some(dir) = claude_user_config_dir() else {
+        return Ok(());
+    };
+    if !user_layer_dir_writable(&dir) {
+        return Ok(());
+    }
+    install_claude_user_hook_artifacts_at(&dir)
+}
+
+/// `#tmuxguardclaudeuser`: the user layer gets ONLY the `PreToolUse` guard.
+///
+/// The live-tmux-server guard (`#tmuxkittyterminal`) protects the operator's
+/// tmux server from any Claude pane or subagent, governed by a session
+/// document or not, so it belongs in the layer every Claude project loads.
+/// The consequential admission/closeout hooks (preflight, Stop, steering) stay
+/// project-scoped in `.claude/settings.json`. Claude Code runs a handler that
+/// two settings files define once, so the project copy of the guard does not
+/// double it. Grok Build and Cursor also load `~/.claude/settings.json`, so the
+/// same entry guards their panes.
+pub(crate) fn install_claude_user_hook_artifacts_at(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("settings.json");
+    merge_hook_settings(&path, "settings.json", |hooks_map| {
+        ensure_codex_hook_command(
+            hooks_map,
+            "PreToolUse",
+            COINED_ID_PRETOOLUSE_COMMAND,
+            None,
+            None,
+        );
+    })?;
+    report_user_layer_project_hooks(&path);
+    Ok(())
+}
+
+/// Project-scoped agent-doc Claude commands found in a user-layer settings file.
+///
+/// An older `agent-doc turn-status install --user` wrote the full project hook
+/// set into `~/.claude/settings.json`. They are left in place, never stripped
+/// silently: Claude Code runs a handler defined in two settings files once, and
+/// each stays silent without an agent-doc cycle. The install names them so the
+/// operator can remove them by hand.
+pub(crate) fn user_layer_project_hooks(path: &Path) -> Vec<&'static str> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    let commands: Vec<String> = root
+        .get("hooks")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flat_map(|hooks| hooks.values())
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .filter_map(|entry| entry.get("hooks").and_then(serde_json::Value::as_array))
+        .flatten()
+        .filter_map(|hook| hook.get("command").and_then(serde_json::Value::as_str))
+        .map(str::to_string)
+        .collect();
+    [
+        PREFLIGHT_USER_PROMPT_COMMAND,
+        CLAUDE_STOP_COMMAND,
+        STEERING_POSTTOOLUSE_COMMAND,
+    ]
+    .into_iter()
+    .filter(|command| commands.iter().any(|found| found == command))
+    .collect()
+}
+
+fn report_user_layer_project_hooks(path: &Path) {
+    let found = user_layer_project_hooks(path);
+    if found.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[agent-doc] note: {} also carries project-scoped agent-doc hooks ({}), likely from an older `agent-doc turn-status install --user`. They are left in place: Claude Code runs a handler defined in two settings files once, and each stays silent without an agent-doc cycle. Remove them by hand to keep them project-only.",
+        path.display(),
+        found.join(", ")
+    );
+}
+
+/// Read a JSON hook settings file (missing or blank = `{}`), let `merge` edit
+/// its `hooks` object, and write it back only on a real change.
+fn merge_hook_settings(
+    path: &Path,
+    label: &str,
+    merge: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Result<()> {
+    let mut root = if path.exists() {
+        let content =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .with_context(|| format!("parse {}", path.display()))?
+        }
+    } else {
+        serde_json::json!({})
+    };
+    let hooks = root
+        .as_object_mut()
+        .with_context(|| format!("{label} root must be an object"))?
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let hooks_map = hooks
+        .as_object_mut()
+        .with_context(|| format!("{label} `hooks` must be an object"))?;
+    merge(hooks_map);
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(path, &rendered)
+}
+
+/// OpenCode's user config dir: `$XDG_CONFIG_HOME/opencode`, else
+/// `~/.config/opencode`.
+fn opencode_user_config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|value| !value.is_empty())
+        .map(|dir| PathBuf::from(dir).join("opencode"))
+        .or_else(|| home_dir().map(|home| home.join(".config/opencode")))
+}
+
+fn install_opencode_user_hook_artifacts() -> Result<()> {
+    let Some(dir) = opencode_user_config_dir() else {
+        return Ok(());
+    };
+    if !user_layer_dir_writable(&dir) {
+        return Ok(());
+    }
+    install_opencode_user_hook_artifacts_at(&dir)
+}
+
+/// Plugin directory OpenCode documents (`plugins/`). OpenCode 1.19.4 loads
+/// `{plugin,plugins}/*.{ts,js}`, so the older singular `plugin/` still loads,
+/// but only `plugins/` is documented.
+const OPENCODE_PLUGIN_DIR: &str = "plugins";
+const OPENCODE_LEGACY_PLUGIN_DIR: &str = "plugin";
+const OPENCODE_TOOL_GUARD_PLUGIN_FILE: &str = "agent-doc-tool-guard.js";
+
+/// `#tmuxguardclaudeuser`: OpenCode has no command-hook config. Its plugin
+/// `tool.execute.before` hook (`input.tool`, `output.args`) can block a call by
+/// throwing. This adapter forwards the `bash` tool's call to the same
+/// `agent-doc hook coined-id-pre-tool-use` handler in the `PreToolUse` payload
+/// shape and throws when it exits 2. Every other outcome (agent-doc missing, a
+/// timeout, any other exit) lets the call run.
+pub(crate) const OPENCODE_TOOL_GUARD_PLUGIN: &str = r#"// agent-doc tool guard (#tmuxkittyterminal, #tmuxguardclaudeuser).
+// Auto-installed by `agent-doc skill install --harness opencode`. Before OpenCode
+// runs its `bash` tool, hand the call to `agent-doc hook coined-id-pre-tool-use`
+// in the PreToolUse payload shape. Exit status 2 means refused, so throw to block.
+// Anything else (agent-doc missing, a timeout, another exit) lets the call run.
+import { spawnSync } from "node:child_process"
+import { resolve } from "node:path"
+
+export const AgentDocToolGuard = async ({ directory }) => ({
+  "tool.execute.before": async (input, output) => {
+    if (input?.tool !== "bash") return
+    const args = output?.args ?? {}
+    const base = typeof directory === "string" && directory ? directory : process.cwd()
+    const payload = {
+      hook_event_name: "PreToolUse",
+      tool_name: "bash",
+      tool_input: args,
+      cwd: typeof args.workdir === "string" && args.workdir ? resolve(base, args.workdir) : base,
+    }
+    let result
+    try {
+      result = spawnSync("agent-doc", ["hook", "coined-id-pre-tool-use"], {
+        input: JSON.stringify(payload),
+        encoding: "utf8",
+        timeout: 10000,
+      })
+    } catch {
+      return
+    }
+    if (result && result.status === 2) {
+      throw new Error(String(result.stderr || "").trim() || "[agent-doc] blocked")
+    }
+  },
+})
+"#;
+
+pub(crate) fn install_opencode_user_hook_artifacts_at(dir: &Path) -> Result<()> {
+    let plugins = dir.join(OPENCODE_PLUGIN_DIR);
+    std::fs::create_dir_all(&plugins).with_context(|| format!("create {}", plugins.display()))?;
+    write_if_changed(
+        &plugins.join(OPENCODE_TOOL_GUARD_PLUGIN_FILE),
+        OPENCODE_TOOL_GUARD_PLUGIN,
+    )
+}
+
+/// Cursor's user config dir, `~/.cursor`.
+fn cursor_user_config_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".cursor"))
+}
+
+fn install_cursor_user_hook_artifacts() -> Result<()> {
+    let Some(dir) = cursor_user_config_dir() else {
+        return Ok(());
+    };
+    if !user_layer_dir_writable(&dir) {
+        return Ok(());
+    }
+    install_cursor_user_hook_artifacts_at(&dir)
+}
+
+/// `#tmuxguardclaudeuser`: a native Cursor `beforeShellExecution` entry in
+/// `~/.cursor/hooks.json`. Cursor also imports `~/.claude/settings.json` while
+/// its third-party import setting is on (the default); this entry keeps the
+/// guard when that setting is off. Cursor's own format is flat
+/// (`{"command": ...}` under the event, `"version": 1` at the root), unlike
+/// Claude's matcher groups. The handler recognizes Cursor's payload and answers
+/// with Cursor's JSON permission reply, exiting 2 on a refusal.
+pub(crate) fn install_cursor_user_hook_artifacts_at(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("hooks.json");
+    let mut root = if path.exists() {
+        let content =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str::<serde_json::Value>(&content)
+                .with_context(|| format!("parse {}", path.display()))?
+        }
+    } else {
+        serde_json::json!({})
+    };
+    let object = root
+        .as_object_mut()
+        .context("Cursor hooks.json root must be an object")?;
+    object
+        .entry("version")
+        .or_insert_with(|| serde_json::json!(1));
+    let hooks = object
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .context("Cursor hooks.json `hooks` must be an object")?;
+    let entries = hooks
+        .entry("beforeShellExecution")
+        .or_insert_with(|| serde_json::json!([]));
+    if !entries.is_array() {
+        *entries = serde_json::json!([]);
+    }
+    let entries = entries.as_array_mut().expect("array ensured above");
+    let present = entries.iter().any(|entry| {
+        entry.get("command").and_then(serde_json::Value::as_str)
+            == Some(COINED_ID_PRETOOLUSE_COMMAND)
+    });
+    if !present {
+        entries.push(serde_json::json!({ "command": COINED_ID_PRETOOLUSE_COMMAND }));
+    }
+    let rendered = ensure_trailing_newline(&serde_json::to_string_pretty(&root)?);
+    write_if_changed(&path, &rendered)
 }
 
 fn retire_codex_project_hook_commands(path: &Path) -> Result<()> {
@@ -1603,10 +1915,15 @@ export const AgentDocTurnStatus = async ({ $ }) => ({
 /// tests and `--dir`). Otherwise `user` selects each harness's user config dir,
 /// else the project-local (cwd) paths.
 pub fn install_turn_status_hooks(base: Option<&Path>, user: bool, tmux: bool) -> Result<()> {
+    // `#tmuxguardclaudeuser`: `--user` writes the user layer, which every Claude
+    // project loads, so it gets the turn-status hooks only. The consequential
+    // project hooks (preflight, Stop, steering, the tool guard's project copy)
+    // are `skill install`'s, and the user-layer guard is too.
+    let user_layer = base.is_none() && user && home_dir().is_some();
     // Claude — settings.json: UserPromptSubmit/Stop/SessionStart.
     let claude = turn_status_path(base, user, ".claude/settings.json", ".claude/settings.json");
     ensure_parent_dir(&claude)?;
-    merge_claude_turn_status_hooks(&claude)?;
+    merge_claude_turn_status_for_layer(&claude, user_layer)?;
     println!("[turn-status] claude   -> {}", claude.display());
 
     // Codex — hooks.json: UserPromptSubmit/Stop (Codex has no SessionStart event).
@@ -1619,12 +1936,12 @@ pub fn install_turn_status_hooks(base: Option<&Path>, user: bool, tmux: bool) ->
     let opencode = turn_status_path(
         base,
         user,
-        ".opencode/plugin/agent-doc-turn-status.js",
-        ".config/opencode/plugin/agent-doc-turn-status.js",
+        ".opencode/plugins/agent-doc-turn-status.js",
+        ".config/opencode/plugins/agent-doc-turn-status.js",
     );
     ensure_parent_dir(&opencode)?;
-    std::fs::write(&opencode, OPENCODE_TURN_STATUS_PLUGIN)
-        .with_context(|| format!("write {}", opencode.display()))?;
+    write_if_changed(&opencode, OPENCODE_TURN_STATUS_PLUGIN)?;
+    retire_legacy_opencode_plugin(&opencode)?;
     println!("[turn-status] opencode -> {}", opencode.display());
 
     println!("  start (UserPromptSubmit / chat.message)   -> {TURN_STATUS_ACTIVE_COMMAND}");
@@ -1651,6 +1968,73 @@ pub fn install_turn_status_hooks(base: Option<&Path>, user: bool, tmux: bool) ->
     } else {
         println!(
             "  visibility: enable the pane border to see it — `agent-doc turn-status install --tmux` (applies now), or add `set -g pane-border-status top` to your tmux config"
+        );
+    }
+    Ok(())
+}
+
+/// Claude turn-status merge for one settings layer. The user layer
+/// (`turn-status install --user`) gets only the turn-status hooks; a project
+/// file gets the full project set `skill install` writes.
+fn merge_claude_turn_status_for_layer(path: &Path, user_layer: bool) -> Result<()> {
+    if user_layer {
+        merge_claude_turn_status_only_hooks(path)?;
+        report_user_layer_project_hooks(path);
+        Ok(())
+    } else {
+        merge_claude_turn_status_hooks(path)
+    }
+}
+
+/// Only the turn-in-progress monitor hooks: `UserPromptSubmit` → active,
+/// `Stop` and `SessionStart` → idle.
+fn merge_claude_turn_status_only_hooks(path: &Path) -> Result<()> {
+    merge_hook_settings(path, "settings.json", |hooks_map| {
+        ensure_codex_hook_command(
+            hooks_map,
+            "UserPromptSubmit",
+            TURN_STATUS_ACTIVE_COMMAND,
+            None,
+            None,
+        );
+        ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None, None);
+        ensure_codex_hook_command(
+            hooks_map,
+            "SessionStart",
+            TURN_STATUS_IDLE_COMMAND,
+            None,
+            None,
+        );
+    })
+}
+
+/// Remove agent-doc's own copy of a plugin from OpenCode's legacy singular
+/// `plugin/` dir once the documented `plugins/` copy is written, so OpenCode
+/// (which loads both dirs) does not run it twice. A file whose content differs
+/// from what agent-doc writes is the operator's and stays.
+fn retire_legacy_opencode_plugin(current: &Path) -> Result<()> {
+    let (Some(file_name), Some(plugins_dir)) = (current.file_name(), current.parent()) else {
+        return Ok(());
+    };
+    if plugins_dir.file_name().and_then(|name| name.to_str()) != Some(OPENCODE_PLUGIN_DIR) {
+        return Ok(());
+    }
+    let Some(config_dir) = plugins_dir.parent() else {
+        return Ok(());
+    };
+    let legacy = config_dir.join(OPENCODE_LEGACY_PLUGIN_DIR).join(file_name);
+    let Ok(legacy_content) = std::fs::read_to_string(&legacy) else {
+        return Ok(());
+    };
+    let Ok(current_content) = std::fs::read_to_string(current) else {
+        return Ok(());
+    };
+    if legacy_content == current_content {
+        std::fs::remove_file(&legacy).with_context(|| format!("retire {}", legacy.display()))?;
+        eprintln!(
+            "[turn-status] retired {} (now {})",
+            legacy.display(),
+            current.display()
         );
     }
     Ok(())
@@ -1948,7 +2332,7 @@ fn ensure_trailing_newline(content: &str) -> String {
 /// When `root` is None, resolves to git superproject root (or CWD fallback).
 #[allow(dead_code)]
 pub fn install_at(root: Option<&Path>) -> Result<bool> {
-    let install_user_codex_hooks = root.is_none();
+    let install_user_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let env = detect_install_env();
     let updated = install_skill_for_env(env, resolved.as_deref())?;
@@ -1957,8 +2341,8 @@ pub fn install_at(root: Option<&Path>) -> Result<bool> {
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf(resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
-    if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
-        install_codex_user_hook_artifacts()?;
+    if install_user_hooks {
+        install_user_hook_artifacts_for(env)?;
     }
     retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(updated)
@@ -1984,7 +2368,7 @@ pub fn install_for_at(
     env: agent_kit::detect::Environment,
     root: Option<&Path>,
 ) -> Result<bool> {
-    let install_user_codex_hooks = root.is_none();
+    let install_user_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let updated = install_skill_for_env(env, resolved.as_deref())?;
     install_runbooks_for(env, resolved.as_deref())?;
@@ -1992,8 +2376,8 @@ pub fn install_for_at(
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_for(env, resolved.as_deref())?;
     install_env_artifacts(env, resolved.as_deref())?;
-    if install_user_codex_hooks && matches!(env, agent_kit::detect::Environment::Codex) {
-        install_codex_user_hook_artifacts()?;
+    if install_user_hooks {
+        install_user_hook_artifacts_for(env)?;
     }
     retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(updated)
@@ -2002,7 +2386,7 @@ pub fn install_for_at(
 /// Install the skill for all supported harnesses under an explicit root.
 /// A `None` root resolves to the superproject (or git toplevel) install root.
 pub fn install_all_at(root: Option<&Path>) -> Result<bool> {
-    let install_user_codex_hooks = root.is_none();
+    let install_user_hooks = root.is_none();
     let resolved = root.map(|p| p.to_path_buf()).or_else(resolve_root);
     let mut updated = grok::install(resolved.as_deref())?;
     for (env, _) in agent_kit::detect::Environment::all_skill_rel_paths("agent-doc") {
@@ -2013,8 +2397,8 @@ pub fn install_all_at(root: Option<&Path>) -> Result<bool> {
     retire_managed_runbook_mirrors(resolved.as_deref())?;
     install_okf_all(resolved.as_deref())?;
     install_env_artifacts_all(resolved.as_deref())?;
-    if install_user_codex_hooks {
-        install_codex_user_hook_artifacts()?;
+    if install_user_hooks {
+        install_user_hook_artifacts_all()?;
     }
     retire_managed_always_on_agents(resolved.as_deref())?;
     Ok(updated)
@@ -3424,6 +3808,258 @@ mod tests {
         assert!(pre.contains(&"operator-bash-audit".to_string()));
     }
 
+    fn read_json(path: &Path) -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn all_hook_commands(settings: &serde_json::Value) -> Vec<String> {
+        settings["hooks"]
+            .as_object()
+            .map(|events| {
+                events
+                    .keys()
+                    .flat_map(|event| hook_commands(settings, event))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `#tmuxguardclaudeuser`: the user layer gets the `PreToolUse` guard and
+    /// nothing else, once, beside the operator's own entries and settings.
+    #[test]
+    fn claude_user_hooks_wire_only_the_guard_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_claude = dir.path().join("claude-home");
+        std::fs::create_dir_all(&user_claude).unwrap();
+        std::fs::write(
+            user_claude.join("settings.json"),
+            serde_json::json!({
+                "theme": "dark",
+                "permissions": { "allow": ["Bash(ls:*)"] },
+                "hooks": {
+                    "PreToolUse": [{
+                        "matcher": "Bash",
+                        "hooks": [{ "type": "command", "command": "operator-safety-gate" }]
+                    }],
+                    "Stop": [{ "hooks": [{ "type": "command", "command": "operator-stop" }] }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        super::install_claude_user_hook_artifacts_at(&user_claude).unwrap();
+        let first = std::fs::read_to_string(user_claude.join("settings.json")).unwrap();
+        super::install_claude_user_hook_artifacts_at(&user_claude).unwrap();
+        let second = std::fs::read_to_string(user_claude.join("settings.json")).unwrap();
+        assert_eq!(first, second, "a re-run must not change the file");
+
+        let settings = read_json(&user_claude.join("settings.json"));
+        assert_eq!(settings["theme"], "dark");
+        assert_eq!(settings["permissions"]["allow"][0], "Bash(ls:*)");
+        let pre = hook_commands(&settings, "PreToolUse");
+        assert_eq!(
+            pre.iter()
+                .filter(|command| command.as_str() == COINED_ID_PRETOOLUSE_COMMAND)
+                .count(),
+            1,
+            "{settings:#}"
+        );
+        assert!(pre.contains(&"operator-safety-gate".to_string()));
+        let operator_entry = settings["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["hooks"][0]["command"] == "operator-safety-gate")
+            .unwrap();
+        assert_eq!(operator_entry["matcher"], "Bash");
+        let mut agent_doc_commands: Vec<String> = all_hook_commands(&settings)
+            .into_iter()
+            .filter(|command| command.starts_with("agent-doc"))
+            .collect();
+        agent_doc_commands.sort();
+        assert_eq!(
+            agent_doc_commands,
+            vec![COINED_ID_PRETOOLUSE_COMMAND.to_string()],
+            "the user layer carries the guard only: {settings:#}"
+        );
+        assert_eq!(
+            hook_commands(&settings, "Stop"),
+            vec!["operator-stop".to_string()]
+        );
+    }
+
+    /// A user file that already holds project hooks from an older
+    /// `turn-status install --user` keeps them; the install names them.
+    #[test]
+    fn claude_user_install_leaves_older_project_hooks_and_names_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_claude = dir.path().join("claude-home");
+        std::fs::create_dir_all(&user_claude).unwrap();
+        std::fs::write(
+            user_claude.join("settings.json"),
+            serde_json::json!({
+                "hooks": {
+                    "UserPromptSubmit": [{ "hooks": [
+                        { "type": "command", "command": TURN_STATUS_ACTIVE_COMMAND },
+                        { "type": "command", "command": PREFLIGHT_USER_PROMPT_COMMAND }
+                    ] }],
+                    "Stop": [{ "hooks": [
+                        { "type": "command", "command": CLAUDE_STOP_COMMAND }
+                    ] }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        super::install_claude_user_hook_artifacts_at(&user_claude).unwrap();
+
+        let path = user_claude.join("settings.json");
+        let commands = all_hook_commands(&read_json(&path));
+        for kept in [
+            PREFLIGHT_USER_PROMPT_COMMAND,
+            CLAUDE_STOP_COMMAND,
+            TURN_STATUS_ACTIVE_COMMAND,
+            COINED_ID_PRETOOLUSE_COMMAND,
+        ] {
+            assert!(commands.contains(&kept.to_string()), "{kept}: {commands:?}");
+        }
+        assert_eq!(
+            super::user_layer_project_hooks(&path),
+            vec![PREFLIGHT_USER_PROMPT_COMMAND, CLAUDE_STOP_COMMAND]
+        );
+    }
+
+    /// `#tmuxguardclaudeuser` add-on D: `turn-status install --user` writes the
+    /// turn-status hooks only. The project layer keeps the full set.
+    #[test]
+    fn turn_status_user_layer_writes_only_turn_status_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user/settings.json");
+        let project = dir.path().join("project/settings.json");
+        std::fs::create_dir_all(user.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+
+        super::merge_claude_turn_status_for_layer(&user, true).unwrap();
+        super::merge_claude_turn_status_for_layer(&user, true).unwrap();
+        super::merge_claude_turn_status_for_layer(&project, false).unwrap();
+
+        let user_settings = read_json(&user);
+        let mut user_commands = all_hook_commands(&user_settings);
+        user_commands.sort();
+        assert_eq!(
+            user_commands,
+            vec![
+                TURN_STATUS_ACTIVE_COMMAND.to_string(),
+                TURN_STATUS_IDLE_COMMAND.to_string(),
+                TURN_STATUS_IDLE_COMMAND.to_string(),
+            ],
+            "{user_settings:#}"
+        );
+        assert_eq!(
+            hook_commands(&user_settings, "SessionStart"),
+            vec![TURN_STATUS_IDLE_COMMAND.to_string()]
+        );
+
+        let project_commands = all_hook_commands(&read_json(&project));
+        for command in [
+            PREFLIGHT_USER_PROMPT_COMMAND,
+            CLAUDE_STOP_COMMAND,
+            STEERING_POSTTOOLUSE_COMMAND,
+            COINED_ID_PRETOOLUSE_COMMAND,
+        ] {
+            assert!(
+                project_commands.contains(&command.to_string()),
+                "{command}: {project_commands:?}"
+            );
+        }
+    }
+
+    /// The OpenCode adapter is a `tool.execute.before` plugin in the documented
+    /// `plugins/` dir that forwards only the `bash` tool and throws on exit 2.
+    #[test]
+    fn opencode_user_guard_plugin_installs_in_plugins_dir_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_opencode = dir.path().join("opencode");
+        super::install_opencode_user_hook_artifacts_at(&user_opencode).unwrap();
+        super::install_opencode_user_hook_artifacts_at(&user_opencode).unwrap();
+
+        let plugin = user_opencode.join("plugins/agent-doc-tool-guard.js");
+        let content = std::fs::read_to_string(&plugin).unwrap();
+        assert_eq!(content, super::OPENCODE_TOOL_GUARD_PLUGIN);
+        for needle in [
+            "\"tool.execute.before\"",
+            "input?.tool !== \"bash\"",
+            "tool_name: \"bash\"",
+            "tool_input: args",
+            "[\"hook\", \"coined-id-pre-tool-use\"]",
+            "result.status === 2",
+            "throw new Error",
+        ] {
+            assert!(content.contains(needle), "{needle} missing:\n{content}");
+        }
+        assert!(!user_opencode.join("plugin").exists());
+    }
+
+    /// The Cursor entry is Cursor's flat `beforeShellExecution` shape, added
+    /// once beside the operator's entries, with `version` kept or defaulted.
+    #[test]
+    fn cursor_user_hooks_wire_before_shell_execution_idempotently() {
+        let dir = tempfile::tempdir().unwrap();
+        let fresh = dir.path().join("fresh");
+        super::install_cursor_user_hook_artifacts_at(&fresh).unwrap();
+        let hooks = read_json(&fresh.join("hooks.json"));
+        assert_eq!(hooks["version"], 1);
+        assert_eq!(
+            hooks["hooks"]["beforeShellExecution"],
+            serde_json::json!([{ "command": COINED_ID_PRETOOLUSE_COMMAND }])
+        );
+
+        let existing = dir.path().join("existing");
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(
+            existing.join("hooks.json"),
+            serde_json::json!({
+                "version": 2,
+                "hooks": {
+                    "beforeShellExecution": [{ "command": "./hooks/approve.sh", "matcher": "curl" }],
+                    "afterFileEdit": [{ "command": "./hooks/format.sh" }]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        super::install_cursor_user_hook_artifacts_at(&existing).unwrap();
+        let first = std::fs::read_to_string(existing.join("hooks.json")).unwrap();
+        super::install_cursor_user_hook_artifacts_at(&existing).unwrap();
+        assert_eq!(
+            first,
+            std::fs::read_to_string(existing.join("hooks.json")).unwrap()
+        );
+        let hooks = read_json(&existing.join("hooks.json"));
+        assert_eq!(hooks["version"], 2);
+        assert_eq!(
+            hooks["hooks"]["afterFileEdit"][0]["command"],
+            "./hooks/format.sh"
+        );
+        let shell = hooks["hooks"]["beforeShellExecution"].as_array().unwrap();
+        assert_eq!(shell.len(), 2, "{hooks:#}");
+        assert_eq!(shell[0]["matcher"], "curl");
+        assert_eq!(shell[1]["command"], COINED_ID_PRETOOLUSE_COMMAND);
+    }
+
+    /// A test process never rewrites the real user config: outside the test
+    /// runtime scope the user layer is skipped.
+    #[test]
+    fn user_layer_writes_stay_inside_the_test_runtime_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(super::user_layer_dir_writable(&dir.path().join(".claude")));
+        assert!(!super::user_layer_dir_writable(Path::new(
+            "/agent-doc-test-no-such-home/.claude"
+        )));
+    }
+
     #[test]
     fn install_turn_status_hooks_all_harnesses_idempotent_and_preserves_existing() {
         let dir = tempfile::tempdir().unwrap();
@@ -3492,12 +4128,39 @@ mod tests {
         assert!(cmds(&codex, "Stop").contains(&TURN_STATUS_IDLE_COMMAND.to_string()));
 
         // OpenCode: plugin file wired to both turn-status commands via chat.message + session.idle.
-        let oc =
-            std::fs::read_to_string(dir.path().join(".opencode/plugin/agent-doc-turn-status.js"))
-                .unwrap();
+        let oc = std::fs::read_to_string(
+            dir.path()
+                .join(".opencode/plugins/agent-doc-turn-status.js"),
+        )
+        .unwrap();
         assert!(oc.contains("turn-status active"), "{oc}");
         assert!(oc.contains("session.idle"), "{oc}");
         assert!(oc.contains("turn-status idle"), "{oc}");
+    }
+
+    /// The turn-status plugin moves to OpenCode's documented `plugins/` dir;
+    /// agent-doc's exact old copy in `plugin/` is retired so it cannot run
+    /// twice, and an operator-edited copy stays.
+    #[test]
+    fn turn_status_retires_only_agent_docs_own_legacy_opencode_plugin() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".opencode/plugin/agent-doc-turn-status.js");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, super::OPENCODE_TURN_STATUS_PLUGIN).unwrap();
+        super::install_turn_status_hooks(Some(dir.path()), false, false).unwrap();
+        assert!(!legacy.exists(), "agent-doc's own legacy copy is retired");
+        assert!(
+            dir.path()
+                .join(".opencode/plugins/agent-doc-turn-status.js")
+                .exists()
+        );
+
+        std::fs::write(&legacy, "// operator edit\n").unwrap();
+        super::install_turn_status_hooks(Some(dir.path()), false, false).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&legacy).unwrap(),
+            "// operator edit\n"
+        );
     }
 
     #[test]

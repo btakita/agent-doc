@@ -29,6 +29,14 @@ fn agent_doc_cmd() -> Command {
     if std::env::var_os("AGENT_DOC_ROOT_CEILING_DIRECTORIES").is_none() {
         command.env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", std::env::temp_dir());
     }
+    // `#tmuxguardclaudeuser`: a raw `cargo test` exports no runtime scope, so a
+    // spawned bare `skill install` that missed `isolate_user_config` would
+    // rewrite the operator's real `~/.claude/settings.json` (observed
+    // 2026-10-27). Scope it to the temp dir as `make test` does; the install
+    // then skips any user layer outside it.
+    if std::env::var_os(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV).is_none() {
+        command.env(agent_doc_fs::TEST_RUNTIME_SCOPE_ENV, std::env::temp_dir());
+    }
     command
 }
 
@@ -34812,6 +34820,7 @@ fn test_cli_skill_install_creates_file() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1"); // Force ClaudeCode environment for deterministic path
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -34832,6 +34841,7 @@ fn test_cli_skill_check_after_install() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -34851,6 +34861,7 @@ fn test_cli_skill_install_idempotent() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -34858,6 +34869,7 @@ fn test_cli_skill_install_idempotent() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -34874,6 +34886,7 @@ fn test_cli_skill_install_reload_compact() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install", "--reload", "compact"]);
     let output = cmd.output().unwrap();
     assert!(
@@ -34896,6 +34909,7 @@ fn test_cli_skill_install_reload_restart_with_explicit_harness_and_root() {
     let tmp = tempfile::TempDir::new().unwrap();
 
     let mut cmd = agent_doc_cmd();
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install", "--harness", "claude", "--root"])
         .arg(tmp.path())
         .args(["--reload", "restart"]);
@@ -34926,6 +34940,18 @@ fn test_cli_skill_install_reload_restart_with_explicit_harness_and_root() {
 }
 
 /// Count `command` hooks equal to `command` under `event` in a harness hooks file.
+/// Point every harness user-config dir a bare `skill install` resolves at a
+/// throwaway home under `root`, so the install's user layer (`~/.claude`,
+/// `$CODEX_HOME`, `~/.config/opencode`, `~/.cursor`) never reaches the real one
+/// (`#tmuxguardclaudeuser`).
+fn isolate_user_config(cmd: &mut Command, root: &std::path::Path) {
+    let home = root.join("home");
+    cmd.env("HOME", &home)
+        .env("CODEX_HOME", home.join(".codex"))
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("XDG_CONFIG_HOME");
+}
+
 fn installed_hook_count(path: &std::path::Path, event: &str, command: &str) -> usize {
     let settings: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
@@ -34978,6 +35004,101 @@ fn test_cli_skill_install_claude_wires_the_pretooluse_tmux_guard() {
     );
 }
 
+/// `#tmuxguardclaudeuser`: a bare-root install writes the guard into each
+/// harness's user layer: only the guard for Claude, the `tool.execute.before`
+/// plugin for OpenCode, the `beforeShellExecution` entry for Cursor. A re-run
+/// adds no duplicate.
+#[test]
+fn test_cli_bare_skill_install_wires_the_user_layer_guard_for_each_harness() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let guard = "agent-doc hook coined-id-pre-tool-use";
+    for harness in [
+        "claude", "opencode", "cursor", "claude", "opencode", "cursor",
+    ] {
+        let mut cmd = agent_doc_cmd();
+        cmd.current_dir(tmp.path());
+        isolate_user_config(&mut cmd, tmp.path());
+        cmd.args(["skill", "install", "--harness", harness])
+            .assert()
+            .success();
+    }
+
+    let claude = home.join(".claude/settings.json");
+    assert_eq!(installed_hook_count(&claude, "PreToolUse", guard), 1);
+    let claude_settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&claude).unwrap()).unwrap();
+    assert_eq!(
+        claude_settings["hooks"].as_object().unwrap().len(),
+        1,
+        "the Claude user layer carries the PreToolUse guard only: {claude_settings:#}"
+    );
+    assert_eq!(
+        installed_hook_count(
+            &tmp.path().join(".claude/settings.json"),
+            "PreToolUse",
+            guard
+        ),
+        1,
+        "the project keeps its own copy"
+    );
+
+    let plugin =
+        fs::read_to_string(home.join(".config/opencode/plugins/agent-doc-tool-guard.js")).unwrap();
+    assert!(plugin.contains("\"tool.execute.before\""), "{plugin}");
+    assert!(plugin.contains("coined-id-pre-tool-use"), "{plugin}");
+
+    let cursor: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(home.join(".cursor/hooks.json")).unwrap())
+            .unwrap();
+    assert_eq!(cursor["version"], 1);
+    assert_eq!(
+        cursor["hooks"]["beforeShellExecution"],
+        serde_json::json!([{ "command": guard }])
+    );
+}
+
+/// `#tmuxguardclaudeuser` add-on D: `turn-status install --user` writes only
+/// the turn-status hooks into the Claude user layer.
+#[test]
+fn test_cli_turn_status_install_user_writes_only_turn_status_hooks() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let mut cmd = agent_doc_cmd();
+    cmd.current_dir(tmp.path());
+    isolate_user_config(&mut cmd, tmp.path());
+    cmd.args(["turn-status", "install", "--user"])
+        .assert()
+        .success();
+
+    let settings: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(tmp.path().join("home/.claude/settings.json")).unwrap(),
+    )
+    .unwrap();
+    let mut commands: Vec<String> = settings["hooks"]
+        .as_object()
+        .unwrap()
+        .values()
+        .flat_map(|entries| entries.as_array().cloned().unwrap_or_default())
+        .flat_map(|entry| entry["hooks"].as_array().cloned().unwrap_or_default())
+        .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+        .collect();
+    commands.sort();
+    commands.dedup();
+    assert_eq!(
+        commands,
+        vec![
+            "agent-doc turn-status active".to_string(),
+            "agent-doc turn-status idle".to_string()
+        ],
+        "{settings:#}"
+    );
+    assert!(
+        tmp.path()
+            .join("home/.config/opencode/plugins/agent-doc-turn-status.js")
+            .exists()
+    );
+}
+
 /// `#tmuxguardclaudeinstall`: the Codex install wires the same guard into the
 /// user-level `$CODEX_HOME/hooks.json`, the layer that owns agent-doc's Codex
 /// hooks, and a re-run adds no duplicate.
@@ -35016,6 +35137,7 @@ fn test_skill_md_contains_required_steps() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -35174,6 +35296,7 @@ fn test_codex_skill_install_writes_hook_artifacts() {
     .unwrap();
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.env("CODEX_CLI", "1");
     cmd.env("CODEX_HOME", &codex_home);
     cmd.env_remove("CLAUDE_CODE");
@@ -35298,6 +35421,7 @@ fn test_opencode_skill_install_preserves_operator_authority_instructions() {
     cmd.env_remove("CLAUDE_CODE");
     cmd.env_remove("CLAUDE_CODE_ENTRYPOINT");
     cmd.env_remove("CODEX_CLI");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 
@@ -35331,6 +35455,7 @@ fn test_skill_md_references_valid_commands() {
     let mut cmd = agent_doc_cmd();
     cmd.current_dir(tmp.path());
     cmd.env("CLAUDE_CODE", "1");
+    isolate_user_config(&mut cmd, tmp.path());
     cmd.args(["skill", "install"]);
     cmd.assert().success();
 

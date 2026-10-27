@@ -459,26 +459,84 @@ pub fn document_ids(cwd: &Path, pane: Option<&str>) -> DocumentIds {
     }
 }
 
-/// The tool name and input of a `PreToolUse` payload.
+/// One harness `PreToolUse` call, normalized across payload shapes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    /// The harness's own tool name (`Bash`, `run_terminal_command`, `Shell`, `bash`).
+    pub name: String,
+    /// The tool's arguments; `Null` when the payload carries none.
+    pub input: serde_json::Value,
+    /// The payload came from Cursor, which reads a permission reply on stdout.
+    pub cursor: bool,
+}
+
+/// Normalize a `PreToolUse` payload from any harness that runs this hook
+/// (`#tmuxguardclaudeuser`).
 ///
-/// Claude Code and Codex send `tool_name`/`tool_input`. Grok Build sends
-/// camelCase `toolName`/`toolInput` and documents the snake_case spelling as an
-/// alias; reading both keeps the guard from going inert on a payload that
-/// carries only the camelCase keys (`#tmuxguardclaudeuser`).
-pub fn tool_call_fields<'a>(
-    input: &'a serde_json::Value,
-    empty: &'a serde_json::Value,
-) -> (&'a str, &'a serde_json::Value) {
-    let tool_name = input
-        .get("tool_name")
-        .or_else(|| input.get("toolName"))
+/// * Claude Code and Codex: `tool_name`/`tool_input`.
+/// * Grok Build: camelCase `toolName`/`toolInput`, with the snake_case keys
+///   documented as aliases. The snake_case keys win when both exist.
+/// * OpenCode: agent-doc's own plugin adapter sends `tool_name`/`tool_input`
+///   from `tool.execute.before` (`input.tool`, `output.args`).
+/// * Cursor `preToolUse` (native, or a Claude settings hook Cursor imports):
+///   `tool_name`/`tool_input` with tool name `Shell`.
+/// * Cursor `beforeShellExecution`: no tool name; the command is the top-level
+///   `command` string. It is read as a `Shell` call with that command.
+///
+/// A Cursor payload is recognized by its `cursor_version` common field or a
+/// `beforeShellExecution` event name.
+pub fn parse_tool_call(payload: &serde_json::Value) -> ToolCall {
+    let event = payload
+        .get("hook_event_name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let tool_input = input
+    let cursor = payload.get("cursor_version").is_some() || event == "beforeShellExecution";
+    let name = payload
+        .get("tool_name")
+        .or_else(|| payload.get("toolName"))
+        .and_then(serde_json::Value::as_str);
+    let input = payload
         .get("tool_input")
-        .or_else(|| input.get("toolInput"))
-        .unwrap_or(empty);
-    (tool_name, tool_input)
+        .or_else(|| payload.get("toolInput"))
+        .cloned();
+    if name.is_none()
+        && cursor
+        && let Some(command) = payload.get("command").and_then(serde_json::Value::as_str)
+    {
+        return ToolCall {
+            name: "Shell".to_string(),
+            input: serde_json::json!({ "command": command }),
+            cursor,
+        };
+    }
+    ToolCall {
+        name: name.unwrap_or_default().to_string(),
+        input: input.unwrap_or(serde_json::Value::Null),
+        cursor,
+    }
+}
+
+/// The stdout reply for a Cursor permission hook. Cursor's docs say a
+/// permission hook blocks on output that is not valid JSON, so an allowed call
+/// answers explicitly rather than with silence.
+pub fn cursor_permission_reply(deny_reason: Option<&str>) -> String {
+    match deny_reason {
+        None => serde_json::json!({ "permission": "allow" }).to_string(),
+        Some(reason) => serde_json::json!({
+            "permission": "deny",
+            "user_message": reason,
+            "agent_message": reason,
+        })
+        .to_string(),
+    }
+}
+
+fn deny_and_exit(call: &ToolCall, reason: &str) -> ! {
+    if call.cursor {
+        println!("{}", cursor_permission_reply(Some(reason)));
+    }
+    eprintln!("{reason}");
+    std::process::exit(2);
 }
 
 /// `PreToolUse` entry point: read the harness payload on stdin, decide, and
@@ -498,17 +556,15 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
     let Ok(input) = serde_json::from_str::<serde_json::Value>(&payload) else {
         return Ok(());
     };
-    let empty = serde_json::Value::Null;
-    let (tool_name, tool_input) = tool_call_fields(&input, &empty);
+    let call = parse_tool_call(&input);
     if let PreToolUseDecision::Deny { reason } =
         crate::tmux_live_server_guard::tmux_live_server_decision(
-            tool_name,
-            tool_input,
+            &call.name,
+            &call.input,
             &crate::tmux_live_server_guard::TmuxAmbient::from_env(),
         )
     {
-        eprintln!("{reason}");
-        std::process::exit(2);
+        deny_and_exit(&call, &reason);
     }
     let cwd = input
         .get("cwd")
@@ -519,10 +575,13 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
     let pane = std::env::var("TMUX_PANE").ok();
     let ids = document_ids(&cwd, pane.as_deref());
     let root = agent_doc_fs::find_project_root(&cwd);
-    let decision = pretooluse_decision_in(tool_name, tool_input, &ids, root.as_deref(), Some(&cwd));
+    let decision =
+        pretooluse_decision_in(&call.name, &call.input, &ids, root.as_deref(), Some(&cwd));
     if let PreToolUseDecision::Deny { reason } = decision {
-        eprintln!("{reason}");
-        std::process::exit(2);
+        deny_and_exit(&call, &reason);
+    }
+    if call.cursor {
+        println!("{}", cursor_permission_reply(None));
     }
     Ok(())
 }
@@ -536,38 +595,114 @@ mod tests {
         ids.iter().map(|id| (*id).to_string()).collect()
     }
 
-    /// `#tmuxguardclaudeuser`: a Grok Build payload names the tool in camelCase
-    /// keys; the snake_case keys Claude and Codex send win when both exist.
+    /// `#tmuxguardclaudeuser`: every harness payload shape that runs this hook
+    /// normalizes to one tool call.
     #[test]
-    fn tool_call_fields_read_claude_and_grok_payload_keys() {
-        let empty = serde_json::Value::Null;
-        let claude = json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } });
+    fn parse_tool_call_reads_every_harness_payload_shape() {
+        let call = |name: &str, input: serde_json::Value, cursor: bool| ToolCall {
+            name: name.to_string(),
+            input,
+            cursor,
+        };
+        // Claude Code / Codex.
         assert_eq!(
-            tool_call_fields(&claude, &empty),
-            ("Bash", &json!({ "command": "ls" }))
+            parse_tool_call(&json!({
+                "hook_event_name": "PreToolUse",
+                "tool_name": "Bash",
+                "tool_input": { "command": "ls" }
+            })),
+            call("Bash", json!({ "command": "ls" }), false)
         );
-        let grok = json!({
-            "toolName": "run_terminal_command",
-            "toolInput": { "command": "tmux kill-server" }
-        });
+        // Grok Build: camelCase only, and snake_case winning when both exist.
         assert_eq!(
-            tool_call_fields(&grok, &empty),
-            (
+            parse_tool_call(&json!({
+                "toolName": "run_terminal_command",
+                "toolInput": { "command": "tmux kill-server" }
+            })),
+            call(
                 "run_terminal_command",
-                &json!({ "command": "tmux kill-server" })
+                json!({ "command": "tmux kill-server" }),
+                false
             )
         );
-        let both = json!({
-            "tool_name": "run_terminal_command",
-            "toolName": "ignored",
-            "tool_input": { "command": "a" },
-            "toolInput": { "command": "b" }
-        });
         assert_eq!(
-            tool_call_fields(&both, &empty),
-            ("run_terminal_command", &json!({ "command": "a" }))
+            parse_tool_call(&json!({
+                "tool_name": "run_terminal_command",
+                "toolName": "ignored",
+                "tool_input": { "command": "a" },
+                "toolInput": { "command": "b" }
+            })),
+            call("run_terminal_command", json!({ "command": "a" }), false)
         );
-        assert_eq!(tool_call_fields(&json!({}), &empty), ("", &empty));
+        // OpenCode plugin adapter.
+        assert_eq!(
+            parse_tool_call(&json!({
+                "hook_event_name": "PreToolUse",
+                "tool_name": "bash",
+                "tool_input": { "command": "tmux kill-server", "workdir": "/w" },
+                "cwd": "/w"
+            })),
+            call(
+                "bash",
+                json!({ "command": "tmux kill-server", "workdir": "/w" }),
+                false
+            )
+        );
+        // Cursor preToolUse.
+        assert_eq!(
+            parse_tool_call(&json!({
+                "hook_event_name": "preToolUse",
+                "cursor_version": "3.1.0",
+                "tool_name": "Shell",
+                "tool_input": { "command": "tmux kill-server", "working_directory": "/w" }
+            })),
+            call(
+                "Shell",
+                json!({ "command": "tmux kill-server", "working_directory": "/w" }),
+                true
+            )
+        );
+        // Cursor beforeShellExecution: the command is top-level.
+        assert_eq!(
+            parse_tool_call(&json!({
+                "hook_event_name": "beforeShellExecution",
+                "command": "tmux kill-server",
+                "cwd": "/w",
+                "sandbox": false
+            })),
+            call("Shell", json!({ "command": "tmux kill-server" }), true)
+        );
+        assert_eq!(
+            parse_tool_call(&json!({
+                "cursor_version": "3.1.0",
+                "command": "ls",
+                "cwd": "/w"
+            })),
+            call("Shell", json!({ "command": "ls" }), true)
+        );
+        // A non-Cursor payload's top-level `command` is not a tool call.
+        assert_eq!(
+            parse_tool_call(&json!({ "command": "tmux kill-server" })),
+            call("", serde_json::Value::Null, false)
+        );
+        assert_eq!(
+            parse_tool_call(&json!({})),
+            call("", serde_json::Value::Null, false)
+        );
+    }
+
+    /// Cursor blocks a permission hook whose stdout is not valid JSON, so the
+    /// allow path must answer explicitly, and a deny names the reason.
+    #[test]
+    fn cursor_permission_reply_is_valid_json_both_ways() {
+        let allow: serde_json::Value =
+            serde_json::from_str(&cursor_permission_reply(None)).unwrap();
+        assert_eq!(allow, json!({ "permission": "allow" }));
+        let deny: serde_json::Value =
+            serde_json::from_str(&cursor_permission_reply(Some("no"))).unwrap();
+        assert_eq!(deny["permission"], "deny");
+        assert_eq!(deny["user_message"], "no");
+        assert_eq!(deny["agent_message"], "no");
     }
 
     /// The durable case this exists for: writing a coined tag into source.

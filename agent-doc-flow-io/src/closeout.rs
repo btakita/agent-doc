@@ -23,8 +23,13 @@ pub trait CloseoutEffects {
         self.commit(file)
     }
 
-    fn crdt_commit_barrier(&self, file: &Path) -> Result<bool> {
-        agent_doc_controller_io::project_controller::commit_barrier_via_controller_model_for_doc(
+    /// The relay commit barrier's verdict, with its refusal reason
+    /// (`#inflighttypinghold` (3)).
+    fn crdt_commit_barrier(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_turn::commit_barrier::CommitBarrierVerdict> {
+        agent_doc_controller_io::project_controller::commit_barrier_verdict_via_controller_model_for_doc(
             file,
         )
     }
@@ -167,8 +172,8 @@ pub fn complete_required_closeout_with_options(
     // Under `CrdtAuthority::GitAuthoritative` (Detached / headless — most traffic)
     // this is a trivial no-op that touches no hub and leaves the commit path
     // byte-for-byte unchanged.
-    let barrier_ready = if options.force_disk {
-        true
+    let barrier = if options.force_disk {
+        agent_doc_turn::commit_barrier::CommitBarrierVerdict::Ready
     } else {
         effects.crdt_commit_barrier(file).with_context(|| {
             format!(
@@ -177,7 +182,7 @@ pub fn complete_required_closeout_with_options(
             )
         })?
     };
-    if !barrier_ready {
+    if let Some(refusal) = barrier.refusal() {
         log_closeout_guard_event(
             file,
             FlowStage::PreCommitGuard,
@@ -186,10 +191,9 @@ pub fn complete_required_closeout_with_options(
         );
         anyhow::bail!(
             "{}",
-            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(
-                file,
-                agent_doc_capture_io::retained_write_ownership(file),
-            )
+            agent_doc_git_io::live_buffer_guard::commit_barrier_refusal(file, refusal, || {
+                agent_doc_capture_io::retained_write_ownership(file)
+            })
         );
     }
 

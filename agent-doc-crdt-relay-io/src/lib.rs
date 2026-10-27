@@ -48,6 +48,7 @@
 //!   and publishes its complete visible projection. The commit barrier refuses a
 //!   MultiReplica closeout while any live target has unprojected delivery.
 
+pub use agent_doc_turn::commit_barrier::{CommitBarrierRefusal, CommitBarrierVerdict};
 use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -5439,9 +5440,16 @@ pub fn checkpoint_durable_projection_for_file(
 /// controller's commit Effect; it is not request/ACK authority for this
 /// transition.
 pub fn commit_barrier_for_file(file: &Path) -> bool {
+    commit_barrier_verdict_for_file(file).is_ready()
+}
+
+/// [`commit_barrier_for_file`] with the refusal reason (`#inflighttypinghold`
+/// (3)), so a refused commit can name a quarantined editor replica instead of
+/// the generic convergence wait.
+pub fn commit_barrier_verdict_for_file(file: &Path) -> CommitBarrierVerdict {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
-    commit_barrier_for_file_with_authority(file, authority)
+    commit_barrier_verdict_for_file_with_authority(file, authority)
 }
 
 /// [`commit_barrier_for_file`] with an explicitly-resolved authority — the
@@ -5449,6 +5457,14 @@ pub fn commit_barrier_for_file(file: &Path) -> bool {
 /// [`CrdtAuthority`] (e.g. from a backbone projection) should use this to avoid a
 /// second authority hydration/read.
 pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthority) -> bool {
+    commit_barrier_verdict_for_file_with_authority(file, authority).is_ready()
+}
+
+/// [`commit_barrier_for_file_with_authority`] with the refusal reason.
+pub fn commit_barrier_verdict_for_file_with_authority(
+    file: &Path,
+    authority: CrdtAuthority,
+) -> CommitBarrierVerdict {
     commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
 }
 
@@ -5459,6 +5475,11 @@ pub fn commit_barrier_for_file_with_authority(file: &Path, authority: CrdtAuthor
 /// asynchronously folded receipt Source and is derived by the controller before
 /// its native-save/commit Effect runs; the barrier does not wait for an ACK.
 pub fn commit_barrier_for_durable_response_cell(file: &Path) -> bool {
+    commit_barrier_verdict_for_durable_response_cell(file).is_ready()
+}
+
+/// [`commit_barrier_for_durable_response_cell`] with the refusal reason.
+pub fn commit_barrier_verdict_for_durable_response_cell(file: &Path) -> CommitBarrierVerdict {
     let file_str = file.display().to_string();
     let authority = authority_for_file(&file_str);
     commit_barrier_for_file_with_authority_and_delivery(file, authority, false)
@@ -5468,13 +5489,13 @@ fn commit_barrier_for_file_with_authority_and_delivery(
     file: &Path,
     authority: CrdtAuthority,
     require_delivery_convergence: bool,
-) -> bool {
+) -> CommitBarrierVerdict {
     if !authority.editor_attached() {
         // Detached / headless: the CRDT is ephemeral, git is the source of truth,
         // and there are no live editor replicas to flush. The barrier is trivially
         // satisfied and NO hub is touched — the headless path is byte-for-byte
         // unchanged.
-        return true;
+        return CommitBarrierVerdict::Ready;
     }
     match with_existing_hub(file, |hub| {
         // `#staleinmem` — reconcile an out-of-band disk correction only when no
@@ -5579,9 +5600,11 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                         live_editors,
                     ),
                 );
-                return false;
+                return CommitBarrierVerdict::Refused(CommitBarrierRefusal::QuarantinedReplica);
             }
-            ready && (!require_delivery_convergence || visible_delivery_projected)
+            CommitBarrierVerdict::from_ready(
+                ready && (!require_delivery_convergence || visible_delivery_projected),
+            )
         }
         Ok(Some(Err(e))) => {
             agent_doc_ops_log_io::log_op(
@@ -5592,7 +5615,7 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                     e
                 ),
             );
-            false
+            CommitBarrierVerdict::CONVERGENCE_PENDING
         }
         Ok(None) => {
             agent_doc_ops_log_io::log_op(
@@ -5602,7 +5625,7 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                     file.display(),
                 ),
             );
-            false
+            CommitBarrierVerdict::CONVERGENCE_PENDING
         }
         Err(e) => {
             agent_doc_ops_log_io::log_op(
@@ -5613,7 +5636,7 @@ fn commit_barrier_for_file_with_authority_and_delivery(
                     e
                 ),
             );
-            false
+            CommitBarrierVerdict::CONVERGENCE_PENDING
         }
     }
 }
@@ -14210,6 +14233,12 @@ mod tests {
             !commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
             "a quarantined live editor must refuse the commit barrier"
         );
+        // `#inflighttypinghold` (3): the refusal carries its reason, so the CLI
+        // can name the quarantine instead of the generic convergence wait.
+        assert_eq!(
+            commit_barrier_verdict_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            CommitBarrierVerdict::Refused(CommitBarrierRefusal::QuarantinedReplica)
+        );
         // `#clobberfollowups` (3): the current-text read reports the
         // quarantine, which `realtime_doc_resolve` renders as `diverged=true`.
         assert!(matches!(
@@ -14244,6 +14273,10 @@ mod tests {
         assert!(
             commit_barrier_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
             "the editor's roll-forward receipt releases the barrier"
+        );
+        assert_eq!(
+            commit_barrier_verdict_for_file_with_authority(&doc, CrdtAuthority::MultiReplica),
+            CommitBarrierVerdict::Ready
         );
         assert!(matches!(
             current_text_for_file_with_authority_nonblocking(&doc, CrdtAuthority::MultiReplica)

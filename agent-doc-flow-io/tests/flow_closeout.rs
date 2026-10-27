@@ -28,8 +28,13 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for LocalCrdtBarrierCloseoutEf
         agent_doc_closeout_runtime_io::closeout_effects().commit_for_authority(file, force_disk)
     }
 
-    fn crdt_commit_barrier(&self, file: &Path) -> Result<bool> {
-        Ok(agent_doc_crdt_relay_io::commit_barrier_for_file(file))
+    fn crdt_commit_barrier(
+        &self,
+        file: &Path,
+    ) -> Result<agent_doc_turn::commit_barrier::CommitBarrierVerdict> {
+        Ok(agent_doc_crdt_relay_io::commit_barrier_verdict_for_file(
+            file,
+        ))
     }
 
     fn run_pending_maintenance(
@@ -574,6 +579,56 @@ mod tests {
         assert!(
             !head.contains("typed before closeout"),
             "a pending editor projection is still downstream of the durable closeout intent:\n{head}"
+        );
+    }
+
+    /// `#inflighttypinghold` (3): a closeout whose commit the relay barrier
+    /// refuses over a quarantined live editor replica names the quarantine and
+    /// its remedy. It used to print "CRDT relay convergence is still pending",
+    /// whose wait-for-convergence remedy is wrong while that editor holds
+    /// operator text the canonical lacks.
+    #[test]
+    fn inflighttypinghold_closeout_refused_over_a_quarantined_replica_names_the_quarantine() {
+        let base = concat!(
+            "---\nagent_doc_format: template\nsession: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: base — gpt-5\n\nBase response.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        seed_live_reliable_sync_open(&doc);
+        let (editor, _bootstrap) =
+            agent_doc_crdt_relay_io::register_replica_for_file(&doc, "vscode:quarantined")
+                .unwrap()
+                .expect("the editor replica should register");
+        agent_doc_crdt_relay_io::with_hub(&doc, |hub| {
+            let canonical_hash = agent_doc_hash::content_hash(&hub.canonical_text());
+            hub.observe_delivery_projection(editor, &canonical_hash)
+                .unwrap();
+            // A CP write replaced the cut this editor typed over: its updates
+            // are quarantined until it rolls forward onto canonical.
+            hub.fence_registered_document_op_origins([editor]).unwrap();
+            assert_eq!(hub.quarantined_live_replicas(), vec![editor]);
+        })
+        .unwrap();
+        let head_before = agent_doc_git_io::revision::show_head(&doc).unwrap();
+
+        let error = complete_required_closeout_with_local_crdt_barrier(&doc)
+            .expect_err("a quarantined live replica must refuse the commit");
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("state=crdt_commit_barrier_refused_quarantined_replica")
+                && rendered.contains("replica is quarantined"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("convergence is still pending"),
+            "the generic convergence wait is the wrong remedy here: {rendered}"
+        );
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&doc).unwrap(),
+            head_before,
+            "nothing may be committed over the quarantined editor"
         );
     }
 

@@ -21365,6 +21365,8 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "agent_doc_crdt_relay_io::observe_replica_projection_for_file(",
         "agent_doc_crdt_relay_io::set_replica_awareness_for_file(",
         "agent_doc_crdt_relay_io::commit_barrier_for_file(",
+        // `#inflighttypinghold`: the verdict form is the same hub mutation.
+        "agent_doc_crdt_relay_io::commit_barrier_verdict_for_file(",
         "agent_doc_crdt_relay_io::record_committed_baseline_for_file(",
         "agent_doc_crdt_relay_io::reconcile_disk_projection_for_file(",
         "agent_doc_crdt_relay_io::route_disk_change_signal(",

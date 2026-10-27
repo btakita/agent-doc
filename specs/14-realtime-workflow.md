@@ -1778,6 +1778,44 @@ replacement replica.
   (`mark_terminal_roll_forward_refusal`), so its `admin recycle` remedy always
   renders.
 
+`#inflighttypinghold`. Three gaps the `#clobberfollowups` fix left open:
+
+- **The direct CLI CP-write path holds too.** `apply_canonical_replace_if_attached`
+  (the atomic-write, retained-settle and projected-capture paths and
+  `try_editor_converge` reach `apply_cp_write_for_file_scoped` through it,
+  in-process or over the controller RPC) had no hold: it
+  CAS'd its target against the visible relay text while the editor had
+  reported a burst over that text whose delta was still in flight. Before
+  issuing a CP write over a relay text other than the target, it now reads
+  the active op-capture epoch (`editor_ops_in_flight_over`) and, by the same
+  rule as the controller (below), waits in the caller's convergence loop
+  (`reason=awaiting_editor_ops`; ops log `{source}_crdt_write_held_for_editor_ops
+  ... pending_from=K pending_ops=N recovery=await_editor_delta_then_rebase`,
+  once per attested tip). When the delta lands, the relay text reaches the
+  tip and the ordinary rebase rolls the agent target forward onto the typing.
+  The wait shares the write's convergence deadline; on expiry nothing is
+  written. An unreadable ledger never holds
+  (`..._crdt_write_editor_ops_unreadable action=proceed_unheld`).
+- **A mid-epoch burst is held.** The hold used to require the epoch base to be
+  exactly the visible cut, so once an earlier delta of the same epoch landed
+  (the epoch continues: its base stays the text the first burst was typed
+  into) a later in-flight burst was not held. Both sites now share
+  `agent_doc_merge::crdt::editor_ops_in_flight_over_visible`: hold whenever
+  the visible text is a prefix state of the epoch, i.e. some suffix
+  `ops[K..]` replays from the visible text to the attested tip (`K = 0`
+  additionally requires the epoch base hash to name the visible text).
+  Shorter suffixes are tried first and the scan is budgeted
+  (`EDITOR_OPS_IN_FLIGHT_SCAN_BUDGET_BYTES`); past the budget it reports no
+  evidence. An epoch without lineage, a tip that is the visible text, or ops
+  that do not replay from it never hold.
+- **The commit refusal names the quarantine.** The relay barrier returns a
+  `CommitBarrierVerdict` (`ready`, or `refused` with `convergence_pending` |
+  `quarantined_replica`). The `crdt_commit_barrier` RPC carries it when the
+  request payload asks (`{"verdict":true}`); otherwise, and from a controller
+  that predates it, the data stays the legacy `bool`, which a new client reads
+  as `convergence_pending`. See the closeout-commands rule "A refused commit
+  names its reason".
+
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery
 acknowledgement is pending" — a self-converging wait — for a state only the

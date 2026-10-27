@@ -56,6 +56,10 @@
   unmerged visible text; `realtime_doc_resolve` derives `diverged` from the
   quarantined live replicas; and `session-check` reports the operator-text
   refusal and the terminal roll-forward refusal with their remedies.
+  `#inflighttypinghold`: the direct CLI CP-write path holds for attested
+  in-flight typing too, both holds cover a mid-epoch burst (any prefix state
+  of the epoch), and a commit refused over a quarantined replica names the
+  quarantine (the barrier verdict crosses the controller RPC, `bool`-compatible).
 
 - `agent-doc serve`'s `POST /save` is a whole-document write with no base
   (`#servesavebypass`). It is refused with `409 Conflict` while an editor

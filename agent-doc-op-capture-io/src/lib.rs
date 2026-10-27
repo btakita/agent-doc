@@ -1107,6 +1107,55 @@ pub fn verified_editor_ops_for_base(doc: &Path, base_text: &str) -> Result<Optio
     Ok(None)
 }
 
+/// Operator typing the editor attested over a visible text but whose delta the
+/// relay has not ingested (`#inflighttypinghold`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorOpsInFlight {
+    /// The active epoch holding the typing.
+    pub epoch: u64,
+    /// Index of the first op past the visible text; `0` means the epoch is
+    /// based on exactly the visible text, `> 0` that an earlier burst of the
+    /// same epoch already landed.
+    pub pending_from: usize,
+    /// Ops still in flight (`ops.len() - pending_from`).
+    pub pending_ops: usize,
+    /// The editor's attested tip the typing reaches.
+    pub tip_hash: String,
+}
+
+/// [`EditorOpsInFlight`] for `capture` over `visible`, by the one rule the
+/// controller's retained hold uses
+/// ([`agent_doc_merge::crdt::editor_ops_in_flight_over_visible`]).
+pub fn editor_ops_in_flight_for_capture(
+    capture: &OpCaptureState,
+    visible: &str,
+) -> Option<EditorOpsInFlight> {
+    let pending_from = agent_doc_merge::crdt::editor_ops_in_flight_over_visible(
+        visible,
+        &capture.base_hash,
+        &capture.tip_hash,
+        &capture.ops,
+        content_hash,
+    )?;
+    Some(EditorOpsInFlight {
+        epoch: capture.epoch,
+        pending_from,
+        pending_ops: capture.ops.len() - pending_from,
+        tip_hash: capture.tip_hash.clone(),
+    })
+}
+
+/// Whether the active epoch of `doc` holds attested operator typing past
+/// `visible` that has not reached the relay (`#inflighttypinghold`). A direct
+/// CP write over `visible` must wait for it: written first, the typing lands
+/// over a replaced cut and is quarantined.
+pub fn editor_ops_in_flight_over(doc: &Path, visible: &str) -> Result<Option<EditorOpsInFlight>> {
+    let Some(capture) = load_op_capture(doc)? else {
+        return Ok(None);
+    };
+    Ok(editor_ops_in_flight_for_capture(&capture, visible))
+}
+
 /// Replay the newest durable editor operation checkpoint when, and only when,
 /// it was captured against `base_text` exactly.
 pub fn last_editor_text_for_base(doc: &Path, base_text: &str) -> Result<Option<String>> {

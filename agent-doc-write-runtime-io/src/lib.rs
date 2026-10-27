@@ -4751,10 +4751,10 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                 // `#crdtauth4` — authority-gated commit barrier (plan phase 4).
                 // No-op under `GitAuthoritative` (Detached); under `MultiReplica`
                 // flushes live editor replicas to a consistent cut before commit.
-                let barrier_ready = match agent_doc_controller_io::project_controller::
-                    commit_barrier_via_controller_model_for_doc(file)
+                let barrier = match agent_doc_controller_io::project_controller::
+                    commit_barrier_verdict_via_controller_model_for_doc(file)
                 {
-                    Ok(ready) => ready,
+                    Ok(verdict) => verdict,
                     Err(err) => {
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -4763,14 +4763,24 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                                 file.display()
                             ),
                         );
-                        false
+                        agent_doc_turn::commit_barrier::CommitBarrierVerdict::CONVERGENCE_PENDING
                     }
                 };
-                if !barrier_ready {
+                if let Some(refusal) = barrier.refusal() {
+                    // `#inflighttypinghold` (3): the log and the refusal name
+                    // the barrier's reason, not always "convergence pending".
+                    let reason = match refusal {
+                        agent_doc_turn::commit_barrier::CommitBarrierRefusal::ConvergencePending => {
+                            "relay_convergence_pending"
+                        }
+                        agent_doc_turn::commit_barrier::CommitBarrierRefusal::QuarantinedReplica => {
+                            "quarantined_replica"
+                        }
+                    };
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "commit_editor_authority_unavailable file={} reason=relay_convergence_pending",
+                            "commit_editor_authority_unavailable file={} reason={reason}",
                             file.display()
                         ),
                     );
@@ -4780,16 +4790,27 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                         agent_doc_flow::types::FlowOutcome::Blocked,
                         agent_doc_turn::closeout_guard::CloseoutGuardReason::ReplicaDeliveryPending,
                     );
-                    eprintln!(
-                        "[commit] skipped: live editor relay convergence is still pending for {}",
-                        file.display()
-                    );
+                    match refusal {
+                        agent_doc_turn::commit_barrier::CommitBarrierRefusal::ConvergencePending => {
+                            eprintln!(
+                                "[commit] skipped: live editor relay convergence is still pending for {}",
+                                file.display()
+                            )
+                        }
+                        agent_doc_turn::commit_barrier::CommitBarrierRefusal::QuarantinedReplica => {
+                            eprintln!(
+                                "[commit] skipped: a live editor replica of {} is quarantined and holds text the canonical lacks",
+                                file.display()
+                            )
+                        }
+                    }
                     if session_document {
                         anyhow::bail!(
                             "{}",
-                            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(
+                            agent_doc_git_io::live_buffer_guard::commit_barrier_refusal(
                                 file,
-                                agent_doc_capture_io::retained_write_ownership(file),
+                                refusal,
+                                || agent_doc_capture_io::retained_write_ownership(file),
                             )
                         );
                     }

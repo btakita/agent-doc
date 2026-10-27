@@ -536,6 +536,10 @@ enum CrdtConvergenceState {
     DeliveryProjectionPending,
     OperatorAdvancedAfterApply,
     CompareAndSwapRaced,
+    /// `#inflighttypinghold` (1): the editor attested operator typing past the
+    /// relay's visible text whose delta has not landed; the CP write waits for
+    /// it, then rebases onto it.
+    AwaitingEditorOps,
 }
 
 /// Per-state time accumulator for one convergence wait
@@ -608,6 +612,7 @@ impl CrdtConvergenceState {
             Self::DeliveryProjectionPending => "delivery_projection_pending",
             Self::OperatorAdvancedAfterApply => "operator_advanced_after_apply",
             Self::CompareAndSwapRaced => "compare_and_swap_raced",
+            Self::AwaitingEditorOps => "awaiting_editor_ops",
         }
     }
 }
@@ -3752,6 +3757,78 @@ fn await_canonical_revision_edge(
     Ok(!(subscription.timed_out && !subscription.changed))
 }
 
+/// `#inflighttypinghold` (1): attested operator typing past `relay_text` that
+/// a CP write over it would race. `None` when the relay already holds the
+/// target (nothing is written), when no epoch is active, or when the epoch is
+/// not evidence by the shared rule
+/// ([`agent_doc_op_capture_io::editor_ops_in_flight_for_capture`]). An
+/// unreadable ledger never holds: it is logged and the write proceeds exactly
+/// as before this hold existed, and every other operator-text guard still runs.
+fn cp_write_editor_ops_in_flight(
+    file: &Path,
+    relay_text: &str,
+    target: &str,
+    source: &str,
+) -> Option<agent_doc_op_capture_io::EditorOpsInFlight> {
+    if relay_text == target {
+        return None;
+    }
+    match agent_doc_op_capture_io::editor_ops_in_flight_over(file, relay_text) {
+        Ok(in_flight) => in_flight,
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_write_editor_ops_unreadable file={} error={} action=proceed_unheld (#inflighttypinghold)",
+                    file.display(),
+                    format!("{error:#}").replace('\n', "\\n"),
+                ),
+            );
+            None
+        }
+    }
+}
+
+/// Deterministic seam for the `#inflighttypinghold` hold: runs on the writer's
+/// thread each time the hold fires, so a test lands the in-flight editor delta
+/// exactly while the write is held, without a timer.
+#[cfg(test)]
+mod in_flight_typing_hold_hook {
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        static HOOK: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+        static FIRED: Cell<u32> = const { Cell::new(0) };
+    }
+
+    pub(super) fn install(hook: impl FnMut() + 'static) {
+        HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+        FIRED.with(|fired| fired.set(0));
+    }
+
+    pub(super) fn fired() -> u32 {
+        FIRED.with(Cell::get)
+    }
+
+    pub(super) fn clear() {
+        HOOK.with(|slot| slot.borrow_mut().take());
+    }
+
+    pub(super) fn fire() {
+        FIRED.with(|fired| fired.set(fired.get() + 1));
+        let hook = HOOK.with(|slot| slot.borrow_mut().take());
+        if let Some(mut hook) = hook {
+            hook();
+            HOOK.with(|slot| {
+                let mut slot = slot.borrow_mut();
+                if slot.is_none() {
+                    *slot = Some(hook);
+                }
+            });
+        }
+    }
+}
+
 fn retained_prewrite_base_can_be_superseded(
     error: &anyhow::Error,
     expected_current: &str,
@@ -3790,6 +3867,9 @@ pub fn apply_canonical_replace_if_attached(
     let mut agent_projection_may_be_visible = false;
     let mut projection_observation = ProjectionObservationState::default();
     let mut wait_state = CrdtConvergenceState::TypingQuiescence;
+    // `#inflighttypinghold`: the attested tip the last hold logged, so a hold
+    // logs once per in-flight burst rather than once per backoff tick.
+    let mut last_in_flight_tip: Option<String> = None;
     // `#crdtprojectionprofile`: accumulate time per wait state so a single write reports
     // where its convergence latency went, instead of only what state it happened
     // to be in at a 2s notice.
@@ -4083,6 +4163,36 @@ pub fn apply_canonical_replace_if_attached(
                             wait_state = CrdtConvergenceState::OperatorAdvancedAfterApply;
                             continue;
                         }
+                    } else if let Some(in_flight) =
+                        cp_write_editor_ops_in_flight(file, &relay_text, content, source)
+                    {
+                        // `#inflighttypinghold` (1): the controller's retained
+                        // projection already waits for attested typing
+                        // (`AwaitingEditorOps`), but this direct CP write did
+                        // not. It derived its target over `relay_text` while the
+                        // editor had reported a burst typed over that text
+                        // whose delta was still in flight; written first, the
+                        // burst lands over a replaced cut and is quarantined.
+                        // Wait for the delta, then the rebase below rolls the
+                        // target forward onto the typing.
+                        if last_in_flight_tip.as_deref() != Some(in_flight.tip_hash.as_str()) {
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_write_held_for_editor_ops file={} relay_hash={} editor_tip_hash={} epoch={} pending_from={} pending_ops={} recovery=await_editor_delta_then_rebase (#inflighttypinghold)",
+                                    file.display(),
+                                    agent_doc_hash::content_hash(&relay_text),
+                                    in_flight.tip_hash,
+                                    in_flight.epoch,
+                                    in_flight.pending_from,
+                                    in_flight.pending_ops,
+                                ),
+                            );
+                            last_in_flight_tip = Some(in_flight.tip_hash.clone());
+                        }
+                        #[cfg(test)]
+                        in_flight_typing_hold_hook::fire();
+                        wait_state = CrdtConvergenceState::AwaitingEditorOps;
                     } else {
                         let effective_target = if relay_text == expected_current
                             || relay_text == content
@@ -13898,6 +14008,171 @@ mod tests {
         assert!(current.contains("agent:boundary:new"));
         assert!(!current.contains("agent:boundary:old"));
         assert_eq!(current.matches("agent:boundary:").count(), 1);
+    }
+
+    /// `#inflighttypinghold` (1)+(2): the direct CLI CP-write path
+    /// (`apply_canonical_replace_if_attached`) races operator typing the editor
+    /// attested but whose delta has not reached the relay. Before this hold the
+    /// write CAS'd against the visible text and won; the burst then arrived over
+    /// a replaced cut and was quarantined. The write must hold until the delta
+    /// lands, then roll the agent target forward onto the typing.
+    ///
+    /// `mid_epoch` lands an earlier burst of the same epoch before the write, so
+    /// the visible text is inside the epoch rather than its base (gap 2).
+    fn run_cli_cp_write_in_flight_typing_scenario(mid_epoch: bool) {
+        use agent_doc_merge::crdt::EditorOp;
+        let disk = concat!(
+            "# Session\n\n",
+            "## Notes\n\n- baseline note\n\n",
+            "<!-- agent:exchange -->\nReady.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(disk);
+        let identity: &'static str = if mid_epoch {
+            "test-inflighttypinghold-cli-mid-epoch"
+        } else {
+            "test-inflighttypinghold-cli"
+        };
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        // The editor types into the relay canonical, which registration may have
+        // normalized from the disk bytes.
+        let baseline_owned =
+            agent_doc_crdt_relay_io::with_hub(&file, |hub| hub.canonical_text().to_string())
+                .unwrap();
+        let baseline = baseline_owned.as_str();
+        let offset = baseline.find("- baseline note\n").unwrap() + "- baseline note\n".len();
+        let first_burst = "- operator first note\n";
+        let second_burst = "- operator note typed in flight\n";
+        let first = vec![EditorOp::Insert {
+            offset,
+            text: first_burst.to_string(),
+        }];
+        let second = vec![EditorOp::Insert {
+            offset: offset + first_burst.len(),
+            text: second_burst.to_string(),
+        }];
+        let after_first = agent_doc_merge::crdt::replay_editor_ops(baseline, &first).unwrap();
+        let operator_tip = agent_doc_merge::crdt::replay_editor_ops(&after_first, &second).unwrap();
+        // The agent derived its target from the text the relay held when it ran.
+        let write_base = if mid_epoch {
+            after_first.clone()
+        } else {
+            baseline.to_string()
+        };
+        let agent = write_base.replace(
+            "Ready.\n<!-- agent:boundary:old -->\n<!-- /agent:exchange -->",
+            "Ready.\n\n### Re: agent\n\nApplied once.\n<!-- agent:boundary:new -->\n<!-- /agent:exchange -->",
+        );
+        assert_ne!(
+            agent, write_base,
+            "the agent target must change the document"
+        );
+        let record = |pre: &str, post: &str, ops: Vec<EditorOp>| {
+            agent_doc_op_capture_io::record_editor_ops_retaining_with_lineage(
+                &file,
+                &agent_doc_hash::content_hash(baseline),
+                ops,
+                Some(agent_doc_state_backbone::EditorOpBurstLineage {
+                    pre_hash: agent_doc_hash::content_hash(pre),
+                    post_hash: agent_doc_hash::content_hash(post),
+                }),
+            )
+            .unwrap()
+        };
+        if mid_epoch {
+            // The first burst is attested AND landed; the epoch stays based on
+            // `baseline` and continues past it.
+            record(baseline, &after_first, first);
+            agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+                hub.apply_local(client_id, 0, baseline.chars().count() as u32, &after_first)
+                    .unwrap();
+            })
+            .unwrap();
+            record(&after_first, &operator_tip, second);
+        } else {
+            let mut both = first;
+            both.extend(second);
+            record(baseline, &operator_tip, both);
+        }
+        let capture = agent_doc_op_capture_io::load_op_capture(&file)
+            .unwrap()
+            .expect("the attested epoch is active");
+        assert_eq!(capture.base_hash, agent_doc_hash::content_hash(baseline));
+        assert_eq!(
+            capture.tip_hash,
+            agent_doc_hash::content_hash(&operator_tip)
+        );
+
+        // Land the in-flight delta exactly while the write is held, once.
+        let landing_file = file.clone();
+        let landing_from = write_base.clone();
+        let landing_tip = operator_tip.clone();
+        let mut landed = false;
+        in_flight_typing_hold_hook::install(move || {
+            if landed {
+                return;
+            }
+            landed = true;
+            agent_doc_crdt_relay_io::with_hub(&landing_file, |hub| {
+                hub.apply_local(
+                    client_id,
+                    0,
+                    landing_from.chars().count() as u32,
+                    &landing_tip,
+                )
+                .unwrap();
+            })
+            .unwrap();
+        });
+        let ack = project_next_crdt_delivery(file.clone(), identity);
+        let write =
+            apply_canonical_replace_if_attached(&file, &write_base, &agent, "test_inflight_hold");
+        let held = in_flight_typing_hold_hook::fired();
+        in_flight_typing_hold_hook::clear();
+        write.unwrap().expect("attached CRDT write");
+        ack.join().unwrap();
+
+        let log = std::fs::read_to_string(file.parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            held >= 1,
+            "the CP write must hold for the attested typing:\n{log}"
+        );
+        let current = match agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap() {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+            other => panic!("expected current CRDT text, got {other:?}"),
+        };
+        assert!(
+            current.contains(first_burst) && current.contains(second_burst),
+            "the write dropped operator typing:\n{current}"
+        );
+        assert_eq!(current.matches("Applied once.").count(), 1, "{current}");
+        assert!(current.contains("agent:boundary:new"), "{current}");
+        let expected_from = if mid_epoch {
+            "pending_from=1"
+        } else {
+            "pending_from=0"
+        };
+        assert!(
+            log.lines().any(|line| {
+                line.contains("test_inflight_hold_crdt_write_held_for_editor_ops")
+                    && line.contains(expected_from)
+                    && line.contains("recovery=await_editor_delta_then_rebase")
+            }),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn inflighttypinghold_cli_cp_write_holds_for_attested_typing_then_rolls_forward() {
+        run_cli_cp_write_in_flight_typing_scenario(false);
+    }
+
+    #[test]
+    fn inflighttypinghold_cli_cp_write_holds_a_mid_epoch_burst_then_rolls_forward() {
+        run_cli_cp_write_in_flight_typing_scenario(true);
     }
 
     #[test]

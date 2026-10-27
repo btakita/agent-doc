@@ -9732,6 +9732,21 @@ struct ControllerCrdtTextAdoptPayload {
 }
 
 pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
+    commit_barrier_verdict_via_controller_model_for_doc(doc).map(|verdict| verdict.is_ready())
+}
+
+/// [`commit_barrier_via_controller_model_for_doc`] with the barrier's refusal
+/// reason (`#inflighttypinghold` (3)), so a refused commit names a quarantined
+/// editor replica instead of the generic convergence wait.
+///
+/// The request asks for the verdict through its payload. A controller that
+/// predates the verdict ignores the payload and answers the legacy `bool`,
+/// which decodes as the generic refusal; an older client never asks and still
+/// receives the `bool`.
+pub fn commit_barrier_verdict_via_controller_model_for_doc(
+    doc: &Path,
+) -> Result<agent_doc_turn::commit_barrier::CommitBarrierVerdict> {
+    use agent_doc_turn::commit_barrier::CommitBarrierVerdict;
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = crdt_authority_for_file(&file_arg);
@@ -9743,7 +9758,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
                 canonical.display(),
             ),
         );
-        return Ok(true);
+        return Ok(CommitBarrierVerdict::Ready);
     }
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         agent_doc_ops_log_io::log_op(
@@ -9753,7 +9768,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
                 doc.display(),
             ),
         );
-        return Ok(true);
+        return Ok(CommitBarrierVerdict::Ready);
     };
     let controller_socket = socket_path(&project_root);
     if let Err(err) = connect_path(&controller_socket) {
@@ -9773,7 +9788,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
             )
         })?;
     }
-    request_controller(
+    let data: serde_json::Value = request_controller(
         &project_root,
         ControllerRequest {
             command: "crdt_commit_barrier".to_string(),
@@ -9788,10 +9803,13 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
             supervisor_pid: None,
             supervisor_socket: None,
             command_kind: None,
-            diagnostic_payload: None,
+            diagnostic_payload: Some(
+                agent_doc_turn::commit_barrier::VERDICT_REQUEST_PAYLOAD.to_string(),
+            ),
             sequence: None,
         },
-    )
+    )?;
+    CommitBarrierVerdict::from_wire(&data).map_err(anyhow::Error::msg)
 }
 
 /// Delegate the git commit for `doc` to the CP controller — the authoritative
@@ -10170,10 +10188,29 @@ fn handle_crdt_commit_barrier_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<bool> {
+) -> Result<serde_json::Value> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
-    commit_barrier_for_closeout(runtime, &canonical)
+    let verdict = commit_barrier_verdict_for_closeout(runtime, &canonical)?;
+    Ok(crdt_commit_barrier_response(
+        verdict,
+        agent_doc_turn::commit_barrier::request_wants_verdict(
+            request.diagnostic_payload.as_deref(),
+        ),
+    ))
+}
+
+/// `#inflighttypinghold` (3): the verdict for a client that asked for it, the
+/// legacy `bool` for one that did not (an older client decodes only that).
+fn crdt_commit_barrier_response(
+    verdict: agent_doc_turn::commit_barrier::CommitBarrierVerdict,
+    wants_verdict: bool,
+) -> serde_json::Value {
+    if wants_verdict {
+        serde_json::to_value(verdict).unwrap_or(serde_json::Value::Bool(verdict.is_ready()))
+    } else {
+        serde_json::Value::Bool(verdict.is_ready())
+    }
 }
 
 /// `durable_response_cell` readiness is read from the live in-memory Lazily
@@ -10184,25 +10221,34 @@ fn handle_crdt_commit_barrier_rpc(
 /// editor delivery is folded independently as a receipt Source and derived by
 /// [`decide_controller_commit_projection`].
 fn commit_barrier_for_closeout(runtime: &ControllerRuntime, canonical: &Path) -> Result<bool> {
+    commit_barrier_verdict_for_closeout(runtime, canonical).map(|verdict| verdict.is_ready())
+}
+
+/// [`commit_barrier_for_closeout`] with the relay's refusal reason.
+fn commit_barrier_verdict_for_closeout(
+    runtime: &ControllerRuntime,
+    canonical: &Path,
+) -> Result<agent_doc_turn::commit_barrier::CommitBarrierVerdict> {
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
     let durable_response_cell = runtime
         .document_state_projection(&document_hash)?
         .is_some_and(|document| document.closeout.response_cell.is_some());
-    let ready = if durable_response_cell {
-        agent_doc_crdt_relay_io::commit_barrier_for_durable_response_cell(canonical)
+    let verdict = if durable_response_cell {
+        agent_doc_crdt_relay_io::commit_barrier_verdict_for_durable_response_cell(canonical)
     } else {
-        agent_doc_crdt_relay_io::commit_barrier_for_file(canonical)
+        agent_doc_crdt_relay_io::commit_barrier_verdict_for_file(canonical)
     };
     agent_doc_ops_log_io::log_op(
         canonical,
         &format!(
-            "controller_crdt_commit_barrier file={} durable_response_cell={} ready={}",
+            "controller_crdt_commit_barrier file={} durable_response_cell={} ready={} refusal={}",
             canonical.display(),
             durable_response_cell,
-            ready,
+            verdict.is_ready(),
+            verdict.refusal().map_or("none", |refusal| refusal.as_str()),
         ),
     );
-    Ok(ready)
+    Ok(verdict)
 }
 
 /// Stamped on every `commit_document` refusal that means "the live projection
@@ -47874,6 +47920,40 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// `#inflighttypinghold` (3): the commit barrier RPC carries the refusal
+    /// reason to a client that asks for it, and the legacy `bool` to one that
+    /// does not, so neither an older client nor an older controller misreads it.
+    #[test]
+    fn inflighttypinghold_commit_barrier_rpc_carries_the_refusal_reason_compatibly() {
+        use agent_doc_turn::commit_barrier::{
+            CommitBarrierRefusal, CommitBarrierVerdict, VERDICT_REQUEST_PAYLOAD,
+            request_wants_verdict,
+        };
+        let quarantined = CommitBarrierVerdict::Refused(CommitBarrierRefusal::QuarantinedReplica);
+        let asked = crdt_commit_barrier_response(
+            quarantined,
+            request_wants_verdict(Some(VERDICT_REQUEST_PAYLOAD)),
+        );
+        assert_eq!(
+            CommitBarrierVerdict::from_wire(&asked).unwrap(),
+            quarantined
+        );
+        // An older client never sends the payload and decodes only a `bool`.
+        let legacy = crdt_commit_barrier_response(quarantined, request_wants_verdict(None));
+        assert_eq!(legacy, serde_json::Value::Bool(false));
+        assert!(serde_json::from_value::<bool>(legacy.clone()).is_ok());
+        // An older controller answers that `bool` even when asked; a new client
+        // reads it as the generic refusal.
+        assert_eq!(
+            CommitBarrierVerdict::from_wire(&legacy).unwrap(),
+            CommitBarrierVerdict::CONVERGENCE_PENDING
+        );
+        assert_eq!(
+            crdt_commit_barrier_response(CommitBarrierVerdict::Ready, false),
+            serde_json::Value::Bool(true)
+        );
     }
 
     #[test]

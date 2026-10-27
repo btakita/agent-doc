@@ -20,6 +20,10 @@
 //! - `--dry-run` flag shows what would be deleted without deleting.
 //! - `--database-only` runs existing ledger retention and space reclamation
 //!   without scanning files or mutating actor/session lifecycle state.
+//! - Retired stores (`.agent-doc/live-buffer/`): the CLI `gc` only reports them;
+//!   `--retired-stores` lists (`--dry-run`) or removes them. See
+//!   [`retired_store`]. `run_with_controller_effects` (and so preflight auto-GC)
+//!   never touches them.
 //!
 //! ## Agentic Contracts
 //! - `run(root, dry_run)` — scans `.agent-doc/` under `root`, removes orphaned files.
@@ -36,6 +40,12 @@ use std::time::Duration;
 
 use agent_doc_supervisor_io::ipc;
 use tmux_router::RegistryLock;
+
+pub mod retired_store;
+pub use retired_store::{
+    RETIRED_STORES, RetiredStore, RetiredStoreMode, RetiredStoreReport, RetiredStoresResult,
+    run_retired_stores, sweep_retired_stores,
+};
 
 pub struct GcResult {
     pub deleted: usize,

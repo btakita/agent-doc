@@ -2465,6 +2465,9 @@ enum Commands {
         /// Only prune superseded database history and reclaim free pages; leave files and actors alone
         #[arg(long)]
         database_only: bool,
+        /// Only remove retired .agent-doc/ stores (live-buffer/); with --dry-run, list them with file count and bytes
+        #[arg(long, conflicts_with = "database_only")]
+        retired_stores: bool,
     },
     /// List or restore a document's pre-mutation recovery checkpoints
     /// (pre-auto-run / pre-compact tags)
@@ -5798,9 +5801,23 @@ fn try_main() -> anyhow::Result<()> {
             root,
             dry_run,
             database_only,
+            retired_stores,
         } => {
             if database_only {
                 return agent_doc_gc_io::run_database_only(root.as_deref(), dry_run);
+            }
+            if retired_stores {
+                let mode = if dry_run {
+                    agent_doc_gc_io::RetiredStoreMode::DryRun
+                } else {
+                    agent_doc_gc_io::RetiredStoreMode::Remove
+                };
+                let result = agent_doc_gc_io::run_retired_stores(root.as_deref(), mode)?;
+                let failures = result.failure_count();
+                if failures > 0 {
+                    anyhow::bail!("retired-store cleanup left {failures} entries in place");
+                }
+                return Ok(());
             }
             let mut effects = CliGcControllerEffects;
             let result = agent_doc_gc_io::run_with_controller_effects(
@@ -5819,6 +5836,13 @@ fn try_main() -> anyhow::Result<()> {
                     "[gc] Dry run: {} files would be deleted, {} kept",
                     result.deleted, result.skipped
                 );
+            }
+            // Retired stores are deleted only on explicit `--retired-stores`.
+            if let Err(error) = agent_doc_gc_io::run_retired_stores(
+                root.as_deref(),
+                agent_doc_gc_io::RetiredStoreMode::Report,
+            ) {
+                eprintln!("[gc] warning: retired-store report skipped: {error:#}");
             }
             tmux_cmd::gc_navigation_lanes(root.as_deref(), dry_run)
         }

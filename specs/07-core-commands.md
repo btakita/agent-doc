@@ -261,9 +261,11 @@ banner.
 
 ## gc
 
-`agent-doc gc [--root DIR] [--dry-run] [--database-only]`
+`agent-doc gc [--root DIR] [--dry-run] [--database-only | --retired-stores]`
 
 - `--database-only` skips file scanning, actor cleanup, and supervisor effects. It reports allocated/free bytes and ledger row counts, runs the existing superseded-history retention on database open, and reclaims sufficiently fragmented free pages. It preserves live recovery facts, queues, and session documents. Pairing it with `--dry-run` uses a read-only SQLite connection without schema initialization or retention; a missing database remains absent. Reported free bytes are reusable pages, not a promise that every byte will be returned to disk.
+
+- `--retired-stores` (`#livebuffergc`) acts only on retired `.agent-doc/` stores, today `live-buffer/` (the editor full-buffer sidecar retired in 0.34.160; the Lazily/CP CRDT is the sole live editor authority and no current code reads, writes, or prunes it). With `--dry-run` it lists each store's path, file count, bytes, and last write and deletes nothing; without it, it removes the store. Only `<root>/.agent-doc/<store>` is touched. Symlinks are never followed: a symlink inside the store is unlinked without touching its target, and a store root that is itself a symlink or not a directory is refused and left in place. Removal continues past an entry that cannot be deleted, prints `[gc] retired store <name>: failed to remove <path>: <error>` for each, and exits non-zero when any entry was left. Plain `agent-doc gc` and `--dry-run` only report a retired store and print the `--retired-stores` commands; preflight auto-GC never reports or removes it, so the operator decides when it is deleted. For a `$HOME/.agent-doc` lazy root use `agent-doc gc --root ~ --retired-stores --dry-run`.
 
 - Garbage-collects legacy snapshot residue, locks, hooks, repair diagnostics, sockets, and dead transactional rows under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.

@@ -449,6 +449,66 @@ mod tests {
     #![allow(unused_imports)]
     use super::*;
     use tmux_router::{IsolatedTmux, Registry as SessionRegistry, RegistryEntry as SessionEntry};
+
+    /// `#prunetestisolation`: the project a live-tmux purge test runs in.
+    ///
+    /// The stash purge resolves every unregistered stash pane's
+    /// `#{pane_current_path}` to its nearest `.agent-doc` ancestor and, when
+    /// that root differs from the process CWD, opens that root's session
+    /// registry. A test that started its panes in its crate checkout collapsed
+    /// them up to whatever ancestor holds `.agent-doc/` (the superproject, or
+    /// `$HOME` when `~/.agent-doc/state.db` exists), and the stash window's
+    /// placeholder pane inherits the tmux client's CWD the same way. Opening
+    /// that live `state.db` trips the `#testisolationleaks` guard. So the test
+    /// owns one temp project root: the panes start there, the tmux client runs
+    /// there, and it is the CWD project the purge compares against.
+    struct PurgeTestProject {
+        // Restore the CWD before the temp root is removed.
+        _cwd: ScopedCurrentDir,
+        root: PathBuf,
+        _dir: tempfile::TempDir,
+    }
+
+    impl PurgeTestProject {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            let cwd = ScopedCurrentDir::set(&root);
+            Self {
+                _cwd: cwd,
+                root,
+                _dir: dir,
+            }
+        }
+
+        /// Positive control: every live pane on the test server resolves to
+        /// this project, so the purge never consults another root's registry.
+        /// Without it a leaked pane only fails where some ancestor happens to
+        /// hold `.agent-doc/`, and passes silently everywhere else.
+        fn assert_owns_every_pane(&self, tmux: &IsolatedTmux) {
+            let output = tmux
+                .cmd()
+                .args(["list-panes", "-a", "-F", "#{pane_id}\t#{pane_dead}"])
+                .output()
+                .unwrap();
+            let listing = String::from_utf8_lossy(&output.stdout);
+            let live_panes: Vec<&str> = listing
+                .lines()
+                .filter_map(|line| line.split_once('\t'))
+                .filter(|(_, dead)| *dead != "1")
+                .map(|(pane, _)| pane)
+                .collect();
+            assert!(!live_panes.is_empty(), "test server has no live panes");
+            for pane in live_panes {
+                assert_eq!(
+                    pane_project_root(tmux, pane).as_deref(),
+                    Some(self.root.as_path()),
+                    "pane {pane} must resolve to the test's own project root"
+                );
+            }
+        }
+    }
     #[test]
     fn prune_dead_entries_for_target_only_removes_matching_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -547,8 +607,9 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_kills_unregistered_shell_in_stash() {
         // An unregistered idle shell in the stash should be killed.
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-shell");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
@@ -561,6 +622,7 @@ mod tests {
 
         // Empty registry — pane2 is not registered
         let registry = SessionRegistry::new();
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
 
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -573,8 +635,9 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_registered_pane_in_stash() {
         // A registered pane in stash should NOT be killed.
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-registered");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
@@ -585,6 +648,7 @@ mod tests {
         let mut registry = SessionRegistry::new();
         registry.insert("registered-sess".to_string(), test_entry(&pane2, "test.md"));
 
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(
@@ -596,8 +660,9 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_user_process_in_stash() {
         // A pane running a user process (not shell/agent) should NOT be killed.
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-userproc");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
 
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let output = iso
@@ -625,6 +690,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let registry = SessionRegistry::new();
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(
@@ -635,8 +701,9 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_kills_unregistered_agent_in_stash_without_live_owner() {
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-no-owner");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
         let dir = tempfile::tempdir().unwrap();
         let script = write_mock_agent_doc(dir.path());
 
@@ -648,6 +715,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let registry = SessionRegistry::new();
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(
@@ -658,8 +726,9 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_unregistered_stash_panes_kills_retained_dead_stash_pane() {
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-dead-stash");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
         let pane1 = iso.auto_start("test", &cwd).unwrap();
         let pane2 = iso.split_window(&pane1, &cwd, "-dh").unwrap();
         iso.enable_remain_on_exit(&pane2).unwrap();
@@ -675,6 +744,7 @@ mod tests {
             "dead pane should move into stash before purge"
         );
 
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &SessionRegistry::new());
         assert!(
             wait_for_pane_removed(&iso, &pane2, std::time::Duration::from_secs(3)),
@@ -684,8 +754,9 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_unregistered_agent_in_stash_with_live_supervisor() {
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-live-supervisor");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
         let dir = tempfile::tempdir().unwrap();
         let script = write_mock_agent_doc(dir.path());
         let pane1 = iso.auto_start("test", &cwd).unwrap();
@@ -715,6 +786,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let live_supervisors = agent_doc_supervisor_io::ipc::active_supervisor_pids(dir.path());
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry_and_supervisors(
             &iso,
             &SessionRegistry::new(),
@@ -730,8 +802,9 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn purge_preserves_unregistered_agent_in_stash_with_live_owner() {
+        let project = PurgeTestProject::new();
         let iso = agent_doc_tmux_io::isolated_test_tmux("resync-purge-agent-live-owner");
-        let cwd = std::env::current_dir().unwrap();
+        let cwd = project.root.clone();
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let script = write_mock_agent_doc(dir.path());
@@ -770,6 +843,7 @@ mod tests {
             test_entry(&stale_pane, &doc.to_string_lossy()),
         );
 
+        project.assert_owns_every_pane(&iso);
         purge_unregistered_stash_panes_with_registry(&iso, &registry);
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(

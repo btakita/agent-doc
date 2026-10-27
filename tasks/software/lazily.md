@@ -18,7 +18,6 @@ prompt_presets:
   '#push': push authorized
   '#rebase-conflicts': rebase + fix merge conflicts
   'release': 'release + publish any lazily packages that have pending work'
-queue: go
 ---
 
 ## Status
@@ -1348,31 +1347,92 @@ The worker landed one fix that needed no decision from you, and returned a block
 - Add a coined-id commit-message check for Grok's `run_terminal_command`.
 
 The claim stays open (🚧, generation 1, refreshed). I'll send your answer to the same worker.
+
+### Re: #tmuxguardclaudeuser done — user-level guard (A+D+E), Grok report goes to /feedback — opus-5-5 · 2026-10-27T02:15-04:00
+
+**Your answer to [#subagent-operator-request-tmuxguser-scope]:** scope "A. Always add it (Recommended)"; add-ons "D. Narrow turn-status --user, E. OpenCode/Cursor guards,  Please add a reminder to revisit this rule when new harness versions come out. File a github issue with the offending harness."
+
+**Landed: agent-doc `cd7ddd3f31` on main.** I installed it with `make install` from the worker's worktree, and the binary was rebuilt at 02:13. Combined with `cd73bda514`, which made the guard recognise Grok's shell tool names:
+- **A:** a bare-root `skill install` (and `--all`, and `init`) merges only the unmatched `PreToolUse` guard into `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR` when set. Your existing hooks are untouched. Preflight, Stop and steering stay project-only.
+- **D:** `turn-status install --user` now writes only `turn-status active`/`idle`. Entries left by older full-set installs stay where they are, and the command prints a stderr note naming them; Claude Code runs a handler defined in two places only once.
+- **E:**
+  - **OpenCode:** a `tool.execute.before` plugin at `~/.config/opencode/plugins/agent-doc-tool-guard.js` that blocks only on a guard exit 2 and lets everything else run. The turn-status plugin also moved to the documented `plugins/` directory.
+  - **Cursor:** a native `beforeShellExecution` entry in `~/.cursor/hooks.json` that replies with Cursor's allow/deny JSON. Cursor also imports `~/.claude/settings.json`, so the guard can run twice there; both copies reach the same decision.
+- **Re-verify reminder:** spec 10 now has a table of the harness versions and docs the guard was checked against: Claude Code 2.1.310, Codex 0.164.0, Grok Build 1.0.62, OpenCode v1.19.4 (from its source), and Cursor (docs only). It also has a rule to re-verify on every new harness version. agent-doc doesn't read harness versions anywhere yet, so there's no automatic warning; that's a follow-up below.
+- **Worker tests** (all 0 failures):
+  - hooks-io: 83 passed.
+  - `agent-doc` bin: 1292 passed, 13 ignored.
+  - `test_cli`: 357 passed.
+  - `make clippy`: clean. `audit-docs`: no blocking issues.
+  - Mutations: 11 of 11 killed.
+  - The full `make check` was not run, and agent-doc CI was pending.
+- **My checks after install:**
+  - `~/.claude/settings.json` now has the unmatched `agent-doc hook coined-id-pre-tool-use` entry alongside your existing Bash `PreToolUse` hooks.
+  - `~/.cursor/hooks.json` and the OpenCode plugin both exist.
+  - The installed hook blocks `tmux kill-server` (exit 2) and allows `ls` (exit 0).
+
+**⚠️ Incident:** a worker test wrote to your real `~/.claude/settings.json` at 02:04:19.
+- **Cause:** the second `skill install` call in `test_cli_skill_install_idempotent` had no HOME isolation, so it appended the guard entry to the real file.
+- **What the worker did:** removed exactly that entry by hand, then fixed the tests. Every bare install in the CLI tests now uses a throwaway HOME, and a full `test_cli` run afterwards left the real HOME unchanged.
+- **What it can't prove:** that key order matches the pre-incident file, because its restore rewrote the whole file and there was no recent backup. `settings.json.bak` dates from 2026-05-20.
+- **What I checked:** the file was valid JSON with no agent-doc guard entry before install.
+- **My copy:** before installing I saved a mode-600 copy of the file at `/tmp/claude-1000/-home-brian-work-btakita-agent-loop/62d9849d-6ef7-44d3-9e33-c667b53bcbba/scratchpad/claude-settings.pre-install-20261027.json`.
+
+**Grok Build issue: not filed.** Its repo `xai-org/grok-build` has GitHub issues disabled. Cursor and OpenCode don't have the same flaw. The worker's packet, verbatim:
+
+[#subagent-operator-request-grok-issue-draft] subagent operator request
+- *queue_item:* do [#tmuxguardclaudeuser]
+- *kind:* question
+- *blocking:* true
+- *request:* Grok Build has no public GitHub issue tracker. Its repo, `xai-org/grok-build`, has issues disabled (`has_issues=false` from the GitHub API), and the bundled docs only name the in-app `/feedback` command. Where should this report go?
+- *context:* The draft below is ready to send. It contains no private paths or project names. Cursor and OpenCode don't have a comparable flaw: Cursor documents its `Bash`→`Shell` mapping, and OpenCode doesn't run Claude hooks. agent-doc no longer depends on the fix (it now accepts `run_terminal_command`, `Shell` and the camelCase keys), but other Claude-compatible guards still fail open in Grok.
+  > **Title:** Claude-compatible PreToolUse hooks fail open: payload uses Grok tool names/keys, not Claude's
+  >
+  > **Version:** grok 1.0.62 (1474f9cbdd91) [stable], Linux.
+  >
+  > **What happens:** Grok runs hooks from `~/.claude/settings.json` and trusted project `.claude/settings.json` (documented as Claude Code compatibility). The `PreToolUse` payload names the shell tool `run_terminal_command` (or `Shell` under the Cursor preset), and its primary keys are camelCase `toolName`/`toolInput`. Claude names (`Bash`) are mapped only in `matcher`. A hook written to Claude's documented contract (`tool_name == "Bash"`, `tool_input.command`) therefore never recognizes the call and allows it.
+  >
+  > **Minimal repro:** a Claude settings hook `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"/path/guard.sh"}]}]}}` where `guard.sh` exits 2 when `.tool_name == "Bash"` and `.tool_input.command` contains `kill-server`. Ask Grok to run `tmux kill-server`. The matcher fires, the guard receives `{"hook_event_name":"PreToolUse","toolName":"run_terminal_command","tool_name":"run_terminal_command","toolInput":{"command":"tmux kill-server"},...}`, exits 0, and the command runs.
+  >
+  > **Expected:** a hook loaded from a Claude settings file receives Claude's payload contract: `tool_name: "Bash"`, `tool_input: {"command": ...}`, matching the alias the matcher already applied.
+  >
+  > **Actual:** the payload carries Grok's tool name, so the guard fails open.
+  >
+  > **Why it matters:** safety guards (destructive-command blocks, secret filters) copied from Claude Code load in Grok and silently allow everything. Exit 2 and the `deny` decision work; only tool identification breaks.
+- *choices:*
+  - **Send via `/feedback`**: the operator submits the draft through Grok's in-app `/feedback` (I can't drive that from here).
+  - **Comment on an existing GitHub thread**: the operator names a repo or discussion where xAI accepts reports, and I post it there with `gh`.
+  - **Don't file**: keep the workaround in agent-doc; spec 10 already records the incompatibility.
+
+**Your answer:** "I'll send via /feedback". It's recorded as a todo for you.
+
+**Follow-ups (not queued, because backlog items here go straight into the go queue):**
+- Warn when an installed harness is newer than the version recorded in spec 10. Cursor's hook payload includes `cursor_version`, which could be a start.
+- The coined-id commit-message check still only looks at `Bash`, so it doesn't run in Grok, Cursor or OpenCode.
+- Skip the per-call document parse for read-only tools.
+- The `$HOME/.agent-doc` edge case: projects under `$HOME` with no `.agent-doc` of their own resolve to `$HOME` as their root.
+- Optionally add a Grok-native `~/.grok/hooks/` entry.
+
+**Claim:** the claim expired at 1793081369, during the worker's 23-minute run. The work completed regardless, and this `--done` closes the row.
 <!-- agent:boundary:ebfb7a2e:lazily -->
 <!-- /agent:exchange -->
  
 ## Queue
 
-<!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- 🚧 [#subagent:tmuxuser#1] do [#tmuxguardclaudeuser]
-- ~~do [#lzspecreadmeci]~~
-- ~~do [#tmuxkittyterminal]~~
-- ~~do [#lzcoverageresync]~~
-- ~~do [#lzbindingevidenceci]~~
-- ~~do [#lzauditbranchprune]~~
-- ~~do [#tmuxguardclaudeinstall]~~
+<!-- agent:queue priority subagents preset="#spec-test-commit-push" -->
 <!-- /agent:queue -->
 
 ## Todo
 
 <!-- agent:todo -->
 - [ ] [#lzambienttokenresolve] Complete #lzambienttokenresolve quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification (source: agent:review [#lzambienttokenresolve])
+- [x] [#subagent-operator-request-tmuxguser-scope] Choose the user-level ~/.claude/settings.json tmux-guard scope for #tmuxguardclaudeuser: option A/B/C plus optional D/E, per the [#subagent-operator-request-tmuxguser-scope] packet in agent:exchange (source: agent:backlog [#tmuxguardclaudeuser])
+- [ ] [#subagent-operator-request-grok-issue-draft] Submit the Grok Build hook-payload report (draft in the [#subagent-operator-request-grok-issue-draft] packet in agent:exchange) through Grok's in-app /feedback: xai-org/grok-build has GitHub issues disabled
 <!-- /agent:todo -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmuxguardclaudeuser] Decide whether agent-doc should write the coined-id-pre-tool-use tmux guard into user-level ~/.claude/settings.json: today a Claude project that never ran 'agent-doc skill install --harness claude' has no guard, while Codex is covered by its user-level hooks.json (follow-up of #tmuxguardclaudeinstall; also check OpenCode/Grok/Cursor for an equivalent PreToolUse hook).
 <!-- /agent:backlog -->
 
 ## Review

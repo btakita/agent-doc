@@ -1,9 +1,9 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume:
-  claude: d6379dbb-42f5-4658-8da6-e0251c5eaa18
-  codex: 01a166d2-8127-7cf3-85fc-ab12b5f67d2d
-agent: codex
+  claude: c21b1ca5-28bc-4bfc-b8da-7959562eb263
+  codex: 01a17636-406a-7b73-935e-8c09a7f7a445
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -945,10 +945,6 @@ The 14 earlier removed stale-handle claims were also checked through their gener
 
 Changed paths: none outside this binary-owned session update. Commands/evidence: `agent-doc review list`, session/archive and repository history inspection, worker-fenced queue claim/start/report-complete, and all 14 idempotent cancellation releases. Verification: current branches, commits, missing historical worktrees, resolved dependencies, and retained external gates were checked read-only. Confidence: high overall; medium only on whether current `agent-doc` main already subsumes `#fixrunturn`, which its re-queued regression task now proves. Escalation: none for this triage.
 
-### Re: Subagent completed: `subagent:ambienttokenresolve2` returned work for queue item “do [#lzambienttokenresolve]” — agent-doc
-Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
-<!-- agent-doc-subagent-completion key=200bdb9b6aaea565c46f4929b1931b3338b4ad155e005f6429b3091cf6fd63dd -->
-
 ### Re: Subagent completed: `subagent:fixrunturn` returned work for queue item “do [#fixrunturn]” — agent-doc
 Subagent completion feedback was recorded by agent-doc; the claim remains active pending coordinator integration and closeout.
 <!-- agent-doc-subagent-completion key=3bbd4bd60125d7bbb58f54fe19488e042148a77b46c660fc20e4a2c23efaa649 -->
@@ -989,19 +985,50 @@ Changed paths this cycle: none outside the binary-owned session update. Evidence
 
 > **Operator note:** Why is this blocked?
 
-**Deferred:** The visible `⚠️` was a lost-worker state: the generation-2 subagent claim expired without a completion report. It did not mean the CI reachability audit had found a technical blocker. I reclaimed the item as generation 3 and bound it to `/root/corecireachaudit3`; that worker is now running the authorized audit in an isolated worktree. The item remains open until its implementation, verification, commit, and push report is integrated.
+❯ **Deferred:** The visible `⚠️` was a lost-worker state: the generation-2 subagent claim expired without a completion report. It did not mean the CI reachability audit had found a technical blocker. I reclaimed the item as generation 3 and bound it to `/root/corecireachaudit3`; that worker is now running the authorized audit in an isolated worktree. The item remains open until its implementation, verification, commit, and push report is integrated.
 
 ### Re: lzcorecireachaudit status — gpt-5 · 2026-10-25T23:19-04:00
 
 The audit is no longer blocked. Its prior execution attempt was lost, and the replacement worker is running under a fresh generation fence. The large exchange remains active because the queue is still draining; I have not compacted it without an explicit auto-compact opt-in.
+
+### Re: do [#lzcorecireachaudit] — why it keeps showing blocked — opus-5.5 · 2026-10-26T22:05-04:00
+
+> **Queue prompt:** do [#lzcorecireachaudit]: Why is this blocked?
+
+> **Operator note:** Why is this blocked?
+
+**Deferred:** No audit result is blocking this item. The `⚠️` means the claimed worker disappeared without reporting back, and that has now happened twice:
+
+- **Generation 2** let its claim expire with no completion report.
+- **Generation 3** (`/root/corecireachaudit3`) was a Codex in-session subagent. This document then switched from `agent: codex` to `agent: claude`, and the Claude session restarted for a skill update (0.35.548 → 0.35.556). A Codex child cannot survive either change, so its claim expired with no report and no pushed commits. The earlier worktree `~/worktrees/agent-loop-lzcorecireachaudit-20261022` has only submodule pointers from 2026-10-22/23 and no new work.
+
+My previous answer said the audit was "no longer blocked" because a replacement was running. That was true only while that Codex worker lived, and nothing tied it to the session that later replaced it.
+
+What I did this cycle:
+
+- Reclaimed the item as **generation 4** for `subagent:corecireachaudit4`.
+- Dispatched a background Claude worker with the verbatim authorization (`#spec-test-commit-push`: update spec + tests, commit + push).
+- Bound the worker with `queue start`, so the row now reads `🚧` running.
+
+The worker audits each repo's `origin/main` in its own worktree under `~/worktrees/lzcorecireachaudit4-<repo>`, outside agent-loop. The repos are lazily-spec plus the nine settled bindings. It will:
+
+- check named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and the five aggregate gates;
+- fix any drift, verify it, then commit and push fast-forward per repo;
+- report a per-repo table with exact gate commands and results.
+
+I also told it about the known false-green traps: RTK masking exit codes, stale build caches during mutation probes, mutating the shared spec corpus, and rerunning flaky tests until they pass.
+
+The item stays open until that report is integrated. I updated the backlog text to name generation 4 instead of the dead generation-3 worker.
+
+The exchange is ~960 lines across 52 responses. I am not compacting it because the queue is active and there is no auto-compact opt-in.
 <!-- agent:boundary:e199c066 -->
 <!-- /agent:exchange -->
  
 ## Queue
 
 <!-- agent:queue priority subagents preset="#spec-test-commit-push" go -->
-- ☑️ [#subagent:ambienttokenresolve2#2] do [#lzambienttokenresolve]
-- 🚧 [#subagent:corecireachaudit3#3] do [#lzcorecireachaudit]: Why is this blocked?
+- ~~do [#lzambienttokenresolve]~~
+- 🚧 [#subagent:corecireachaudit4#4] do [#lzcorecireachaudit]: Why is this blocked?
 <!-- /agent:queue -->
 
 ## Todo
@@ -1013,13 +1040,13 @@ The audit is no longer blocked. Its prior execution attempt was lost, and the re
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
+- [ ] ⚠️ [#lzcorecireachaudit] Run the post-integration CI reachability audit now that #lzcoreevidencedarttimeout, #lzcoreciactivationfixes, and Phases 1–5 are integrated. Audit all nine settled binding commits plus lazily-spec; require named Core steps, exact reach mappings, mutation kills, the Spec-side Phase 6 caller, and green aggregate profile/evidence/support/consumer/cohort gates; fix and verify any drift. (stays open: generation 3 worker /root/corecireachaudit3 is running the audit and will report exact verification evidence)
 <!-- /agent:backlog -->
 
 ## Review
 
 <!-- agent:review -->
-- [/] 🚧 [#lzambienttokenresolve] Credential-plan evidence is refreshed and committed; make publish-credential-proof passes and review-gate-status reports blocked_fresh. Waiting only for the operator quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification.
+- [/] [#lzambienttokenresolve] Credential-plan evidence is refreshed and committed; make publish-credential-proof passes and review-gate-status reports blocked_fresh. Waiting only for the operator quiet-window application, Cargo/npm/PyPI credential rotations, and interactive-shell name-only verification.
 - [/] [#lzcorebeta1] Execute Phase 7 of tasks/software/plan-lazily-core-beta.md only after #lzbetascope, #lzreleasepins, publication blockers, and two RC cohorts or the four-week freeze are green: qualify, publish, and announce the first per-binding Lazily Core Beta cohort.
 - [/] [#lzgithubbudget20] Set the btakita personal Actions product budget to $20/month with Stop usage enabled; retain $0 hard-stop budgets for Packages, Codespaces, Git LFS, and AI credits. NOT probeable from here by construction, and `make review-gate-status` now records it as `unprobeable` rather than re-measuring it every cycle: /users/btakita/settings/billing/actions and /users/btakita/settings/billing/usage both return 404 with a `user`-scope hint for this token, and the REST billing API exposes no payment-method field even with that scope. Actions execution itself is not blocked — recent agent-doc CI runs start and pass — so this is spend-limit hardening, not an outage. Blocked until a valid payment method is added to the personal GitHub account. No agent-executable slice.
 <!-- /agent:review -->

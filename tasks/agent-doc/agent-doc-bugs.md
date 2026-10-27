@@ -282,6 +282,58 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - An explicit `id=` must always win.
 - A todo must never take an id that an open tracked item already owns.
 - A regression test should pin both.
+
+### Re: do [#jbshrinkrestarts], do [#todoaddidhijack] — opus-5 · 2026-10-26T21:39-04:00
+
+> **Queue prompt:** do [#jbshrinkrestarts]
+
+**On `main` and installed:** benchmark `d34a3b53ab`, moves `82b1284035` and `ba299eef24`, and plugin bump `b2b22a4685` (JetBrains classic 0.2.845, 2026.2 0.2.846, 2026.3 0.2.847).
+
+**Integrated checks:**
+- `make check-fast` passed: 11739 run, 11739 passed.
+- Classic Gradle passed: 984 tests, 0 failures.
+- `jetbrains-262-check` and `jetbrains-263-check` both passed.
+
+**Restart needed:** IntelliJ 2026.3 and Rider 2026.2 need one to load the bump, as expected. This is the first upgrade that should show the new **Restart IDE** balloon.
+
+**New benchmark: `make jetbrains-keystroke-bench`.** It runs headless on a 127 KB document and fails if any keystroke case gets more than max(5 µs, 15%) slower. No regression:
+
+| Case | Before | After |
+|---|---|---|
+| typing report | 106 µs | 106 µs |
+| replica flush, 1 key | 54.7 ms | 49.0 ms |
+| replica flush, 16 keys | 55.2 ms | 54.3 ms |
+| worker hop | 2.4 µs | 2.0 µs |
+
+**What moved into the native library** (it hot-reloads, so changing these rules no longer needs an IDE restart):
+- **`route_outcome`:** how the plugin reads a Run Agent Doc route's output and every notification text. 32-case shared fixture.
+- **`exchange_prefix_repair`:** the `❯ ` prefix repair applied after a patch. 126-case shared fixture.
+- Both are exact ports, and the Kotlin stays as a fallback.
+- The native route parse takes 38 µs versus 25 µs in Kotlin, once per route. The prefix repair takes 1.2 ms versus 0.3 ms, once per patch that needs it.
+
+**The big finding:** a replica flush costs about 50 ms whatever the burst size. About 48 ms of that is native `agent_doc_replica_diff`, and it grows faster than the document (about 4.9 ms on a 32 KB copy). Queued below as `#replicadiffcost`.
+
+> **Queue prompt:** do [#todoaddidhijack]
+
+**On `main` as `da5f6f9473`, and installed.** `make check-fast` passed: 11451 run, 11451 passed. You chose the full fix:
+
+- An explicit `id=` always wins.
+- A todo never takes an id that an open review, backlog or icebox item already owns. An explicit collision is refused with a message naming the owner.
+- A cited `#id` becomes a `(source: …)` link, so `--done <item>` still checks the linked todo off.
+- `review_add` now runs the same id guard as backlog and icebox adds.
+- Cause: the deliberate `#todoidlayer` reuse rule overrode an explicit id whenever the text cited exactly one open item. Five mutation checks each turn their tests red.
+
+**One thing to know:** a link created by a `(source: …)` marker counts as "done when that item is done". So a todo that only mentions a prerequisite ("once X reports") would be checked off when X finishes. The worker flagged it; it's not queued.
+
+**Queued (4), your picks:**
+
+- `#replicadiffcost`: make the replica diff proportional to the edit. Native-only, gated by the keystroke benchmark.
+- `#jbsessioncmdoutcome`: move the clear/restart refusal parsers into native code, the same way `route_outcome` moved.
+- `#jbshellr1`: GH #339 stage R1. That's the shell, the forwarders and the activation receipts, with the code still in one loader. It costs one restart. It also proposes the restated 2026.3 reopen rule for your agreement. Todo `#jb339r1decision` is done.
+- `#editorbackendparity`: your question.
+  - Does VS Code on Coder have a similar frontend/backend split (remote extension host vs UI extensions)?
+  - What does Zed's architecture imply?
+  - What does each need for parity with the JetBrains plugins (restart-free upgrades, activation receipts, measured-layout routing)? The parity matrix goes in `editors/SPEC.md`.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -289,9 +341,13 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:todoidhijack#1] do [#todoaddidhijack]
+- do [#replicadiffcost]
+- do [#jbsessioncmdoutcome]
+- do [#jbshellr1]
+- do [#editorbackendparity]
+- ~~do [#todoaddidhijack]~~
 - ~~do [#jb339shelldesign]~~
-- 🚧 [#subagent:jbshrink#1] do [#jbshrinkrestarts]
+- ~~do [#jbshrinkrestarts]~~
 - ~~do [#cazn]~~
 - ~~do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.~~
 - ~~do [#jb263-feed-verify]~~
@@ -310,12 +366,14 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 - [x] [#subagent-operator-request-autoupgrade-263-path] Answer the blocking subagent question for tracked work jb262dynlauncherrecommen for queue item ‘Fix the auto-upgrade not working...the IDE needed to be restarted.’ in agent:exchange: The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). (choices: Keep restart-only + prompt, Re-qualify on 263.7307.44, Build the GH #339 architecture, Shrink the restart count) (source: agent:review [#jb262dynlauncherrecommen])
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
-- [ ] [#jb339r1decision] Decide whether to queue GH 339 shell stage R1 (stable shell + forwarders + activation receipts, code still in one loader, costs one restart) once the shrink-restarts work reports its benchmark and moves. Same decision: restate the "Exact-263 decision" reopen rule as "module graph and registrations unchanged across the swap, and the retired implementation is collectable" (editors/jetbrains/SPEC.md).
+- [x] [#jb339r1decision] Decide whether to queue GH 339 shell stage R1 (stable shell + forwarders + activation receipts, code still in one loader, costs one restart) once the shrink-restarts work reports its benchmark and moves. Same decision: restate the "Exact-263 decision" reopen rule as "module graph and registrations unchanged across the swap, and the retired implementation is collectable" (editors/jetbrains/SPEC.md).
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#todoaddidhijack] [agent-doc] `agent-doc respond --todo-add "id=<custom> <text>"` ignores the explicit `id=` when the text mentions another tracked id: on 2026-10-26 `--todo-add "id=jb339r1decision ... once #jbshrinkrestarts reports ..."` created todo `[#jbshrinkrestarts]`, colliding with the open backlog item of that id, while session-check warned the coined `#jb339r1decision` was untracked. An explicit `id=` must always win, a todo must never take an id an open tracked item already owns, and a regression test should pin both.
-- [ ] [#jbshrinkrestarts] Shrink the JetBrains restart count: move TerminalUtil (tmux/process orchestration) and PatchWatcher logic behind the native agent-doc library, which already hot-reloads without an IDE restart, so fewer releases change plugin Kotlin. First add a per-keystroke latency benchmark on a large session document and gate each move on no regression. Leave CrdtReplicaManager in Kotlin unless the native side keeps the replica behind a handle and the boundary carries binary op deltas, not whole-document JSON.
+- [ ] [#replicadiffcost] Make the native agent_doc_replica_diff proportional to the edit, not the whole document: on a 125 KB session document a JetBrains replica flush costs about 50 ms whatever the burst size, about 48 ms of it in agent_doc_replica_diff, and the cost grows superlinearly (about 4.9 ms on a 32 KB copy). Native-only, so no IDE restart. Gate on make jetbrains-keystroke-bench (baseline report in the jbshrink worktree .bench/baseline.json) and prove no change to CRDT convergence or editor-truth semantics.
+- [ ] [#jbsessioncmdoutcome] Move the JetBrains TerminalUtil clear/restart refusal parsers (parseBusySessionClearRefusal, parseLiveTurnQueuedClear, the restart refusals) and their notification texts into a native session_command_outcome derivation, the same way route_outcome moved: exact port, shared fixture that the Rust derivation and the Kotlin fallback must answer identically, keystroke benchmark gate.
+- [ ] [#jbshellr1] Build GH 339 shell stage R1 from editors/jetbrains/SPEC.md "Restart-free implementation generations": the stable shell, the forwarders that own every IntelliJ registration, and the activation receipt fields, with the implementation still in the same classloader (no child loader yet). It costs one restart. Keep the frontend shell-only, keep the restart-required prompt as the fallback, and propose the restated Exact-263 reopen rule (module graph and registrations unchanged across the swap, retired implementation collectable) in the spec for operator agreement.
+- [ ] [#editorbackendparity] Editor frontend/backend architecture parity: compare the JetBrains split-mode (Remote Dev backend + JetBrains Client frontend) design with VS Code on Coder (remote extension host vs UI extensions) and Zed (remote development, extension model), and decide what each needs for parity with the JetBrains plugins: restart-free upgrades (shell + swappable implementation), activation receipts proving the frontend runs the same generation, and measured-layout routing. Answer whether VS Code on Coder has a similar architecture and what Zed overall architecture implies, record the parity matrix in editors/SPEC.md, and queue concrete per-editor gaps as follow-ups.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

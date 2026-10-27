@@ -203,7 +203,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   `exchange_subagent_dispatch`. Dispatch every listed prompt immediately, one
   background subagent per prompt and a dedicated worktree for repository work.
   Exchange prompts have no queue claim/release lifecycle and no preamble, so
-  the coordinator puts the scratch-isolation rule (the
+  the coordinator puts the scratch-isolation and live-tmux isolation rules (the
   `exchange_subagent_dispatch_guidance` text) in each subagent prompt itself. The parent retains
   the response cycle: review the worker result, answer the exchange prompt, and
   perform the normal binary-owned closeout.

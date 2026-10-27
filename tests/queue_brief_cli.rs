@@ -79,6 +79,10 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
             "- {}\n",
             agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE
         )))
+        .stdout(predicate::str::contains(format!(
+            "- {}\n",
+            agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE
+        )))
         .stdout(predicate::str::contains("AUTHORIZATION NOT RESOLVED").not());
 }
 

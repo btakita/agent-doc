@@ -3,6 +3,7 @@
 pub mod coined_id_pretooluse;
 mod commit_message_source;
 pub mod preflight_user_prompt_submit;
+pub mod tmux_live_server_guard;
 
 use std::path::Path;
 

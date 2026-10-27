@@ -1256,6 +1256,8 @@ dependencies = [
  "agent-doc-turn",
  "agent-kit",
  "anyhow",
+ "libc",
+ "regex",
  "serde_json",
  "tempfile",
 ]

@@ -1520,3 +1520,58 @@ fn a_bare_trigger_matches_the_file_trigger_through_admission_and_stop() {
         );
     }
 }
+
+/// `#tmuxkittyterminal`: the `PreToolUse` command installed for Claude Code
+/// and Codex refuses the command that killed the operator's tmux server on
+/// 2026-10-26 (`TMUX_TMPDIR=<dir> tmux kill-server` from a harness inside
+/// tmux), in a directory no session document governs, and allows the same
+/// teardown aimed at a named private socket. `$TMUX` names a socket path that
+/// is never bound, and the hook only decides; it runs no tmux command.
+#[test]
+fn pretooluse_hook_refuses_killing_the_inherited_tmux_server() {
+    let tmp = TempDir::new().unwrap();
+    let live = tmp.path().join("tmux-live").join("default");
+    let payload = |command: &str| {
+        json!({
+            "session_id": "tmux-guard",
+            "cwd": tmp.path().display().to_string(),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": { "command": command },
+        })
+        .to_string()
+    };
+    let hook = || {
+        let mut cmd = agent_doc();
+        cmd.current_dir(tmp.path())
+            .env("TMUX", format!("{},4242,0", live.display()))
+            .env_remove("TMUX_TMPDIR")
+            .env_remove("TMUX_PANE")
+            .args(["hook", "coined-id-pre-tool-use"]);
+        cmd
+    };
+
+    hook()
+        .write_stdin(payload(
+            "TMUX_TMPDIR=$CS/home/tmux tmux ls; TMUX_TMPDIR=$CS/home/tmux tmux kill-server",
+        ))
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "tmux consults `$TMUX` before `TMUX_TMPDIR`",
+        ))
+        .stderr(predicate::str::contains(live.display().to_string()));
+
+    hook()
+        .write_stdin(payload("pkill -f tmux"))
+        .assert()
+        .code(2);
+
+    for allowed in [
+        "tmux -L lzkitty-test kill-server",
+        "env -u TMUX TMUX_TMPDIR=/wt/tmux tmux kill-server",
+        "tmux ls",
+    ] {
+        hook().write_stdin(payload(allowed)).assert().success();
+    }
+}

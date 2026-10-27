@@ -1013,8 +1013,10 @@ subagent intent. For EACH listed exchange prompt, dispatch it NOW to its own bac
 (and use a dedicated worktree outside the IDE-watched project if it touches a repository). The \
 parent retains this response cycle: review the worker result, answer the prompt in the exchange, \
 and perform the normal binary-owned closeout. No queue claim/release applies to exchange prompts. \
-Exchange prompts have no preamble, so put this rule in each subagent prompt yourself: ",
-    agent_doc_queue::subagent_scratch_isolation_rule!()
+Exchange prompts have no preamble, so put these rules in each subagent prompt yourself: ",
+    agent_doc_queue::subagent_scratch_isolation_rule!(),
+    " ",
+    agent_doc_queue::subagent_tmux_isolation_rule!()
 );
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -8636,7 +8638,10 @@ mod tests {
         assert!(guidance.contains("parent retains this response cycle"));
         assert!(guidance.contains("No queue claim/release"));
         assert!(
-            guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
+            guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
+        );
+        assert!(
+            guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE)
         );
     }
 

@@ -32,19 +32,19 @@ use std::path::{Component, Path, PathBuf};
 
 /// One shell word after quote removal.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Word {
-    value: String,
+pub(crate) struct Word {
+    pub(crate) value: String,
     /// False when the word carries an expansion (`$`, a backtick) whose value
     /// cannot be known from the unexpanded command.
-    literal: bool,
+    pub(crate) literal: bool,
 }
 
 /// One simple command of a command line.
 #[derive(Debug, Default)]
-struct Segment {
+pub(crate) struct Segment {
     /// Source text of the segment, excluding heredoc bodies.
-    text: String,
-    words: Vec<Word>,
+    pub(crate) text: String,
+    pub(crate) words: Vec<Word>,
     /// Bodies of heredocs and here-strings this segment reads on stdin.
     stdin_bodies: Vec<String>,
     /// Stdout redirections: (target, append).
@@ -367,7 +367,7 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn shell_segments(command: &str) -> Vec<Segment> {
+pub(crate) fn shell_segments(command: &str) -> Vec<Segment> {
     Lexer::new(command).run()
 }
 

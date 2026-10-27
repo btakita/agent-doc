@@ -462,6 +462,11 @@ pub fn document_ids(cwd: &Path, pane: Option<&str>) -> DocumentIds {
 /// `PreToolUse` entry point: read the harness payload on stdin, decide, and
 /// report. Exit status 2 with the reason on stderr is how Claude Code blocks a
 /// tool call; every other path exits 0 so the guard can never wedge a turn.
+///
+/// This one installed hook hosts two guards. The live-tmux guard
+/// (`crate::tmux_live_server_guard`, `#tmuxkittyterminal`) runs first and needs
+/// no document: a command that would kill the operator's tmux server is
+/// refused in every pane, governed or not. The coined-id guard follows.
 pub fn handle_pretooluse() -> anyhow::Result<()> {
     use std::io::Read;
     let mut payload = String::new();
@@ -477,6 +482,16 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
         .unwrap_or_default();
     let empty = serde_json::Value::Null;
     let tool_input = input.get("tool_input").unwrap_or(&empty);
+    if let PreToolUseDecision::Deny { reason } =
+        crate::tmux_live_server_guard::tmux_live_server_decision(
+            tool_name,
+            tool_input,
+            &crate::tmux_live_server_guard::TmuxAmbient::from_env(),
+        )
+    {
+        eprintln!("{reason}");
+        std::process::exit(2);
+    }
     let cwd = input
         .get("cwd")
         .and_then(serde_json::Value::as_str)

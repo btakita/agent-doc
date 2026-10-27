@@ -102,6 +102,18 @@ subprocess under test reaches the same server through `AGENT_DOC_TMUX_SOCKET`
 set from the handle's `server_socket`; no test may reach the operator's default
 server.
 
+tmux picks its server from `-L`/`-S` first, then `$TMUX`, and only then
+`$TMUX_TMPDIR/tmux-<uid>/default`. A test or an agent running inside the
+operator's tmux inherits `$TMUX`, so `TMUX_TMPDIR=<dir>` alone isolates
+nothing: on 2026-10-26 a subagent's `TMUX_TMPDIR=<dir> tmux kill-server`
+killed the operator's server, every agent pane, and kitty
+(`#tmuxkittyterminal`). Every tmux command against a test server names its
+socket (`-L`/`-S`), or runs with `$TMUX` removed and a private `TMUX_TMPDIR`.
+`tmux_env_beats_tmux_tmpdir_so_only_a_named_socket_isolates` (`make tmux-ci`)
+pins this: its control kills a stand-in server through `$TMUX` despite a
+private `TMUX_TMPDIR`, then shows that `env -u TMUX` with a private
+`TMUX_TMPDIR`, and `-L <private>`, leave a second server alive.
+
 Tests that mutate or inspect process-global state (`std::env` or the process
 current directory) must hold the reentrant shared test env lock from
 `test_support::env_lock()` or a helper backed by that same lock, and mutations

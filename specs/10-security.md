@@ -26,6 +26,49 @@ agent-doc is designed for single-user, local operation. There is no authenticati
 - For broader shared/collaborative use cases, wait for the planned multi-user security model (access control, session isolation, content scanning).
 - Review agent responses before sharing or publishing document content.
 
+## Live tmux server guard (`#tmuxkittyterminal`)
+
+Agent panes, their subagents, and the terminal hosting them all depend on one
+tmux server: the operator's. Killing it ends every live session at once. On
+2026-10-26 22:26:47 -04:00 a background subagent tore down its test server with
+`TMUX_TMPDIR=<dir> tmux kill-server`. Its harness ran inside the operator's
+tmux, and tmux resolves the server as `-L`/`-S`, then `$TMUX`, then
+`$TMUX_TMPDIR/tmux-<uid>/default`. The command killed the operator's server,
+every Claude and Codex pane, and kitty, which runs `kitty -e tmux` and closed
+when its client exited.
+
+The `PreToolUse` command installed for Claude Code and Codex
+(`agent-doc hook coined-id-pre-tool-use`) runs this guard first, before the
+coined-id guard, in every pane, with or without a session document:
+
+- **Scope.** Only `Bash` commands. The guard follows quote-aware segments,
+  prefix assignments, `env`/`sudo`/`command`/`exec`/`nohup`/`timeout`/`nice`/
+  `rtk proxy` wrappers, and `sh -c`/`bash -lc` scripts. It inspects the tmux
+  commands that destroy state: any `kill*` (`kill-server`, `kill-session`,
+  `kill-window`, `kill-pane`, `killp`, `killw`, unique prefixes), plus
+  `respawn*` and `unlink*` with `-k`, including commands chained with `\;`.
+  It also inspects `pkill`/`killall` patterns that match `tmux`, `tmux:
+  server`, `tmux: client`, `kitty`, or `kitten`. Read-only tmux commands
+  (`ls`, `list-panes`, `show-options`, `capture-pane`) are never blocked.
+- **Allowed only when provably private.** The command passes `-L <name>`
+  (not `default`) or `-S <path>` (not the `$TMUX` socket or the default
+  socket). Or it clears `$TMUX` (`env -u TMUX`, `TMUX=`, `unset TMUX`,
+  `env -i`) and exports a non-empty `TMUX_TMPDIR` in the same command line.
+  Or it sets `$TMUX` to another socket. A label or path built from a shell
+  variable counts as private.
+- **Refused otherwise,** with exit status 2 and a reason that names the server
+  the command would reach and the private form to use instead. A `TMUX_TMPDIR`
+  with an inherited `$TMUX` is refused, and the reason says tmux reads `$TMUX`
+  first. An unexported `TMUX_TMPDIR` assignment is ignored, and so is a
+  `source`d env file, because the guard cannot see what it exports. The guard
+  fails closed on a destructive command: a refusal costs a retry with `-L`, and
+  a wrong allow costs every live pane. There is no override flag. A change to
+  the operator's own server is the operator's call.
+
+The subagent brief (`agent-doc queue brief`) and the exchange-subagent dispatch
+guidance restate the full rule (`subagent_tmux_isolation_rule!`), including send-keys
+and resize, which the hook does not inspect.
+
 ## Secret Redaction
 
 The `agent-doc-secret-redact` crate is a backend hygiene layer that scrubs common plaintext secret shapes from anything written to `.agent-doc/` state files or stream/finalize stdout messages. It is **always on** with no operator-facing flag.

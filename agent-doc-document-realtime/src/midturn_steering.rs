@@ -1702,9 +1702,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                  If it touches a repository, give that subagent its own git worktree outside the \
                  IDE-watched project; never run two subagents against one checkout. Keep working the \
                  current item yourself; review the worker result and answer the exchange prompt in \
-                 this response cycle, then perform the normal closeout. Put this rule in the \
+                 this response cycle, then perform the normal closeout. Put these rules in the \
                  subagent prompt: ",
-                agent_doc_queue::subagent_scratch_isolation_rule!()
+                agent_doc_queue::subagent_scratch_isolation_rule!(),
+                " ",
+                agent_doc_queue::subagent_tmux_isolation_rule!()
             )
         }
         (SteeringDispatch::CancelClaimed, _, _, _) => {
@@ -1866,8 +1868,10 @@ pub fn render_closeout_steering_context(
                      have no queue claim/release lifecycle. If it touches a repository, give the \
                      subagent its own git worktree outside the IDE-watched project. When the worker \
                      reports back, carry its result into the next response cycle; the current \
-                     response is already committed. Put this rule in the subagent prompt: ",
-                    agent_doc_queue::subagent_scratch_isolation_rule!()
+                     response is already committed. Put these rules in the subagent prompt: ",
+                    agent_doc_queue::subagent_scratch_isolation_rule!(),
+                    " ",
+                    agent_doc_queue::subagent_tmux_isolation_rule!()
                 )
                 .to_string()
             }
@@ -3191,8 +3195,12 @@ mod tests {
         // Exchange subagents get no `queue brief` preamble, so both render
         // paths carry the shared scratch-isolation rule themselves.
         let scratch = agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE;
+        let tmux = agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE;
         assert!(text.contains(scratch), "{text}");
-        assert!(instruction_for(&item_clone).ends_with(scratch));
+        assert!(text.contains(tmux), "{text}");
+        let instruction = instruction_for(&item_clone);
+        assert!(instruction.contains(scratch), "{instruction}");
+        assert!(instruction.ends_with(tmux), "{instruction}");
     }
 
     #[test]

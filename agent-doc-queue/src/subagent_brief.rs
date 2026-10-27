@@ -353,6 +353,31 @@ macro_rules! subagent_scratch_isolation_rule {
 /// in every preamble and appended to the exchange-subagent dispatch texts.
 pub const SUBAGENT_SCRATCH_ISOLATION_RULE: &str = subagent_scratch_isolation_rule!();
 
+/// The live-tmux isolation coordinator rule (`#tmuxkittyterminal`), as a
+/// string literal so other crates can `concat!` it like the scratch rule.
+/// Subagents run inside the operator's tmux, so `$TMUX` points every bare
+/// `tmux` command at the operator's server, and tmux reads `$TMUX` before
+/// `TMUX_TMPDIR`. On 2026-10-26 a subagent tore down its test server with
+/// `TMUX_TMPDIR=<dir> tmux kill-server` and killed the operator's server,
+/// every agent pane, and the terminal. The `PreToolUse` hook enforces the
+/// kill half of this rule; the brief states all of it.
+#[macro_export]
+macro_rules! subagent_tmux_isolation_rule {
+    () => {
+        "Live tmux isolation: you run inside the operator's live tmux server, and `$TMUX` points \
+         every bare `tmux` command at it. tmux reads `$TMUX` before `TMUX_TMPDIR`, so \
+         `TMUX_TMPDIR=<dir>` alone isolates nothing. Name a private server on every tmux command \
+         against a test server (`tmux -L <unique-name>` or `-S <path>`, or prefix \
+         `env -u TMUX TMUX_TMPDIR=<dir>`), and tear it down by that name only. Never kill, \
+         respawn, send keys to, or resize the operator's server, sessions, windows, or panes, and \
+         never `pkill`/`killall` tmux or the terminal."
+    };
+}
+
+/// The live-tmux isolation rule (`subagent_tmux_isolation_rule!`), restated
+/// in every preamble and appended to the exchange-subagent dispatch texts.
+pub const SUBAGENT_TMUX_ISOLATION_RULE: &str = subagent_tmux_isolation_rule!();
+
 /// Marker line that opens every preamble.
 pub const SUBAGENT_PREAMBLE_MARKER: &str =
     "[agent-doc] operator authorization for a dispatched queue item (#waypostauthorization)";
@@ -551,6 +576,7 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          closes the item.\n",
     );
     out.push_str(concat!("- ", subagent_scratch_isolation_rule!(), "\n"));
+    out.push_str(concat!("- ", subagent_tmux_isolation_rule!(), "\n"));
     out.push_str(
         "- Commit and push only when the authorization above includes it. Use your own branch and \
          fast-forward by default. An explicitly named target branch or explicit force-push directive \
@@ -928,6 +954,43 @@ mod tests {
             SUBAGENT_SCRATCH_ISOLATION_RULE.contains("never a file in a shared scratchpad or /tmp")
         );
         assert!(SUBAGENT_SCRATCH_ISOLATION_RULE.contains("unique `mktemp` path"));
+    }
+
+    /// `#tmuxkittyterminal`: every preamble tells the worker that `$TMUX`
+    /// beats `TMUX_TMPDIR`, inside the coordinator rules, before commit/push.
+    #[test]
+    fn every_status_restates_the_live_tmux_isolation_rule() {
+        let resolved = doc(
+            PRESETS,
+            "subagents preset=\"#spec-test-build-install-commit-push\"",
+            &["do [#abc]"],
+            &["[ ] [#abc] x"],
+        );
+        let unresolved = doc("", "subagents preset=\"#nosuch\"", &["do [#abc]"], &[]);
+        let item_only = doc("", "subagents", &["look at foo"], &[]);
+        let bullet = format!("- {SUBAGENT_TMUX_ISOLATION_RULE}\n");
+        for (content, item) in [
+            (&resolved, "do [#abc]"),
+            (&unresolved, "do [#abc]"),
+            (&item_only, "look at foo"),
+        ] {
+            let p = subagent_authorization("doc.md", content, item).subagent_prompt_preamble;
+            let rule_at = p.find(&bullet).unwrap_or_else(|| panic!("{p}"));
+            assert!(p.find("Coordinator rules").unwrap() < rule_at, "{p}");
+            assert!(
+                rule_at < p.find("- Commit and push only when").unwrap(),
+                "{p}"
+            );
+        }
+        for phrase in [
+            "tmux reads `$TMUX` before `TMUX_TMPDIR`",
+            "`TMUX_TMPDIR=<dir>` alone isolates nothing",
+            "`tmux -L <unique-name>`",
+            "`env -u TMUX TMUX_TMPDIR=<dir>`",
+            "never `pkill`/`killall` tmux",
+        ] {
+            assert!(SUBAGENT_TMUX_ISOLATION_RULE.contains(phrase), "{phrase}");
+        }
     }
 
     #[test]

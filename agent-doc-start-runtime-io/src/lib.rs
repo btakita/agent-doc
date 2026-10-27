@@ -2401,6 +2401,7 @@ impl SessionActorRuntime {
                 state,
                 caller: caller.to_string(),
                 reason: reason.to_string(),
+                expected_revision: None,
             },
         )
     }

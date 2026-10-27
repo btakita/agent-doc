@@ -5551,6 +5551,37 @@ pub fn store_actor_lifecycle_record_tx(
     )
 }
 
+/// `#bindingcallersaudit`: [`store_actor_lifecycle_record_tx`] fenced on the
+/// exact write the caller decided against, not only its generation.
+///
+/// A projection-evidence lifecycle write (the route promoting a `Starting`
+/// actor it saw at a ready prompt, recovering a starting-timeout `Blocked`, or
+/// marking a `Starting` actor `Blocked` after its ready wait timed out) decides
+/// from an earlier read. The owner's same-generation `Busy`/`Ready` committed
+/// in between keeps the generation, so a generation fence alone lets the stale
+/// decision land over it, and a `Ready` landing over a `Busy` also releases
+/// that running turn's dispatch receipt. This fails with the same
+/// `generation compare-and-swap failed` error as [`store_actor_record_fenced_tx`].
+pub fn store_actor_lifecycle_record_fenced_tx(
+    conn: &mut Connection,
+    expected_prior_generation: u64,
+    expected_prior_revision: ActorRevision,
+    record: &ActorRecord,
+    launch_mode: Option<String>,
+    controller_epoch: Option<i64>,
+    now_secs: i64,
+) -> Result<(ActorStoreWrite, usize)> {
+    store_actor_record_in_tx(
+        conn,
+        Some(expected_prior_generation),
+        Some(expected_prior_revision),
+        record,
+        launch_mode,
+        controller_epoch,
+        (record.state == ActorState::Ready).then_some(now_secs),
+    )
+}
+
 fn store_actor_record_in_tx(
     conn: &mut Connection,
     expected_prior_generation: Option<u64>,
@@ -8139,6 +8170,106 @@ mod tests {
         let (_, released) =
             store_actor_lifecycle_record_tx(&mut conn, Some(1), &record, None, None, past_grace)?;
         assert_eq!(released, 1, "the pre-turn-grace sweep still runs");
+        Ok(())
+    }
+
+    /// `#bindingcallersaudit`: a route `Ready` decided from a `Starting` read
+    /// and landing after the owner's same-generation `Busy` turn start must fail
+    /// the revision fence, and must not release the running turn's receipt (a
+    /// `Ready` over a non-`Ready` record ends the turn and releases it).
+    #[test]
+    fn fenced_lifecycle_ready_over_a_newer_owner_busy_fails_and_keeps_the_running_receipt()
+    -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let mut conn = open_state_db(dir.path())?;
+        let doc = "tasks/fenced-lifecycle.md";
+        let actor = |state: ActorState, caller: &str| ActorRecord {
+            document_id: doc.to_string(),
+            session_id: "session-fenced".to_string(),
+            generation: 2,
+            pane_id: "%5".to_string(),
+            window_id: "@1".to_string(),
+            harness: "codex".to_string(),
+            state,
+            last_transition: ActorLastTransition {
+                caller: caller.to_string(),
+                reason: "test".to_string(),
+                timestamp: timestamp_secs(),
+                prior_generation: 2,
+                new_generation: 2,
+            },
+        };
+        let now = timestamp_secs() as i64;
+        store_actor_record_tx(
+            &mut conn,
+            None,
+            &actor(ActorState::Starting, "start"),
+            None,
+            None,
+        )?;
+        let (_, decided) = load_actor_record_with_revision_from_db(&conn, doc)?;
+
+        // The owner's turn starts after the route's decision: Busy, same generation.
+        insert_dispatch_attempt_in_db(
+            &conn,
+            &DispatchAttemptInsert {
+                document_id: doc,
+                generation: 2,
+                command_kind: "supervisor_inject",
+                accepted_stage: Some("ready"),
+                failed_stage: None,
+                diagnostic_payload: "owner dispatch",
+                result_status: "accepted",
+                proof_scope: "accepted_only",
+                dispatch_start_proven: false,
+            },
+        )?;
+        store_actor_lifecycle_record_tx(
+            &mut conn,
+            Some(2),
+            &actor(ActorState::Busy, "dispatch"),
+            None,
+            None,
+            now,
+        )?;
+        assert_eq!(mark_open_dispatches_turn_started(&conn, doc)?, 1);
+
+        let err = store_actor_lifecycle_record_fenced_tx(
+            &mut conn,
+            2,
+            decided,
+            &actor(ActorState::Ready, "route"),
+            None,
+            None,
+            now,
+        )
+        .expect_err("a route Ready fenced on the pre-Busy revision must fail");
+        assert!(
+            err.to_string()
+                .contains("generation compare-and-swap failed"),
+            "callers re-decide on the CAS error: {err}"
+        );
+        let stored = load_actor_record_from_db(&conn, doc)?.unwrap();
+        assert_eq!(stored.state, ActorState::Busy);
+        assert_eq!(stored.last_transition.caller, "dispatch");
+        assert!(
+            has_running_dispatch_turn_as_of(&conn, doc, now)?,
+            "the refused Ready must not release the running turn's receipt"
+        );
+
+        // Fenced on the current revision, the same write commits.
+        let (_, current) = load_actor_record_with_revision_from_db(&conn, doc)?;
+        let (write, released) = store_actor_lifecycle_record_fenced_tx(
+            &mut conn,
+            2,
+            current,
+            &actor(ActorState::Ready, "supervisor"),
+            None,
+            None,
+            now,
+        )?;
+        assert_eq!(write.record.state, ActorState::Ready);
+        assert_eq!(released, 1, "a fenced Ready that wins still ends the turn");
         Ok(())
     }
 

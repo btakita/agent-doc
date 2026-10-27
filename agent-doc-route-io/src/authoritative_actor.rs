@@ -483,20 +483,21 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
         return (record, runtime);
     }
 
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    match agent_doc_controller_io::project_controller::mark_lifecycle(
-        &base_dir,
-        agent_doc_controller_io::project_controller::LifecycleRequest {
-            file: file.to_path_buf(),
-            session_id: record.session_id.clone(),
-            pane_id: record.pane_id.clone(),
-            generation: record.generation,
-            state: agent_doc_controller::actor::ActorState::Ready,
-            caller: "route".to_string(),
-            reason: "dispatch_ready_prompt".to_string(),
-        },
+    // `#bindingcallersaudit`: the prompt is projection evidence; the record the
+    // route decided against may have moved on (the owner's same-generation
+    // `Busy` turn start), so the promotion is fenced on that exact record.
+    match mark_route_lifecycle_fenced(
+        file,
+        file_path,
+        &record,
+        agent_doc_controller::actor::ActorState::Ready,
+        "dispatch_ready_prompt",
     ) {
-        Ok(updated) => {
+        Ok(RouteLifecycleWrite::Superseded(current)) => {
+            log_route_lifecycle_superseded(file, &record, current.as_ref(), "promote_ready");
+            (record, runtime)
+        }
+        Ok(RouteLifecycleWrite::Written(updated)) => {
             runtime.actor_state = Some(RouteActorState::Ready);
             agent_doc_ops_log_io::log_op(
                 file,
@@ -556,6 +557,9 @@ pub fn wait_for_authoritative_actor_ready(
         initial,
         current_generation_ready_prompt_proven(tmux, initial, harness),
     );
+    // The record `last_facts` was read from: a timeout `Blocked` write is fenced
+    // on it (`#bindingcallersaudit`).
+    let mut last_record = initial.record.clone();
     let start = Instant::now();
     if last_facts.actor_state != ActorDispatchState::Starting
         && starting_actor_timeout_record_identity_matches(file_path, &last_facts)
@@ -573,7 +577,7 @@ pub fn wait_for_authoritative_actor_ready(
         );
     }
     if starting_actor_timeout_record_matches(file_path, &last_facts) {
-        mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+        mark_starting_actor_timeout_blocked(file, file_path, &last_facts, &last_record);
         let file_display = file.display().to_string();
         agent_doc_ops_log_io::log_op(
             file,
@@ -605,6 +609,7 @@ pub fn wait_for_authoritative_actor_ready(
         )? {
             let prompt_ready = current_generation_ready_prompt_proven(tmux, &refreshed, harness);
             last_facts = authoritative_actor_ready_facts_from_target(&refreshed, prompt_ready);
+            last_record = refreshed.record.clone();
             match classify_authoritative_prompt_ready_barrier(
                 AuthoritativePromptReadyBarrierFacts {
                     ready_facts: &last_facts,
@@ -680,10 +685,10 @@ pub fn wait_for_authoritative_actor_ready(
                     ),
                     agent_doc_ops_log_io::log_op,
                 );
-                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+                mark_starting_actor_timeout_blocked(file, file_path, &last_facts, &last_record);
             }
             Ok(StartingActorTimeoutLogDecision::DuplicateTimeout) => {
-                mark_starting_actor_timeout_blocked(file, file_path, session_id, &last_facts);
+                mark_starting_actor_timeout_blocked(file, file_path, &last_facts, &last_record);
                 let file_display = file.display().to_string();
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -801,20 +806,34 @@ pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
         return None;
     }
 
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    match agent_doc_controller_io::project_controller::mark_lifecycle(
-        &base_dir,
-        agent_doc_controller_io::project_controller::LifecycleRequest {
-            file: file.to_path_buf(),
-            session_id: actor.record.session_id.clone(),
-            pane_id: actor.record.pane_id.clone(),
-            generation: actor.record.generation,
-            state: agent_doc_controller::actor::ActorState::Ready,
-            caller: "route".to_string(),
-            reason: "dispatch_ready_prompt".to_string(),
-        },
+    // `#bindingcallersaudit`: fenced on the `Blocked` record the route decided
+    // against; an owner that moved the actor on in between is followed, never
+    // overwritten.
+    match mark_route_lifecycle_fenced(
+        file,
+        file_path,
+        &actor.record,
+        agent_doc_controller::actor::ActorState::Ready,
+        "dispatch_ready_prompt",
     ) {
-        Ok(updated) => {
+        Ok(RouteLifecycleWrite::Superseded(current)) => {
+            log_route_lifecycle_superseded(
+                file,
+                &actor.record,
+                current.as_ref(),
+                "recover_starting_timeout",
+            );
+            // The owner already left the timed-out `Blocked` on this same
+            // binding: follow its record instead of failing the route.
+            current
+                .filter(|current| route_lifecycle_owner_recovered(&actor.record, current))
+                .map(|current| AuthoritativeActorDispatchTarget {
+                    record: current,
+                    runtime: actor.runtime.clone(),
+                    pending_harness_switch: None,
+                })
+        }
+        Ok(RouteLifecycleWrite::Written(updated)) => {
             let recovered_facts = authoritative_actor_ready_facts_from_target(actor, true);
             clear_starting_actor_timeout_record(file_path, &recovered_facts);
             let mut runtime = actor.runtime.clone();
@@ -1146,26 +1165,34 @@ pub fn route_starting_actor_not_ready_log_line(
     })
 }
 
+/// Mark the `Starting` actor the route timed out waiting on as `Blocked`.
+///
+/// `decided` is the record the timeout was observed against
+/// (`#bindingcallersaudit`): the write is fenced on it, so an owner that
+/// reached `Ready`/`Busy` (same generation) after the route's last poll is
+/// never overwritten with `Blocked`.
 pub fn mark_starting_actor_timeout_blocked(
     file: &Path,
     file_path: &str,
-    session_id: &str,
     facts: &AuthoritativeActorReadyFacts,
+    decided: &agent_doc_controller::actor::ActorRecord,
 ) {
-    let base_dir = registry_base_dir_for_dispatch(file_path);
-    match agent_doc_controller_io::project_controller::mark_lifecycle(
-        &base_dir,
-        agent_doc_controller_io::project_controller::LifecycleRequest {
-            file: file.to_path_buf(),
-            session_id: session_id.to_string(),
-            pane_id: facts.pane_id.clone(),
-            generation: facts.generation,
-            state: agent_doc_controller::actor::ActorState::Blocked,
-            caller: "route".to_string(),
-            reason: STARTING_ACTOR_TIMEOUT_REASON.to_string(),
-        },
+    match mark_route_lifecycle_fenced(
+        file,
+        file_path,
+        decided,
+        agent_doc_controller::actor::ActorState::Blocked,
+        STARTING_ACTOR_TIMEOUT_REASON,
     ) {
-        Ok(updated) => {
+        Ok(RouteLifecycleWrite::Superseded(current)) => {
+            log_route_lifecycle_superseded(
+                file,
+                decided,
+                current.as_ref(),
+                "starting_timeout_blocked",
+            );
+        }
+        Ok(RouteLifecycleWrite::Written(updated)) => {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1187,6 +1214,142 @@ pub fn mark_starting_actor_timeout_blocked(
             );
         }
     }
+}
+
+/// Outcome of a route lifecycle write fenced on the record it decided against
+/// (`#bindingcallersaudit`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouteLifecycleWrite {
+    /// The transition committed over the record the route decided against.
+    Written(agent_doc_controller::actor::ActorRecord),
+    /// The record moved after the route's decision; nothing was written. Carries
+    /// the record that stands now, when there is one.
+    Superseded(Option<agent_doc_controller::actor::ActorRecord>),
+}
+
+/// Whether `current` is still the record write `decided` was read from: same
+/// binding, state, and last transition. Any commit after it (an owner's
+/// same-generation `Busy`/`Ready`, a rebind, a close) changes one of them.
+fn route_lifecycle_decision_still_current(
+    decided: &agent_doc_controller::actor::ActorRecord,
+    current: &agent_doc_controller::actor::ActorRecord,
+) -> bool {
+    current.document_id == decided.document_id
+        && current.session_id == decided.session_id
+        && current.pane_id == decided.pane_id
+        && current.generation == decided.generation
+        && current.state == decided.state
+        && current.last_transition == decided.last_transition
+}
+
+/// The owner left a timed-out `Blocked` itself on the same binding.
+fn route_lifecycle_owner_recovered(
+    decided: &agent_doc_controller::actor::ActorRecord,
+    current: &agent_doc_controller::actor::ActorRecord,
+) -> bool {
+    current.session_id == decided.session_id
+        && current.pane_id == decided.pane_id
+        && current.generation == decided.generation
+        && !matches!(
+            current.state,
+            agent_doc_controller::actor::ActorState::Blocked
+                | agent_doc_controller::actor::ActorState::Closed
+        )
+}
+
+/// Write a route lifecycle transition (`caller = route`) fenced on `decided`,
+/// the record the route observed when it decided (`#bindingcallersaudit`).
+///
+/// The route's evidence (a ready prompt in the pane, a ready-wait timeout) is
+/// projection evidence: it never outranks a commit the owner made after it.
+/// The controller's lifecycle transition alone is fenced on the generation,
+/// which every lifecycle transition keeps, so a stale route decision landed
+/// over the owner's `Busy` (and a `Ready` over a `Busy` released that turn's
+/// dispatch receipt). This reads the record with its `ActorRevision`, writes
+/// nothing when the record already moved, and otherwise compare-and-swaps the
+/// transition on that revision; a lost race reports the newer record.
+pub fn mark_route_lifecycle_fenced(
+    file: &Path,
+    file_path: &str,
+    decided: &agent_doc_controller::actor::ActorRecord,
+    state: agent_doc_controller::actor::ActorState,
+    reason: &str,
+) -> Result<RouteLifecycleWrite> {
+    mark_route_lifecycle_fenced_with_hook(file, file_path, decided, state, reason, &|| {})
+}
+
+/// [`mark_route_lifecycle_fenced`] with a hook between the decision read and
+/// the write, so tests interleave an owner commit there deterministically.
+pub(crate) fn mark_route_lifecycle_fenced_with_hook(
+    file: &Path,
+    file_path: &str,
+    decided: &agent_doc_controller::actor::ActorRecord,
+    state: agent_doc_controller::actor::ActorState,
+    reason: &str,
+    between_decision_and_write: &dyn Fn(),
+) -> Result<RouteLifecycleWrite> {
+    let base_dir = registry_base_dir_for_dispatch(file_path);
+    let file_key = file.to_string_lossy();
+    let (current, revision) =
+        agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?;
+    let Some(current) = current else {
+        return Ok(RouteLifecycleWrite::Superseded(None));
+    };
+    if !route_lifecycle_decision_still_current(decided, &current) {
+        return Ok(RouteLifecycleWrite::Superseded(Some(current)));
+    }
+    between_decision_and_write();
+    match agent_doc_controller_io::project_controller::mark_lifecycle(
+        &base_dir,
+        agent_doc_controller_io::project_controller::LifecycleRequest {
+            file: file.to_path_buf(),
+            session_id: current.session_id.clone(),
+            pane_id: current.pane_id.clone(),
+            generation: current.generation,
+            state,
+            caller: "route".to_string(),
+            reason: reason.to_string(),
+            expected_revision: Some(revision),
+        },
+    ) {
+        Ok(updated) => Ok(RouteLifecycleWrite::Written(updated)),
+        Err(err) if agent_doc_session_actor_io::binding_fence_lost(&err) => {
+            let (newer, _) =
+                agent_doc_session_actor_io::load_record_with_revision_in(&base_dir, &file_key)?;
+            Ok(RouteLifecycleWrite::Superseded(newer))
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn log_route_lifecycle_superseded(
+    file: &Path,
+    decided: &agent_doc_controller::actor::ActorRecord,
+    current: Option<&agent_doc_controller::actor::ActorRecord>,
+    write: &str,
+) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_authoritative_actor_lifecycle_superseded file={} write={} decided_pane={} decided_generation={} decided_state={} current_pane={} current_generation={} current_state={} current_caller={} current_reason={}",
+            file.display(),
+            write,
+            decided.pane_id,
+            decided.generation,
+            decided.state.as_str(),
+            current.map(|record| record.pane_id.as_str()).unwrap_or("-"),
+            current
+                .map(|record| record.generation.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            current.map(|record| record.state.as_str()).unwrap_or("-"),
+            current
+                .map(|record| record.last_transition.caller.as_str())
+                .unwrap_or("-"),
+            current
+                .map(|record| record.last_transition.reason.as_str())
+                .unwrap_or("-"),
+        ),
+    );
 }
 
 #[cfg(test)]
@@ -1377,5 +1540,241 @@ mod tests {
         std::fs::write(&doc, "---\nagent: claude\n---\n").unwrap();
         assert!(document_declares_expected_harness(&doc, "claude-code"));
         assert!(!document_declares_expected_harness(&doc, "codex"));
+    }
+
+    // ----- `#bindingcallersaudit`: route lifecycle writes fenced on the
+    // record they decided against. No tmux: the decision record is seeded in
+    // the project's state DB and the controller's lifecycle transition runs
+    // in-process (`test-support`). The hook lands an owner commit between the
+    // route's decision read and its write, deterministically.
+
+    struct RouteLifecycleFixture {
+        _dir: tempfile::TempDir,
+        doc: std::path::PathBuf,
+        file_path: String,
+        root: std::path::PathBuf,
+    }
+
+    impl RouteLifecycleFixture {
+        fn new(state: agent_doc_controller::actor::ActorState, caller: &str, reason: &str) -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+            let doc = root.join("route-lifecycle.md");
+            std::fs::write(&doc, "---\nagent: codex\n---\n").unwrap();
+            let file_path = doc.to_string_lossy().to_string();
+            agent_doc_controller_io::project_controller::store_actor_record(
+                &root,
+                None,
+                &agent_doc_controller::actor::ActorRecord {
+                    document_id: agent_doc_session_actor_io::canonical_document_id_in(
+                        &root, &file_path,
+                    ),
+                    session_id: "route-lifecycle-session".to_string(),
+                    generation: 3,
+                    pane_id: "%91".to_string(),
+                    window_id: "@9".to_string(),
+                    harness: "codex".to_string(),
+                    state,
+                    last_transition: agent_doc_controller::actor::ActorLastTransition {
+                        caller: caller.to_string(),
+                        reason: reason.to_string(),
+                        timestamp: 1,
+                        prior_generation: 2,
+                        new_generation: 3,
+                    },
+                },
+            )
+            .unwrap();
+            Self {
+                _dir: dir,
+                doc,
+                file_path,
+                root,
+            }
+        }
+
+        fn record(&self) -> agent_doc_controller::actor::ActorRecord {
+            agent_doc_session_actor_io::load_record_with_revision_in(
+                &self.root,
+                &self.doc.to_string_lossy(),
+            )
+            .unwrap()
+            .0
+            .expect("seeded actor record")
+        }
+
+        /// The owner's own same-generation lifecycle transition (generation
+        /// fence only, as supervisors write it).
+        fn owner_transition(
+            &self,
+            state: agent_doc_controller::actor::ActorState,
+            caller: &str,
+            reason: &str,
+        ) {
+            let current = self.record();
+            agent_doc_controller_io::project_controller::mark_lifecycle(
+                &self.root,
+                agent_doc_controller_io::project_controller::LifecycleRequest {
+                    file: self.doc.clone(),
+                    session_id: current.session_id,
+                    pane_id: current.pane_id,
+                    generation: current.generation,
+                    state,
+                    caller: caller.to_string(),
+                    reason: reason.to_string(),
+                    expected_revision: None,
+                },
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn route_lifecycle_write_commits_over_the_unchanged_decision_record() {
+        use agent_doc_controller::actor::ActorState;
+        let fx = RouteLifecycleFixture::new(ActorState::Starting, "start", "session_start");
+        let decided = fx.record();
+        let outcome = mark_route_lifecycle_fenced(
+            &fx.doc,
+            &fx.file_path,
+            &decided,
+            ActorState::Ready,
+            "dispatch_ready_prompt",
+        )
+        .unwrap();
+        let RouteLifecycleWrite::Written(updated) = outcome else {
+            panic!("an unchanged decision record must take the route's write: {outcome:?}");
+        };
+        assert_eq!(updated.state, ActorState::Ready);
+        let stored = fx.record();
+        assert_eq!(stored.state, ActorState::Ready);
+        assert_eq!(stored.last_transition.caller, "route");
+        assert_eq!(stored.last_transition.reason, "dispatch_ready_prompt");
+        assert_eq!(stored.generation, decided.generation);
+    }
+
+    #[test]
+    fn route_ready_promotion_never_overwrites_an_owner_busy_committed_after_the_decision() {
+        use agent_doc_controller::actor::ActorState;
+        let fx = RouteLifecycleFixture::new(ActorState::Starting, "start", "session_start");
+        let decided = fx.record();
+        let outcome = mark_route_lifecycle_fenced_with_hook(
+            &fx.doc,
+            &fx.file_path,
+            &decided,
+            ActorState::Ready,
+            "dispatch_ready_prompt",
+            &|| fx.owner_transition(ActorState::Busy, "dispatch", "dispatch_turn_started"),
+        )
+        .unwrap();
+        let RouteLifecycleWrite::Superseded(Some(current)) = outcome else {
+            panic!("the owner's same-generation Busy must supersede the route: {outcome:?}");
+        };
+        assert_eq!(current.state, ActorState::Busy);
+        let stored = fx.record();
+        assert_eq!(
+            stored.state,
+            ActorState::Busy,
+            "route wrote Ready over a live Busy turn"
+        );
+        assert_eq!(stored.last_transition.caller, "dispatch");
+        assert_eq!(stored.generation, decided.generation);
+    }
+
+    #[test]
+    fn route_starting_timeout_block_never_overwrites_an_owner_ready_committed_after_the_decision() {
+        use agent_doc_controller::actor::ActorState;
+        let fx = RouteLifecycleFixture::new(ActorState::Starting, "start", "session_start");
+        let decided = fx.record();
+        let outcome = mark_route_lifecycle_fenced_with_hook(
+            &fx.doc,
+            &fx.file_path,
+            &decided,
+            ActorState::Blocked,
+            STARTING_ACTOR_TIMEOUT_REASON,
+            &|| fx.owner_transition(ActorState::Ready, "supervisor", "prompt_ready"),
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, RouteLifecycleWrite::Superseded(Some(current)) if current.state == ActorState::Ready),
+            "the owner's Ready must supersede the route's timeout block: {outcome:?}"
+        );
+        let stored = fx.record();
+        assert_eq!(
+            stored.state,
+            ActorState::Ready,
+            "route blocked an owner that reached Ready"
+        );
+        assert_eq!(stored.last_transition.reason, "prompt_ready");
+    }
+
+    #[test]
+    fn route_starting_timeout_recovery_never_resurrects_an_owner_close_committed_after_the_decision()
+     {
+        use agent_doc_controller::actor::ActorState;
+        let fx =
+            RouteLifecycleFixture::new(ActorState::Blocked, "route", STARTING_ACTOR_TIMEOUT_REASON);
+        let decided = fx.record();
+        let outcome = mark_route_lifecycle_fenced_with_hook(
+            &fx.doc,
+            &fx.file_path,
+            &decided,
+            ActorState::Ready,
+            "dispatch_ready_prompt",
+            &|| fx.owner_transition(ActorState::Closed, "supervisor", "agent_exit"),
+        )
+        .unwrap();
+        let RouteLifecycleWrite::Superseded(Some(current)) = outcome else {
+            panic!("the owner's close must supersede the route's recovery: {outcome:?}");
+        };
+        assert_eq!(fx.record().state, ActorState::Closed);
+        assert!(
+            !route_lifecycle_owner_recovered(&decided, &current),
+            "a closed owner is not a recovered one: the route must not follow it as dispatchable"
+        );
+    }
+
+    #[test]
+    fn route_lifecycle_write_skips_a_decision_record_that_already_moved() {
+        use agent_doc_controller::actor::ActorState;
+        let fx = RouteLifecycleFixture::new(ActorState::Starting, "start", "session_start");
+        let decided = fx.record();
+        // The owner committed before the route's write even read the record:
+        // the route's decision is stale and nothing is written.
+        fx.owner_transition(ActorState::Busy, "dispatch", "dispatch_turn_started");
+        let outcome = mark_route_lifecycle_fenced(
+            &fx.doc,
+            &fx.file_path,
+            &decided,
+            ActorState::Ready,
+            "dispatch_ready_prompt",
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, RouteLifecycleWrite::Superseded(Some(current)) if current.state == ActorState::Busy),
+            "a stale route decision must not write: {outcome:?}"
+        );
+        assert_eq!(fx.record().state, ActorState::Busy);
+        assert_eq!(fx.record().last_transition.caller, "dispatch");
+    }
+
+    #[test]
+    fn route_starting_timeout_recovery_follows_an_owner_that_recovered_itself() {
+        use agent_doc_controller::actor::ActorState;
+        let decided = {
+            let mut record = test_actor_record("%91");
+            record.state = ActorState::Blocked;
+            record.last_transition.reason = STARTING_ACTOR_TIMEOUT_REASON.to_string();
+            record
+        };
+        let mut current = decided.clone();
+        current.state = ActorState::Ready;
+        assert!(route_lifecycle_owner_recovered(&decided, &current));
+        current.pane_id = "%92".to_string();
+        assert!(
+            !route_lifecycle_owner_recovered(&decided, &current),
+            "an owner on another pane is not this binding's recovery"
+        );
     }
 }

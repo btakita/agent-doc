@@ -1053,6 +1053,20 @@ The owner heals the record instead: the supervisor's stale-busy self-heal
 writes `idle_pane_reconcile` for every busy entry and retries an unlanded write
 (see [Supervisor](supervisor.md)), so a drain blocked on a stale `Busy`
 (`actor_busy_draining`) is a bounded delay that the caller's backoff retries.
+- The route's own lifecycle writes are fenced on the record they decided
+against (`#bindingcallersaudit`). A ready prompt in the pane and a ready-wait
+timeout are projection evidence, so `promote_starting_authoritative_actor_if_dispatch_ready`
+(`Starting` to `Ready`), `recover_starting_timeout_blocked_actor_if_dispatch_ready`
+(starting-timeout `Blocked` to `Ready`), and `mark_starting_actor_timeout_blocked`
+(`Starting` to `Blocked`) go through `mark_route_lifecycle_fenced`: it re-reads
+the record with its revision, writes nothing when the session, pane,
+generation, state, or last transition changed since the decision, and
+otherwise compare-and-swaps the transition on that revision. An owner commit
+landing in between (the supervisor's `Busy` turn start, its own `Ready`, a
+`Closed`) wins, the route logs
+`route_authoritative_actor_lifecycle_superseded`, and it keeps its earlier
+target (promotion), follows an owner that left the timed-out `Blocked` on the
+same binding (recovery), or leaves the owner's state alone (timeout block).
 - Sync never writes an actor binding it decided from an earlier read without a
 fence on that read (`#syncbindingfence`). Every sync/resync actor write decides
 from one read of the record and compare-and-swaps on its generation and

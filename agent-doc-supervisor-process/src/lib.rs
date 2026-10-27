@@ -19,7 +19,10 @@ pub mod route_owned_completion;
 pub mod screen;
 pub mod session_liveness;
 pub mod shared_writer;
-pub mod spawn_program;
+/// GH #380 / `#headlessharnesspath`: the resolver lives in `agent-doc-harness` so
+/// the headless backends in `agent-doc-agent-io` share it; re-exported here so
+/// `supervisor_process::spawn_program` keeps resolving for the pty spawn.
+pub use agent_doc_harness::spawn_program;
 pub mod start_command;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

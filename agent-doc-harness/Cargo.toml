@@ -23,6 +23,7 @@ agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.35
 agent-doc-turn-executor = { path = "../agent-doc-turn-executor", version = "0.35.556" }
 agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.556" }
 anyhow = "1"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

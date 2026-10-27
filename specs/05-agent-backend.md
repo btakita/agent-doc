@@ -57,6 +57,16 @@ applies it through the shared write/commit/session-check path.
 4. Global config `default_agent`
 5. Fallback: `"claude"`
 
+## Harness program resolution (`#headlessharnesspath`)
+
+Every headless backend launch — `claude -p` (`send` and `send_streaming`), `codex exec` (turns and the child capability probes), `opencode run` (turns and the child network/SSH probes), Grok Build, Junie, and the `claude --print` fallback summarizer in `cleanup` — builds its `Command` through `agent_doc_agent_io::agent::harness_command`, which resolves the program with the same resolver the supervisor's pty spawn uses (`agent_doc_harness::spawn_program`, GH #380; see `specs/supervisor.md` § Harness program resolution).
+
+- A headless launch does **not** clear the env: the child inherits the parent env, then the backend's recursion-guard removals (`CLAUDECODE`, `CODEX_CLI`/`CODEX`, `OPENCODE_CLIENT`) and the document `env:` overrides are applied, in that order. Resolution runs over that effective child `PATH`/`HOME`, so the child `PATH` is the parent `PATH` unless the document overrides it. A controller started under the Coder workspace default `PATH` (no `~/.local/bin`) therefore failed a bare `claude`/`codex`/`opencode`/`grok` launch exactly as the supervisor did before GH #380.
+- Order: a program containing `/`, or a bare name executable on the effective child `PATH`, is launched as given (same program string as before). Otherwise the supervisor's install directories are searched in the same order (`~/.local/bin`, `~/.claude/local`, `~/.opencode/bin`, `~/.grok/bin`, `~/.npm-global/bin`, `~/.bun/bin`, `~/.volta/bin`, `~/.cargo/bin`, `~/bin` under the child `HOME`, falling back to the parent `HOME` when the overrides unset it; then `/usr/local/bin`, `/opt/homebrew/bin`, `/home/linuxbrew/.linuxbrew/bin`). The first executable hit is launched by that absolute path (no canonicalization) and its directory is **appended** to the child `PATH`; the launch writes `[agent] harness_program_resolved harness=<name> source=install_dir_fallback program=<abs path> path_dir_appended=<dir>` to stderr.
+- When nothing is found the launch fails before spawning with the resolver's error naming the program, the child `PATH` entries and the install directories searched, and the fix (Grok Build and Junie keep their install hint as context).
+- A non-UTF-8 inherited `PATH` (not overridden) is left to `Command`'s own lookup unchanged. Non-Unix platforms pass the program through unchanged.
+- Pinned by `agent-doc-agent-io` `agent::headless_harness_path_tests` (one launch per backend under the Coder default `PATH` with the fake harness only in a temp `$HOME/.local/bin`, asserting the child saw that directory appended last) and the `spawn_program` `headless_*` unit tests.
+
 ## Claude Backend
 
 Default: `claude -p --output-format json --permission-mode acceptEdits`. Session handling: `--resume {id}` or `--continue --fork-session`. Appends `--append-system-prompt` with document-mode instructions. Removes `CLAUDECODE` env var. Parses JSON: `result`, `session_id`, `is_error`.

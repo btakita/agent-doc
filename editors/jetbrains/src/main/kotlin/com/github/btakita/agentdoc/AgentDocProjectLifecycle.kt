@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.github.btakita.agentdoc.shell.ShellTurnStateStrips
 import com.intellij.openapi.application.ApplicationActivationListener
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -270,6 +271,6 @@ internal object AgentDocProjectLifecycle {
             disposeProjectResources(project)
         }
         // `#staleturnbanner`: strips outlive their unregistered provider, so remove them here.
-        TurnStateBannerProvider.retireStrips()
+        ShellTurnStateStrips.retireStrips()
     }
 }

@@ -5,10 +5,10 @@
          document; outlines are computed off the EDT by VisualHighlighterManager. -->
     <extensions defaultExtensionNs="com.intellij">
         <lang.foldingBuilder language="Markdown"
-                             implementationClass="com.github.btakita.agentdoc.AgentDocComponentFoldingBuilder"/>
+                             implementationClass="com.github.btakita.agentdoc.shell.ShellComponentFoldingBuilder"/>
         <codeInsight.lineMarkerProvider language="Markdown"
-                                        implementationClass="com.github.btakita.agentdoc.AgentDocComponentLineMarkerProvider"/>
+                                        implementationClass="com.github.btakita.agentdoc.shell.ShellComponentLineMarkerProvider"/>
         <lang.structureViewExtension
-                implementation="com.github.btakita.agentdoc.AgentDocComponentStructureViewExtension"/>
+                implementation="com.github.btakita.agentdoc.shell.ShellComponentStructureViewExtension"/>
     </extensions>
 </idea-plugin>

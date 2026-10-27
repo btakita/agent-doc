@@ -149,6 +149,47 @@ class ShellRegistrationOwnershipTest {
     }
 
     /**
+     * Editor and language extensions: every XML extension class in `plugin.xml` and the optional
+     * Markdown descriptor is a shell forwarder in the `shell` package, and no implementation class
+     * extends a platform extension or widget type, so the platform caches no implementation
+     * object. The two notification groups are XML-only (no class).
+     */
+    @Test
+    fun `xml editor and language extensions are shell forwarders`() {
+        val markdownXml = File("src/main/resources/META-INF/agent-doc-markdown.xml")
+        val extensionClasses =
+            listOf(
+                "completion.contributor" to "implementationClass",
+                "statusBarWidgetFactory" to "implementation",
+                "editorNotificationProvider" to "implementation",
+            ).flatMap { (tag, attribute) -> descriptorAttributes(tag, attribute) } +
+                listOf(
+                    "lang.foldingBuilder" to "implementationClass",
+                    "codeInsight.lineMarkerProvider" to "implementationClass",
+                    "lang.structureViewExtension" to "implementation",
+                ).flatMap { (tag, attribute) -> descriptorAttributes(tag, attribute, markdownXml) }
+        assertEquals("editor and language extensions", 6, extensionClasses.size)
+        val notShell = extensionClasses.filterNot { className ->
+            load(className)
+            className.startsWith("com.github.btakita.agentdoc.shell.") && manifest.isShell(sourceOf(className))
+        }
+        assertEquals("extension classes outside the shell", emptyList<String>(), notShell)
+        assertEquals(2, descriptorAttributes("notificationGroup", "id").size)
+        assertEquals(emptyList<String>(), descriptorAttributes("notificationGroup", "class"))
+
+        val platformTypes = Regex(
+            """:\s*(?:CompletionContributor|FoldingBuilder\w*|LineMarkerProvider|StructureViewExtension|""" +
+                """StatusBarWidgetFactory|StatusBarWidget|EditorNotificationProvider)\b""",
+        )
+        val implementers = manifest.implSources().flatMap { file ->
+            file.readLines().withIndex()
+                .filter { (_, line) -> platformTypes.containsMatchIn(line.substringBefore("//")) }
+                .map { (index, _) -> "${file.name}:${index + 1}" }
+        }
+        assertEquals("implementation classes of platform extension types", emptyList<String>(), implementers)
+    }
+
+    /**
      * Programmatic listeners Tier A: implementation code stages every message-bus subscription and
      * editor-factory or multicaster listener through `GenerationListeners`, which hands it to the
      * shell's per-topic forwarder. Only that bridge, in the generation entry point, may call the
@@ -204,6 +245,9 @@ class ShellRegistrationOwnershipTest {
         val PENDING: List<Pair<String, Regex>> = listOf(
             // AWT and per-editor component listeners are not Tier A topics; measured until moved.
             "awt_or_component_listener" to Regex("""add(?:AWTEvent|Focus)Listener\("""),
+            // Notification objects the platform keeps in its notification log (the groups
+            // themselves are XML-only); measured until the shell builds them.
+            "notification" to Regex("""\bNotification\(|createNotification\("""),
             "invoke_later" to Regex("""invokeLater\s*[({]"""),
             "pooled_thread" to Regex("""executeOnPooledThread\s*[({]"""),
             "app_executor_util" to Regex("""AppExecutorUtil\."""),

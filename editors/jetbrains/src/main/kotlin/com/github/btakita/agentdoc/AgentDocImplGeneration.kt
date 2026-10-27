@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.github.btakita.agentdoc.shell.GenerationContext
 import com.github.btakita.agentdoc.shell.ImplAction
+import com.github.btakita.agentdoc.shell.ImplEditorExtensions
 import com.github.btakita.agentdoc.shell.ImplGeneration
 import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.intellij.openapi.Disposable
@@ -49,6 +50,8 @@ class AgentDocImplGeneration : ImplGeneration {
 
     override fun disposeOpenProjectsForDynamicUnload(): Int =
         AgentDocProjectLifecycle.disposeOpenProjectsForDynamicUnload()
+
+    override fun editorExtensions(): ImplEditorExtensions = AgentDocEditorExtensions
 
     override fun quiesce(): String {
         handlers.clear()

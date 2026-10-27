@@ -23,7 +23,7 @@
                            displayType="STICKY_BALLOON"
                            isLogByDefault="true"/>
         <completion.contributor language="any"
-                                implementationClass="com.github.btakita.agentdoc.SlashCommandCompletionContributor"/>
+                                implementationClass="com.github.btakita.agentdoc.shell.ShellSlashCommandCompletionContributor"/>
         <applicationService serviceImplementation="com.github.btakita.agentdoc.AgentDocColorSettings"/>
         <applicationConfigurable parentId="tools"
                                  id="com.github.btakita.agentdoc.colorConfigurable"
@@ -37,9 +37,9 @@
                                  instance="com.github.btakita.agentdoc.MarkdownStyleConfigurable"
                                  displayName="Agent Doc Markdown Style"/>
         <statusBarWidgetFactory id="com.github.btakita.agentdoc.TurnStateStatusBar"
-                                implementation="com.github.btakita.agentdoc.TurnStateStatusBarWidgetFactory"/>
+                                implementation="com.github.btakita.agentdoc.shell.ShellTurnStateStatusBarWidgetFactory"/>
         <editorNotificationProvider
-                implementation="com.github.btakita.agentdoc.TurnStateBannerProvider"/>
+                implementation="com.github.btakita.agentdoc.shell.ShellTurnStateBannerProvider"/>
     </extensions>
 
     <projectListeners>

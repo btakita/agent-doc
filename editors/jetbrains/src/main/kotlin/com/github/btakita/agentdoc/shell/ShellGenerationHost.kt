@@ -86,6 +86,9 @@ class ShellGenerationHost : Disposable {
     /** Activate the implementation generation if it is not active yet; null once unloading. */
     fun activate(): ImplGeneration? = activeGeneration()?.impl
 
+    /** The active generation's editor-extension handlers, activating it on first use. */
+    fun editorExtensions(): ImplEditorExtensions? = activeGeneration()?.impl?.editorExtensions()
+
     /** The active generation's handler for [actionId], activating the generation on first use. */
     fun action(actionId: String): ImplAction? = activeGeneration()?.impl?.action(actionId)
 

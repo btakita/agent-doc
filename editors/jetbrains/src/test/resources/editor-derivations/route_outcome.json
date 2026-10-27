@@ -1,0 +1,577 @@
+{
+  "derivation": "route_outcome",
+  "about": "#jbshrinkrestarts parity cases. The Rust `route_outcome` derivation (agent-doc-editor-surface) and the plugin's frozen Kotlin floor (RouteOutcomeTest) both answer every case. `input` is exactly what the plugin sends: the Run Agent Doc route's output and the document's relative path. The rules reproduce the pre-move Kotlin: java.util.regex ASCII `\\s`/`\\S`/`\\d`/`\\b`, Kotlin `trim`/`isBlank` whitespace, and `lines()` splitting at CRLF, LF, and CR. A native rule change updates this file and may diverge from the frozen floor only on purpose; a case whose native answer diverged on purpose keeps the frozen floor's answer in `frozen_expected`.",
+  "cases": [
+    {
+      "name": "a starting actor is startup-not-ready",
+      "input": {
+        "output": "[route] target tmux session: 1\nError: authoritative actor generation 22 for tasks/root.md owns pane %12 but route will not inject a new trigger because the authoritative actor is still starting.",
+        "relative_path": "tasks/root.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "startup_not_ready",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/root.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a latest run still booting on an active codex turn is busy",
+      "input": {
+        "output": "Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (active codex turn); wait for the pane to become ready and reroute again",
+        "relative_path": "tasks/professional/sampleportal.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/professional/sampleportal.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a latest run still booting that timed out is startup-not-ready",
+      "input": {
+        "output": "Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again",
+        "relative_path": "tasks/professional/sampleportal.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "startup_not_ready",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/professional/sampleportal.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a latest run still booting at a shell search is a persistent failure",
+      "input": {
+        "output": "Error: dispatch-only codex reopen refused to inject into pane %42 for tasks/professional/sampleportal.md because the latest run is still booting and never reached a dispatch-ready prompt (interactive shell reverse-i-search); wait for the pane to become ready and reroute again",
+        "relative_path": "tasks/professional/sampleportal.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "an active-turn skip-wait refusal is busy",
+      "input": {
+        "output": "Error: authoritative actor generation 242 for tasks/sampleorders.md owns pane %30 but dispatch-only route will not inject a new trigger because the pane is busy on an active codex turn (Working (1m 34s - esc to interrupt)); restore an idle prompt and retry",
+        "relative_path": "tasks/sampleorders.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/sampleorders.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "an opencode active turn is busy",
+      "input": {
+        "output": "Error: dispatch-only opencode reopen refused to inject into pane %21 for tasks/software/tsift.md because the pane still shows opencode active turn; restore an idle prompt and retry",
+        "relative_path": "tasks/software/tsift.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/software/tsift.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a busy actor wait timeout is busy",
+      "input": {
+        "output": "Error: authoritative actor generation 244 for tasks/sampleorders.md owns pane %40 but dispatch-only route will not inject a new trigger because the authoritative actor is busy did not return to a dispatch-ready prompt in the current generation after waiting 60s. Run `agent-doc session status tasks/sampleorders.md` and wait for an idle prompt.",
+        "relative_path": "tasks/sampleorders.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/sampleorders.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a route into another lane's pane succeeds with the owning lane notice",
+      "input": {
+        "output": "[route] Pane %7 is alive, sending command\n[agent-doc] owned_by_other_lane: plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": "plan.md runs in pane %7 of navigation lane IU-0a1b2c3d (tmux session proj-IU-0a1b2c3d); the route dispatched it there and left this IDE's tmux layout unchanged. Use Claim for Tmux Pane to move the pane into this IDE's lane.",
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "a bare owned-by-other-lane prefix is no notice",
+      "input": {
+        "output": "  [agent-doc] owned_by_other_lane:   \n[route] dispatched",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "a pane on no screen succeeds with the GH 243 notice",
+      "input": {
+        "output": "[route] delivered steering to the live owner\n   [route] pane-not-visible: pane %4 is in window @2, which no attached tmux client shows   \n",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": "[route] pane-not-visible: pane %4 is in window @2, which no attached tmux client shows",
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "a queued route is queued pending",
+      "input": {
+        "output": "[route] authoritative actor generation 199 for tasks/agent-doc/agent-doc-bugs2.md is busy on pane %6; queued pending dispatch \"JB `Run Agent Doc` does not complete the agent-doc <file-name> run.\" in active agent:queue (appended=true, already_present=false) instead of injecting a duplicate trigger",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queued_pending",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is queued behind the active owner for tasks/agent-doc/agent-doc-bugs2.md.\nIt should run when that turn drains."
+      }
+    },
+    {
+      "name": "a protected prompt input is actionable with its draft and snapshot",
+      "input": {
+        "output": "Error: route refusing to dispatch agent-doc /repo/tasks/professional/sampleportal.md into pane %3 for /repo/tasks/professional/sampleportal.md because the composer contains protected prompt input (drafted prompt input) draft_preview=\"› implement the feature\"; clear or submit that draft, then rerun agent-doc route snapshot_path=/tmp/agent-doc-route-snapshot.txt",
+        "relative_path": "tasks/professional/sampleportal.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "protected_prompt_input",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "/tmp/agent-doc-route-snapshot.txt",
+        "summary": "Agent Doc did not start for tasks/professional/sampleportal.md.\nThe target pane has unsent prompt text. Clear or submit that draft, then run Agent Doc again.\nDraft preview: › implement the feature\nRoute snapshot: /tmp/agent-doc-route-snapshot.txt"
+      }
+    },
+    {
+      "name": "an operator-paused queue offers resume",
+      "input": {
+        "output": "Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=operator paused this queue for manual review receipt_id=52 ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=resume_or_clear_queue_control",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "operator paused this queue for manual review",
+          "restart_supervisor_redirect": false,
+          "stale_pid": ""
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nResume the queue when unattended dispatch should continue, or use Show status to inspect it first.\nReason: operator paused this queue for manual review"
+      }
+    },
+    {
+      "name": "a stale-supervisor paused queue offers restart and resume with the pid",
+      "input": {
+        "output": "Error: project controller command `dispatch` failed: dispatch blocked for tasks/agent-doc/agent-doc-bugs2.md: failed_stage=queue_paused reason=churn-stop: stale supervisor pid1368698; needs operator recycle receipt_id=42 supervisor_restart_redirect stale_pid=1368698 ui_outcome_contract=ui-outcome-v1 ui_outcome=recovered_and_retried ui_outcome_class=ok next_action=restart_supervisor_once_and_retry",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "churn-stop: stale supervisor pid1368698; needs operator recycle",
+          "restart_supervisor_redirect": true,
+          "stale_pid": "1368698"
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nThis pause looks like stale-supervisor churn. Restart Supervisor and resume the queue, then run Agent Doc again.\nStale supervisor pid: 1368698\nReason: churn-stop: stale supervisor pid1368698; needs operator recycle"
+      }
+    },
+    {
+      "name": "a paused-queue reason spanning lines with tabs and a no-break space is kept",
+      "input": {
+        "output": "failed_stage=queue_paused reason=\t first line held\nsecond line \t receipt_id=7",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "first line held\nsecond line",
+          "restart_supervisor_redirect": false,
+          "stale_pid": ""
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nResume the queue when unattended dispatch should continue, or use Show status to inspect it first.\nReason: first line held\nsecond line"
+      }
+    },
+    {
+      "name": "a paused queue with no parseable reason names no reason",
+      "input": {
+        "output": "FAILED_STAGE=QUEUE_PAUSED reason=x",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "",
+          "restart_supervisor_redirect": false,
+          "stale_pid": ""
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nResume the queue when unattended dispatch should continue, or use Show status to inspect it first."
+      }
+    },
+    {
+      "name": "a paused-queue reason longer than 600 UTF-16 units is cut",
+      "input": {
+        "output": "failed_stage=queue_paused reason=long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason receipt_id=9",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason",
+          "restart_supervisor_redirect": false,
+          "stale_pid": ""
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nResume the queue when unattended dispatch should continue, or use Show status to inspect it first.\nReason: long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason long reason "
+      }
+    },
+    {
+      "name": "a deferred switch on a paused queue offers restart and resume",
+      "input": {
+        "output": "[route] target tmux session: 0\nError: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness claude-code, but frontmatter now resolves to codex; deferring to boundary agent restart instead of replacing live pane. queue is paused — the boundary restart will not fire until it is healthy and resumed. Run: agent-doc session restart-supervisor tasks/agent-doc/agent-doc-bugs2.md",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": {
+          "force_required": false,
+          "previous_harness": "claude-code",
+          "queue_paused": true,
+          "restart_in_flight": false,
+          "supervisor_unavailable": false,
+          "target_harness": "codex"
+        },
+        "kind": "agent_switch_deferred",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc did not switch harnesses for tasks/agent-doc/agent-doc-bugs2.md.\nCurrent actor is claude-code; frontmatter now resolves to codex. The queue is paused, so the boundary restart will not fire. Restart Supervisor and resume the queue, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a deferred switch on a not-ready pane needs a forced restart",
+      "input": {
+        "output": "Error: authoritative actor record for tasks/professional/sampleportal.md is running harness codex, but frontmatter now resolves to opencode; deferring to boundary agent restart instead of replacing live pane. pane is busy (not dispatch-ready) — run: agent-doc session restart-supervisor tasks/professional/sampleportal.md --force",
+        "relative_path": "tasks/professional/sampleportal.md"
+      },
+      "expected": {
+        "agent_switch_deferred": {
+          "force_required": true,
+          "previous_harness": "codex",
+          "queue_paused": false,
+          "restart_in_flight": false,
+          "supervisor_unavailable": false,
+          "target_harness": "opencode"
+        },
+        "kind": "agent_switch_deferred",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc did not switch harnesses for tasks/professional/sampleportal.md.\nCurrent actor is codex; frontmatter now resolves to opencode. The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch."
+      }
+    },
+    {
+      "name": "a deferred switch during its own restart never asks to interrupt",
+      "input": {
+        "output": "Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to claude-code; deferring to boundary agent restart instead of replacing live pane. the harness restart is already in flight — the switch completes at that boundary, so wait for it and run Agent Doc again. No interrupt or forced restart is needed.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": {
+          "force_required": false,
+          "previous_harness": "codex",
+          "queue_paused": false,
+          "restart_in_flight": true,
+          "supervisor_unavailable": false,
+          "target_harness": "claude-code"
+        },
+        "kind": "agent_switch_deferred",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc did not switch harnesses for tasks/agent-doc/agent-doc-bugs2.md.\nCurrent actor is codex; frontmatter now resolves to claude-code. The harness restart is already in flight and completes the switch at the next boundary. Wait for it, then run Agent Doc again — do not interrupt or force a restart."
+      }
+    },
+    {
+      "name": "a deferred switch with an unhealthy supervisor asks for a restart",
+      "input": {
+        "output": "Error: authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to claude-code; deferring to boundary agent restart instead of replacing live pane. The supervisor is unhealthy.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": {
+          "force_required": false,
+          "previous_harness": "codex",
+          "queue_paused": false,
+          "restart_in_flight": false,
+          "supervisor_unavailable": true,
+          "target_harness": "claude-code"
+        },
+        "kind": "agent_switch_deferred",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc did not switch harnesses for tasks/agent-doc/agent-doc-bugs2.md.\nCurrent actor is codex; frontmatter now resolves to claude-code. The supervisor is not healthy enough to reach the boundary restart. Restart Supervisor, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a deferred switch at an idle boundary offers a restart now",
+      "input": {
+        "output": "authoritative actor record for tasks/agent-doc/agent-doc-bugs2.md is running harness codex, but frontmatter now resolves to claude-code; deferring to boundary agent restart instead of replacing live pane",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": {
+          "force_required": false,
+          "previous_harness": "codex",
+          "queue_paused": false,
+          "restart_in_flight": false,
+          "supervisor_unavailable": false,
+          "target_harness": "claude-code"
+        },
+        "kind": "agent_switch_deferred",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc did not switch harnesses for tasks/agent-doc/agent-doc-bugs2.md.\nCurrent actor is codex; frontmatter now resolves to claude-code. The supervisor will switch at the next idle boundary. Use Restart Supervisor to switch now."
+      }
+    },
+    {
+      "name": "an accepted-only dispatch is unproven with its attempt and snapshot",
+      "input": {
+        "output": "[route] preserved dispatch-start proof snapshot for tasks/agent-doc/agent-doc-bugs2.md pane %12 harness=codex phase=direct_pane_dispatch_start_unproven capture_len=1234 capture_hash=e5b665883cc3 snapshot_path=/repo/.agent-doc/logs/route-submit/1781670099279-direct_pane_dispatch_start_unproven-codex-_12-e5b665883cc3.txt editor_attempt_id=1781670087547-4\nError: dispatch-only codex reopen for tasks/agent-doc/agent-doc-bugs2.md was accepted in pane %12 via direct_pane_submit (tmux_text_enter), but only pane-input acceptance proof was available after waiting 10s; treating this as not dispatched because no dispatch-start proof was recorded. Restore an idle codex prompt or restart the session and reroute again",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "dispatch_start_unproven",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "/repo/.agent-doc/logs/route-submit/1781670099279-direct_pane_dispatch_start_unproven-codex-_12-e5b665883cc3.txt",
+        "summary": "Agent Doc did not start for tasks/agent-doc/agent-doc-bugs2.md.\nPane input was accepted, but dispatch-start proof did not appear.\nAttempt: 1781670087547-4\nRoute snapshot: /repo/.agent-doc/logs/route-submit/1781670099279-direct_pane_dispatch_start_unproven-codex-_12-e5b665883cc3.txt\nWait for an idle prompt or restart the session, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "the latest snapshot path wins across CRLF lines",
+      "input": {
+        "output": "snapshot_path=/repo/first.txt\r\nERROR: route_dispatch_only_submit_unproven\r\nsnapshot_path=/repo/second.txt editor_attempt_id=a-1\r\n",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "dispatch_start_unproven",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "/repo/second.txt",
+        "summary": "Agent Doc did not start for tasks/agent-doc/agent-doc-bugs2.md.\nPane input was accepted, but dispatch-start proof did not appear.\nAttempt: a-1\nRoute snapshot: /repo/second.txt\nWait for an idle prompt or restart the session, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a typed queued outcome is queued without prose",
+      "input": {
+        "output": "[route] dispatch deferred ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queued_pending",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is queued behind the active owner for tasks/agent-doc/agent-doc-bugs2.md.\nIt should run when that turn drains."
+      }
+    },
+    {
+      "name": "explicit steering delivery is informational",
+      "input": {
+        "output": "Error: [route] Sent 1 update to the agent already running for /repo/tasks/agent-doc/agent-doc-bugs.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "steering_delivered",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Sent your update to the Agent Doc turn already running for tasks/agent-doc/agent-doc-bugs.md.\nThat turn will handle it; no second turn was started."
+      }
+    },
+    {
+      "name": "steering without its count is not delivered steering",
+      "input": {
+        "output": "ui_outcome=steering_delivered_to_owner but nothing was sent",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "queued dispatch beside benign resync info stays queued",
+      "input": {
+        "output": "resync: stash pane %32 is registered in its own project root — skipping kill\n[route] authoritative actor generation 233 for tasks/software/tsift.md is busy on pane %19; queued pending dispatch \"What are #next-steps?\" in active agent:queue (appended=true, already_present=false) instead of injecting a duplicate trigger",
+        "relative_path": "tasks/software/tsift.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queued_pending",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is queued behind the active owner for tasks/software/tsift.md.\nIt should run when that turn drains."
+      }
+    },
+    {
+      "name": "an unrecognised failure is persistent",
+      "input": {
+        "output": "Error: controller socket closed before the route answered",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "an empty output is persistent",
+      "input": {
+        "output": "",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "upper-case cues still classify after lowercasing",
+      "input": {
+        "output": "DISPATCH-ONLY route refused: PANE STILL SHOWS ACTIVE CLAUDE TURN",
+        "relative_path": "plan.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for plan.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a stale pid needs an ASCII word boundary",
+      "input": {
+        "output": "failed_stage=queue_paused reason=r receipt_id=1 xstale_pid=5 éstale_pid=77 supervisor_restart_redirect",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queue_paused",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": {
+          "reason": "r",
+          "restart_supervisor_redirect": true,
+          "stale_pid": "77"
+        },
+        "snapshot_path": "",
+        "summary": "Agent Doc queue is paused for tasks/agent-doc/agent-doc-bugs2.md.\nThis pause looks like stale-supervisor churn. Restart Supervisor and resume the queue, then run Agent Doc again.\nStale supervisor pid: 77\nReason: r"
+      }
+    }
+  ]
+}

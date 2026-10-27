@@ -814,6 +814,7 @@ dependencies = [
  "agent-doc-turn",
  "lazily 0.61.0",
  "proptest",
+ "regex",
  "serde",
  "serde_json",
 ]

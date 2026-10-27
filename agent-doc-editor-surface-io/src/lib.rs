@@ -303,6 +303,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "remote_client_surface",
     "registration_projection",
     "attach_failure_diagnosis",
+    "route_outcome",
 ];
 
 #[derive(serde::Deserialize)]
@@ -403,6 +404,15 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             let evidence: agent_doc_editor_surface::AttachFailureEvidence =
                 serde_json::from_value(input).context("parse attach failure evidence")?;
             serde_json::to_value(agent_doc_editor_surface::diagnose_attach_failure(&evidence))?
+        }
+        "route_outcome" => {
+            // `#jbshrinkrestarts`: what a Run Agent Doc route's output means
+            // for the operator (`TerminalUtil.sendToTerminal`): the outcome
+            // kind, the paused-queue and deferred-switch details, the
+            // notification text, the snapshot path, and the success notices.
+            let evidence: agent_doc_editor_surface::RouteOutcomeEvidence =
+                serde_json::from_value(input).context("parse route outcome evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_route_outcome(&evidence))?
         }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",
@@ -1025,6 +1035,36 @@ mod tests {
             let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
             assert_eq!(output, case["expected"], "{name}");
         }
+    }
+
+    /// `#jbshrinkrestarts`: the native `route_outcome` derivation answers every
+    /// shared parity case through the derivation channel. The plugin's frozen
+    /// Kotlin floor answers the same file in `RouteOutcomeTest`, so the two
+    /// cannot drift silently.
+    #[test]
+    fn route_outcome_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/route_outcome.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 32, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request = serde_json::json!({
+                "derivation": "route_outcome",
+                "input": case["input"].clone(),
+            });
+            let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
+            assert_eq!(output, case["expected"], "{name}");
+        }
+        let listed = derive_editor_from_json(r#"{"derivation":"capabilities"}"#).unwrap();
+        assert!(
+            listed["output"]["derivations"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("route_outcome"))
+        );
     }
 
     /// GH #326 phase 4: the native `remote_client_surface` derivation answers

@@ -770,6 +770,27 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   refusal event, formats the refusal there, and only shows it on the EDT. A new
   reason, remedy, or wording needs no plugin generation; a new *kind* of effect
   does.
+- `route_outcome` (`#jbshrinkrestarts`): what a finished Run Agent Doc route's
+  output means for the operator (`TerminalUtil.sendToTerminal`). Evidence is the
+  route's output text and the document's relative path. Native owns the outcome
+  kind (still running, startup not ready, steering delivered, queued behind the
+  owner, paused queue, deferred harness switch, unproven dispatch start,
+  protected prompt input, or a persistent failure), the paused-queue details
+  (reason, stale-supervisor redirect, stale pid), the deferred switch (previous
+  and target harness, paused queue, forced restart needed, restart already in
+  flight, supervisor unavailable), the notification text of every non-persistent
+  kind, the latest `snapshot_path=`, and the two success notices
+  (`[agent-doc] owned_by_other_lane:` and the GH #243 `[route] pane-not-visible:`).
+  The route thread asks once per route and executes the answer: the notification
+  type, its actions, the ops-log line, the persisted failure output, and the
+  state projection stay in Kotlin. `RouteOutcome.frozen` composes the pre-move
+  `TerminalUtil` rules and is never extended. A kind token this plugin generation
+  cannot execute takes the whole floor, so a new *kind* needs a plugin
+  generation; new wording, or a new output shape for an existing kind, does not.
+  The native rules reproduce `java.util.regex`'s ASCII `\s`, `\S`, `\d`, and
+  `\b`, Kotlin's `trim`/`isBlank` whitespace (which keeps U+0085 and strips
+  U+001C..U+001F), and `lines()` splitting at CRLF, LF, and CR. The parity file
+  `editor-derivations/route_outcome.json` is answered by both.
 - `capabilities`: the derivations the loaded library answers, and (phase 5c)
   `captured_splice_inputs`, the optional inputs its captured-splice calls accept.
 

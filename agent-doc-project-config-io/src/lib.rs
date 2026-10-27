@@ -244,6 +244,26 @@ pub fn project_tmux_session() -> Option<String> {
     load_project().tmux_session
 }
 
+/// The `.agent-doc/config.toml` of the project rooted at `project_root`.
+pub fn project_config_path_for_root(project_root: &Path) -> PathBuf {
+    project_root.join(".agent-doc").join("config.toml")
+}
+
+/// Load the config of the project rooted at `project_root` (default when absent).
+///
+/// Unlike [`load_project_for_doc`], this never falls back to the process cwd's
+/// project: a caller that already resolved a document's store
+/// (`project_root_or_file_parent`) reads that store's config, even when the
+/// store has no config yet (`#startcwdfallback`).
+pub fn load_project_for_root(project_root: &Path) -> ProjectConfig {
+    load_project_from(&project_config_path_for_root(project_root))
+}
+
+/// [`project_tmux_session`] for the project rooted at `project_root`.
+pub fn project_tmux_session_for_root(project_root: &Path) -> Option<String> {
+    load_project_for_root(project_root).tmux_session
+}
+
 /// Get the resolved tmux executable (project, then global; `None` means PATH).
 pub fn project_tmux_bin() -> Option<String> {
     tmux_bin_resolution().binary
@@ -266,10 +286,19 @@ pub fn save_project_to(config: &ProjectConfig, path: &Path) -> Result<()> {
 
 /// Update the project's configured tmux session.
 pub fn update_project_tmux_session(new_session: &str) -> Result<()> {
-    let mut config = load_project();
+    update_project_tmux_session_at(&project_config_path(), new_session)
+}
+
+/// [`update_project_tmux_session`] for the project rooted at `project_root`.
+pub fn update_project_tmux_session_for_root(project_root: &Path, new_session: &str) -> Result<()> {
+    update_project_tmux_session_at(&project_config_path_for_root(project_root), new_session)
+}
+
+fn update_project_tmux_session_at(path: &Path, new_session: &str) -> Result<()> {
+    let mut config = load_project_from(path);
     let old = config.tmux_session.clone();
     config.tmux_session = Some(new_session.to_string());
-    save_project(&config)?;
+    save_project_to(&config, path)?;
     eprintln!(
         "[config] updated tmux_session: {} → {}",
         old.as_deref().unwrap_or("(none)"),

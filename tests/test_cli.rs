@@ -26986,8 +26986,9 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
         fs::read_to_string(manifest_dir.join("agent-doc-start-io/src/lib.rs")).unwrap();
     assert!(
         !start_run_source.contains("agent_doc_fs::find_project_root(")
-            && start_run_source.contains("agent_doc_project_root_io::project_root_containing("),
-        "agent-doc-start-io should call focused project-root IO instead of owning supervisor-start root discovery"
+            && start_run_source.contains("agent_doc_project_root_io::project_root_or_file_parent(")
+            && !start_run_source.contains("std::env::current_dir()\n                .ok()\n                .unwrap_or_else(|| canonical.parent()"),
+        "agent-doc-start-io should call focused project-root IO (`project_root_or_file_parent`, `#startcwdfallback`) instead of owning supervisor-start root discovery"
     );
     let preflight_run_source =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-command-io/src/run.rs")).unwrap();

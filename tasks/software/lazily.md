@@ -25,6 +25,7 @@ queue: go
 
 <!-- agent:status patch=replace -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Released and published: lazily-spec v0.43.0, lazily-formal v0.40.0, lazily-kt v0.46.0, lazily-js v0.37.0, and lazily-rs v0.61.0. Rust v0.57.2 compatibility and remaining bindings are pending; operator-deleted queue claims remain cancelled.
 <!-- /agent:status -->
 

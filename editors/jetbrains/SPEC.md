@@ -669,6 +669,51 @@ plugin sends against the same file. This differs from the controller's
 boundary ids and headings; registration keeps the plugin's rule until it is
 deliberately changed in native code and the parity file.
 
+**Keystroke latency gate (`#jbshrinkrestarts`).** A rule moves behind the
+boundary only if the keystroke path does not get slower. `make
+jetbrains-keystroke-bench` builds the local-install profile and runs
+`runKeystrokeLatencyBenchmark` (`KeystrokeLatencyBenchmarkMain.kt`), a task the
+init script `benchmark/keystroke-latency.init.gradle.kts` adds so that changing
+the benchmark never changes `pluginSourceDigest`. It is
+headless, like the cross-editor harness. Every timed call goes through the
+shipped `AgentDocLib` proxy and Kotlin helpers, against the `libagent_doc` that
+`agent-doc lib-path` resolves on `PATH`. The document is a deterministic,
+synthetic ~125 KB session document (multi-byte text, a queue, a backlog, and an
+exchange of prompt and `### Re:` cycles). `AGENT_DOC_BENCH_FIXTURE` swaps in a
+*copied* document; it never points at a live one. The document's path is outside
+every `.agent-doc` project, so no controller or socket is reached. What remains
+is exactly the cost a rule move could change.
+Cases, in microseconds per operation:
+- `keystroke.typing_report`: TypingTracker's quiet-boundary report, which sends
+  the whole buffer through `agent_doc_lazily_current_observed_v1`.
+- `keystroke.replica_flush_1` and `_16`: CrdtReplicaManager's splice flush for a
+  1- and a 16-keystroke burst: `prepareLocalEditorEditsUtil`, one `apply_local`
+  per splice, then the state vector and the incremental diff. Each step is also
+  reported as `<case>.<step>`.
+- `boundary.worker_hop`: the hand-off to a worker thread and back.
+- `boundary.derive_capabilities`: the smallest `agent_doc_editor_derive_json`
+  round trip.
+- `move.<rule>.native` and `.frozen`: each moved rule, asked through the
+  derivation channel next to its frozen Kotlin floor, on the same input.
+
+The cases run interleaved in five rounds, so a slow stretch of the machine
+lands on every case. `p50_best` is the median of a case's fastest round; two
+runs of one build agree on it to within about 10%.
+`JETBRAINS_BENCH_BASELINE=<report.json>` compares this run with an earlier
+report. The run fails when the `p50_best` of `typing_report`, `replica_flush_1`,
+or `replica_flush_16` grows by more than max(5 us, 15%). Other cases, and the
+per-step breakdowns, are reported but not gated.
+
+The 2026-10-26 baseline (0.35.556, release-local, synthetic 127,583-byte
+document) puts the cost of the keystroke path in the replica diff, not in the
+plugin. `typing_report` is about 91 us. A flush costs about 50 ms whether the
+burst is 1 or 16 keystrokes: `agent_doc_replica_diff` takes about 48 ms of it
+and the state vector about 1.4 ms. `prepare` (about 51 us), `apply_local`
+(13 us for one splice, 36 us for 16), the worker hop (2.6 us), and the
+smallest derivation round trip (6.3 us) are small next to it. On a copied
+32 KB live session document the diff takes about 4.9 ms, so the diff cost grows
+faster than linearly with the document's size.
+
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is
 a true no-op: the installer leaves the existing files and inodes in place so a

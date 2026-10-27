@@ -228,6 +228,45 @@ class ShellRegistrationOwnershipTest {
     }
 
     /**
+     * Per-platform-object state: every user-data key the implementation uses is a shell key, and
+     * the one that carried an implementation class (the highlight identity) now carries JDK
+     * values. `putUserData` call sites stay measured, since their values cannot be typed here.
+     */
+    @Test
+    fun `implementation user data uses shell keys and JDK values`() {
+        val sources = manifest.implSources().filter { it.name != "AgentDocImplGeneration.kt" }
+        val keys = sources.flatMap { file ->
+            Regex("""GenerationKeys\.create<([^>]+(?:<[^>]*>)?)>\("([^"]+)"\)""").findAll(file.readText())
+                .map { it.groupValues[2] to it.groupValues[1] }.toList()
+        }.toMap()
+        assertEquals(
+            mapOf(
+                "agent-doc.visual.highlighter" to "Boolean",
+                "agent-doc.visual.highlight-identity" to "List<Any?>",
+                "agent-doc.visual.tracked-highlighters" to "List<RangeHighlighter>",
+            ),
+            keys,
+        )
+        assertTrue(ShellUserDataKeys.key<Boolean>("agent-doc.test") === ShellUserDataKeys.key<Boolean>("agent-doc.test"))
+    }
+
+    /**
+     * Modular extensions: a shell-declared module interface resolves to this generation's
+     * implementation by name, and to null in the classic package, which has no such module.
+     */
+    @Test
+    fun `module services resolve by name and are absent from the classic package`() {
+        val generation = load(IMPL_GENERATION_CLASS).getDeclaredConstructor().newInstance() as ImplGeneration
+        assertEquals(
+            setOf("com.github.btakita.agentdoc.split.backend.SurfaceIngressFactory"),
+            AgentDocImplGeneration.MODULE_SERVICES.keys,
+        )
+        assertNull(generation.moduleService(Runnable::class.java))
+        val ingress = AgentDocImplGeneration.MODULE_SERVICES.keys.single()
+        assertNull("the classic package has no split backend", runCatching { load(ingress) }.getOrNull())
+    }
+
+    /**
      * The registration classes R1 has not moved yet, measured by text search of the
      * implementation file set. Printed so a follow-up can compare; enforced once it lands.
      */
@@ -258,6 +297,8 @@ class ShellRegistrationOwnershipTest {
             "raw_thread" to Regex("""(?<!\w)Thread\s*[({]"""),
             "executors_new" to Regex("""Executors\.new"""),
             "alarm" to Regex("""\bAlarm\("""),
+            // Per-platform-object state: keys come from the shell (`GenerationKeys.create`).
+            "key_create" to Regex("""(?<!\w)Key\.create\b"""),
         )
 
         /** Every Tier A registration the implementation stages (one per former direct call). */
@@ -282,7 +323,6 @@ class ShellRegistrationOwnershipTest {
             // Notification objects the platform keeps in its notification log (the groups
             // themselves are XML-only); measured until the shell builds them.
             "notification" to Regex("""\bNotification\(|createNotification\("""),
-            "key_create" to Regex("""Key\.create\b"""),
             "put_user_data" to Regex("""putUserData\("""),
         )
     }

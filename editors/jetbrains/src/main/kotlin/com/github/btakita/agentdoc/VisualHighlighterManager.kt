@@ -23,7 +23,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Key
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.openapi.vfs.VirtualFileManager
@@ -50,7 +49,21 @@ internal data class VisualHighlightKey(
     val layer: Int,
     val kind: String,
     val attributes: Any?,
-)
+) {
+    /** GH #339 R1: the identity a highlighter carries, as JDK values only (never this class). */
+    fun toUserData(): List<Any?> = listOf(start, end, layer, kind, attributes)
+
+    companion object {
+        fun fromUserData(data: List<Any?>): VisualHighlightKey? {
+            if (data.size != 5) return null
+            val start = data[0] as? Int ?: return null
+            val end = data[1] as? Int ?: return null
+            val layer = data[2] as? Int ?: return null
+            val kind = data[3] as? String ?: return null
+            return VisualHighlightKey(start, end, layer, kind, data[4])
+        }
+    }
+}
 
 internal data class VisualHighlightPlan<H>(
     val remove: List<H>,
@@ -366,7 +379,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
                 HighlighterTargetArea.EXACT_RANGE,
             )
             highlighter.putUserData(HIGHLIGHTER_KEY, true)
-            highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key)
+            highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key.toUserData())
             next.add(highlighter)
         }
         editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, next)
@@ -375,7 +388,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
     /** The identity this highlighter was created with, or null once it no longer matches it. */
     private fun RangeHighlighter.visualHighlightKey(): VisualHighlightKey? {
         if (!isValid) return null
-        val created = getUserData(HIGHLIGHT_IDENTITY_KEY) ?: return null
+        val created = getUserData(HIGHLIGHT_IDENTITY_KEY)?.let(VisualHighlightKey::fromUserData) ?: return null
         return created.copy(start = startOffset, end = endOffset)
     }
 
@@ -511,9 +524,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
     }
 
     companion object {
-        private val HIGHLIGHTER_KEY = Key.create<Boolean>("agent-doc.visual.highlighter")
-        private val HIGHLIGHT_IDENTITY_KEY = Key.create<VisualHighlightKey>("agent-doc.visual.highlight-identity")
-        private val TRACKED_HIGHLIGHTERS_KEY = Key.create<List<RangeHighlighter>>("agent-doc.visual.tracked-highlighters")
+        // GH #339 R1: shell-created keys holding JDK and platform values only.
+        private val HIGHLIGHTER_KEY = GenerationKeys.create<Boolean>("agent-doc.visual.highlighter")
+        private val HIGHLIGHT_IDENTITY_KEY = GenerationKeys.create<List<Any?>>("agent-doc.visual.highlight-identity")
+        private val TRACKED_HIGHLIGHTERS_KEY = GenerationKeys.create<List<RangeHighlighter>>("agent-doc.visual.tracked-highlighters")
         private val INSTANCES = ConcurrentHashMap<Project, VisualHighlighterManager>()
 
         /** Share of the theme foreground mixed into a component body's background. */

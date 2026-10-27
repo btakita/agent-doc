@@ -300,13 +300,16 @@ nothing in it changes the decision above until its migration step R4 lands.
 ### Restart-free implementation generations: shell plus child loader (GH #339 design)
 
 **Status.** R0 (this design plus the test-only proof of concept in
-`src/test/kotlin/com/github/btakita/agentdoc/shellspike/`) and the first R1
-step have landed. R1 so far moves the actions, the project lifecycle, the Tier A programmatic
-listeners and the editor and language extensions behind shell forwarders,
-routes EDT and pooled work through per-generation shell owners, registers the
-backend receipt with the controller, classifies the services, settings and JNA binding as shell, splits the shell
-and implementation digests, and publishes the activation receipt on both JVMs;
-"R1 status" below lists each registration class and what remains. The
+`src/test/kotlin/com/github/btakita/agentdoc/shellspike/`) and R1 have landed,
+except `verifyImplJar` (no implementation jar exists before R2) and the
+measured remainder that "R1 status" lists. R1 moves the actions, the project
+lifecycle, the Tier A programmatic listeners and the editor and language
+extensions behind shell forwarders; routes EDT and pooled work through
+per-generation shell owners; creates the user-data keys in the shell; delegates
+the Fleet RPC ingress into the generation; classifies the services, settings
+and JNA binding as shell; splits the shell and implementation digests; and
+publishes the activation receipt on both JVMs and in the backend's controller
+registration. "R1 status" below lists each registration class. The
 implementation still loads in the plugin classloader, so behaviour is unchanged
 for users. Until migration step R4 below lands with the receipts it names, the
 "Exact-263 decision" above stays in force, and every JetBrains source-digest
@@ -562,7 +565,7 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
 
 - **R0 (this change):** this section and the test-only spike. No shipped
   change and no version bump.
-- **R1, shell in place in the same loader (restart-bound; in progress, see
+- **R1, shell in place in the same loader (restart-bound; landed, see
   "R1 status"):** add the SPI,
   `GenerationHost`, forwarders for every XML registration, and the generation
   context. Move the implementation behind the SPI, still compiled into the same
@@ -589,7 +592,7 @@ outcome=impl_swapped impl_version=<v> epoch=<n>` and, when the shell changed,
 
 #### R1 status
 
-The first R1 step is restart-bound like every shell change: installing it
+R1 is restart-bound like every shell change: installing each R1 release
 costs one IDE restart. It keeps the frontend shell-only (`SHELL_ONLY`) and
 keeps the restart-required prompt, marker, and diagnostics unchanged.
 
@@ -600,12 +603,12 @@ keeps the restart-required prompt, marker, and diagnostics unchanged.
 | Project lifecycle (`<projectListeners>`) | **done** | `PluginLifecycleListener` forwards `projectOpened` and `projectClosed` to `ImplGeneration.projectOpened`/`disposeProject`; `ProjectPluginLifecycleService.dispose` forwards to `disposeProject`. The attach bridge's static hooks `initializeOpenProjectsAfterDynamicLoad` and `disposeOpenProjectsForDynamicUnload` stay on the listener class, which the bridge resolves by name, and forward to the generation. The startup body, the dynamic-load and dynamic-unload bodies, and project teardown moved unchanged into the implementation's `AgentDocProjectLifecycle`. `PluginUnloadCleanupService` keeps the unload order: it retires `PluginGeneration`, retires the implementation generation through `ShellGenerationHost.retireActiveGeneration()` (`ImplGeneration.retire`: dispose every open project, then remove the turn-state strips), then closes the classloader-global resources. The host's own disposal retires the generation too, so whichever service IntelliJ disposes first runs it, once. `generateModularLifecycle` now copies `AgentDocProjectLifecycle.kt` into `AgentDocProjectLifecycle262Generated.kt` (the 262/263 backend excludes the classic file and compiles the shell listener as is). |
 | Programmatic listeners (Tier A) | **done** | `ShellListenerHub` holds one forwarder per topic or `add…Listener` key: a JDK proxy defined by the shell's classloader, subscribed once under the hub owner (`ShellGenerationHost` for the application bus, the editor event multicaster and the editor factory; `ProjectPluginLifecycleService` for each project bus). It delivers every interface method, default methods included, to the staged handlers in staging order; every handler sees the event even when one throws, and the first failure is rethrown with the rest suppressed. Implementation code stages all 17 former direct registrations (8 project-bus and 3 application-bus subscriptions, 3 document listeners, 2 editor-factory listeners and 1 multicaster mouse listener) through `GenerationListeners`, which calls `GenerationContext.subscribe`/`addDocumentListener`/`addEditorMouseListener`/`addEditorFactoryListener`. Each handler keeps its former parent disposable, and the removal is registered through `Disposer.register(parent, …)`, so a disposed parent refuses it exactly as `MessageBus.connect(parent)` did. A retired generation stages nothing. The audit enforces `message_bus_subscribe`, `message_bus_connect`, `document_or_vfs_listener` and `editor_factory_or_multicaster_listener` at zero in implementation files and pins the 17 staged registrations. AWT and per-editor focus listeners (`awt_or_component_listener=3`) are not message-bus topics and stay measured. |
 | Editor/language extensions | **done** | All six XML extension classes are shell forwarders in `shell/ShellEditorForwarders.kt`: `ShellSlashCommandCompletionContributor`, `ShellComponentFoldingBuilder`, `ShellComponentLineMarkerProvider` and `ShellComponentStructureViewExtension` (the last three in `agent-doc-markdown.xml`), `ShellTurnStateStatusBarWidgetFactory` with its `ShellTurnStateStatusBarWidget`, and `ShellTurnStateBannerProvider`. Each asks the active generation's `ImplEditorExtensions` (`ImplGeneration.editorExtensions()`, served by the implementation's `AgentDocEditorExtensions`) for plain data (`SlashCompletions`, `ComponentFold`, a marker's component name and tooltip, `StructureNode` trees with a stable string key, `TurnStateStatus`, `TurnStateBanner`) and builds the lookup elements, fold descriptors, line markers, structure elements, widget and banner strip itself; the strip builder and its `#staleturnbanner`/`#duplicateturnbanner` sweep moved to `shell/ShellTurnStateStrips.kt`. The widget stages its turn-state listener under a shell disposable it disposes with the widget. The two notification groups were already XML-only. The audit enforces that the six classes are shell forwarders and that no implementation class extends a platform extension or widget type. Refreshing what the platform cached from an old generation (`EditorNotifications.updateAllNotifications()`, `StatusBarWidgetsManager.updateWidget(factory)`, `DaemonCodeAnalyzer.restart()`) belongs to the swap (R3): in R1 no generation is replaced while the platform holds its results. The `Notification` objects the implementation posts are measured (`notification=21`), not moved. |
-| Modular extensions and Fleet RPC | partial | The RPC contract carries the receipt (snapshot schema 5). The frontend module, `SurfaceSnapshotRemoteApiProvider`, `BackendSurfaceSnapshotRpcApi` and `AuthenticatedSurfaceIngressService` are shell files in `editors/jetbrains-262/shell-sources.txt`. The ingress service still drives implementation classes (the controller publisher and the layout forwarder) directly. |
+| Modular extensions and Fleet RPC | **done** | The RPC contract carries the receipt (snapshot schema 5). The frontend module, `SurfaceSnapshotRemoteApiProvider`, `BackendSurfaceSnapshotRpcApi`, `AuthenticatedSurfaceIngressService` and the new `SurfaceIngressSpi.kt` are shell files in `editors/jetbrains-262/shell-sources.txt`. The ingress project service only delegates: it asks the active generation for its `SurfaceIngressFactory` (`ImplGeneration.moduleService`, which `AgentDocImplGeneration` resolves by class name from its own classloader, so the classic package, which has no split backend, answers null) and forwards every lease, snapshot and presentation-receipt call to the `SurfaceIngress` it creates. `AuthenticatedSurfaceIngressState`, the snapshot validator, the controller publisher and the layout forwarder are implementation: the state machine and validator moved to `AuthenticatedSurfaceIngressState.kt`, which brings ingress-only commits back to implementation-only (see "Re-measured yield"). `SplitShellOwnershipTest` (262 backend) enforces that the backend shell files name no backend implementation type and that the service declares nothing else. |
 | EDT work | **done** | Implementation code queues all 43 EDT tasks through `GenerationWork.invokeLater`, which calls `GenerationContext.invokeLater`. The shell's `ShellGenerationWork` wraps each in a `FencedTask` and queues it with `ModalityState.defaultModalityState()` (what `Application.invokeLater(Runnable)` used) and an `expired` condition that is the generation's fence, so the event queue holds only shell tasks. A task drops its implementation runnable once it ran. Retirement takes a policy: a swap (R3) retires with `CANCEL`, which expires every queued task and clears its runnable before it runs; R1's only retirement, plugin unload, retires with `DRAIN`, so queued tasks still run exactly as before R1 (unload teardown itself queues EDT work, such as an AWT listener detached from a pooled dispose path). |
 | Pooled work and threads | **done** | `GenerationContext.work` (`ShellGenerationWork`, one per generation) serves `executeOnPooledThread` (20 sites), `schedule`/`scheduleWithFixedDelay`/`submit` on the application pools (7), `newSingleThreadScheduledExecutor`/`newSingleThreadExecutor` with named daemon threads (9), `newThread` and `threadFactory` (14 raw threads), `newPooledAlarm` (1), and one `CoroutineScope` (`SupervisorJob` + `Dispatchers.Default`) that retirement cancels. Pooled tasks are counted while they run; executors and threads are tracked weakly, and retirement logs `[shell] implementation generation <n> retired pending_edt=… pooled_in_flight=… live_executors=… live_threads=…`. R1 does not stop or join them at retirement: the implementation's own unload owners (`PluginGeneration.registerResource`, `disposeProject`) still do, as before. Joining with a deadline belongs to the swap's quiesce (R3). The implementation reaches all of it through `GenerationWork`, which falls back to the platform call it replaced when no generation exists. The audit enforces `invoke_later`, `pooled_thread`, `app_executor_util`, `raw_thread`, `executors_new` and `alarm` at zero in implementation files and pins the staged counts. |
 | Native library (JNA) | **done (shell classification)** | `NativeLib.kt` and `NativeReloadCoordinator.kt` are shell files. |
 | Controller identity | **done** | Every `Register` op the backend's `ReliableSyncLivenessGraph` builds carries this JVM's `agent_doc_activation_receipt/v1` line as `activation_receipt` (`ShellGenerationHost.receipt()`, read when the op is built, so a native-reload republish reports the generation active then). It reuses the controller's existing `EditorRegistration.activation_receipt` (`agent_doc_reliable_sync_io::liveness`, serde default, omitted when absent), which the VS Code adapter introduced with `role=workspace`; the field is omitted when no host exists, so an older controller reads the same registration. `editors/jetbrains/src/test/resources/reliable-sync/jetbrains-register-with-receipt.json` is the exact op: `ReliableSyncLivenessGraphTest` asserts the plugin produces it, and `agent-doc-reliable-sync-io/tests/jetbrains_registration_receipt.rs` decodes it as a `role=backend` receipt and re-encodes it unchanged. `agent-doc reliable-sync-status` prints the parsed receipt. The receipt still carries `impl_sha256=none` and `epoch=0` until R2/R3, and a retired generation's context still refuses new listener registrations. |
-| Per-platform-object state | pending | `key_create=3 put_user_data=4`. |
+| Per-platform-object state | **done** | The shell creates every user-data `Key` (`ShellUserDataKeys`, once per IDE run, lent as `GenerationContext.userDataKey`); implementation code takes its three keys from `GenerationKeys.create` (`key_create=0`, enforced). The highlight identity that each `RangeHighlighter` carried as the implementation's `VisualHighlightKey` is now stored as a JDK list, so platform objects hold only JDK and platform values. The four `putUserData` sites stay measured (`put_user_data=4`); the retirement sweep of shell keys belongs to the swap (R3). |
 
 The counts come from `ShellRegistrationOwnershipTest`, whose pending-class
 test prints them as `[shell-audit] implementation registrations still direct:`
@@ -669,9 +672,9 @@ figure of 138 of 187 used a different selection of commits. The 10 extra
 commits in the total are build-script-only changes, which now count as shell.
 Five commits that the design's rule called implementation-only now touch shell
 files: `AuthenticatedSurfaceIngressService.kt` accounts for 3 and a
-`build.gradle.kts` for 3, and one commit has both. Moving
-`AuthenticatedSurfaceIngressState` out of the service file would bring the
-ingress share back.
+`build.gradle.kts` for 3, and one commit has both. R1 moved
+`AuthenticatedSurfaceIngressState` out of the service file, so a change to the
+ingress state machine is again implementation-only.
 
 **Not yet present.** There is no `verifyImplJar` while no implementation jar
 exists; `ShellRegistrationOwnershipTest` is the R1 audit in its place. The
@@ -687,8 +690,13 @@ matters only once a child loader defines the implementation (R2).
    with the swap in R3).
 4. ~~Controller identity~~ (done; the Rust field already existed from the
    VS Code receipt work).
-5. Per-platform-object `Key`s created by the shell, and the shell-side Fleet
-   RPC delegation into the generation.
+5. ~~Per-platform-object `Key`s and the Fleet RPC delegation~~ (done).
+
+R1's registration classes are all in place. What the platform still holds
+from implementation code is measured, not moved: AWT and per-editor focus
+listeners (`awt_or_component_listener=3`), posted `Notification`s
+(`notification=21`) and the four `putUserData` values. R2 packages the
+implementation into `impl/` and adds `verifyImplJar`.
 
 #### Restatement of the Exact-263 reopen rule (adopted 2026-10-26)
 

@@ -66,6 +66,51 @@ impl StaleBusyReconcileEffects {
         self.scope.ctx().set(&self.projection, projection);
         true
     }
+
+    /// Re-license `key` after its repair write did not land (`#drainbusymask`).
+    ///
+    /// [`Self::observe_and_take`] consumes the key before the controller write.
+    /// When that write fails retryably, the actor stays `Busy` over the idle
+    /// pane, and the consumed key would refuse every later attempt until a new
+    /// dispatch epoch. Under `admin queue drain` no dispatch is admitted to a
+    /// non-`Ready` actor, so that epoch never comes: the drain wedges. The
+    /// caller's idle-tick debounce still paces the retry, so an unchanged poll
+    /// cannot turn this into a per-tick write storm.
+    pub fn release_unlanded(&self, key: &str) {
+        let mut projection = self.scope.ctx().get(&self.projection);
+        if projection.consumed_key.as_deref() == Some(key) {
+            projection.consumed_key = None;
+            self.scope.ctx().set(&self.projection, projection);
+        }
+    }
+}
+
+/// What one licensed stale-busy repair attempt did (`#drainbusymask`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleBusyReconcileAttempt {
+    /// The key was already consumed: an unchanged poll of the same busy entry.
+    NotLicensed,
+    /// The repair landed; the actor left `Busy`/`Starting`.
+    Landed,
+    /// The repair write did not land; the key was re-licensed for the next
+    /// debounced attempt.
+    Unlanded,
+}
+
+impl StaleBusyReconcileEffects {
+    /// Run one licensed repair: take `key`, `apply` the `Ready` transition, and
+    /// re-license the key when `apply` reports the actor is still busy.
+    pub fn attempt(&self, key: String, apply: impl FnOnce() -> bool) -> StaleBusyReconcileAttempt {
+        if !self.observe_and_take(key.clone()) {
+            return StaleBusyReconcileAttempt::NotLicensed;
+        }
+        if apply() {
+            StaleBusyReconcileAttempt::Landed
+        } else {
+            self.release_unlanded(&key);
+            StaleBusyReconcileAttempt::Unlanded
+        }
+    }
 }
 
 pub fn recoverable_ready_busy_blocker_reason(reason: &str) -> bool {
@@ -122,6 +167,38 @@ mod tests {
         assert!(effects.observe_and_take("generation-7:dispatch-11".to_string()));
         assert!(!effects.observe_and_take("generation-7:dispatch-11".to_string()));
         assert!(effects.observe_and_take("generation-7:dispatch-12".to_string()));
+    }
+
+    /// `#drainbusymask`: a repair whose controller write did not land must be
+    /// retried on the next debounced attempt. Before this, the consumed key
+    /// refused every retry until a new dispatch epoch, which `admin queue drain`
+    /// never admits to a non-`Ready` actor.
+    #[test]
+    fn stale_busy_reconcile_effect_retries_a_repair_that_did_not_land() {
+        let effects = StaleBusyReconcileEffects::new();
+        let key = || "generation-7:dispatch-11:busy-3".to_string();
+        assert_eq!(
+            effects.attempt(key(), || false),
+            StaleBusyReconcileAttempt::Unlanded
+        );
+        assert_eq!(
+            effects.attempt(key(), || true),
+            StaleBusyReconcileAttempt::Landed,
+            "an unlanded repair must stay licensed for the same busy entry"
+        );
+        assert_eq!(
+            effects.attempt(key(), || true),
+            StaleBusyReconcileAttempt::NotLicensed,
+            "a landed repair consumes its busy entry: unchanged polls stay quiet"
+        );
+    }
+
+    #[test]
+    fn release_unlanded_ignores_a_key_it_did_not_consume() {
+        let effects = StaleBusyReconcileEffects::new();
+        assert!(effects.observe_and_take("a".to_string()));
+        effects.release_unlanded("b");
+        assert!(!effects.observe_and_take("a".to_string()));
     }
 
     #[test]

@@ -60676,6 +60676,97 @@ mod tests {
             "redirectable stale dispatch must not degrade into a terminal generation-closed proof:\n{ops_log}"
         );
     }
+    /// `#drainbusymask`: during `admin queue drain` the dispatch gate reads the
+    /// durable actor record. A live `Busy` turn stays blocked
+    /// (`actor_busy_draining`, the invariant `#predispatchreadyoverwrite`
+    /// restored), and a route's in-memory evidence promotion writes nothing, so
+    /// it cannot open the gate. The stale `Busy` drains once the supervisor's
+    /// `idle_pane_reconcile` lands its `Ready` through `mark_lifecycle`.
+    #[test]
+    fn drain_gate_admits_a_stale_busy_only_after_the_idle_pane_reconcile_lands() {
+        use agent_doc_controller::actor::ActorState;
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/drainbusymask.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(
+            &doc,
+            "---\nagent_doc_session: session-dbm\nagent: codex\n---\nBody\n",
+        )
+        .unwrap();
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc,
+            "session-dbm",
+            "%42",
+            "@1",
+            1,
+        )
+        .unwrap();
+        let lifecycle = |state: ActorState, caller: &str, reason: &str| {
+            mark_lifecycle(
+                dir.path(),
+                LifecycleRequest {
+                    file: doc.clone(),
+                    session_id: "session-dbm".to_string(),
+                    pane_id: "%42".to_string(),
+                    generation: 1,
+                    state,
+                    caller: caller.to_string(),
+                    reason: reason.to_string(),
+                },
+            )
+            .unwrap()
+        };
+        let dispatch = || {
+            authorize_dispatch(
+                dir.path(),
+                DispatchRequest {
+                    file: doc.clone(),
+                    session_id: "session-dbm".to_string(),
+                    pane_id: "%42".to_string(),
+                    generation: 1,
+                    command_kind: "dispatch_only_reopen".to_string(),
+                    diagnostic_payload: "submit=direct_pane actor_state=ready harness=codex"
+                        .to_string(),
+                },
+            )
+        };
+        lifecycle(ActorState::Busy, "dispatch", "ipc_inject");
+        control_queue(
+            dir.path(),
+            Some(&doc),
+            "drain",
+            Some(1),
+            Some("drainbusymask test"),
+            None,
+        )
+        .unwrap();
+
+        let err = dispatch().expect_err("a Busy record must block dispatch during a drain");
+        assert!(
+            format!("{err:#}").contains("actor_busy_draining"),
+            "{err:#}"
+        );
+        // The route's evidence promotion (`actor_state=ready` in the payload
+        // above) is in-memory only; the gate still refuses on the record.
+        let err = dispatch().expect_err("route evidence alone must not open the drain gate");
+        assert!(
+            format!("{err:#}").contains("actor_busy_draining"),
+            "{err:#}"
+        );
+
+        let record = lifecycle(ActorState::Ready, "supervisor", "idle_pane_reconcile");
+        assert_eq!(record.state, ActorState::Ready);
+        dispatch().expect("the reconciled actor drains");
+
+        // The admitted dispatch starts a live turn: it is blocked again.
+        lifecycle(ActorState::Busy, "dispatch", "ipc_inject");
+        let err = dispatch().expect_err("a live Busy turn must stay blocked during a drain");
+        assert!(
+            format!("{err:#}").contains("actor_busy_draining"),
+            "{err:#}"
+        );
+    }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {
         use agent_doc_supervisor::config::resolve_supervisor_auto_recycle as r;

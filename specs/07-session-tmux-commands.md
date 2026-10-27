@@ -1040,6 +1040,19 @@ generation. The controller does read the record's lifecycle state at
 `authorize_dispatch` (an `admin queue drain` blocks a non-`Ready` actor with
 `actor_busy_draining`), so a `Ready` written there would have waved a live
 `Busy` turn through that gate.
+A stale `Busy` the route proves idle from pane evidence (the ready-prompt,
+timeout-idle, and eager two-capture repairs in `authoritative_dispatch.rs`)
+stays an in-memory promotion: the route writes no lifecycle state, and the
+controller's drain gate takes no route-supplied idle evidence
+(`#drainbusymask`). The route's evidence is weaker than the owner's: it does not
+consult the harness turn lease or the 15s post-dispatch grace, and the ready-prompt
+repair is a single capture, which a live turn can satisfy between tool calls. A
+route `Ready` would also release the turn's dispatch receipts
+(`#queuedclearflake`) under a supervisor that still holds the actor `Busy`.
+The owner heals the record instead: the supervisor's stale-busy self-heal
+writes `idle_pane_reconcile` for every busy entry and retries an unlanded write
+(see [Supervisor](supervisor.md)), so a drain blocked on a stale `Busy`
+(`actor_busy_draining`) is a bounded delay that the caller's backoff retries.
 - Sync never writes an actor binding it decided from an earlier read without a
 fence on that read (`#syncbindingfence`). Every sync/resync actor write decides
 from one read of the record and compare-and-swaps on its generation and

@@ -1323,7 +1323,20 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   polls (~2s debounce so a turn still spinning up is never cut short), the watch
   transitions the actor back to `ready` (`caller=supervisor reason=idle_pane_reconcile`,
   persisted through `mark_lifecycle`), resets the prompt latch, and logs
-  `idle_queue_watch_stale_busy_reconciled`. It must preserve the dispatch dedup
+  `idle_queue_watch_stale_busy_reconciled`. The repair is edge-triggered on the
+  actor's busy entry, keyed `generation:dispatch-epoch:busy-entry`: an unchanged
+  poll of one busy episode writes once, and each landed transition INTO
+  `busy`/`starting` (a dispatch, a harness permission prompt resolving, a child
+  restart spawn) licenses one more repair (`#drainbusymask`). A repair whose
+  write did not land (the in-memory actor is still `busy` after the transition,
+  e.g. a retryable controller failure) re-licenses its key and retries after the
+  next full debounce, logging `idle_queue_watch_stale_busy_reconcile_unlanded`
+  once per episode. Keyed on the dispatch epoch alone, either case stayed `busy`
+  until the next dispatch, and `admin queue drain` admits no dispatch to a
+  non-`ready` actor (`actor_busy_draining`), so the drain wedged. This repair is
+  the only writer that heals a stale `busy` record during a drain: the route's
+  own pane-evidence promotion is in-memory (see
+  [Session Tmux Commands](07-session-tmux-commands.md)). It must preserve the dispatch dedup
   for the current head: if the injected command returned without consuming the
   same active head, the next idle tick must skip it as `SkipAlreadyDispatched`
   instead of re-injecting the same drain payload in a loop. The dedup clears

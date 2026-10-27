@@ -372,6 +372,28 @@ fn turn_active_for_owned_pane_with_idle_evidence(
     }
 }
 
+/// Run one licensed stale-busy repair (`#stale-busy-after-auto-inject-no-clear`,
+/// `#drainbusymask`).
+///
+/// The repair is keyed on the actor's busy entry
+/// ([`SupervisorShared::stale_busy_reconcile_effect_key`]), so an unchanged poll
+/// of one busy episode writes once. `transition` performs the `Ready` write; the
+/// attempt has landed only when the in-memory actor left `Busy`/`Starting`
+/// afterwards. A failed write leaves it busy, and the key is re-licensed so the
+/// next debounced tick retries: this is the only path that heals a stale `Busy`
+/// record during `admin queue drain`, which admits no dispatch (and so no new
+/// dispatch epoch) to a non-`Ready` actor.
+fn attempt_stale_busy_idle_reconcile(
+    shared: &SupervisorShared,
+    effects: &agent_doc_supervisor::idle_reconcile::StaleBusyReconcileEffects,
+    transition: impl FnOnce(&SupervisorShared),
+) -> agent_doc_supervisor::idle_reconcile::StaleBusyReconcileAttempt {
+    effects.attempt(shared.stale_busy_reconcile_effect_key(), || {
+        transition(shared);
+        !agent_doc_supervisor_io::detection::actor_state_is_busy_or_starting(shared)
+    })
+}
+
 fn log_interrupted_turn_lease_retired(
     file: &Path,
     shared: &SupervisorShared,
@@ -2341,6 +2363,18 @@ fn clear_durable_prompt_dispatch_key_at(path: &Path, only_key: Option<&str>) {
 /// Shared writer handle: outer Mutex guards replace/clear, inner Mutex guards concurrent writes.
 type SharedWriter = Mutex<Option<Arc<Mutex<SharedPtyWriter>>>>;
 
+fn actor_lifecycle_state_is_busy_or_starting(
+    state: Option<agent_doc_controller::actor::ActorState>,
+) -> bool {
+    matches!(
+        state,
+        Some(
+            agent_doc_controller::actor::ActorState::Busy
+                | agent_doc_controller::actor::ActorState::Starting
+        )
+    )
+}
+
 #[derive(Debug, Clone)]
 struct SessionActorRuntime {
     project_root: PathBuf,
@@ -2482,6 +2516,11 @@ pub(crate) struct SupervisorShared {
     /// Monotonic admission edge for stale-busy reconciliation. Polling terminal
     /// evidence cannot create another repair effect until a new dispatch starts.
     prompt_dispatch_epoch: AtomicU64,
+    /// Monotonic count of landed transitions INTO `Busy`/`Starting`
+    /// (`#drainbusymask`). A busy entry with no new dispatch (a harness
+    /// permission prompt resolving, a child restart spawn) is a fresh stale-busy
+    /// episode: it licenses one more repair even within one dispatch epoch.
+    actor_busy_entry_epoch: AtomicU64,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
     inject_pane: Option<String>,
     /// Filtered output and visible terminal projection for the current child process.
@@ -2621,6 +2660,7 @@ impl SupervisorShared {
             inject_writer: Mutex::new(None),
             prompt_dispatch_projection: Mutex::new(None),
             prompt_dispatch_epoch: AtomicU64::new(0),
+            actor_busy_entry_epoch: AtomicU64::new(0),
             inject_pane,
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),
@@ -2876,9 +2916,21 @@ impl SupervisorShared {
             .map(|runtime| runtime.generation)
             .unwrap_or_default();
         format!(
-            "generation-{generation}:dispatch-{}",
-            self.prompt_dispatch_epoch.load(Ordering::Relaxed)
+            "generation-{generation}:dispatch-{}:busy-{}",
+            self.prompt_dispatch_epoch.load(Ordering::Relaxed),
+            self.actor_busy_entry_epoch.load(Ordering::Relaxed)
         )
+    }
+
+    /// Publish a landed lifecycle transition into the in-memory actor state,
+    /// counting each entry into `Busy`/`Starting` (`#drainbusymask`).
+    fn record_landed_actor_state(&self, state: agent_doc_controller::actor::ActorState) {
+        let prior = self.actor_state.lock().replace(state);
+        if actor_lifecycle_state_is_busy_or_starting(Some(state))
+            && !actor_lifecycle_state_is_busy_or_starting(prior)
+        {
+            self.actor_busy_entry_epoch.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn prompt_dispatch_grace_active(&self, grace: std::time::Duration) -> bool {
@@ -2996,7 +3048,7 @@ impl SupervisorShared {
         };
         match runtime.transition(state, caller, reason) {
             Ok(record) => {
-                *self.actor_state.lock() = Some(record.state);
+                self.record_landed_actor_state(record.state);
                 if record.state == agent_doc_controller::actor::ActorState::Ready {
                     *self.prompt_dispatch_projection.lock() = None;
                     self.clear_durable_prompt_dispatch_key(None);
@@ -3132,13 +3184,7 @@ impl agent_doc_supervisor_io::detection::SupervisorDetectionState for Supervisor
     }
 
     fn actor_busy_or_starting(&self) -> bool {
-        self.actor_state.lock().is_some_and(|state| {
-            matches!(
-                state,
-                agent_doc_controller::actor::ActorState::Busy
-                    | agent_doc_controller::actor::ActorState::Starting
-            )
-        })
+        actor_lifecycle_state_is_busy_or_starting(*self.actor_state.lock())
     }
 
     fn owned_pane_id(&self) -> Option<String> {
@@ -3803,6 +3849,122 @@ mod tests {
         assert!(
             !prompt_visible_requires_ready_transition(&shared),
             "a repeated prompt without an intervening busy transition should not retrigger ready"
+        );
+    }
+
+    /// `#drainbusymask`: a stale `Busy` repair whose controller write does not
+    /// land is retried on the next debounced attempt instead of waiting for a
+    /// new dispatch epoch, which `admin queue drain` never admits to a
+    /// non-`Ready` actor. With no actor runtime, `transition_actor_state` writes
+    /// nothing — the same in-memory outcome as a retryable controller failure.
+    #[test]
+    fn stale_busy_reconcile_retries_a_write_that_did_not_land() {
+        use agent_doc_supervisor::idle_reconcile::{
+            StaleBusyReconcileAttempt, StaleBusyReconcileEffects,
+        };
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            Some(agent_doc_controller::actor::ActorState::Busy),
+            Some("%owner".to_string()),
+        );
+        let effects = StaleBusyReconcileEffects::new();
+        let production_write = |shared: &SupervisorShared| {
+            shared.transition_actor_state(
+                agent_doc_controller::actor::ActorState::Ready,
+                "supervisor",
+                "idle_pane_reconcile",
+            )
+        };
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, production_write),
+            StaleBusyReconcileAttempt::Unlanded
+        );
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, production_write),
+            StaleBusyReconcileAttempt::Unlanded,
+            "an unlanded repair must be re-attempted, not latched until the next dispatch"
+        );
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, |shared| {
+                shared.record_landed_actor_state(agent_doc_controller::actor::ActorState::Ready)
+            }),
+            StaleBusyReconcileAttempt::Landed
+        );
+        assert_eq!(
+            *shared.actor_state.lock(),
+            Some(agent_doc_controller::actor::ActorState::Ready)
+        );
+    }
+
+    /// `#drainbusymask`: a busy entry that no dispatch caused (a harness
+    /// permission prompt resolving, a child restart spawn) licenses a fresh
+    /// stale-busy repair within the same dispatch epoch. Keyed on the dispatch
+    /// epoch alone, the second episode was never repaired, and during
+    /// `admin queue drain` nothing else could heal it.
+    #[test]
+    fn stale_busy_reconcile_relicenses_on_a_busy_entry_without_a_dispatch() {
+        use agent_doc_controller::actor::ActorState;
+        use agent_doc_supervisor::idle_reconcile::{
+            StaleBusyReconcileAttempt, StaleBusyReconcileEffects,
+        };
+        let shared = SupervisorShared::with_actor_runtime(
+            "test",
+            "test-instance".to_string(),
+            None,
+            "claude",
+            None,
+            Some(ActorState::Ready),
+            Some("%owner".to_string()),
+        );
+        let effects = StaleBusyReconcileEffects::new();
+        let land_ready =
+            |shared: &SupervisorShared| shared.record_landed_actor_state(ActorState::Ready);
+
+        shared.record_landed_actor_state(ActorState::Busy);
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, land_ready),
+            StaleBusyReconcileAttempt::Landed
+        );
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, land_ready),
+            StaleBusyReconcileAttempt::NotLicensed,
+            "an unchanged poll of a repaired episode writes nothing"
+        );
+
+        // Same generation, same dispatch epoch: the permission prompt resolves.
+        shared.record_landed_actor_state(ActorState::WaitingInput);
+        shared.record_landed_actor_state(ActorState::Busy);
+        // A repeated Busy is the same episode, not a new entry.
+        shared.record_landed_actor_state(ActorState::Busy);
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, land_ready),
+            StaleBusyReconcileAttempt::Landed,
+            "a new busy entry must license its own repair"
+        );
+        assert_eq!(
+            attempt_stale_busy_idle_reconcile(&shared, &effects, land_ready),
+            StaleBusyReconcileAttempt::NotLicensed
+        );
+    }
+
+    #[test]
+    fn transition_actor_state_publishes_landed_states_through_the_busy_entry_counter() {
+        // Pin the production call site: a landed transition must go through
+        // `record_landed_actor_state`, or busy entries are never counted.
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("    fn transition_actor_state(\n")
+            .map(|(_, tail)| tail)
+            .and_then(|tail| tail.split_once("    /// `#reexecdeadchild`"))
+            .map(|(body, _)| body)
+            .expect("transition_actor_state must remain discoverable");
+        assert!(
+            body.contains("self.record_landed_actor_state(record.state);"),
+            "a landed lifecycle transition must count busy entries"
         );
     }
 

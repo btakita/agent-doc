@@ -2201,6 +2201,9 @@ struct WriteArgs {
     /// (`#operatortodo`, repeatable). Creates the `agent:todo` component when the
     /// document has none; existing items are preserved and an identical action
     /// is a no-op. Prefix with `id=<custom> ` to choose the item's id.
+    /// Nested sub-items (`#nestedtodoadd`): one value whose later lines are each
+    /// an indented `  - <text>` row, e.g. `$'id=q1 Decide X\n  - first?\n  - second?'`;
+    /// they render under the item and stay part of it.
     #[arg(long = "todo-add")]
     todo_add: Vec<String>,
     /// Check an `agent:todo` item off (`[x]`) in place once the operator action
@@ -2209,7 +2212,8 @@ struct WriteArgs {
     #[arg(long = "todo-done")]
     todo_done: Vec<String>,
     /// Edit an `agent:todo` item's text: `id=new text` (repeatable). Keeps the
-    /// item's id, checkbox state, and position.
+    /// item's id, checkbox state, and position. Multi-line text replaces the
+    /// item's nested lines with its `  - <text>` sub-items; single-line text keeps them.
     #[arg(long = "todo-edit")]
     todo_edit: Vec<String>,
     /// Uncheck an `agent:todo` item (`[ ]`) in place (repeatable).

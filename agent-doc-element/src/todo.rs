@@ -27,6 +27,20 @@
 //!   gated) already carries the same action text, the add is a no-op. A replayed
 //!   closeout therefore never duplicates a todo, and never resurrects one the
 //!   operator already checked off.
+//! - `#nestedtodoadd`: add/edit text may carry nested sub-items. The first
+//!   line is the item; every later line is one `  - <text>` sub-item, rendered
+//!   under the item as `  - <text>` (two columns deeper than the item). The
+//!   input is validated strictly ([`split_todo_payload`]): no blank lines, no
+//!   flush-left or non-bullet lines, one indentation level, no checkbox
+//!   children (a checkbox row is a separate todo item), no HTML comments or
+//!   component markers. Sub-items are part of the item, never items: identity,
+//!   id minting, source linking and dedupe read the item line alone, so a
+//!   replayed add with sub-items is a no-op, and when the existing item's
+//!   nested lines differ the add still changes nothing
+//!   ([`TodoAddOutcome::sub_items_kept`]). `--todo-done`/`--todo-reopen` flip
+//!   the item's checkbox and keep its sub-items; `--todo-remove` deletes them
+//!   with it; a multi-line `--todo-edit` replaces the nested lines with the
+//!   new sub-items, and a single-line edit keeps them.
 //! - Only a LEADING id is an item's own id: bracketed `[#id]`, or bare `#id`
 //!   followed by whitespace with at least one letter (`#sdktododone`; a
 //!   leading `#157` stays a GitHub citation). Rewrites keep the row's
@@ -104,8 +118,9 @@
 //! - All functions are pure: no file IO, no clock, no randomness.
 //! - Placement depends only on the component layout, so the same document
 //!   always yields the same insertion point.
-//! - An action must be one non-empty line; multi-line text is rejected rather
-//!   than silently split into several items.
+//! - An action must be one non-empty line; later lines are accepted only as
+//!   strictly validated nested sub-items of that one item, never silently split
+//!   into several items (`#nestedtodoadd`).
 
 use anyhow::{Context, Result};
 
@@ -380,6 +395,11 @@ pub struct TodoAddOutcome {
     /// [#<id>])` locator; `None` when the action cites zero or several open
     /// tracked items. A new row's own id is never this id.
     pub source: Option<(String, String)>,
+    /// `#nestedtodoadd`: the add was a no-op on an existing item whose nested
+    /// lines differ from the sub-items the add carried. The existing item's
+    /// lines are kept (an operator edit to them survives a replay); a caller
+    /// that means to replace them uses `--todo-edit`.
+    pub sub_items_kept: bool,
 }
 
 /// `#todoids`: tracked-work evidence a todo id is evaluated against.
@@ -679,12 +699,83 @@ fn normalize_todo_action_for(text: &str, flag: &str) -> Result<String> {
     Ok(action.to_string())
 }
 
-/// Split an add/edit input into an optional caller-chosen id and the action.
+/// One parsed add/edit input: optional caller-chosen id, the item's action,
+/// and its nested sub-items (`#nestedtodoadd`).
+struct TodoInput {
+    id: Option<String>,
+    action: String,
+    /// Sub-item texts, without indentation or the `- ` bullet, in order.
+    children: Vec<String>,
+}
+
+/// `#nestedtodoadd`: split add/edit text into the item line and its nested
+/// sub-items.
+///
+/// The first line is the item. Every later line must be one nested list item,
+/// `<indent>- <text>`, with the same non-empty indentation as its siblings
+/// (one level only) and single-line, non-empty text. Rejected, so nothing is
+/// silently split into several items or written outside the item: blank
+/// lines, flush-left or non-bullet lines, mixed indentation, checkbox children
+/// (`- [ ] ...`, which would parse as separate todo items), and HTML comments
+/// or component markers.
+fn split_todo_payload<'a>(text: &'a str, flag: &str) -> Result<(&'a str, Vec<String>)> {
+    let trimmed = text.trim_end().trim_start_matches(['\n', '\r']);
+    let mut lines = trimmed.lines();
+    let first = lines.next().unwrap_or("");
+    let mut children = Vec::new();
+    let mut sibling_indent: Option<&str> = None;
+    for (offset, line) in lines.enumerate() {
+        let number = offset + 2;
+        anyhow::ensure!(
+            !line.trim().is_empty(),
+            "{flag}: line {number} is blank; nested sub-items follow the item line directly, one `  - <text>` line each"
+        );
+        let body = line.trim_start();
+        let indent = &line[..line.len() - body.len()];
+        // A bare `-` is an empty sub-item (trailing spaces were trimmed).
+        let child = body
+            .strip_prefix("- ")
+            .map(str::trim)
+            .or((body == "-").then_some(""));
+        anyhow::ensure!(
+            !indent.is_empty() && child.is_some(),
+            "{flag}: line {number} ({line:?}) is not a nested sub-item; every line after the first must be an indented list item, `  - <text>`"
+        );
+        let child = child.unwrap_or_default();
+        match sibling_indent {
+            None => sibling_indent = Some(indent),
+            Some(expected) => anyhow::ensure!(
+                expected == indent,
+                "{flag}: line {number} ({line:?}) changes indentation; nested sub-items are one level deep, all at the same indent"
+            ),
+        }
+        anyhow::ensure!(
+            !child.is_empty(),
+            "{flag}: line {number} is an empty sub-item"
+        );
+        anyhow::ensure!(
+            !["[ ]", "[x]", "[X]", "[/]"]
+                .iter()
+                .any(|checkbox| child == *checkbox || child.starts_with(&format!("{checkbox} "))),
+            "{flag}: line {number} ({line:?}) is a checkbox row; a sub-item is plain text (`  - <text>`), since a checkbox row is a separate todo item"
+        );
+        anyhow::ensure!(
+            !child.contains("<!--") && !child.contains("-->"),
+            "{flag}: line {number} ({line:?}) carries an HTML comment or component marker; sub-items are plain text"
+        );
+        children.push(child.to_string());
+    }
+    Ok((first, children))
+}
+
+/// Split an add/edit input into an optional caller-chosen id, the action, and
+/// its nested sub-items ([`split_todo_payload`]).
 ///
 /// The id spellings mirror `--backlog-add`: canonical `id=<id> <action>`, or
-/// the compatibility form `[#<id>] <action>`.
-fn parse_todo_input(text: &str, flag: &str) -> Result<(Option<String>, String)> {
-    let action = normalize_todo_action_for(text, flag)?;
+/// the compatibility form `[#<id>] <action>`. Both belong to the first line.
+fn parse_todo_input(text: &str, flag: &str) -> Result<TodoInput> {
+    let (first, children) = split_todo_payload(text, flag)?;
+    let action = normalize_todo_action_for(first, flag)?;
     if let Some(rest) = action.strip_prefix("id=") {
         let (id, tail) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
         anyhow::ensure!(
@@ -693,13 +784,50 @@ fn parse_todo_input(text: &str, flag: &str) -> Result<(Option<String>, String)> 
         );
         let tail = tail.trim();
         anyhow::ensure!(!tail.is_empty(), "{flag} expects an action after id={id}");
-        return Ok((Some(id.to_ascii_lowercase()), tail.to_string()));
+        return Ok(TodoInput {
+            id: Some(id.to_ascii_lowercase()),
+            action: tail.to_string(),
+            children,
+        });
     }
     if let Some((id, tail)) = split_leading_bracket_id(&action) {
         anyhow::ensure!(!tail.is_empty(), "{flag} expects an action after [#{id}]");
-        return Ok((Some(id.to_ascii_lowercase()), tail.to_string()));
+        return Ok(TodoInput {
+            id: Some(id.to_ascii_lowercase()),
+            action: tail.to_string(),
+            children,
+        });
     }
-    Ok((None, action))
+    Ok(TodoInput {
+        id: None,
+        action,
+        children,
+    })
+}
+
+/// Render nested sub-items under an item whose own line is indented `indent`
+/// columns: one `<indent+2>- <text>\n` line each.
+fn render_todo_children(indent: usize, children: &[String]) -> String {
+    let pad = " ".repeat(indent + 2);
+    children
+        .iter()
+        .map(|child| format!("{pad}- {child}\n"))
+        .collect()
+}
+
+/// The trimmed continuation lines of the item at `items[index]` (its nested
+/// sub-items and any operator notes under it), for comparing against an add's
+/// requested sub-items.
+fn existing_children(body: &TodoBody, index: usize) -> Vec<String> {
+    let item = &body.items[index];
+    let span = body.item_span(item);
+    body.lines[span.start + 1..span.end]
+        .iter()
+        .map(|line| {
+            let line = line.trim();
+            line.strip_prefix("- ").unwrap_or(line).trim().to_string()
+        })
+        .collect()
 }
 
 /// Collapse whitespace so two spellings of one action compare equal.
@@ -790,7 +918,11 @@ pub fn add_todo_item_to_document(
     reserved: &std::collections::HashSet<String>,
     links: &TodoLinkIndex,
 ) -> Result<TodoAddOutcome> {
-    let (explicit_id, action) = parse_todo_input(text, "--todo-add")?;
+    let TodoInput {
+        id: explicit_id,
+        action,
+        children,
+    } = parse_todo_input(text, "--todo-add")?;
     // `#queueoperatoraction`: request packets deliberately own an identity
     // distinct from the tracked work whose queue row they pause. Preserve that
     // reserved explicit id and leave the action as written (no source
@@ -818,19 +950,30 @@ pub fn add_todo_item_to_document(
     let wanted = normalize_action_text(&contextual_action);
     let wanted_legacy = normalize_action_text(&action);
     let items: Vec<TodoLine<'_>> = body.lines().filter_map(parse_todo_line).collect();
+    // `#nestedtodoadd`: the located view of the same rows (same order), for
+    // the nested lines an existing item already carries.
+    let located = TodoBody::parse(body);
     // `#todoaddonsamecycledone`: the binary-owned source locator is not part
     // of the action the caller wrote. A replay evaluated after the source was
     // resolved computes no locator, so it must still recognise the row the
     // first pass wrote WITH one; otherwise it mints a second, surrogate copy.
-    if let Some(existing) = items.iter().find(|item| {
+    //
+    // `#nestedtodoadd`: identity is the item line alone, so a replayed add
+    // with sub-items never duplicates the item, and an operator edit to the
+    // nested lines survives the replay (`sub_items_kept` reports a mismatch).
+    if let Some(existing_index) = items.iter().position(|item| {
         let existing = normalize_action_text(item.action);
         let existing_bare = strip_trailing_source_reference(item.action)
             .map(normalize_action_text)
             .unwrap_or_else(|| existing.clone());
         existing == wanted || existing == wanted_legacy || existing_bare == wanted_legacy
     }) {
+        let existing = &items[existing_index];
         let id = existing.own_id.map(str::to_ascii_lowercase);
         let source = contextual_source.clone();
+        let sub_items_kept = !children.is_empty()
+            && existing_index < located.items.len()
+            && existing_children(&located, existing_index) != children;
         if wanted != wanted_legacy
             && normalize_action_text(existing.action) == wanted_legacy
             && id.as_deref() == contextual_source.as_ref().map(|(id, _)| id.as_str())
@@ -857,6 +1000,7 @@ pub fn add_todo_item_to_document(
                 created_component,
                 id,
                 source,
+                sub_items_kept,
             });
         }
         return Ok(TodoAddOutcome {
@@ -866,6 +1010,7 @@ pub fn add_todo_item_to_document(
             created_component,
             id,
             source,
+            sub_items_kept,
         });
     }
     let owner = |id: &str| {
@@ -910,17 +1055,21 @@ pub fn add_todo_item_to_document(
             // the same item folds into the open todo already linked to it
             // (its canonical locator, or a legacy row that shares the id).
             if let Some((source_id, _)) = source.as_ref()
-                && let Some(existing) = items.iter().find(|item| {
+                && let Some(existing_index) = items.iter().position(|item| {
                     item.state.is_open() && todo_line_links_source(item, source_id)
                 })
             {
+                let sub_items_kept = !children.is_empty()
+                    && existing_index < located.items.len()
+                    && existing_children(&located, existing_index) != children;
                 return Ok(TodoAddOutcome {
                     content: ensured.clone(),
                     inserted: false,
                     source_reference_added: false,
                     created_component,
-                    id: existing.own_id.map(str::to_ascii_lowercase),
+                    id: items[existing_index].own_id.map(str::to_ascii_lowercase),
                     source,
+                    sub_items_kept,
                 });
             }
             let taken = body_id_tokens(&ensured);
@@ -958,6 +1107,7 @@ pub fn add_todo_item_to_document(
         &action,
     ));
     new_body.push('\n');
+    new_body.push_str(&render_todo_children(0, &children));
     Ok(TodoAddOutcome {
         content: todo.replace_content(&ensured, &new_body),
         inserted: true,
@@ -965,6 +1115,7 @@ pub fn add_todo_item_to_document(
         created_component,
         id: Some(id),
         source,
+        sub_items_kept: false,
     })
 }
 
@@ -1523,7 +1674,11 @@ pub fn edit_todo_item_in_document(
     let (todo, mut body) = todo_body_for_mutation(content, flag)?;
     let index = resolve_todo_selector(&body, selector, None, flag)?;
     let item = body.items[index].clone();
-    let (new_id, mut action) = parse_todo_input(text, flag)?;
+    let TodoInput {
+        id: new_id,
+        mut action,
+        children,
+    } = parse_todo_input(text, flag)?;
     // `#sdktododone`: text that repeats a bare own id (`#id new text`) names
     // the same item; drop the repeat so the row does not read `#id #id ...`.
     if new_id.is_none()
@@ -1542,7 +1697,23 @@ pub fn edit_todo_item_in_document(
         );
     }
     let label = item_label(item.own_id.as_deref(), &item.action);
+    // `#nestedtodoadd`: multi-line edit text replaces the item's nested lines
+    // with its sub-items; single-line text keeps them as they are.
+    let span = body.item_span(&item);
     body.rewrite_line(item.line, item.state, item.own_id.as_deref(), &action);
+    if !children.is_empty() {
+        let last = &body.lines[span.end - 1];
+        let ends_with_newline = last.ends_with('\n');
+        let mut rendered = render_todo_children(item.indent, &children);
+        if !ends_with_newline {
+            rendered.pop();
+        }
+        if !body.lines[item.line].ends_with('\n') {
+            body.lines[item.line].push('\n');
+        }
+        body.lines
+            .splice(span.start + 1..span.end, std::iter::once(rendered));
+    }
     let new_body = body.render();
     let changed = new_body != todo.content(content);
     Ok(TodoMutationOutcome {
@@ -2421,6 +2592,159 @@ mod tests {
         assert!(add(content, "- [ ] ").is_err());
         assert!(add(content, "one\ntwo").is_err());
         assert!(add(content, "id=x").is_err());
+    }
+
+    /// `#nestedtodoadd`: later lines of an add are the item's nested
+    /// sub-items, rendered under it; the item's identity is its own line.
+    #[test]
+    fn add_renders_nested_sub_items_under_the_item_and_replays_as_a_noop() {
+        let content = wrap("- [ ] [#keep] Operator item\n");
+        let text = "id=q1 Decide the sync model\n  - Pull or push?\n  - Who owns conflicts?\n  - Which providers first?";
+        let outcome = add(&content, text).unwrap();
+        assert!(outcome.inserted);
+        assert_eq!(outcome.id.as_deref(), Some("q1"));
+        assert_eq!(
+            todo_body(&outcome.content),
+            concat!(
+                "- [ ] [#keep] Operator item\n",
+                "- [ ] [#q1] Decide the sync model\n",
+                "  - Pull or push?\n",
+                "  - Who owns conflicts?\n",
+                "  - Which providers first?\n",
+            )
+        );
+        // The sub-items are not checklist items.
+        assert_eq!(TodoBody::parse(&todo_body(&outcome.content)).items.len(), 2);
+
+        // A replay (same text, or the same item without its id) is a no-op.
+        let replay = add(&outcome.content, text).unwrap();
+        assert!(!replay.inserted);
+        assert!(!replay.sub_items_kept);
+        assert_eq!(replay.content, outcome.content);
+        let minted = add(&content, "Decide the sync model\n\t- Pull or push?").unwrap();
+        let replay_minted =
+            add(&minted.content, "Decide the sync model\n\t- Pull or push?").unwrap();
+        assert!(!replay_minted.inserted);
+        assert_eq!(replay_minted.content, minted.content);
+        assert!(
+            minted
+                .content
+                .contains("] Decide the sync model\n  - Pull or push?\n")
+        );
+
+        // An operator edit to a sub-item survives a replay, which reports it.
+        let operator = outcome.content.replace(
+            "  - Pull or push?\n",
+            "  - Pull or push? (push, per Brian)\n",
+        );
+        let replay = add(&operator, text).unwrap();
+        assert!(!replay.inserted);
+        assert!(replay.sub_items_kept);
+        assert_eq!(replay.content, operator);
+    }
+
+    #[test]
+    fn add_rejects_malformed_nested_sub_items_and_writes_nothing() {
+        let content = wrap("");
+        for (text, why) in [
+            ("Item\n\n  - child", "blank"),
+            ("Item\n  - child\n", "trailing newline is fine"),
+            ("Item\n- flush child", "not a nested sub-item"),
+            ("Item\n  plain prose", "not a nested sub-item"),
+            ("Item\n  * star child", "not a nested sub-item"),
+            ("Item\n  - one\n    - deeper", "changes indentation"),
+            ("Item\n  - [ ] checkbox child", "checkbox row"),
+            ("Item\n  - [x]", "checkbox row"),
+            ("Item\n  - <!-- agent:queue -->", "HTML comment"),
+            ("Item\n  - ends -->", "HTML comment"),
+            ("Item\n  - ", "empty sub-item"),
+            ("   \n  - child", "non-empty operator action"),
+        ] {
+            let result = add(&content, text);
+            if why == "trailing newline is fine" {
+                assert!(result.is_ok(), "{text:?}: {result:?}");
+                continue;
+            }
+            let err = format!("{:#}", result.expect_err(text));
+            assert!(err.contains(why), "{text:?}: {err}");
+        }
+    }
+
+    /// `#nestedtodoadd`: done/reopen keep the sub-items with the item, remove
+    /// deletes them with it, a multi-line edit replaces them, and a
+    /// single-line edit keeps them.
+    #[test]
+    fn mutations_keep_nested_sub_items_with_their_item() {
+        let content = wrap(concat!(
+            "- [ ] [#q1] Decide the sync model\n",
+            "  - Pull or push?\n",
+            "  - Who owns conflicts?\n",
+            "- [ ] [#q2] Next item\n",
+        ));
+        let done = set_todo_item_state_in_document(&content, "q1", TodoTransition::Done).unwrap();
+        assert_eq!(
+            todo_body(&done.content),
+            concat!(
+                "- [x] [#q1] Decide the sync model\n",
+                "  - Pull or push?\n",
+                "  - Who owns conflicts?\n",
+                "- [ ] [#q2] Next item\n",
+            )
+        );
+        let edited =
+            edit_todo_item_in_document(&done.content, "q1", "Decide the sync model (decided)")
+                .unwrap();
+        assert_eq!(
+            todo_body(&edited.content),
+            concat!(
+                "- [x] [#q1] Decide the sync model (decided)\n",
+                "  - Pull or push?\n",
+                "  - Who owns conflicts?\n",
+                "- [ ] [#q2] Next item\n",
+            )
+        );
+        let replaced = edit_todo_item_in_document(
+            &edited.content,
+            "q1",
+            "Decide the sync model (decided)\n  - Push.",
+        )
+        .unwrap();
+        assert!(replaced.changed);
+        assert_eq!(
+            todo_body(&replaced.content),
+            concat!(
+                "- [x] [#q1] Decide the sync model (decided)\n",
+                "  - Push.\n",
+                "- [ ] [#q2] Next item\n",
+            )
+        );
+        let same = edit_todo_item_in_document(
+            &replaced.content,
+            "q1",
+            "Decide the sync model (decided)\n  - Push.",
+        )
+        .unwrap();
+        assert!(!same.changed);
+        // Children added to the LAST item, whose line has no trailing newline.
+        let tail = "<!-- agent:todo -->\n- [ ] [#q3] Last<!-- /agent:todo -->\n";
+        let grown = edit_todo_item_in_document(tail, "q3", "Last\n  - a\n  - b").unwrap();
+        assert_eq!(todo_body(&grown.content), "- [ ] [#q3] Last\n  - a\n  - b");
+        let removed = remove_todo_item_from_document(&replaced.content, "q1").unwrap();
+        assert_eq!(todo_body(&removed.content), "- [ ] [#q2] Next item\n");
+        // Fresh ids are never minted for sub-item lines.
+        let assigned = assign_missing_todo_ids(
+            &content,
+            &test_id,
+            &Default::default(),
+            &TodoLinkIndex::default(),
+            &|_| true,
+        )
+        .unwrap();
+        assert!(
+            assigned.assigned.is_empty(),
+            "sub-items are not id-less todo rows"
+        );
+        assert_eq!(assigned.content, content);
     }
 
     #[test]

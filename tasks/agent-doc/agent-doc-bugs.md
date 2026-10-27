@@ -400,10 +400,13 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#vscoderemoteparity]
+- do [#vscodeupgradelayout]
+- do [#zedparity]
 - 🚧 [#subagent:replicadiff#1] do [#replicadiffcost]
 - 🚧 [#subagent:jbsessioncmd#1] do [#jbsessioncmdoutcome]
 - 🚧 [#subagent:jbshellr1#1] do [#jbshellr1]
-- 🚧 [#subagent:editorparity#1] do [#editorbackendparity]
+- ~~do [#editorbackendparity]~~
 - ~~do [#todoaddidhijack]~~
 - ~~do [#jb339shelldesign]~~
 - ~~do [#jbshrinkrestarts]~~
@@ -426,10 +429,12 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#vscoderemoteparity] VS Code remote parity (editors/SPEC.md section 13): declare "extensionKind": ["workspace"] and test the extension loads in the remote extension host; add a single-role agent_doc_activation_receipt/v1 line (role=workspace) to the controller registration; make agent-doc plugin install vscode reach the workspace extension host (code-server and the Remote-SSH server extensions directory); add a Coder workspace smoke test (install, register, remoteName, tmux attach, layout sync). Update the section 13 matrix and its editor_contract test as gaps close.
+- [ ] [#vscodeupgradelayout] VS Code upgrade and layout parity (editors/SPEC.md section 13): detect an installed VSIX that differs from the running version (installed_plugin_version covers JetBrains only today) and prompt Restart Extensions locally or Reload Window remotely; capture orientation and group sizes with vscode.getEditorLayout and move the layout-grouping rules behind agent_doc_editor_derive_json so changing them needs no reload. Update the section 13 matrix and its editor_contract test as gaps close.
+- [ ] [#zedparity] Zed parity (editors/SPEC.md section 13): zed-lsp registration carries editor kind, version and capabilities; decide and test how zed-lsp picks up a new agent-doc binary without restarting Zed (in-place re-exec keeping the LSP session, or a language-server restart prompt); document and enforce document-only routing since Zed exposes no layout; qualify Zed remote development (agent-doc on the remote worktree PATH, dev-extension sync, controller locality). Update the section 13 matrix and its editor_contract test as gaps close.
 - [ ] [#replicadiffcost] Make the native agent_doc_replica_diff proportional to the edit, not the whole document: on a 125 KB session document a JetBrains replica flush costs about 50 ms whatever the burst size, about 48 ms of it in agent_doc_replica_diff, and the cost grows superlinearly (about 4.9 ms on a 32 KB copy). Native-only, so no IDE restart. Gate on make jetbrains-keystroke-bench (baseline report in the jbshrink worktree .bench/baseline.json) and prove no change to CRDT convergence or editor-truth semantics.
 - [ ] [#jbsessioncmdoutcome] Move the JetBrains TerminalUtil clear/restart refusal parsers (parseBusySessionClearRefusal, parseLiveTurnQueuedClear, the restart refusals) and their notification texts into a native session_command_outcome derivation, the same way route_outcome moved: exact port, shared fixture that the Rust derivation and the Kotlin fallback must answer identically, keystroke benchmark gate.
 - [ ] [#jbshellr1] Build GH 339 shell stage R1 from editors/jetbrains/SPEC.md "Restart-free implementation generations": the stable shell, the forwarders that own every IntelliJ registration, and the activation receipt fields, with the implementation still in the same classloader (no child loader yet). It costs one restart. Keep the frontend shell-only, keep the restart-required prompt as the fallback, and propose the restated Exact-263 reopen rule (module graph and registrations unchanged across the swap, retired implementation collectable) in the spec for operator agreement.
-- [ ] [#editorbackendparity] Editor frontend/backend architecture parity: compare the JetBrains split-mode (Remote Dev backend + JetBrains Client frontend) design with VS Code on Coder (remote extension host vs UI extensions) and Zed (remote development, extension model), and decide what each needs for parity with the JetBrains plugins: restart-free upgrades (shell + swappable implementation), activation receipts proving the frontend runs the same generation, and measured-layout routing. Answer whether VS Code on Coder has a similar architecture and what Zed overall architecture implies, record the parity matrix in editors/SPEC.md, and queue concrete per-editor gaps as follow-ups.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

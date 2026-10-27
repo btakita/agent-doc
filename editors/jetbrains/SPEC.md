@@ -1314,6 +1314,37 @@ The gate passes against the unmodified build. The remote apply did not change:
 the CRDT's own text projection dominates it, and the editor needs that text
 anyway. The fold and the order's spelling check are small beside it.
 
+`#kotlinflushprep` took the per-character work out of `prepare`. It used to copy
+the shadow into a `StringBuilder` and count code points from the end of the
+document (`String.codePointCount` over the whole shadow, then
+`Character.codePointCount` back to the splice). Now
+`LocalEditorSplicePreparation.kt` applies the burst to one edit window over the
+shadow. It reads only the window, and it converts offsets with an index of the
+shadow's surrogate pairs. That index is cached by String identity, and each
+flush stores the index of the text it produces, so typing never rescans a
+shadow. The native edits are the same as before. `LocalEditorSplicePreparationTest`
+runs the old walk next to the new one on randomized bursts: clustered and
+scattered splices, multibyte text, surrogate pairs, unpaired halves, and the
+three refusals. It also checks the window's code point count for any range.
+Six mutations of the window and index code were each caught.
+
+What still grows with the document is building `resultingText`. The shadow,
+the forwarder's `knownReplicaText`, and the next flush's base are `String`s, so
+every flush allocates and copies the whole next shadow. A JVM microbenchmark of
+that copy alone measures about 35 us at 125 KB and about 170 us at 500 KB, which
+matches what `prepare` still costs. Removing it needs a non-`String` shadow,
+such as a rope or a piece table, in `CrdtReplicaManager` and
+`CrdtReplicaForwarder`. Synthetic document, `p50_best`, same machine and native
+build, before -> after:
+
+| Document | `prepare` (1 / 16) | `replica_flush_1` | `replica_flush_16` | `typing_report` |
+|----------|--------------------|-------------------|--------------------|-----------------|
+| 34,701 B | 8.8 / 10.5 -> 5.6 / 7.3 us | 25.5 -> 20.8 us | 54.8 -> 52.7 us | 38.0 -> 39.2 us |
+| 127,583 B | 33.8 / 36.3 -> 25.7 / 23.1 us | 54.2 -> 57.0 us | 94.7 -> 71.7 us | 116.8 -> 108.1 us |
+| 528,985 B | 229.3 / 269.0 -> 177.1 / 179.3 us | 254.9 -> 200.5 us | 332.2 -> 228.8 us | 493.9 -> 399.7 us |
+
+The gate passes at all three sizes.
+
 The two `#jbshrinkrestarts` moves left every gated case within noise of that
 baseline (`typing_report` 106.1 -> 105.8 us, `replica_flush_1` 54,672 ->
 49,029 us, `replica_flush_16` 55,156 -> 54,264 us). They are not on the

@@ -124,6 +124,22 @@ fn ensure_tmux_session_with_ide(
     ensure_tmux_session_with_ide_client(tmux, file, explicit_session, ide_available, None)
 }
 
+/// The store a start reads and binds a document in: the nearest `.agent-doc`
+/// project of the canonical document, or for a document with no `.agent-doc`
+/// ancestor its canonical parent directory
+/// (`agent_doc_project_root_io::project_root_or_file_parent`), the store the
+/// route, claim (`#claimwrongstore`) and sync's recovered-owner bind
+/// (`#syncnorootfallback`) use.
+///
+/// `#startcwdfallback`: never the process cwd. Start admission used to fall
+/// back to `current_dir()` for a rootless document, so a start run from inside
+/// another project bound the document (actor, registry, controller, config
+/// pin) in that project's store, where no reader of the document looks.
+fn start_project_root(canonical: &Path) -> PathBuf {
+    agent_doc_project_root_io::project_root_or_file_parent(canonical)
+        .unwrap_or_else(|_| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
+}
+
 fn ensure_tmux_session_with_ide_client(
     tmux: &tmux_router::Tmux,
     file: &Path,
@@ -141,9 +157,7 @@ fn ensure_tmux_session_with_ide_client(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = start_project_root(&canonical);
 
     let reconciled_server_before_lookup = if tmux.running() {
         reconcile_tmux_server_identity(tmux, &project_root)?;
@@ -156,7 +170,7 @@ fn ensure_tmux_session_with_ide_client(
     // the document's `tmux_session` binding must be allowed, and a live
     // registry pane is reused only from an allowed session that matches the
     // binding. The single-session default leaves every check a no-op.
-    let project_config = agent_doc_project_config_io::load_project_for_doc(&canonical);
+    let project_config = agent_doc_project_config_io::load_project_for_root(&project_root);
     let session_policy = agent_doc_sync::TmuxSessionPolicy::new(&project_config.tmux_sessions)
         .with_navigation_lanes(agent_doc_project_config_io::editor_navigation_lanes(
             &project_config,
@@ -492,9 +506,7 @@ fn start_bootstrap_target(
         shared
     };
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| agent_doc_project_config_io::project_root_for_doc(&canonical))
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
+    let project_root = start_project_root(&canonical);
     let pane_id = if outcome.created {
         // A freshly created session (or navigation lane) starts with exactly
         // one idle pane; the start takes it over.
@@ -598,7 +610,9 @@ fn terminal_policy_for_file(
     session_state: TerminalSessionState,
 ) -> Result<ResolvedTerminalPolicy> {
     let frontmatter_host = frontmatter_terminal_host_for_file(file, session_state)?;
-    let project = agent_doc_project_config_io::load_project_for_doc(file);
+    let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    let project =
+        agent_doc_project_config_io::load_project_for_root(&start_project_root(&canonical));
     let global = agent_doc_config::load()?;
     let command_available = project
         .terminal
@@ -1477,12 +1491,7 @@ fn prepare_start_runtime_with_admission(
     }
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf())
-        });
+    let project_root = start_project_root(&canonical);
     // A route-owned child is autonomous infrastructure even when the tmux
     // command itself was already submitted. Re-check durable queue control at
     // the lifecycle boundary to close the pause-vs-route race. Supervisor
@@ -1709,7 +1718,9 @@ fn prepare_start_runtime_with_admission(
 
     let mut force_superseded_pane = None;
     if !force {
-        if let Some(action) = existing_session_pane_action(&tmux, &session_id, file, &pane_id)? {
+        if let Some(action) =
+            existing_session_pane_action(&tmux, &project_root, &session_id, file, &pane_id)?
+        {
             match action {
                 ExistingSessionPaneAction::Refuse(conflicting_pane) => {
                     if let Some(miss) = unresolved_startup_miss.as_ref()
@@ -1755,7 +1766,7 @@ fn prepare_start_runtime_with_admission(
         // changing authority, but do not retire it until the controller has
         // accepted the replacement generation below.
         if let Some(ExistingSessionPaneAction::Refuse(superseded_pane)) =
-            existing_session_pane_action(&tmux, &session_id, file, &pane_id)?
+            existing_session_pane_action(&tmux, &project_root, &session_id, file, &pane_id)?
         {
             let action = agent_doc_sync_io::superseded_owner::superseded_owner_decision(
                 &tmux,
@@ -1794,7 +1805,7 @@ fn prepare_start_runtime_with_admission(
         &session_policy,
         pane_session.as_deref(),
         agent_doc_sync_io::sync::document_tmux_session_binding(&canonical).as_deref(),
-        agent_doc_project_config_io::project_tmux_session().as_deref(),
+        agent_doc_project_config_io::project_tmux_session_for_root(&project_root).as_deref(),
     )
     .map_err(|refused| anyhow::anyhow!("[start] {refused}"))?;
     // Starting inside an isolated editor view must not pull that pane back into
@@ -1815,7 +1826,7 @@ fn prepare_start_runtime_with_admission(
     // In `shared` mode a lane session is stale and the shared sync adopts its
     // panes (`#ridernavp6switchback`), so the pre-lane relocation applies.
     let lanes_enabled = agent_doc_project_config_io::editor_navigation_lanes(
-        &agent_doc_project_config_io::load_project_for_doc(&canonical),
+        &agent_doc_project_config_io::load_project_for_root(&project_root),
     );
     let in_navigation_lane = lanes_enabled
         && pane_session.as_deref().is_some_and(|session| {
@@ -1849,7 +1860,12 @@ fn prepare_start_runtime_with_admission(
             .as_deref()
             .is_some_and(|session| session_policy.allows(session))
     {
-        rebind_project_tmux_session_if_expected_dead(&tmux, &pane_id, &target.session);
+        rebind_project_tmux_session_if_expected_dead(
+            &tmux,
+            &project_root,
+            &pane_id,
+            &target.session,
+        );
     }
 
     let pane_window = agent_doc_tmux_io::target_window_id(&tmux, &pane_id).unwrap_or_default();
@@ -1899,7 +1915,7 @@ fn prepare_start_runtime_with_admission(
     } else {
         None
     };
-    let prior_entry = agent_doc_session_registry_io::lookup_entry(&session_id)?;
+    let prior_entry = agent_doc_session_registry_io::lookup_entry_in(&project_root, &session_id)?;
     let supervisor_instance_id = if admission.preserves_session_lifecycle() {
         prior_entry
             .as_ref()
@@ -2198,11 +2214,12 @@ fn clear_superseded_startup_miss(
 
 pub fn existing_session_pane_action(
     tmux: &tmux_router::Tmux,
+    project_root: &Path,
     session_id: &str,
     file: &Path,
     current_pane: &str,
 ) -> Result<Option<ExistingSessionPaneAction>> {
-    let entry = agent_doc_session_registry_io::lookup_entry(session_id)?;
+    let entry = agent_doc_session_registry_io::lookup_entry_in(project_root, session_id)?;
     let live_owner = agent_doc_sync_io::sync::find_normal_path_owner_pane_excluding_quiet(
         tmux,
         file,
@@ -2448,6 +2465,7 @@ pub fn relocate_pane_into_session(
 
 pub fn rebind_project_tmux_session_if_expected_dead(
     tmux: &tmux_router::Tmux,
+    project_root: &Path,
     pane_id: &str,
     expected_session: &str,
 ) {
@@ -2458,7 +2476,10 @@ pub fn rebind_project_tmux_session_if_expected_dead(
     if actual_session == expected_session || tmux.session_alive(expected_session) {
         return;
     }
-    match agent_doc_project_config_io::update_project_tmux_session(&actual_session) {
+    match agent_doc_project_config_io::update_project_tmux_session_for_root(
+        project_root,
+        &actual_session,
+    ) {
         Ok(()) => eprintln!(
             "[start] configured project session '{}' is dead — rebound tmux_session to '{}'",
             expected_session, actual_session
@@ -2805,6 +2826,28 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// `#startcwdfallback`: a rootless document's start store is its canonical
+    /// parent and a project document's is its `.agent-doc` project, whatever
+    /// the process cwd is (this test's cwd is the crate checkout).
+    #[test]
+    fn start_project_root_is_the_document_store_never_the_cwd() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let notes = base.join("notes/deep");
+        let project = base.join("project");
+        std::fs::create_dir_all(&notes).unwrap();
+        std::fs::create_dir_all(project.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(project.join("tasks")).unwrap();
+        let rootless = notes.join("rootless.md");
+        let tracked = project.join("tasks/doc.md");
+        std::fs::write(&rootless, "# rootless\n").unwrap();
+        std::fs::write(&tracked, "# tracked\n").unwrap();
+        assert_ne!(std::env::current_dir().unwrap(), notes);
+
+        assert_eq!(start_project_root(&rootless), notes);
+        assert_eq!(start_project_root(&tracked), project);
+    }
 
     fn generation_race_actor(
         session_id: &str,

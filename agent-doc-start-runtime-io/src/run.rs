@@ -4086,7 +4086,10 @@ mod tests {
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn start_rebinds_dead_project_session_to_current_pane_session() {
         let dir = TempDir::new().unwrap();
-        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        // `#startcwdfallback`: the pin lives in the document store's config,
+        // never the process cwd's.
+        let elsewhere = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(elsewhere.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
@@ -4103,18 +4106,25 @@ mod tests {
             "missing anchor in dead configured session should fall back to current pane session"
         );
 
-        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+        rebind_project_tmux_session_if_expected_dead(&iso, dir.path(), &pane, "0");
 
         assert_eq!(
-            project_config_io::project_tmux_session().as_deref(),
+            project_config_io::project_tmux_session_for_root(dir.path()).as_deref(),
             Some("14")
+        );
+        assert!(
+            !elsewhere.path().join(".agent-doc").exists(),
+            "the rebind writes no config into the process cwd's project"
         );
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn start_does_not_rebind_live_project_session_pin() {
         let dir = TempDir::new().unwrap();
-        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        // `#startcwdfallback`: the pin lives in the document store's config,
+        // never the process cwd's.
+        let elsewhere = TempDir::new().unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(elsewhere.path());
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(
             dir.path().join(".agent-doc/config.toml"),
@@ -4126,10 +4136,10 @@ mod tests {
         let _expected_pane = iso.new_session("0", dir.path()).unwrap();
         let pane = iso.new_session("14", dir.path()).unwrap();
 
-        rebind_project_tmux_session_if_expected_dead(&iso, &pane, "0");
+        rebind_project_tmux_session_if_expected_dead(&iso, dir.path(), &pane, "0");
 
         assert_eq!(
-            project_config_io::project_tmux_session().as_deref(),
+            project_config_io::project_tmux_session_for_root(dir.path()).as_deref(),
             Some("0")
         );
     }

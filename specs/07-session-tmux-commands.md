@@ -63,13 +63,33 @@ may republish the retained intent, but remains subject to the same rule.
   invocation, including claim, route, and supervisor descendants. A selected
   socket must never fall back to the operator's default server during provisioning.
 - Starts the configured harness in the current tmux pane and registers the pane as the session owner.
+- Start reads and binds the **document's** store, never the process cwd's (`#startcwdfallback`):
+  the nearest `.agent-doc` project of the canonical document, or for a document with no
+  `.agent-doc` ancestor its canonical parent directory
+  (`agent_doc_project_root_io::project_root_or_file_parent`), the store the route, claim
+  (`#claimwrongstore`) and sync's recovered-owner bind (`#syncnorootfallback`) use. Every start
+  path resolves it once (`start_project_root`): the outside-tmux bootstrap (session ensure,
+  start-pane provisioning) and the in-pane admission (`prepare_start_runtime_with_admission`).
+  Admission used to fall back to `current_dir()` for a rootless document, so a start run from
+  inside another project bound the document there. Every consumer of the admission store uses
+  it: route-owned queue control, session identity, stale-actor cleanup, the stderr redirect, the
+  project controller, the session policy, navigation-lane config, the `tmux_session` pin the
+  pane is relocated toward (`project_tmux_session_for_root`), the dead-pin rebind
+  (`update_project_tmux_session_for_root`), the existing-pane and prior registry entry reads
+  (`lookup_entry_in`), the actor bind, and the registry publication. The terminal-host policy
+  reads the same store's config. A start of a rootless document from another project's cwd
+  therefore writes no store, actor, registry entry, controller, or config pin into the cwd's
+  project, and the cwd's `tmux_session` pin never becomes its relocation target. The registry
+  entry's `cwd` stays the supervisor's process cwd: that is where the harness child runs.
+  `tests/start_rootless_store_tmux.rs` (`make tmux-ci`) runs the real in-pane start this way
+  against a fake harness.
 - Route-owned tmux autostart panes must not automatically restart the child harness after a clean exit. If the newly started child exits before or after surfacing a prompt, `start --route-owned` must surface the local restart/quit prompt instead of immediately spawning another child process.
 - Route-owned reap decisions after a committed cycle may use the supervisor actor's stable `ready` state as prompt proof even when the terminal tail still contains transient renderer text. Explicit blocking prompt states, including queued drafts, permission prompts, hook-review prompts, history search, and clean-exit restart prompts, still preserve the pane.
 - If another alive pane is already bound to the same document session, normal `start` must fail closed instead of reusing, restarting, or replacing it.
 - That failure must print concrete tmux inspection/capture/kill commands so the user can decide which pane to keep and which pane to kill manually.
 - `--force` is the only supported escape hatch for intentionally rebinding the current pane during repair work, and the registry rebind must still record supersession provenance in the session log.
 - `--force` retires the live owner it bypasses (GH #243, GH #354), but controller admission is the authority edge: the replacement generation must be accepted before any destructive retirement of the prior owner. Before admission, the pane the non-force path would have refused is preflighted and retirement is permitted only when its process tree proves it is agent-doc's supervisor for this document **and** tmux/turn evidence proves that destructive retirement is safe: no active turn, no protected prompt input, and no attached client displaying the pane. A protected duplicate is reported with its pane, window, requested owner pane, and protection reason; the force-start is deferred without starting a second supervisor, and the operator retries after the protected pane becomes safe. Controller rejection or panic leaves the prior supervisor and pane untouched. After successful admission, retirement revalidates the same facts; a newly protected owner receives a durable pid/pane-targeted idle-retirement request while the accepted controller authority fences its writes. The same guard applies when a route finds non-authoritative duplicate supervisors: routing to the authoritative owner continues, while a protected duplicate receives that durable retirement request. Its own supervisor consumes the request through the existing idle watcher only after revalidating the authoritative owner and reaching an idle, input-free, unwatched boundary; it records an intentional exit, tears down its child, reports the closeout with duplicate pane/window/owner, and exits without relaunch. Immediate safe retirement SIGTERMs the supervisor (its handler records an intentional exit, so the controller watchdog does not respawn it), escalates to SIGKILL after a 5s grace, stops any descendant that outlived it, closes the pane, and prints/logs the closeout. A transient `agent-doc write|compact|session … <doc>`, bare harness session (`#bare-foreign-session-guard`), stale registry row, or idle shell is never ownership proof and is left alone.
-- When a fresh start falls back to a new session binding because the configured session is dead, `.agent-doc/config.toml` must be updated to the new live session.
+- When a fresh start falls back to a new session binding because the configured session is dead, the document store's `.agent-doc/config.toml` must be updated to the new live session (never the process cwd's, `#startcwdfallback`).
 - Harness launches must auto-add writable roots for parent-repo patchback and nested submodule git metadata when needed.
 - Start pane launch: an outside-tmux `start` runs its re-exec'd
   `agent-doc start` as the provisioned pane's own process and never types it into the

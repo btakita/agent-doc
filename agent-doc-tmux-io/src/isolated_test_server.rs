@@ -297,12 +297,11 @@ mod tests {
     ///
     /// Server A stands in for the operator's live server. The control
     /// reproduces the incident against A: `$TMUX` names A, `TMUX_TMPDIR` names
-    /// an empty private dir, and `kill-server` still kills A. Then the forms
-    /// the `PreToolUse` guard allows (`env -u TMUX` with a private
-    /// `TMUX_TMPDIR`, and `-L <private>`) leave server B alive. Every command
-    /// names its target explicitly; the operator's real server is never
-    /// reachable, because `$TMUX` is set to A's socket or removed on every
-    /// spawned client.
+    /// an empty private dir, and `kill-server` still kills A. Then the required
+    /// form, `env -u TMUX tmux -L <private>`, leaves server B alive, and so does
+    /// `-L <private>` with `$TMUX` pointing at B. No client inherits `$TMUX`.
+    /// Each one removes it or sets it to a stand-in socket that is asserted
+    /// not to be the operator's.
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn tmux_env_beats_tmux_tmpdir_so_only_a_named_socket_isolates() {
@@ -312,43 +311,79 @@ mod tests {
         }
         let dir = std::env::temp_dir();
         let private = tempfile::tempdir().expect("private TMUX_TMPDIR");
-        let client = |tmux_env: Option<&Path>, args: &[&str]| {
+        // The operator's sockets: the server this test may be running inside,
+        // and the default socket. No client below may name either one.
+        let operator_sockets: Vec<PathBuf> = std::env::var("TMUX")
+            .ok()
+            .and_then(|tmux| tmux.split(',').next().map(PathBuf::from))
+            .into_iter()
+            .chain([isolated_tmux_socket_path("default")])
+            .collect();
+        // No client inherits `$TMUX`. A `StandIn` client sets it to a stand-in
+        // server this test owns. That is only for proving precedence, and it is
+        // asserted never to be an operator socket. A `Private` client is the
+        // form agents must use: `env -u TMUX` AND `-L <unique>`.
+        enum Client<'a> {
+            StandIn(&'a Path),
+            Private(&'a str),
+        }
+        let run = |client: Client<'_>, args: &[&str]| {
             let mut command = std::process::Command::new("tmux");
-            command.env("TMUX_TMPDIR", private.path()).args(args);
-            match tmux_env {
-                Some(socket) => command.env("TMUX", format!("{},1,0", socket.display())),
-                None => command.env_remove("TMUX"),
-            };
-            command.output().expect("spawn tmux client")
+            command.env("TMUX_TMPDIR", private.path());
+            match client {
+                Client::StandIn(socket) => {
+                    assert!(
+                        !operator_sockets.iter().any(|live| live == socket),
+                        "refusing to aim a client at an operator socket: {}",
+                        socket.display()
+                    );
+                    command.env("TMUX", format!("{},1,0", socket.display()));
+                }
+                Client::Private(label) => {
+                    command.env_remove("TMUX").args(["-L", label]);
+                }
+            }
+            command.args(args).output().expect("spawn tmux client")
         };
 
-        // Control: the incident shape, aimed at stand-in server A.
+        // Control: the incident shape (`$TMUX` set, a private `TMUX_TMPDIR`,
+        // no socket flag), aimed at stand-in server A instead of the operator.
         let server_a = isolated_test_tmux("tmux-env-precedence-a");
         server_a.new_session("main", &dir).expect("server A starts");
-        let listed = client(Some(server_a.socket_path()), &["ls"]);
+        let listed = run(Client::StandIn(server_a.socket_path()), &["ls"]);
         assert!(
             String::from_utf8_lossy(&listed.stdout).contains("main:"),
             "with $TMUX set, `tmux ls` lists the $TMUX server despite TMUX_TMPDIR: {listed:?}"
         );
-        client(Some(server_a.socket_path()), &["kill-server"]);
+        run(Client::StandIn(server_a.socket_path()), &["kill-server"]);
         assert!(
             !server_a.session_exists("main"),
             "TMUX_TMPDIR alone must not isolate: kill-server followed $TMUX and killed server A"
         );
 
-        // The guarded forms leave the stand-in server alive.
+        // The required form, `env -u TMUX tmux -L <unique> kill-server`,
+        // leaves stand-in server B alive.
         let server_b = isolated_test_tmux("tmux-env-precedence-b");
         server_b.new_session("main", &dir).expect("server B starts");
-        let unset = client(None, &["kill-server"]);
-        assert!(
-            !unset.status.success(),
-            "with $TMUX removed, kill-server targets the empty private TMUX_TMPDIR: {unset:?}"
-        );
         let other = unique_isolated_tmux_socket("tmux-env-precedence-other");
-        client(Some(server_b.socket_path()), &["-L", &other, "kill-server"]);
+        let private_kill = run(Client::Private(&other), &["kill-server"]);
+        assert!(
+            !private_kill.status.success(),
+            "the private socket has no server to kill: {private_kill:?}"
+        );
         assert!(
             server_b.session_exists("main"),
-            "`env -u TMUX TMUX_TMPDIR=<private>` and `-L <private>` must not reach server B"
+            "`env -u TMUX tmux -L <private>` must not reach server B"
+        );
+        // `-L` alone already beats an inherited `$TMUX`; the harness helpers
+        // rely on it.
+        run(
+            Client::StandIn(server_b.socket_path()),
+            &["-L", &other, "kill-server"],
+        );
+        assert!(
+            server_b.session_exists("main"),
+            "`-L <private>` must win over `$TMUX`"
         );
     }
 

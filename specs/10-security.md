@@ -64,6 +64,11 @@ coined-id guard, in every pane, with or without a session document:
   fails closed on a destructive command: a refusal costs a retry with `-L`, and
   a wrong allow costs every live pane. There is no override flag. A change to
   the operator's own server is the operator's call.
+- **Required practice is stricter than the floor.** The guard allows exactly
+  what tmux resolves to a private socket. Agents and scripts must still use
+  both `env -u TMUX` and `-L <unique-name>` (or `-S <path>`) on every tmux
+  command against a test server, setup and teardown included, and the refusal
+  reason names that form.
 
 The subagent brief (`agent-doc queue brief`) and the exchange-subagent dispatch
 guidance restate the full rule (`subagent_tmux_isolation_rule!`), including send-keys

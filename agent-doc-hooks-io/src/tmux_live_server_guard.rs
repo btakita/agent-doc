@@ -473,9 +473,10 @@ fn tmux_command(
         "[agent-doc] blocked: `{}` runs tmux {} with no socket of its own, so it would reach \
          {target}. That is the operator's live tmux server, where every agent pane and the \
          terminal hosting them run. On 2026-10-26 this exact shape killed the operator's \
-         server, all of its panes, and kitty. Name a private server on every tmux command: \
-         `tmux -L <unique-name> {}` (or `-S <socket-path>`), or prefix the command with \
-         `env -u TMUX TMUX_TMPDIR=<private-dir>`. A sourced env file does not count, because \
+         server, all of its panes, and kitty. Run every tmux command against a test server with \
+         both `env -u TMUX` and a private socket: `env -u TMUX tmux -L <unique-name> {}` (or \
+         `-S <socket-path>`). `TMUX_TMPDIR` alone isolates nothing while `$TMUX` is set. A \
+         sourced env file does not count, because \
          the guard cannot see it. If the operator's own server really must change, ask the \
          operator to do it.",
         segment.text.trim(),
@@ -668,7 +669,7 @@ mod tests {
         );
         assert!(reason.contains("/tmp/tmux-1000/default"), "{reason}");
         assert!(
-            reason.contains("tmux -L <unique-name> kill-server"),
+            reason.contains("env -u TMUX tmux -L <unique-name> kill-server"),
             "{reason}"
         );
     }

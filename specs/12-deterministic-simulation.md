@@ -107,12 +107,14 @@ tmux picks its server from `-L`/`-S` first, then `$TMUX`, and only then
 operator's tmux inherits `$TMUX`, so `TMUX_TMPDIR=<dir>` alone isolates
 nothing: on 2026-10-26 a subagent's `TMUX_TMPDIR=<dir> tmux kill-server`
 killed the operator's server, every agent pane, and kitty
-(`#tmuxkittyterminal`). Every tmux command against a test server names its
-socket (`-L`/`-S`), or runs with `$TMUX` removed and a private `TMUX_TMPDIR`.
+(`#tmuxkittyterminal`). An agent or script runs every tmux command against a
+test server with both `env -u TMUX` and a private socket (`-L`/`-S`). Test
+harness handles always pass `-L`, which tmux already ranks above `$TMUX`.
 `tmux_env_beats_tmux_tmpdir_so_only_a_named_socket_isolates` (`make tmux-ci`)
 pins this: its control kills a stand-in server through `$TMUX` despite a
-private `TMUX_TMPDIR`, then shows that `env -u TMUX` with a private
-`TMUX_TMPDIR`, and `-L <private>`, leave a second server alive.
+private `TMUX_TMPDIR`, then shows that `env -u TMUX tmux -L <private>`, and
+`-L <private>` with `$TMUX` set, leave a second server alive. No client in it
+inherits `$TMUX`; a stand-in socket is asserted not to be the operator's.
 
 Tests that mutate or inspect process-global state (`std::env` or the process
 current directory) must hold the reentrant shared test env lock from

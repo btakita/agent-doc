@@ -366,9 +366,10 @@ macro_rules! subagent_tmux_isolation_rule {
     () => {
         "Live tmux isolation: you run inside the operator's live tmux server, and `$TMUX` points \
          every bare `tmux` command at it. tmux reads `$TMUX` before `TMUX_TMPDIR`, so \
-         `TMUX_TMPDIR=<dir>` alone isolates nothing. Name a private server on every tmux command \
-         against a test server (`tmux -L <unique-name>` or `-S <path>`, or prefix \
-         `env -u TMUX TMUX_TMPDIR=<dir>`), and tear it down by that name only. Never kill, \
+         `TMUX_TMPDIR=<dir>` alone isolates nothing. Run every tmux command against a test \
+         server, setup and teardown included, with BOTH `env -u TMUX` and a private socket \
+         (`env -u TMUX tmux -L <unique-name> ...`, or `-S <path>`), and tear it down by that \
+         name or by its exact pid only. Never kill, \
          respawn, send keys to, or resize the operator's server, sessions, windows, or panes, and \
          never `pkill`/`killall` tmux or the terminal."
     };
@@ -985,8 +986,8 @@ mod tests {
         for phrase in [
             "tmux reads `$TMUX` before `TMUX_TMPDIR`",
             "`TMUX_TMPDIR=<dir>` alone isolates nothing",
-            "`tmux -L <unique-name>`",
-            "`env -u TMUX TMUX_TMPDIR=<dir>`",
+            "BOTH `env -u TMUX` and a private socket",
+            "`env -u TMUX tmux -L <unique-name> ...`",
             "never `pkill`/`killall` tmux",
         ] {
             assert!(SUBAGENT_TMUX_ISOLATION_RULE.contains(phrase), "{phrase}");

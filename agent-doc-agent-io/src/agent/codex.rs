@@ -1616,6 +1616,21 @@ mod tests {
         (dir, dir_path)
     }
 
+    /// A temp dir holding an executable `codex`, for tests that build a bare
+    /// `codex` command: `harness_command` resolves the program before spawn
+    /// (`#headlessharnesspath`), so these must not depend on the host having
+    /// codex installed (CI does not).
+    fn fake_codex_bin() -> (TempDir, String) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("codex");
+        let dir_path = dir.path().to_string_lossy().into_owned();
+        fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+        (dir, dir_path)
+    }
+
     fn init_repo(root: &Path) {
         let init = Command::new("git")
             .current_dir(root)
@@ -1822,7 +1837,8 @@ mod tests {
 
     #[test]
     fn build_command_exec_preserves_default_sandbox_flag() {
-        let codex = Codex::new(None, None);
+        let (_codex_bin, codex_path) = fake_codex_bin();
+        let codex = Codex::new(None, None).with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex.build_command(None, false, None).unwrap();
 
         assert_eq!(
@@ -1833,6 +1849,7 @@ mod tests {
 
     #[test]
     fn build_command_resume_translates_short_sandbox_flag() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1842,7 +1859,8 @@ mod tests {
                 "workspace-write".into(),
                 "--skip-git-repo-check".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex
             .build_command(Some("thread-123"), false, None)
             .unwrap();
@@ -1863,6 +1881,7 @@ mod tests {
 
     #[test]
     fn build_command_fork_starts_fresh_exec_session() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1871,7 +1890,8 @@ mod tests {
                 "--sandbox=danger-full-access".into(),
                 "--ignore-user-config".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex.build_command(None, true, Some("gpt-5.4")).unwrap();
 
         assert_eq!(
@@ -1889,6 +1909,7 @@ mod tests {
 
     #[test]
     fn build_command_exec_preserves_add_dir() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1899,7 +1920,8 @@ mod tests {
                 "--add-dir".into(),
                 "/home/user/.git/modules/sub".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex.build_command(None, false, None).unwrap();
 
         assert_eq!(
@@ -1917,6 +1939,7 @@ mod tests {
 
     #[test]
     fn build_command_resume_strips_add_dir() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1928,7 +1951,8 @@ mod tests {
                 "/home/user/.git/modules/sub".into(),
                 "--skip-git-repo-check".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex
             .build_command(Some("thread-456"), false, None)
             .unwrap();
@@ -1949,6 +1973,7 @@ mod tests {
 
     #[test]
     fn build_command_resume_strips_add_dir_equals_form() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1958,7 +1983,8 @@ mod tests {
                 "workspace-write".into(),
                 "--add-dir=/home/user/.git".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex
             .build_command(Some("thread-789"), false, None)
             .unwrap();
@@ -1978,6 +2004,7 @@ mod tests {
 
     #[test]
     fn build_command_resume_strips_multiple_add_dirs() {
+        let (_codex_bin, codex_path) = fake_codex_bin();
         let codex = Codex::new(
             Some("codex".into()),
             Some(vec![
@@ -1990,7 +2017,8 @@ mod tests {
                 "--add-dir".into(),
                 "/home/user/.git".into(),
             ]),
-        );
+        )
+        .with_env(vec![("PATH".to_string(), Some(codex_path))]);
         let cmd = codex
             .build_command(Some("thread-abc"), false, None)
             .unwrap();

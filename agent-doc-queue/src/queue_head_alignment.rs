@@ -13,15 +13,19 @@
 //!    ([`queue_head_identity`]) aligns the untouched run; a head whose identity
 //!    survives outside that run (a moved line) still pairs with itself.
 //! 2. **Edit.** Inside each Myers replace hunk, the lines left without an
-//!    identity partner are paired first by text similarity. When a replace
-//!    hunk keeps its row count, remaining rows at the same structural offset
-//!    pair too. Such a row replacement is operator steering even when its prose
-//!    or tracked id changes completely; it is not a deletion plus a new
-//!    registration. Only an old row with no same-slot successor is a deletion.
+//!    identity partner pair by text similarity ([`pair_replaced_lines`]): one
+//!    contains the other, or their character-diff ratio is at least
+//!    [`EDIT_SIMILARITY_THRESHOLD`]. Two rows that carry *different* tracked
+//!    ids never pair, and a row that gains or loses its id pairs only by
+//!    containment.
 //!
-//! A line deleted in one hunk and a line added in another never pair, so a
-//! consumed head followed by an operator addition elsewhere is a delete plus an
-//! add, not an edit.
+//! Anything else is a replacement, not an edit (`#krwr`): an old row with no
+//! partner is a deletion and a new row with no partner is new work, even when
+//! the new row sits in the old row's slot of an equal-count hunk. Position is
+//! not identity. A claimed row replaced this way ends its claim through the
+//! deletion path (`cancel_claimed`); the new row is unclaimed. A line deleted
+//! in one hunk and a line added in another never pair either, so a consumed
+//! head followed by an operator addition elsewhere is a delete plus an add.
 
 use agent_doc_element_queue::queue_head_identity;
 
@@ -123,37 +127,52 @@ pub fn pair_queue_heads(old: &[String], new: &[String]) -> QueueHeadPairing {
     }
 }
 
-/// Pair a replaced block as row mutations: `(old_offset, new_offset)`.
+/// Minimum character-diff ratio at which two id-less rows of one replace hunk
+/// read as one row's text edit rather than a delete plus an add.
+pub const EDIT_SIMILARITY_THRESHOLD: f32 = 0.5;
+
+/// Pair a replaced block as row edits: `(old_offset, new_offset)`.
 ///
-/// Similar free-text rows pair first so adjacent edits keep the most useful
-/// provenance. When the replace hunk keeps the same row count, every remaining
-/// old/new row at the same structural offset then pairs regardless of text or
-/// tracked id. Already-paired rows are never skipped over to manufacture a
-/// match: that would turn a deletion plus an adjacent addition into an edit.
-/// This fallback is the fail-safe distinction between mutation and removal: an
-/// edited claimed row keeps its owner/generation and is forwarded as steering;
-/// only an old row with no same-slot successor is deleted and eligible for
-/// cancellation.
+/// Two rows pair when one's text contains the other's (an annotation, a
+/// trailing note) or their character-diff ratio is at least
+/// [`EDIT_SIMILARITY_THRESHOLD`] (a typo fix, a reworded clause). The most
+/// similar pairs win, one-to-one. Two rows that both carry a tracked id never
+/// pair here: equal ids already paired by identity, so their ids differ and
+/// they name different work. A row that gains or loses its tracked id pairs
+/// only by containment (`[#a]` -> `[#a]: note`, `fix x` -> `do [#x] fix x`):
+/// a character ratio between prose and an id slug is noise.
+///
+/// There is no positional fallback (`#krwr`). Every row left unpaired is a
+/// deletion (old) or new work (new), even in an equal-count hunk where a new
+/// row took a deleted row's slot. Deleting a claimed row while adding a
+/// different one in its place therefore cancels the claim instead of handing
+/// it to the new row as an edit; only a text edit of the same row, or the
+/// same tracked id with rewritten prose, steers the owner.
 pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)> {
     let mut scored: Vec<(f32, usize, usize)> = Vec::new();
     for (o, old_text) in old.iter().enumerate() {
         let old_identity = queue_head_identity(old_text);
         for (n, new_text) in new.iter().enumerate() {
-            // Tracked ids do not participate in fuzzy matching: identity
-            // matches were already paired above, and text similarity must not
-            // move one id-backed row onto another. If both rows remain in the
-            // same replace hunk, the structural fallback below still treats
-            // their same-slot replacement as steering.
-            if old_identity.is_id_backed() || queue_head_identity(new_text).is_id_backed() {
+            let id_backed = [
+                old_identity.is_id_backed(),
+                queue_head_identity(new_text).is_id_backed(),
+            ];
+            if id_backed == [true, true] {
                 continue;
             }
-            let score =
-                if new_text.contains(old_text.as_str()) || old_text.contains(new_text.as_str()) {
-                    1.0
-                } else {
-                    similar::TextDiff::from_chars(old_text.as_str(), new_text.as_str()).ratio()
-                };
-            if score >= 0.5 {
+            let contains =
+                new_text.contains(old_text.as_str()) || old_text.contains(new_text.as_str());
+            let score = if contains {
+                1.0
+            } else if id_backed.contains(&true) {
+                // A character ratio between prose and an id slug measures
+                // nothing (`release + publish` vs `do [#ridernavp6republish]`
+                // scores above the threshold).
+                continue;
+            } else {
+                similar::TextDiff::from_chars(old_text.as_str(), new_text.as_str()).ratio()
+            };
+            if score >= EDIT_SIMILARITY_THRESHOLD {
                 scored.push((score, o, n));
             }
         }
@@ -168,16 +187,6 @@ pub fn pair_replaced_lines(old: &[String], new: &[String]) -> Vec<(usize, usize)
     for (_, o, n) in scored {
         if !pairs.iter().any(|(po, pn)| *po == o || *pn == n) {
             pairs.push((o, n));
-        }
-    }
-    if old.len() == new.len() {
-        for slot in 0..old.len() {
-            if !pairs
-                .iter()
-                .any(|(old_slot, new_slot)| *old_slot == slot || *new_slot == slot)
-            {
-                pairs.push((slot, slot));
-            }
         }
     }
     pairs
@@ -224,18 +233,56 @@ mod tests {
         );
     }
 
+    /// `#krwr`: a different row in a deleted row's slot is a delete plus an
+    /// add, never an edit, whether the ids or the prose differ.
     #[test]
-    fn every_same_hunk_replacement_is_an_edit() {
+    fn a_same_slot_replacement_is_a_delete_plus_an_add() {
         let pairing = pair_queue_heads(&heads(&["do [#a]"]), &heads(&["do [#b]"]));
-        assert_eq!(
-            pairing.new_index_of(0),
-            Some(0),
-            "changing a tracked id in place steers the existing owner"
-        );
+        assert_eq!(pairing.pair_of_new, vec![None], "a different tracked id");
+        assert_eq!(pairing.old_paired, vec![false]);
 
         let pairing = pair_queue_heads(
             &heads(&["rewrite the deployment guide"]),
             &heads(&["replace this with a wholly different request"]),
+        );
+        assert_eq!(pairing.pair_of_new, vec![None], "unrelated prose");
+        assert_eq!(pairing.old_paired, vec![false]);
+
+        let pairing = pair_queue_heads(
+            &heads(&["current task", "do [#a]", "later work"]),
+            &heads(&[
+                "current task",
+                "#gh-fix https://x.test/issues/380",
+                "later work",
+            ]),
+        );
+        assert_eq!(pairing.pair_of_new[1], None, "an id row replaced by prose");
+        assert_eq!(pairing.new_index_of(1), None);
+        assert_eq!(pairing.new_index_of(0), Some(0));
+        assert_eq!(pairing.new_index_of(2), Some(2));
+    }
+
+    /// `#krwr`: the edits that still continue their row.
+    #[test]
+    fn same_row_edits_still_pair() {
+        // Same tracked id, prose rewritten: identity.
+        let pairing = pair_queue_heads(
+            &heads(&["do [#a]"]),
+            &heads(&["do [#a]: actually rewrite it as a migration instead"]),
+        );
+        assert_eq!(pairing.pair_of_new, vec![Some((0, false))]);
+
+        // A free-text typo fix or reworded clause: similarity.
+        let pairing = pair_queue_heads(
+            &heads(&["fix the login redirect bug"]),
+            &heads(&["fix the login redirect loop bug on Safari"]),
+        );
+        assert_eq!(pairing.pair_of_new, vec![Some((0, true))]);
+
+        // A row that gains an annotation and so loses its tracked id.
+        let pairing = pair_queue_heads(
+            &heads(&["[#a]"]),
+            &heads(&["[#a]: also cover the sibling queue"]),
         );
         assert_eq!(pairing.pair_of_new, vec![Some((0, true))]);
     }
@@ -252,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn structural_fallback_never_skips_over_a_semantic_pair() {
+    fn a_semantic_pair_never_drags_its_neighbours_along() {
         let old = heads(&["current task", "later work"]);
         let new = heads(&["later work, plus docs", "new subagent work"]);
         let pairing = pair_queue_heads(&old, &new);

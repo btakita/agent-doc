@@ -126,7 +126,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     the claim follows its line through an in-place edit, whether an appended
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
     can still `--refresh` / `release` by the text it was handed. An edit of a
-    claimed head also wakes an idle coordinator.
+    claimed head also wakes an idle coordinator. A different row typed over a
+    claimed one is not an edit: it arrives as `cancel_claimed` for the old row
+    plus ordinary new work for the new one (`#krwr`).
   - `cancel_claimed` (`#queue-removal-cancels`): the operator deleted a queue
     row with a durable active claim. Deletion is authoritative cancellation,
     never a best-effort hint and never permission to continue because substantial
@@ -180,9 +182,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   it). The wake reads without consuming, so the woken turn still receives the
   items through preflight, the hook, or the boundary report. Items a worker
   claimed (`agent-doc queue claim`) never wake the session, but an edit of a
-  claimed item's text does (`forward_to_owner`) even for a complete prose or
-  tracked-id rewrite; the exact owner/generation remains registered. Deleting
-  a claimed row with no structural successor wakes it with `cancel_claimed`.
+  claimed item's text does (`forward_to_owner`) when it is an edit of the
+  same row (same tracked id, or similar/contained text); the exact
+  owner/generation remains registered. Deleting a claimed row wakes it with
+  `cancel_claimed`, including when a different row is added in its place: a
+  replacement is new, unclaimed work, never an edit (`#krwr`).
   Steering goes only to the
   turn that owns the document: a subagent's tool calls neither receive nor
   consume it (`#steerowneronly`). Cursor has no

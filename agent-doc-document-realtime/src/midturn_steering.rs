@@ -23,7 +23,8 @@
 //!   authoritative request for the owning turn to handle the item now.
 //! - deletion of a claimed queue item → `cancel_claimed`: removal is an
 //!   authoritative cancellation, so the harness interrupts that exact worker
-//!   attempt and retires its generation-fenced claim.
+//!   attempt and retires its generation-fenced claim. A different row added
+//!   in its place is a deletion plus new work, not an edit (`#krwr`).
 //!
 //! The watermark is the exactly-once fence. Queue steering is tracked as an
 //! *acknowledged queue* (the queue as of the last surfacing), so a later edit
@@ -1461,9 +1462,11 @@ pub fn apply_claim_attempts(
 /// harness work only when the durable claim ledger still names an active
 /// attempt for the removed identity. Identity pairing is the same pairing used
 /// for edits, and cancellation is withheld while the same identity remains
-/// live (for example one of two identical rows was removed). This is the
-/// fail-closed boundary for removals: same-hunk row replacements are edits,
-/// while uncertain cross-hunk lineage never kills a worker.
+/// live (for example one of two identical rows was removed). A different row
+/// added in the removed row's slot does not keep it alive (`#krwr`): the
+/// alignment pairs only same-identity and similar rows, so a replacement is a
+/// removal here and its owner is cancelled. Only an edit of the same row
+/// steers the owner instead.
 pub fn append_claimed_queue_removals(
     items: &mut Vec<SteeringItem>,
     watermark: &SteeringWatermark,
@@ -3537,6 +3540,104 @@ mod tests {
             assert!(text.contains("FORWARD the change"), "{text}");
             assert!(!text.contains("DISPATCH NOW"), "{text}");
             assert!(!text.contains("dispatch this item NOW"), "{text}");
+        }
+    }
+
+    /// `#krwr`: a different row added in a claimed row's slot is a deletion
+    /// plus new work. The owner is cancelled (`cancel_claimed`) and the new row
+    /// keeps its own routing; it never inherits the claim as an edit. A same-id
+    /// prose rewrite and a free-text text edit still forward to the owner.
+    #[test]
+    fn a_same_slot_replacement_cancels_the_owner_instead_of_forwarding() {
+        let owned = BTreeSet::new();
+        let cases = [
+            ("do [#a]", "do [#b]", false),
+            (
+                "rewrite the deployment guide",
+                "replace this with a wholly different request",
+                false,
+            ),
+            (
+                "do [#a]",
+                "do [#a]: actually ship it as a migration instead",
+                true,
+            ),
+            (
+                "fix the login redirect bug",
+                "fix the login redirect loop bug on Safari",
+                true,
+            ),
+        ];
+        for (before, after, edit) in cases {
+            let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+            ledger.claim(before, "subagent:owner", 100, 3600);
+            let claim = ledger.claims[0].clone();
+            let baseline = doc(&format!("- current task\n- {before}\n- later work\n"), EX);
+            let current = doc(&format!("- current task\n- {after}\n- later work\n"), EX);
+            let watermark = seeded(&baseline, Some("current task"));
+            let mut obs = observe_with_mode(
+                &watermark,
+                &current,
+                &quiet_ctx(&owned),
+                ObserveMode::Boundary,
+            );
+            // The ledger answers by claim identity; a replacement is never
+            // followed, so only the old row's identity is claimed.
+            let claim_of = |text: &str| {
+                let identity = agent_doc_queue::queue_claim::claim_identity(text);
+                let followed = if edit {
+                    agent_doc_queue::queue_claim::claim_identity(after)
+                } else {
+                    claim.identity.clone()
+                };
+                (identity == claim.identity || identity == followed).then(|| claim.clone())
+            };
+            apply_claim_attempts(&mut obs.ready, claim_of);
+            append_claimed_queue_removals(&mut obs.ready, &watermark, &current, claim_of);
+            let summary: Vec<_> = obs
+                .ready
+                .iter()
+                .map(|item| (item.change, item.dispatch, item.verbatim.as_str()))
+                .collect();
+            if edit {
+                assert_eq!(
+                    summary,
+                    vec![(
+                        SteeringChange::Edited,
+                        SteeringDispatch::ForwardToOwner,
+                        after
+                    )],
+                    "{before} -> {after}"
+                );
+                assert_eq!(obs.ready[0].previous.as_deref(), Some(before));
+                assert_eq!(obs.ready[0].owner.as_deref(), Some("subagent:owner"));
+            } else {
+                assert!(
+                    summary.contains(&(
+                        SteeringChange::Deleted,
+                        SteeringDispatch::CancelClaimed,
+                        before
+                    )),
+                    "{before} -> {after}: {summary:?}"
+                );
+                let added = obs
+                    .ready
+                    .iter()
+                    .find(|item| item.verbatim == after)
+                    .unwrap_or_else(|| panic!("{before} -> {after}: {summary:?}"));
+                assert_eq!(added.change, SteeringChange::Added, "{summary:?}");
+                assert_eq!(added.dispatch, SteeringDispatch::DrainAfterCurrent);
+                assert_eq!(added.owner, None);
+                assert_eq!(added.previous, None);
+                assert_eq!(summary.len(), 2, "{summary:?}");
+                let cancelled = obs
+                    .ready
+                    .iter()
+                    .find(|item| item.dispatch == SteeringDispatch::CancelClaimed)
+                    .unwrap();
+                assert_eq!(cancelled.owner.as_deref(), Some("subagent:owner"));
+                assert_eq!(cancelled.generation, Some(claim.generation));
+            }
         }
     }
 

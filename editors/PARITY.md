@@ -38,3 +38,8 @@ staged in VS Code and Zed.
 
 Headless native tests prove transport/FFI behavior. IDE UI, VFS wiring, and
 platform-specific terminal behavior still need their documented host smokes.
+
+Where agent-doc code runs on each side of a host's UI/workspace split, and how
+upgrades, generation proof and measured-layout routing compare across
+JetBrains, VS Code (local and Coder/remote) and Zed (local and remote), is
+recorded in `SPEC.md` § 13.

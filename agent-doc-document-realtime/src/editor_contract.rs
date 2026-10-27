@@ -108,6 +108,8 @@ mod tests {
     ];
     const ZED_SOURCES: &[&str] = &[include_str!("../../editors/zed/src/agent_doc.rs")];
     const ZED_LSP_SOURCE: &str = include_str!("../../agent-doc-zed-lsp-io/src/lib.rs");
+    const EDITORS_SPEC: &str = include_str!("../../editors/SPEC.md");
+    const VSCODE_MANIFEST: &str = include_str!("../../editors/vscode/package.json");
 
     #[derive(Debug)]
     struct FeatureParity<'a> {
@@ -368,5 +370,96 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `editors/SPEC.md` § 13 rows, keyed by host, as `[host, runs, upgrade,
+    /// proof, layout, status]` cells.
+    fn frontend_backend_matrix() -> Vec<Vec<&'static str>> {
+        let section = EDITORS_SPEC
+            .split_once("## 13. Frontend/Backend Architecture Parity")
+            .expect("editors/SPEC.md must keep the frontend/backend parity section")
+            .1;
+        section
+            .lines()
+            .skip_while(|line| !line.starts_with("| Host |"))
+            .take_while(|line| line.starts_with('|'))
+            .skip(2)
+            .map(|line| {
+                let cells = line
+                    .trim_matches('|')
+                    .split(" | ")
+                    .map(str::trim)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    cells.len(),
+                    6,
+                    "invalid frontend/backend matrix row: {line}"
+                );
+                cells
+            })
+            .collect()
+    }
+
+    #[test]
+    fn frontend_backend_matrix_matches_adapter_facts() {
+        let rows = frontend_backend_matrix();
+        assert_eq!(
+            rows.iter().map(|row| row[0]).collect::<Vec<_>>(),
+            [
+                "JetBrains classic (242-261, local IDE)",
+                "JetBrains split mode (exact 262 / exact 263)",
+                "VS Code local",
+                "VS Code on Coder / remote",
+                "Zed local",
+                "Zed remote",
+            ],
+            "the matrix must cover every editor host in a fixed order",
+        );
+        let row = |host: &str| {
+            rows.iter()
+                .find(|row| row[0].starts_with(host))
+                .unwrap_or_else(|| panic!("missing matrix row {host}"))
+        };
+
+        // The status column repeats `plugin-parity.tsv`; it never declares one.
+        let hot_reload = parity_rows()
+            .into_iter()
+            .find(|row| row.feature == "native_hot_reload_generation_v1")
+            .expect("plugin-parity.tsv must declare native hot reload");
+        for (host, status) in [
+            ("JetBrains classic", hot_reload.jetbrains),
+            ("VS Code local", hot_reload.vscode),
+            ("Zed local", hot_reload.zed),
+        ] {
+            assert!(
+                row(host)[5].contains(&format!("native hot reload {status}")),
+                "{host} must repeat native_hot_reload_generation_v1={status} from plugin-parity.tsv",
+            );
+        }
+
+        // Each gap the matrix states is pinned to the adapter source, so closing
+        // the gap fails here until the matrix is updated in the same change.
+        let declares_kind = VSCODE_MANIFEST.contains("\"extensionKind\"");
+        assert_eq!(
+            row("VS Code on Coder")[1].contains("`extensionKind` undeclared"),
+            !declares_kind,
+            "the VS Code remote row must match package.json's extensionKind declaration",
+        );
+        let vscode = VSCODE_SOURCES.concat();
+        assert_eq!(
+            row("VS Code local")[4].contains("hard-coded to horizontal"),
+            vscode.contains("const orientation: 'h' | 'v' = 'h';"),
+            "the VS Code layout cell must match the split-orientation capture",
+        );
+        assert_eq!(
+            row("VS Code local")[4].contains("`vscode.getEditorLayout` command is unused"),
+            !vscode.contains("vscode.getEditorLayout"),
+            "the VS Code layout cell must match whether getEditorLayout is captured",
+        );
+        assert_eq!(
+            row("Zed local")[3].contains("`replica_register` carries only `editor_pid`"),
+            ZED_LSP_SOURCE.contains("json!({ \"editor_pid\": std::process::id() })"),
+            "the Zed proof cell must match the zed-lsp registration payload",
+        );
     }
 }

@@ -264,9 +264,10 @@
     "bundle": "node esbuild.js",
     "bundle:watch": "node esbuild.js --watch",
     "check-types": "tsc -p ./ --noEmit",
-    "vscode:prepublish": "npm run check-types && node esbuild.js --production",
+    "vscode:prepublish": "npm run check-types && node esbuild.js --production && node scripts/stage-koffi.mjs",
     "test": "tsc -p ./ && node --test out/activationReceipt.test.js out/about.test.js out/native.test.js out/nativeReloadGate.test.js out/stateMirror.test.js out/stateMirrorConformance.test.js out/reposition.test.js out/patchGuard.test.js out/patchPlan.test.js out/tabSync.test.js out/groupLayout.test.js out/pluginUpgrade.test.js out/sessionUi.test.js out/popupMenu.test.js out/crossSession.test.js out/editorCommandState.test.js out/mergeOwnershipStateChart.test.js out/lazilyStaleHandle.test.js out/crdtReplica.test.js out/peerReplicaPull.test.js out/uiThreadBudget.test.js out/reloadLibraryIntent.test.js out/ideTerminal.test.js out/dashboard.test.js out/commandPlane.test.js",
     "package": "vsce package --skip-license",
+    "test:package": "node --test scripts/vsixPackage.test.mjs",
     "publish": "vsce publish"
   },
   "dependencies": {

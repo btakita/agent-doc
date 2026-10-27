@@ -9,6 +9,13 @@ values and preserves them verbatim. Only concurrent drift inside the same
 Exchange cell may reject or retain the compact target. Sibling edits, including
 queue/backlog changes and unmarked scratch text outside `agent:exchange`, never
 invalidate an Exchange compact and must not be rewritten from its stale base.
+They are not the compact's to commit either (`#compactabsorbsedit`): the
+committed snapshot and `HEAD` keep frontmatter, prose, and every sibling cell
+exactly as the pre-compact snapshot had them, and only the compacted Exchange
+cell changes. An operator edit there that no turn has answered yet, such as a
+queue row typed just before pressing Compact Exchange, stays live, uncommitted
+drift, so the next preflight still diffs it as the operator's edit. Binary-owned
+sibling drift that was not yet committed is likewise left to the next `commit`.
 
 The JetBrains action saves only the selected target document before routing the
 compact command. It must never call `saveAllDocuments()`: doing so can wake a

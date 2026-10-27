@@ -59,6 +59,10 @@
 //!   sibling-cell edits (including queue item deletions) are rebased into both the live and committed
 //!   targets before snapshot/commit; concurrent edits inside the compacted cell remain fail-closed
 //!   (`#compact-independent-cells`).
+//! - The committed projection (snapshot + HEAD) is re-rooted on the pre-compact snapshot at the
+//!   snapshot/commit boundary: only the target cell's compact-owned content changes, and an
+//!   unanswered operator edit in a sibling cell stays live drift for the next preflight
+//!   (`#compactabsorbsedit`).
 //! - Before deriving a compact target, normal compaction replays any exact base-keyed durable
 //!   editor-op epoch into its semantic input cut. The originally observed bytes remain the
 //!   convergence compare-and-swap base, and the epoch is cleared only after the compact write and
@@ -173,7 +177,9 @@ impl CompactDocumentTargets {
     ///
     /// Compact owns only the archiveable region of `target`. A concurrent
     /// operator edit in `queue`, `backlog`, or another sibling component is
-    /// independent and must survive in both projections. For `exchange`, the
+    /// independent and must survive in both projections (the committed one is
+    /// later re-rooted on the baseline by `confine_committed_to_compact_owned_cell`,
+    /// `#compactabsorbsedit`, so the edit stays live drift). For `exchange`, the
     /// post-boundary tail is also independent live state: the committed target
     /// is the compact-owned prefix, while the live target may extend it with the
     /// latest authoritative tail. Drift inside the compact-owned region remains
@@ -944,7 +950,8 @@ fn run_in_controller_scoped(
     // `#compact-independent-cells`: do not compare sibling item counts against
     // the pre-compact document here. Successful CRDT convergence may include
     // authoritative concurrent queue/backlog edits, and `targets` already
-    // rebased the snapshot/commit projection onto those sibling cells. The
+    // rebased the live projection onto those sibling cells (the committed one
+    // keeps the baseline's, `#compactabsorbsedit`). The
     // deterministic pre-write guard still proves that the compaction rebuild
     // itself changed only its target component.
     let changed = updated != content;
@@ -1322,6 +1329,10 @@ pub fn complete_retained_projection(
             "compact projection authority does not contain the retained compact target",
         );
 
+        // `#compactabsorbsedit`: the retained committed projection (and any
+        // rebase above) was derived from editor text, so re-root its siblings on
+        // the current baseline before it reaches the snapshot or HEAD.
+        confine_committed_to_compact_owned_cell(file, &mut targets, target_component)?;
         agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &targets.committed,
@@ -2049,6 +2060,7 @@ fn apply_compacted_document(
         }
     }
 
+    confine_committed_to_compact_owned_cell(file, &mut targets, target_component)?;
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
         &targets.committed,
@@ -2056,6 +2068,85 @@ fn apply_compacted_document(
     )?;
 
     Ok(targets)
+}
+
+/// `#compactabsorbsedit`: keep operator-authored sibling drift out of the
+/// committed projection at the snapshot/commit boundary.
+///
+/// The compact target is derived from the editor-authoritative text, so before
+/// this boundary its committed projection also carried every sibling-cell edit
+/// the agent had not answered yet. Observed 2026-10-27 on
+/// `tasks/agent-doc/agent-doc-bugs.md`: a `commit_document` refused the queue
+/// drift as an unanswered edit, the operator pasted two queue rows, and 57s
+/// later the IDE's Compact Exchange (`compact --component exchange --commit`)
+/// committed those rows into the snapshot and HEAD (`493b81b9bd`), where
+/// preflight read them as authored repeats (`#queuerowdup`).
+///
+/// Compact owns only its target cell, so the committed projection's siblings
+/// are re-rooted on the pre-compact snapshot; the live projection keeps the
+/// operator's text untouched. Sibling drift the binary produced itself is not
+/// lost either: it stays in the live document, and the next `commit` reconciles
+/// it through the retained-write ownership verdict exactly as it would have
+/// without the compact. A missing baseline (first compact of a document that
+/// was never snapshotted) keeps the previous projection.
+fn confine_committed_to_compact_owned_cell(
+    file: &Path,
+    targets: &mut CompactDocumentTargets,
+    target_component: Option<&str>,
+) -> Result<()> {
+    let Some(target) = target_component else {
+        return Ok(());
+    };
+    let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(file)? else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_committed_baseline_unavailable file={} target={} action=keep_compact_projection (#compactabsorbsedit)",
+                file.display(),
+                target,
+            ),
+        );
+        return Ok(());
+    };
+    let Some(mut confined) =
+        agent_doc_document::compact_projection::confine_committed_to_compact_owned_cell(
+            &targets.committed,
+            &baseline,
+            target,
+        )
+    else {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_committed_baseline_lacks_target file={} target={} baseline_hash={} action=keep_compact_projection (#compactabsorbsedit)",
+                file.display(),
+                target,
+                agent_doc_hash::content_hash(&baseline),
+            ),
+        );
+        return Ok(());
+    };
+    if let Some(reconciled) =
+        agent_doc_document::status_projection::reconcile_top_backlog_status_content(&confined)?
+    {
+        confined = reconciled;
+    }
+    if confined != targets.committed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_committed_confined_to_target file={} target={} baseline_hash={} projected_hash={} committed_hash={} live_hash={} (#compactabsorbsedit)",
+                file.display(),
+                target,
+                agent_doc_hash::content_hash(&baseline),
+                agent_doc_hash::content_hash(&targets.committed),
+                agent_doc_hash::content_hash(&confined),
+                agent_doc_hash::content_hash(&targets.live),
+            ),
+        );
+        targets.committed = confined;
+    }
+    Ok(())
 }
 
 /// Compact a named component in a template/stream-mode document.
@@ -4357,19 +4448,26 @@ mod tests {
             run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
                 .unwrap();
 
+        // `#compactabsorbsedit`: the scratch comment is the operator's
+        // unanswered prompt outside the exchange cell. It stays live, and the
+        // committed projection carries only the compacted exchange over the
+        // baseline.
+        let committed = result;
+        assert!(!committed.contains(prompt), "{committed}");
+        let published = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
-            std::fs::read_to_string(&file).unwrap(),
-            result,
-            "component compact must publish its rebased target"
+            published,
+            committed.replace("<!--\n-->", &format!("<!--\n{prompt}\n-->")),
+            "component compact must publish its rebased live target"
         );
-        assert!(result.contains("Compacted summary."));
-        assert_eq!(result.matches(prompt).count(), 1);
+        assert!(published.contains("Compacted summary."));
+        assert_eq!(published.matches(prompt).count(), 1);
         assert_eq!(
             agent_doc_snapshot_io::load_document_baseline(&file)
                 .unwrap()
                 .unwrap(),
-            result,
-            "successful component compact must checkpoint the rebased document"
+            committed,
+            "successful component compact must checkpoint the committed projection"
         );
     }
 
@@ -4419,10 +4517,15 @@ mod tests {
             run_component_compact(&file, doc, "exchange", Some("Compacted summary."), false)
                 .unwrap();
 
+        // `#compactabsorbsedit`: the scratch directives are unanswered operator
+        // input outside the exchange cell, so only the live target carries them.
+        let committed = result;
+        assert!(!committed.contains(scratch_prompt), "{committed}");
         let file_after = std::fs::read_to_string(&file).unwrap();
         assert_eq!(
-            file_after, result,
-            "component compact must publish the rebased exchange target"
+            file_after,
+            committed.replace("<!--\n-->", &live_scratch),
+            "component compact must publish the rebased live exchange target"
         );
         assert!(file_after.contains("Compacted summary."));
         assert_eq!(
@@ -4439,8 +4542,8 @@ mod tests {
             agent_doc_snapshot_io::load_document_baseline(&file)
                 .unwrap()
                 .unwrap(),
-            file_after,
-            "successful compact must checkpoint the rebased full document"
+            committed,
+            "successful compact must checkpoint the committed projection"
         );
         let patch_count = std::fs::read_dir(&patches_dir)
             .unwrap()
@@ -5798,8 +5901,13 @@ mod tests {
         let snapshot = agent_doc_snapshot_io::load_document_baseline(&file)
             .unwrap()
             .unwrap();
-        assert!(!snapshot.contains(deleted_queue_row), "{snapshot}");
+        // `#compactabsorbsedit`: the replayed deletion is the operator's
+        // unanswered queue edit. It is live (no resurrected row, no File Cache
+        // Conflict) but stays out of the checkpoint, so the next preflight still
+        // diffs it as the operator's edit.
+        assert!(snapshot.contains(deleted_queue_row), "{snapshot}");
         assert!(snapshot.contains(kept_queue_row), "{snapshot}");
+        assert!(snapshot.contains("Compacted summary."), "{snapshot}");
         assert!(
             agent_doc_op_capture_io::load_op_capture(&file)
                 .unwrap()

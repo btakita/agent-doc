@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check jetbrains-keystroke-bench tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 # `#tmuxscopesteward`: tmux built with systemd support (e.g. Arch/CachyOS tmux
 # 3.8) asks the systemd user manager for one transient `tmux-spawn-<uuid>.scope`
@@ -290,6 +290,19 @@ dev-harness-test: $(VSCODE_NODE_LOCK)
 # their shipped native forwarders together through a real controller.
 editor-parity: dev-harness-test cross-editor-simworld
 	@python3 scripts/check_editor_parity.py
+
+# `#jbshrinkrestarts`: the JetBrains per-keystroke native-boundary latency gate.
+# Builds the local-install profile, then times the plugin's keystroke path
+# against that library. Pass JETBRAINS_BENCH_BASELINE=<report.json> to gate a
+# rule move (exit 1 on a keystroke regression); JETBRAINS_BENCH_OUT keeps this
+# run's report; AGENT_DOC_BENCH_FIXTURE types into a copied document instead
+# of the synthetic ~120 KB one.
+JETBRAINS_BENCH_BIN_DIR ?= $(CURDIR)/target/$(LOCAL_INSTALL_PROFILE)
+jetbrains-keystroke-bench:
+	$(LOCAL_CARGO_ENV) $(CARGO_CMD) build --profile "$(LOCAL_INSTALL_PROFILE)" --bin agent-doc --lib
+	@cd editors/jetbrains && AGENT_DOC_BENCH_BIN_DIR="$(JETBRAINS_BENCH_BIN_DIR)" \
+		AGENT_DOC_BENCH_OUT="$(JETBRAINS_BENCH_OUT)" AGENT_DOC_BENCH_BASELINE="$(JETBRAINS_BENCH_BASELINE)" \
+		./gradlew $(AGENT_DOC_GRADLE_FLAGS) --no-daemon --console=plain -q -I benchmark/keystroke-latency.init.gradle.kts runKeystrokeLatencyBenchmark
 
 # The classic and both modular ZIPs share one Marketplace plugin ID, so every
 # disjoint compatibility range and the modular role/sandbox contract are release

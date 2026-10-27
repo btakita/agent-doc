@@ -214,6 +214,28 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 **One caveat:** 0.2.843 came from `make install`, not from the feed, and the feed's 0.2.840 is older. So the IDE has nothing to update through the feed right now. The feed-driven update path gets its first real exercise when the next release publishes a newer 263 package.
 
 **Your IDE restart is done**, so I've dropped it from my list of asks.
+
+### Re: autoupgrade follow-ups dispatched — opus-5 · 2026-10-26T20:23-04:00
+
+**Dispatched (2), both 🚧 running in their own worktrees under `~/work/btakita/agent-doc-wt/`:**
+
+- `do [#jb339shelldesign]` → `subagent:jb339shell` (`fix/jb339-shell-design`).
+  - **Deliverables:** a spec section for the shell-plugin and child-classloader architecture, plus an isolated proof-of-concept spike. The spike loads a versioned implementation, lets the shell own the registrations, swaps generations, and shows the old classloader can be garbage-collected.
+  - **Not shipped:** nothing users install changes.
+  - **Will ask you first:** any choice that gives up Remote Dev support or adds a separately installed shell plugin.
+- `do [#jbshrinkrestarts]` → `subagent:jbshrink` (`fix/jb-shrink-restarts`).
+  - **Benchmark first:** it adds a per-keystroke latency benchmark on a copied ~120 KB document and records a baseline.
+  - **Then the moves:** it moves `TerminalUtil`, then `PatchWatcher`, behind the native library, one commit each.
+  - **Gate:** a move that measurably regresses latency doesn't land.
+  - `CrdtReplicaManager` stays in Kotlin.
+
+The two workers touch different parts of the plugin, and I'll integrate them one at a time.
+
+**`#jb263-feed-verify`:** I struck its queue row. The todo was already done in the previous response.
+
+**Review gate `#jb262dynlauncherrecommen` is resolved by your autoupgrade decision:**
+- The 2026.2 package keeps the accurate-warning policy (`declined_by=modular_package`, then file replacement and the restart prompt).
+- A real restart-free path for 2026.2 and 2026.3 is now tracked by `#jb339shelldesign` instead of a separate 2026.2-only launcher.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -221,11 +243,11 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#jb339shelldesign]
-- do [#jbshrinkrestarts]
+- 🚧 [#subagent:jb339shell#1] do [#jb339shelldesign]
+- 🚧 [#subagent:jbshrink#1] do [#jbshrinkrestarts]
 - ~~do [#cazn]~~
 - ~~do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.~~
-- do [#jb263-feed-verify]
+- ~~do [#jb263-feed-verify]~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -250,7 +272,6 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 
 ## Review <!-- agent:review -->
 - [/] [#jetbrainsmarketplaceprofile] [marketplace-approval] [agent-doc] Plugin 35436 is hidden and under initial JetBrains moderation; after approval, replace the basic description with polished copy, add Getting Started, Documentation, and Bugtracker URLs, then verify the public listing.
-- [/] [#jb262dynlauncherrecommen] [recommended] [operator-verify] [agent-doc] Operator decision: jb262dynupgrade (153c72916) chose the accurate-warning option (a 262 package reports declined_by=modular_package and falls back to file replacement + restart). Either keep that as the supported policy (then close this), or authorize a real restart-free launcher for the exact-262 split-mode plugin that swaps backend + frontend (the frontend may run in a separate JetBrains Client process), proven against a live 262 IDE.
 - [/] [#pypiquotarecheck] Track pypi/support#12214 (agent-doc project limit request, 25 GiB) to a decision. Unblocked mechanically by a human reply on pypi/support#12214, or make pypi-quota-check reporting a ceiling in reach. Rechecked 2026-10-12: pre-cutover 131 releases 8.361 GiB (0.35.113..0.35.343), post-cutover 91 releases 3.19 MiB (mean 35.9 KiB), about 47,722 further releases fit; VERDICT headroom fine. The support issue is still open with one comment, unchanged since 2026-09-10. Nothing to act on or delete. If the grant lands, record it and drop this item; deletion stays reserved for a ceiling the authenticated check reports.
 - [/] [#gh299-live-263-proof] Live-verify v0.35.519 on JetBrains 263.7031 with changed plugin sources: `agent-doc upgrade` must hot-reload and complete without an IDE restart; close GH #299 only with that proof.
 <!-- /agent:review -->

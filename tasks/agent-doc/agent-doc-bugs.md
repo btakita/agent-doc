@@ -271,6 +271,17 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 **Your decisions:**
 - **Keep the frontend shell-only.** In Remote Dev, frontend changes still restart, and no code reaches your local JVM except through a plugin install. Frontend swaps are parked in the icebox as `#jbfrontendswap`.
 - **R1 waits for `#jbshrinkrestarts`.** Its benchmark and moves report first, then you decide; the todo is `#jb339r1decision`. The same todo covers restating the 2026.3 reopen rule as "module graph and registrations unchanged across the swap, and the retired code is collectable", because this design never replaces the module graph.
+
+### Re: todo id collision — opus-5 · 2026-10-26T20:55-04:00
+
+**Fixed a mis-named todo.** The R1 decision todo from the previous response landed as `[#jbshrinkrestarts]` instead of `[#jb339r1decision]`. agent-doc ignored the explicit `id=` and took the first tracked id mentioned in the text. That todo shared its id with the running backlog item `#jbshrinkrestarts`, so closing either one could have closed the other.
+
+I removed the mis-named todo and re-added it as `#jb339r1decision`, with no other id in its text. The backlog item and its running worker are untouched.
+
+**Filed as `#todoaddidhijack`:**
+- An explicit `id=` must always win.
+- A todo must never take an id that an open tracked item already owns.
+- A regression test should pin both.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -278,6 +289,7 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- do [#todoaddidhijack]
 - ~~do [#jb339shelldesign]~~
 - 🚧 [#subagent:jbshrink#1] do [#jbshrinkrestarts]
 - ~~do [#cazn]~~
@@ -302,6 +314,7 @@ The two workers touch different parts of the plugin, and I'll integrate them one
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#todoaddidhijack] [agent-doc] `agent-doc respond --todo-add "id=<custom> <text>"` ignores the explicit `id=` when the text mentions another tracked id: on 2026-10-26 `--todo-add "id=jb339r1decision ... once #jbshrinkrestarts reports ..."` created todo `[#jbshrinkrestarts]`, colliding with the open backlog item of that id, while session-check warned the coined `#jb339r1decision` was untracked. An explicit `id=` must always win, a todo must never take an id an open tracked item already owns, and a regression test should pin both.
 - [ ] [#jbshrinkrestarts] Shrink the JetBrains restart count: move TerminalUtil (tmux/process orchestration) and PatchWatcher logic behind the native agent-doc library, which already hot-reloads without an IDE restart, so fewer releases change plugin Kotlin. First add a per-keystroke latency benchmark on a large session document and gate each move on no regression. Leave CrdtReplicaManager in Kotlin unless the native side keeps the replica behind a handle and the boundary carries binary op deltas, not whole-document JSON.
 <!-- /agent:backlog -->
 

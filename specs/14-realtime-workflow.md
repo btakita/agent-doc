@@ -1621,7 +1621,9 @@ roll-forward without the recycle:
   exhaustion edge itself (after the durable record is written), at most
   `RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS` (2) delivered requests per
   refused content, never on an edge that also rebuilds, and a request that
-  reached no editor replica is refunded. The worker sends
+  reached no editor replica is refunded, at most
+  `RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS` (3) times per refused
+  content (`#retainedprojectionclobber`, below). The worker sends
   `deliver_crdt_remote reason=editor_visible_roll_forward` with the refused
   `content_hash`/`content_len` as a fence
   (`agent_doc_crdt_relay_io::signal_editor_visible_roll_forward`; every other
@@ -1660,6 +1662,75 @@ roll-forward without the recycle:
 An editor without the handler (VS Code, Zed, an older JetBrains plugin) treats
 the event as an ordinary drain wakeup, so the exhausted state and its remedy
 stand; that remedy then sanctions `admin recycle` as the fallback.
+
+### Retained writes never replace operator text
+
+`#retainedprojectionclobber`. Measured on `tasks/software/lazily.md`
+2026-10-27T16:07:54Z-17:10:19Z. A captured closeout's tracked-work half was
+retained as `pending_write` intent `1793117274094672983-1-f22b45…` (target =
+the committed `206af5eef3` text: capture baseline + response + queue
+consumption). The operator kept typing. The editor's next frame came back
+`StructuralQuarantined`; its updates stayed fenced for an hour while
+`crdt_current_text` reported `delivery_converged=true` and the in-place
+roll-forward was re-sent 39 times (`notified=0
+diagnosis=delivery_failed_to_all:1`, `refusals=117`). An install reload then
+reseeded a fresh controller from the editor's retained replica (canonical
+became the operator's `8d23a9e…` text). The still-unsettled intent re-derived
+over that cut, and its rebase returned EXACTLY the agent target
+(`projected_target_hash == intent_target_hash`). That was the bare component
+merge's "ours wins" on a frontmatter block both sides changed; the agent had
+removed `queue: go`, the operator had changed `agent:`. The CP write applied
+that text (`crdt_cp_write source=retained_transition_projection_effect
+content_hash=f22b45…`), the compaction rebootstrap replaced the editor buffer
+with it, and the replacement replicas and native save carried it to disk.
+
+The rules:
+
+- The retained write is the agent's unapplied op. It rolls forward onto the
+  operator's cut and never replaces it. `rebase_agent_candidate_over_editor_cut`
+  merges through `merge_contents_crdt`: the frontmatter is reconciled
+  field-wise (`#fmreset`; the operator owns every key but the agent-managed
+  ones), and the per-cell merge 3-way merges an interstitial both sides changed
+  instead of keeping the agent side.
+- `rebase_retained_target_over_editor_cut` then proves it. Every operator-added
+  line of the reconciled cut must survive: every copy the cut holds, less the
+  base copies the agent removed. A line the operator edited also counts as
+  carried when a rebased line that is neither a base line nor an agent-target
+  line holds every word the operator inserted, such as a todo the agent checked
+  while the operator amended it. Otherwise the rebase fails with
+  `OperatorTextWouldBeLost`.
+- The controller's retained-transition state maps that refusal to
+  `OperatorTextConflict`. Its one effect logs
+  `retained_transition_refused_operator_text_loss … lost_operator_lines=N
+  applied=false recovery=retained_write_held_editor_text_kept` once per
+  (intent, visible cut) and writes nothing. The intent stays durable and
+  unsettled, so the closeout cannot report it delivered.
+- A live relay member whose updates are quarantined
+  (`replica_updates_fenced`) and still owes the canonical projection holds the
+  delivery barrier past every non-convergence budget. `delivery_converged` is
+  false while it is live (`RelayHub::quarantined_live_replicas`), and
+  `drop_definitively_refused_replica` never drops it: its refusal protects text
+  the canonical lacks. Its projection receipt (it rolled forward onto
+  canonical) or its departure releases it. No retained transition derives over
+  a cut that lacks quarantined editor text.
+- An undelivered roll-forward request is refunded at most
+  `RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS` times per refused
+  content. The bound is terminal. It marks the durable exhausted record
+  `roll_forward_refusal=editor_unreachable` and logs
+  `retained_persistence_visible_roll_forward_refused terminal=true`, so
+  `session-check` renders the terminal remedy (`admin recycle`, whose reseed is
+  the same roll-forward) instead of a self-converging wait.
+- A full re-registration after a library reload bootstraps from canonical. The
+  rules above keep the operator's text in that canonical; the controller never
+  writes a retained target over the reseeded editor cut.
+
+The SimWorld regression
+`retainedprojectionclobber_operator_text_survives_retained_write_quarantine_and_reload`
+(`agent-doc-controller-io`) drives this sequence with no sleeps: retained
+transition, operator edits after its base, the retained write, quarantine, then
+a fresh-controller reseed and a full re-registration. It asserts the operator's
+text in the canonical (the projected disk), in the editor, and in the
+replacement replica.
 
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery

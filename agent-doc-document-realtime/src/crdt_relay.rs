@@ -2739,6 +2739,12 @@ impl RelayHub {
     /// Refuses a member that still holds the barrier: a replica inside its
     /// budget is still converging and must never be preempted, exactly as the
     /// read side consults a refusal only after the retry budget is spent.
+    ///
+    /// `#retainedprojectionclobber`: never a quarantined member. Its refusal is
+    /// the editor protecting operator text this canonical lacks; dropping it
+    /// would turn that text invisible to every convergence reader. It stays in
+    /// the cut until it rolls its buffer forward onto canonical or the
+    /// retained-persistence path reports the terminal state to the operator.
     pub fn drop_definitively_refused_replica(&mut self, client_id: u64) -> bool {
         let Some(member) = self.members.get(&client_id) else {
             return false;
@@ -2746,6 +2752,7 @@ impl RelayHub {
         if !self.is_live(client_id)
             || member.pending.is_empty()
             || Self::member_holds_delivery_barrier(member)
+            || self.member_quarantined_awaiting_projection(client_id, member)
         {
             return false;
         }
@@ -2936,11 +2943,47 @@ impl RelayHub {
 
     /// True when every currently-live editor has ACKed all queued fan-out updates.
     /// Disconnected editors are excluded from this live convergence cut.
+    ///
+    /// `#retainedprojectionclobber`: a live member whose updates are
+    /// quarantined ([`Self::replica_updates_fenced`]) while it still owes the
+    /// canonical projection never counts as converged, whatever its
+    /// non-convergence budget says. Its buffer holds text this canonical has
+    /// refused, so releasing it for availability would report
+    /// `delivery_converged=true` for a cut that silently lacks operator text.
+    /// On 2026-10-27 `tasks/software/lazily.md` reported exactly that for an
+    /// hour while the editor's typing was quarantined, and the closeout
+    /// committed the canonical without it.
     pub fn delivery_converged(&self) -> bool {
         self.members
             .iter()
             .filter(|(id, _)| self.is_live(**id))
-            .all(|(_, member)| !Self::member_holds_delivery_barrier(member))
+            .all(|(id, member)| {
+                !Self::member_holds_delivery_barrier(member)
+                    && !self.member_quarantined_awaiting_projection(*id, member)
+            })
+    }
+
+    /// `#retainedprojectionclobber`: a live member whose incremental updates
+    /// are quarantined and which has not yet received the canonical projection
+    /// that would release them.
+    fn member_quarantined_awaiting_projection(&self, client_id: u64, member: &Member) -> bool {
+        !member.pending.is_empty() && self.replica_updates_fenced(client_id)
+    }
+
+    /// `#retainedprojectionclobber`: live members whose updates are quarantined
+    /// while they still owe the canonical projection, sorted. Every reader that
+    /// reports a converged/undiverged cut consults this.
+    pub fn quarantined_live_replicas(&self) -> Vec<u64> {
+        let mut ids: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(id, member)| {
+                self.is_live(**id) && self.member_quarantined_awaiting_projection(**id, member)
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        ids.sort_unstable();
+        ids
     }
 
     /// True only when every currently-live editor has visibly projected every
@@ -6359,6 +6402,60 @@ mod tests {
             !recovered.is_safe_to_evict(),
             "a changed CRDT frontier must fence eviction without a whole-text comparison"
         );
+    }
+
+    /// `#retainedprojectionclobber` (c): a live editor whose updates are
+    /// quarantined holds text the canonical refused. Neither the redelivery
+    /// budget nor the silent-replica wait budget may release it into a
+    /// "converged" cut, and a definitive refusal may not drop it; only the
+    /// editor receiving the canonical projection (or leaving) releases it.
+    #[test]
+    fn retainedprojectionclobber_quarantined_live_editor_never_reports_converged() {
+        let mut hub = RelayHub::from_text(1, "# Doc\n\ncanonical\n");
+        let editor = 7;
+        hub.register(editor).unwrap();
+        assert!(hub.delivery_converged());
+
+        // A structurally quarantined document-op frame fences its author.
+        let fence = hub.fence_registered_document_op_origins([editor]).unwrap();
+        assert_eq!(fence.registered_origins, 1);
+        assert!(hub.replica_updates_fenced(editor));
+        assert!(!hub.delivery_converged());
+        assert_eq!(hub.quarantined_live_replicas(), vec![editor]);
+
+        // Exhaust both availability budgets: the incident's editor pulled the
+        // same projection 51+ times and its waits expired.
+        for _ in 0..=MAX_REDELIVERIES_WITHOUT_ACK {
+            hub.pending_updates(editor).unwrap();
+        }
+        for _ in 0..=MAX_BARRIER_WAITS_WITHOUT_PROGRESS {
+            hub.charge_barrier_wait_without_progress();
+        }
+        assert_eq!(
+            hub.nonconverging_replicas(),
+            vec![editor],
+            "the member is past its non-convergence budget"
+        );
+        assert!(
+            !hub.delivery_converged(),
+            "a quarantined editor is never released into a converged cut"
+        );
+        assert!(!hub.visible_delivery_projected());
+        assert!(
+            !hub.drop_definitively_refused_replica(editor),
+            "a refusing quarantined editor is protecting operator text; it is not dropped"
+        );
+        assert_eq!(hub.quarantined_live_replicas(), vec![editor]);
+
+        // The editor rolls forward onto the canonical projection: released.
+        let canonical_hash = content_hash(&hub.canonical_text());
+        assert!(
+            hub.observe_delivery_projection(editor, &canonical_hash)
+                .unwrap()
+        );
+        assert!(!hub.replica_updates_fenced(editor));
+        assert!(hub.quarantined_live_replicas().is_empty());
+        assert!(hub.delivery_converged());
     }
 
     #[test]

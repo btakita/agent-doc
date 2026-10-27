@@ -41,6 +41,16 @@
   `admin recycle`; it is the fallback after the request. See
   [Real-Time Workflow Authority](specs/14-realtime-workflow.md).
 
+- A retained captured write rolls FORWARD onto operator-authored editor text
+  and never replaces it (`#retainedprojectionclobber`). Its rebase over the
+  editor cut merges the frontmatter field-wise and both-diverged interstitials
+  3-way; a rebase that would still drop an operator-added line is refused and
+  reported (`retained_transition_refused_operator_text_loss`), never applied. A
+  live editor whose updates are quarantined is never part of a converged
+  delivery cut, is never dropped as a refusing replica, and an unreachable
+  in-place roll-forward is terminal after a bound instead of a silent retry.
+  See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text).
+
 - Grok Build uses a native final-JSON backend and the existing managed
   supervisor lifecycle, with exact document-bound resume IDs and structural
   composer readiness. Passive hooks are not admission/continuation authority;

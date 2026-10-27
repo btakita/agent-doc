@@ -636,3 +636,5 @@
 - 2026-10-26 [#layoutunprovenliveverify] Integrate subagent commit cb2f9068e3e1ec068cc212910ce4dfd5a354558e from fix/layout-supersede-await, install it after the current session closeout from the clean worktree, recycle at the idle boundary, and live-verify Sync Tmux Layout recreates the stale cross-root sdk-demo pane.
 - 2026-10-26 [#decisionbacklogstrike] **Decision for you:** should a backlog strike also close claimed free-text rows? Today it skips rows that show `☑️ [#owner#N]`.: I'm inclined to say yes, but I don't understand the implications. Please analyze this choice and break it down. What are the side-effects? Are there any hazards?
 - 2026-10-26 [#closehttpsgithub] Can we close https://github.com/btakita/agent-doc/issues/379?
+- 2026-10-26 [#cazn] Is [#fixautoupgrade] done?
+- 2026-10-26 [#fixautoupgrade] 🙋☑️ [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. [#subagent-operator-request-autoupgrade-263-path]: would **Shrink the restart count** have performance issues due to extra serialization?

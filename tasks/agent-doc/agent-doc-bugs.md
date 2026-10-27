@@ -179,6 +179,42 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 **Moved to todo `#lazily-stale-cell-repair`** so the queue stops re-dispatching it. Run it after the next `lazily.md` cycle commits that document clean.
 
 **Worth a look:** pane %7 shows `owned_pane_ready_busy_conflict`. The actor and controller lease say `ready`, but the live pane says busy and is now unobservable. If no real turn is running there, `agent-doc session clear` from another pane is the documented recovery. I didn't run it, because it would interrupt a session I don't own.
+
+### Re: is #fixautoupgrade done, and #jb263-feed-verify — opus-5 · 2026-10-26T20:21-04:00
+
+> **Queue prompt:** do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
+
+> **Operator note:** I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
+
+**Your plan, as built:**
+
+- **Keep restart-only + prompt as the fallback: done.** It's live in your IDE (0.2.843).
+- **Attempt real auto-upgrade with the GH #339 architecture:** queued as `#jb339shelldesign`.
+- **Shrink the restart count, if it performs well:** queued as `#jbshrinkrestarts`, and each move is gated on a per-keystroke latency benchmark so it only lands if it doesn't regress.
+- **Re-qualify on 263.7307.44: not queued.** It's low risk, but the worst case leaves Agent Doc half-unloaded until you restart. Even a pass would only cover local IDEs on that one build, not Remote Dev, and any later plugin change could quietly undo it. GH #339 is far more likely to give you auto-upgrade that keeps working. Ask if you still want the quick experiment.
+
+> **Queue prompt:** do [#cazn]
+
+**`#fixautoupgrade` is closed, as you chose, and the next steps are in the backlog.** "Done" here means the fallback, not restart-free auto-upgrade:
+
+- **Done and running:** the restart-required prompt. Your IntelliJ IDEA 2026.3 (IU-263.7307.44) loaded Agent Doc 0.2.843 at 18:07. Any upgrade that still needs a restart now shows a sticky "Agent Doc Plugin Update" balloon with **Restart IDE**.
+- **Not done:** restart-free upgrades. [GH #339](https://github.com/btakita/agent-doc/issues/339) closed on 2026-10-21 after concluding that today's 2026.3 plugin layout has no safe restart-free path. The fix is a new architecture, and the two new backlog items start it:
+  - `#jb339shelldesign`: design a stable shell plugin that loads the real code in its own classloader, so an upgrade swaps the code without IntelliJ unloading anything. It also covers activation receipts for the Remote Dev frontend. The deliverable is a spec plus a proof-of-concept spike.
+  - `#jbshrinkrestarts`: move `TerminalUtil` and `PatchWatcher` behind the native library, which already reloads without a restart, gated on the latency benchmark. `CrdtReplicaManager` stays in Kotlin unless the boundary carries binary op deltas.
+- I closed todos `#xj75` and `#subagent-operator-request-autoupgrade-263-path` too, since this was the direction they asked you to choose.
+
+> **Queue prompt:** do [#jb263-feed-verify]
+
+**Verified from the IDE's own files, and the todo is done:**
+
+- **Only the feed is configured.** `pluginUpdateSources.xml` lists exactly `https://github.com/btakita/agent-doc/releases/latest/download/agent-doc-jetbrains-263.xml`.
+- **The feed is valid for your build.** It serves 0.2.840 (from v0.35.556) with `since-build="263" until-build="263.*"`, which covers IU-263.7307.44.
+- **The plugin is past the target.** 0.2.843 is loaded, well past the todo's 0.2.824 target, after your restart.
+- **The warning is gone.** The current `idea.log` has zero "Cannot update plugin" lines.
+
+**One caveat:** 0.2.843 came from `make install`, not from the feed, and the feed's 0.2.840 is older. So the IDE has nothing to update through the feed right now. The feed-driven update path gets its first real exercise when the next release publishes a newer 263 package.
+
+**Your IDE restart is done**, so I've dropped it from my list of asks.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -186,8 +222,11 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:autoupgrade#1] do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.
-- ~~When the tasks/software/lazily.md session is idle, run `agent-doc queue repair-stale-completion tasks/software/lazily.md --apply` (dry run: 14 stale completion cells; skipped 2026-10-26 because that session was busy) and commit it~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#jb339shelldesign]
+- do [#jbshrinkrestarts]
+- ~~do [#cazn]~~
+- ~~do [#fixautoupgrade]: I like **Keep restart-only + prompt** as a fallback solution. We should attempt to auto-upgrade though. **Build the GH #339 architecture** seems like a reasonable solution sfor most cases. Not sure what **Re-qualify on 263.7307.44** would imply. Is **Re-qualify on 263.7307.44** safe and how effective would it be? Would **Re-qualify on 263.7307.44** be more likely to successfully run auto-upgrade than **Build the GH #339 architecture**? Your recommendation of **Keep restart-only + prompt** + **Shrink the restart count** seems reasonable if it performs well.~~
+- do [#jb263-feed-verify]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -202,9 +241,11 @@ The previous session ended (`/clear`) while all three sat there, so nothing was 
 - [ ] [#xj75] Choose the JetBrains restart-free upgrade direction in the [#subagent-operator-request-autoupgrade-263-path] packet in agent:exchange: keep restart-only + prompt, re-qualify on IU 263.7307.44, build the GH #339 shell, or shrink the restart count
 - [ ] [#subagent-operator-request-autoupgrade-263-path] Answer the blocking subagent question for tracked work jb262dynlauncherrecommen for queue item ‘Fix the auto-upgrade not working...the IDE needed to be restarted.’ in agent:exchange: The exact-263 package is restart-only by spec (GH #339 closed with that contract; `#jb262dynlauncherrecommen` is the same open decision for 262). (choices: Keep restart-only + prompt, Re-qualify on 263.7307.44, Build the GH #339 architecture, Shrink the restart count) (source: agent:review [#jb262dynlauncherrecommen])
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
+- [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#cazn] Is [#fixautoupgrade] done?
 - [ ] ☑️ [#fixautoupgrade] 🙋☑️ [#subagent:autoupgrade#1] Fix the auto-upgrade not working...the IDE needed to be restarted. [#subagent-operator-request-autoupgrade-263-path]: would **Shrink the restart count** have performance issues due to extra serialization?
 <!-- /agent:backlog -->
 

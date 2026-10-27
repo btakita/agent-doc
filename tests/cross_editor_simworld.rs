@@ -915,9 +915,11 @@ fn captured_editor_splice_recovery_lands_translated_offsets_across_an_independen
             splice(bug_offset + "queue ".chars().count(), 0, "retrieval"),
         ],
     );
-    assert!(captured
-        .resulting_text
-        .contains("- 📥 fix queue retrieval\n"));
+    assert!(
+        captured
+            .resulting_text
+            .contains("- 📥 fix queue retrieval\n")
+    );
 
     // Canonical advances independently while that burst is still retained.
     let response = "### Re: the thing — simworld\n";
@@ -2007,4 +2009,169 @@ fn two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end() {
     let (shared_mode_pane, staged) = provision(&document("shared-mode"), Some(IDEA));
     assert_eq!(session_of(&shared_mode_pane), "proj");
     assert!(!staged);
+}
+
+/// `#zedparity` (`editors/SPEC.md` section 13): `zed-lsp` picks up a replaced
+/// agent-doc binary in place. The running server execs into the new image
+/// with the same PID and the same stdio pipes, so Zed keeps its LSP session:
+/// a request whose first half reached the old image and whose second half
+/// arrives after the handoff is answered by the new one.
+#[cfg(target_os = "linux")]
+#[test]
+fn zed_lsp_hands_its_session_to_a_replaced_binary_in_place() {
+    use std::os::unix::fs::MetadataExt;
+
+    fn frame(message: &Value) -> Vec<u8> {
+        let body = serde_json::to_vec(message).unwrap();
+        let mut bytes = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
+        bytes.extend(body);
+        bytes
+    }
+    fn read_frame(stdout: &mut impl BufRead) -> Option<Value> {
+        let mut length = None;
+        loop {
+            let mut line = String::new();
+            if stdout.read_line(&mut line).ok()? == 0 {
+                return None;
+            }
+            if line.trim().is_empty() {
+                break;
+            }
+            if let Some(value) = line.trim().strip_prefix("Content-Length:") {
+                length = value.trim().parse::<usize>().ok();
+            }
+        }
+        let mut body = vec![0; length?];
+        stdout.read_exact(&mut body).ok()?;
+        serde_json::from_slice(&body).ok()
+    }
+    fn wait_for(lines: &Receiver<String>, needle: &str, seen: &mut Vec<String>) -> String {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match lines.recv_timeout(left) {
+                Ok(line) => {
+                    seen.push(line.clone());
+                    if line.contains(needle) {
+                        return line;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        panic!("zed-lsp never logged {needle}; stderr so far: {seen:#?}");
+    }
+
+    // Same filesystem as the built binary, so the launch path can start as a
+    // hard link and the replacement lands by an atomic rename, as an install does.
+    let dir = tempfile::Builder::new()
+        .prefix("zed-lsp-handoff-")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let built = Path::new(env!("CARGO_BIN_EXE_agent-doc"));
+    let launch = dir.path().join("agent-doc");
+    if std::fs::hard_link(built, &launch).is_err() {
+        std::fs::copy(built, &launch).unwrap();
+    }
+    let mut child = ProcessCommand::new(&launch)
+        .arg("zed-lsp")
+        .current_dir(dir.path())
+        .env("TMPDIR", dir.path())
+        .env("AGENT_DOC_ZED_EXTENSION_VERSION", "0.0.0-handoff-test")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    let mut stdin = child.stdin.take().unwrap();
+    let (frames_tx, frames) = mpsc::channel();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    std::thread::spawn(move || {
+        while let Some(message) = read_frame(&mut stdout) {
+            if frames_tx.send(message).is_err() {
+                break;
+            }
+        }
+    });
+    let (lines_tx, lines) = mpsc::channel();
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    std::thread::spawn(move || {
+        for line in stderr.lines().map_while(Result::ok) {
+            if lines_tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut seen = Vec::new();
+
+    stdin
+        .write_all(&frame(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}
+        })))
+        .unwrap();
+    let initialized = frames.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(initialized["id"], 1);
+    assert_eq!(
+        initialized["result"]["serverInfo"]["name"],
+        "agent-doc-zed-lsp"
+    );
+
+    // Half a request reaches the old image before the binary is replaced.
+    let shutdown = frame(&serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown"}));
+    let (head, tail) = shutdown.split_at(shutdown.len() / 2);
+    stdin.write_all(head).unwrap();
+    stdin.flush().unwrap();
+    std::thread::sleep(Duration::from_millis(600));
+
+    let staged = dir.path().join("agent-doc.next");
+    std::fs::copy(built, &staged).unwrap();
+    std::fs::rename(&staged, &launch).unwrap();
+    let replacement_inode = std::fs::metadata(&launch).unwrap().ino();
+
+    let exec = wait_for(&lines, "zed_lsp_binary_handoff status=exec", &mut seen);
+    assert!(
+        exec.contains(&format!("pending_input_bytes={}", head.len())),
+        "the unframed half-request must travel with the handoff: {exec}"
+    );
+    let resumed = wait_for(&lines, "zed_lsp_binary_handoff status=resumed", &mut seen);
+    assert!(resumed.contains(&format!("pid={pid}")), "{resumed}");
+    assert_eq!(
+        std::fs::metadata(format!("/proc/{pid}/exe")).unwrap().ino(),
+        replacement_inode,
+        "the same process must now run the replacement image"
+    );
+
+    stdin.write_all(tail).unwrap();
+    stdin.flush().unwrap();
+    let answered = frames.recv_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(
+        answered,
+        serde_json::json!({"jsonrpc": "2.0", "id": 2, "result": null})
+    );
+
+    stdin
+        .write_all(&frame(
+            &serde_json::json!({"jsonrpc": "2.0", "method": "exit"}),
+        ))
+        .unwrap();
+    drop(stdin);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "zed-lsp did not exit after `exit`"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success(), "{status:?}");
+    assert!(
+        std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().contains("handoff")),
+        "the handoff file must not outlive the handoff"
+    );
 }

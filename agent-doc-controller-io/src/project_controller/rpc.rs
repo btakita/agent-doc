@@ -10858,6 +10858,109 @@ struct ControllerCrdtReplicaPayload {
     /// through the native editor FFI.
     #[serde(default)]
     editor_pid: Option<u32>,
+    /// `#zedparity`: editor kind a sidecar declares at registration (`zed`).
+    /// Native plugins publish theirs on the liveness plane instead.
+    #[serde(default)]
+    editor_kind: Option<String>,
+    /// The sidecar's editor package generation (the Zed extension version).
+    #[serde(default)]
+    editor_version: Option<String>,
+    /// The agent-doc binary generation serving the sidecar.
+    #[serde(default)]
+    editor_binary_version: Option<String>,
+    /// Shared capability tokens the sidecar advertises.
+    #[serde(default)]
+    capabilities: Option<Vec<String>>,
+    /// How the editor may route: `document_only` for a host with no layout.
+    #[serde(default)]
+    layout_authority: Option<String>,
+}
+
+/// `#zedparity`: what a sidecar's registration says about the generation that
+/// is running, compared with the generations this controller pairs with.
+///
+/// It is reported (ops log and the `replica_register` response), not folded
+/// into the liveness plane: a liveness `EditorRegistration` selects the editor
+/// for PID-endpoint delivery (native saves, restart fan-out), and a sidecar
+/// such as `zed-lsp` has no editor endpoint to receive it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SidecarEditorGeneration {
+    editor_kind: String,
+    running: String,
+    expected: Option<&'static str>,
+    /// `current`, `stale`, or `unpaired` (this build pairs with no version).
+    status: &'static str,
+    binary_version: Option<String>,
+    controller_version: &'static str,
+    /// `current`, `differs`, or `unknown`.
+    binary_status: &'static str,
+    capabilities: Vec<String>,
+    /// The routing authority the controller applies, from the shared policy
+    /// rather than the declaration.
+    layout_authority: String,
+    declared_layout_authority: Option<String>,
+}
+
+fn sidecar_editor_generation(
+    payload: &ControllerCrdtReplicaPayload,
+) -> Option<SidecarEditorGeneration> {
+    let editor_kind = payload
+        .editor_kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())?
+        .to_string();
+    let running = payload
+        .editor_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .unwrap_or("unknown")
+        .to_string();
+    let expected =
+        agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version(&editor_kind);
+    let status = match expected {
+        Some(expected) if expected == running => "current",
+        Some(_) => "stale",
+        None => "unpaired",
+    };
+    let controller_version = env!("CARGO_PKG_VERSION");
+    let binary_version = payload
+        .editor_binary_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(str::to_string);
+    let binary_status = match binary_version.as_deref() {
+        Some(version) if version == controller_version => "current",
+        Some(_) => "differs",
+        None => "unknown",
+    };
+    let layout_authority =
+        if agent_doc_document_realtime::editor_contract::editor_route_document_only_reason(
+            &editor_kind,
+        )
+        .is_some()
+        {
+            agent_doc_document_realtime::editor_contract::DOCUMENT_ONLY_LAYOUT_AUTHORITY.to_string()
+        } else {
+            payload
+                .layout_authority
+                .clone()
+                .unwrap_or_else(|| "editor".to_string())
+        };
+    Some(SidecarEditorGeneration {
+        editor_kind,
+        running,
+        expected,
+        status,
+        binary_version,
+        controller_version,
+        binary_status,
+        capabilities: payload.capabilities.clone().unwrap_or_default(),
+        layout_authority,
+        declared_layout_authority: payload.layout_authority.clone(),
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -11641,7 +11744,43 @@ fn handle_crdt_replica_rpc(
     } else {
         None
     };
-    let data = controller_crdt_replica_data(runtime, &canonical, method, identity, &payload)?;
+    let mut data = controller_crdt_replica_data(runtime, &canonical, method, identity, &payload)?;
+    if method == ControllerCrdtReplicaMethod::Register
+        && data.get("client_id").is_some()
+        && let Some(generation) = sidecar_editor_generation(&payload)
+    {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_crdt_replica_editor_generation file={} identity={} editor_kind={} running={} expected={} status={} binary_version={} controller_version={} binary_status={} capabilities={} layout_authority={} declared_layout_authority={}",
+                canonical.display(),
+                identity,
+                generation.editor_kind,
+                generation.running,
+                generation.expected.unwrap_or("none"),
+                generation.status,
+                generation.binary_version.as_deref().unwrap_or("unknown"),
+                generation.controller_version,
+                generation.binary_status,
+                if generation.capabilities.is_empty() {
+                    "none".to_string()
+                } else {
+                    generation.capabilities.join(",")
+                },
+                generation.layout_authority,
+                generation
+                    .declared_layout_authority
+                    .as_deref()
+                    .unwrap_or("none"),
+            ),
+        );
+        if let Some(object) = data.as_object_mut() {
+            object.insert(
+                "editor_generation".to_string(),
+                serde_json::to_value(&generation)?,
+            );
+        }
+    }
     if replica_method_changes_delivery_frontier(method)
         && let Some(runtime) = runtime
         && let Err(error) =
@@ -12258,6 +12397,43 @@ fn resolve_editor_route_surface_reference(
     Ok(())
 }
 
+/// What [`enforce_document_only_editor_route`] removed from a route.
+#[derive(Debug, PartialEq, Eq)]
+struct DocumentOnlyEditorRoute {
+    reason: &'static str,
+    dropped_layout_args: usize,
+    dropped_surface_reference: bool,
+    dropped_layout_authority: bool,
+}
+
+/// `#zedparity` (`editors/SPEC.md` section 13): an editor whose host exposes no
+/// layout (Zed) is routed by document only.
+///
+/// Whatever layout evidence such a route carries cannot come from a measured
+/// surface, so it is dropped rather than trusted: the route becomes a
+/// single-document `ensure` observation of the routed document (the GH #373
+/// undetected-layout path), and it never awaits or borrows a frontend
+/// measurement. Every other editor's route is left untouched.
+fn enforce_document_only_editor_route(
+    payload: &mut ControllerEditorRoutePayload,
+) -> Option<DocumentOnlyEditorRoute> {
+    let reason = agent_doc_document_realtime::editor_contract::editor_route_document_only_reason(
+        payload.source.as_deref()?,
+    )?;
+    let dropped = DocumentOnlyEditorRoute {
+        reason,
+        dropped_layout_args: payload.layout_args.len(),
+        dropped_surface_reference: payload.surface_reference.is_some(),
+        dropped_layout_authority: payload.layout_authority.is_some(),
+    };
+    payload.layout_args.clear();
+    payload.surface_reference = None;
+    payload.layout_authority = None;
+    payload.column_order = Default::default();
+    payload.layout_mode = Some("ensure".to_string());
+    Some(dropped)
+}
+
 fn handle_editor_route_rpc(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -12301,6 +12477,21 @@ fn handle_editor_route_rpc_with_layout_delegate(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let mut payload: ControllerEditorRoutePayload =
         serde_json::from_str(&payload_json).context("failed to parse editor route payload")?;
+    let document_only = enforce_document_only_editor_route(&mut payload);
+    if let Some(document_only) = &document_only {
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_editor_route_document_only file={} source={} reason={} dropped_layout_args={} dropped_surface_reference={} dropped_layout_authority={} action=route_by_document layout_mode=ensure",
+                canonical.display(),
+                payload.source.as_deref().unwrap_or("none"),
+                document_only.reason,
+                document_only.dropped_layout_args,
+                document_only.dropped_surface_reference,
+                document_only.dropped_layout_authority,
+            ),
+        );
+    }
     let surface_referenced = payload.surface_reference.is_some();
     if let Some(reference) = payload.surface_reference.take() {
         resolve_editor_route_surface_reference(
@@ -12347,7 +12538,9 @@ fn handle_editor_route_rpc_with_layout_delegate(
     // GH #376: a route that observed no column on a Remote Dev backend whose
     // layout the JetBrains Client measures takes that measurement, the
     // authority its editor deferred to, before any fallback below.
-    let layout_args = if surface_referenced {
+    // `#zedparity`: a document-only route never borrows another editor's
+    // measured layout either.
+    let layout_args = if surface_referenced || document_only.is_some() {
         layout_args
     } else {
         match resolve_editor_route_measured_layout(
@@ -42114,6 +42307,110 @@ mod tests {
         );
     }
 
+    /// `#zedparity`: a Zed route carries no layout the controller can trust,
+    /// so its evidence is dropped and the route becomes a single-document
+    /// `ensure` of the routed document. Other editors' routes are untouched.
+    #[test]
+    fn zed_editor_routes_are_routed_by_document_only() {
+        let mut zed: ControllerEditorRoutePayload = serde_json::from_str(
+            r#"{"source":"zed_lsp","layout_args":["--col","a.md","--col","b.md","--focus","b.md"],
+                "column_order":"unknown","layout_mode":"exact",
+                "surface_reference":null,"layout_authority":"frontend_measured"}"#,
+        )
+        .unwrap();
+        let dropped = enforce_document_only_editor_route(&mut zed)
+            .expect("a Zed route must be routed by document only");
+        assert_eq!(
+            dropped,
+            DocumentOnlyEditorRoute {
+                reason: "zed_exposes_no_layout",
+                dropped_layout_args: 6,
+                dropped_surface_reference: false,
+                dropped_layout_authority: true,
+            }
+        );
+        assert!(zed.layout_args.is_empty());
+        assert!(zed.layout_authority.is_none());
+        assert_eq!(zed.layout_mode.as_deref(), Some("ensure"));
+        assert_eq!(zed.column_order, agent_doc_tmux::LayoutColumnOrder::Editor);
+        // The emptied route takes the GH #373 path: the routed document alone.
+        let routed = "/project/session.md";
+        assert_eq!(
+            editor_route_undetected_layout_args(
+                &zed.layout_args,
+                zed.layout_mode.as_deref(),
+                routed
+            )
+            .unwrap(),
+            Some(vec![
+                "--col".to_string(),
+                routed.to_string(),
+                "--focus".to_string(),
+                routed.to_string(),
+            ])
+        );
+
+        for source in [
+            None,
+            Some("jetbrains_plugin"),
+            Some("vscode"),
+            Some("zedless"),
+        ] {
+            let mut other: ControllerEditorRoutePayload =
+                serde_json::from_str(r#"{"layout_args":["--col","a.md","--col","b.md"]}"#).unwrap();
+            other.source = source.map(str::to_string);
+            assert_eq!(
+                enforce_document_only_editor_route(&mut other),
+                None,
+                "{source:?}"
+            );
+            assert_eq!(other.layout_args.len(), 4, "{source:?}");
+        }
+    }
+
+    /// `#zedparity`: a sidecar registration names its kind, generation,
+    /// capabilities, and layout authority; the controller reports it against
+    /// the generations this build pairs with, and applies the shared
+    /// document-only policy whatever the sidecar declared.
+    #[test]
+    fn sidecar_registration_reports_the_running_generation() {
+        let payload = |fields: &str| -> ControllerCrdtReplicaPayload {
+            serde_json::from_str(&format!(
+                r#"{{"method":"replica_register","identity":"zed-lsp:1:x","editor_pid":1{fields}}}"#
+            ))
+            .unwrap()
+        };
+        assert_eq!(sidecar_editor_generation(&payload("")), None);
+
+        let expected = agent_doc_reliable_sync_io::liveness::expected_editor_plugin_version("zed")
+            .expect("the workspace build pairs a Zed extension version");
+        let current = sidecar_editor_generation(&payload(&format!(
+            r#","editor_kind":"zed","editor_version":"{expected}","editor_binary_version":"{}","capabilities":[],"layout_authority":"editor""#,
+            env!("CARGO_PKG_VERSION")
+        )))
+        .unwrap();
+        assert_eq!(current.status, "current");
+        assert_eq!(current.expected, Some(expected));
+        assert_eq!(current.binary_status, "current");
+        assert!(current.capabilities.is_empty());
+        assert_eq!(current.layout_authority, "document_only");
+        assert_eq!(current.declared_layout_authority.as_deref(), Some("editor"));
+
+        let stale = sidecar_editor_generation(&payload(
+            r#","editor_kind":"zed","editor_version":"0.0.1","editor_binary_version":"0.0.1""#,
+        ))
+        .unwrap();
+        assert_eq!(stale.status, "stale");
+        assert_eq!(stale.binary_status, "differs");
+
+        let unpaired =
+            sidecar_editor_generation(&payload(r#","editor_kind":"third-party""#)).unwrap();
+        assert_eq!(unpaired.status, "unpaired");
+        assert_eq!(unpaired.running, "unknown");
+        assert_eq!(unpaired.binary_status, "unknown");
+        assert_eq!(unpaired.layout_authority, "editor");
+    }
+
     /// GH #106: the retained-layout fallback was a feedback loop. It appended
     /// every uncovered asking document to the last published layout and
     /// republished the result, so four documents switching in one second grew
@@ -47741,6 +48038,68 @@ mod tests {
         let second = runtime.pane_layout_desired().unwrap();
         assert!(second.generation > first.generation);
         assert_eq!(second.invocation, first.invocation);
+    }
+
+    /// `#zedparity`: the route handler applies the document-only policy. A
+    /// Zed route that names a two-column layout publishes only the routed
+    /// document; the same route from another editor publishes both columns.
+    #[test]
+    fn a_zed_editor_route_publishes_only_the_routed_document() {
+        let route = |source: Option<&str>| {
+            let dir = tempfile::TempDir::new().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("plan.md");
+            let other = dir.path().join("other.md");
+            for (path, session) in [(&file, "plan"), (&other, "other")] {
+                std::fs::write(
+                    path,
+                    format!("---\nagent_doc_session: {session}\nagent: codex\n---\n# {session}\n"),
+                )
+                .unwrap();
+            }
+            let bootstrap = test_bootstrap(&dir);
+            let runtime = test_controller_runtime(&bootstrap);
+            let mut payload = serde_json::json!({
+                "relative_path": "plan.md",
+                "layout_args": [
+                    "--col", file.display().to_string(),
+                    "--col", other.display().to_string(),
+                    "--focus", file.display().to_string()
+                ],
+                "layout_mode": "exact",
+                "dispatch_only": true,
+                "plain_trigger": true
+            });
+            if let Some(source) = source {
+                payload["source"] = serde_json::Value::String(source.to_string());
+            }
+            let request = ControllerRequest {
+                command: "editor_route".to_string(),
+                file: Some(file.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: None,
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(payload.to_string()),
+                sequence: None,
+            };
+            let result = handle_editor_route_rpc(&bootstrap, runtime.as_ref(), request).unwrap();
+            assert_eq!(result.exit_code, 0, "{source:?}: {}", result.output);
+            let columns = runtime.pane_layout_desired().unwrap().invocation.columns;
+            let routed = file.canonicalize().unwrap().display().to_string();
+            (dir, columns, routed)
+        };
+
+        let (_zed_dir, zed_columns, routed) = route(Some("zed_lsp"));
+        assert_eq!(zed_columns, vec![routed]);
+        let (_jb_dir, jetbrains_columns, _) = route(Some("jetbrains_plugin"));
+        assert_eq!(jetbrains_columns.len(), 2, "{jetbrains_columns:?}");
     }
 
     /// `#ideriderindependentnav` P6: an editor route from an installation
@@ -64171,6 +64530,11 @@ body
             awareness_b64: None,
             source: Some("retained-editor-arrival-test".into()),
             editor_pid,
+            editor_kind: None,
+            editor_version: None,
+            editor_binary_version: None,
+            capabilities: None,
+            layout_authority: None,
         };
         let seed_identity = format!("jetbrains-{editor_pid}-retained-editor-arrival-seed");
         agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
@@ -64361,6 +64725,11 @@ body
                 awareness_b64: None,
                 source: Some("test".into()),
                 editor_pid: None,
+                editor_kind: None,
+                editor_version: None,
+                editor_binary_version: None,
+                capabilities: None,
+                layout_authority: None,
             },
         )
         .unwrap();

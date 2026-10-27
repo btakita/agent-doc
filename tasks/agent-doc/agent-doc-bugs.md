@@ -768,6 +768,48 @@ Applying the remote update itself is unchanged (≈64–71 ms), because lazily's
 **Possible follow-up, not queued:** after a remote update, the first local splice walks back from the end of the document to find its position, about 57 µs at 125 KB. This is older behaviour, not part of this change.
 
 **Still running:** `#kotlinflushprep`.
+
+### Re: do [#kotlinflushprep] — opus-5 · 2026-10-27T00:24-04:00
+
+> **Queue prompt:** do [#kotlinflushprep]
+
+**Partly done: faster, but not fully proportional to the edit yet.** On `main` as `0e06cf94d4` (JetBrains classic 0.2.862, 2026.2 0.2.863, 2026.3 0.2.864, `d1155e8943`), installed. IntelliJ needs a restart to load it.
+
+**Cause:** the old `prepareLocalEditorEditsUtil` (`CrdtReplicaManager.kt:1082-1124`) did three things that grew with the document:
+- copied the whole shadow into a `StringBuilder`;
+- counted code points over the whole shadow, and these documents contain multibyte characters such as `—`, `❯` and `✓`;
+- copied the whole document again for `resultingText`.
+
+**Fix** (new `LocalEditorSplicePreparation.kt`, same function name and signature):
+- **Edit window:** a burst is applied to one window over the shadow, and only that window is read.
+- **Offset conversion:** UTF-16 offsets become code points through an index of the shadow's surrogate pairs. The index is cached by String identity and handed to the next flush, so typing never rescans the document.
+- **Same output:** the native edits are the same as before.
+
+**What's left:** each flush still builds the next shadow as a whole `String`. That copy alone is ≈35 µs at 125 KB and ≈170 µs at 500 KB, which is all `prepare` still costs. Removing it needs a rope or piece-table shadow in `CrdtReplicaManager` and `CrdtReplicaForwarder`. That's a bigger, riskier change for tens of µs per flush, so I parked it in the icebox as `#jbropeshadow` instead of queueing it. Move it to the backlog if you want it.
+
+**Numbers** (`p50_best`, before → after; the gate passes at all sizes):
+
+| Size | `prepare` (1 / 16 keys) | `replica_flush_16` | `typing_report` |
+|---|---|---|---|
+| 32 KB | 8.8 / 10.5 → 5.6 / 7.3 µs | 54.8 → 52.7 µs | 38.0 → 39.2 µs |
+| 125 KB | 33.8 / 36.3 → 25.7 / 23.1 µs | 94.7 → 71.7 µs | 116.8 → 108.1 µs |
+| 500 KB | 229 / 269 → 177 / 179 µs | 332 → 229 µs | 494 → 400 µs |
+
+**Tests:**
+- A differential test runs the old implementation, copied verbatim, beside the new one on 4,000 randomized chained bursts. They cover multibyte text, surrogate pairs, unpaired halves and the three refusals.
+- Six deliberate bugs in the window and index code were all caught.
+- **Integrated:**
+  - check-fast passed.
+  - Classic plugin: 1032 JUnit tests, 0 failures.
+  - `jetbrains-262-check` and `-263-check` pass.
+  - I resolved one spec conflict, keeping both the remote-fold and flush-prep sections.
+
+**Queue status:** the run queue has no open work left. Everything dispatched this session is merged and installed.
+
+**Waiting on you:**
+- Before restarting IntelliJ, run **Run Agent Doc** once to finish `[#ahfe]` / GH #267. Then restart to load 0.2.864.
+- Reload VS Code to load 0.2.88.
+- Run `#vscodecodersmoke` and `#gh379-remotedev-proof` on the remote hosts.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -778,7 +820,7 @@ Applying the remote update itself is unchanged (≈64–71 ms), because lazily's
 - ~~do [#jbshellr1rest]~~
 - ~~do [#vscodesessionparsers]~~
 - ~~do [#replicaremoteflush]~~
-- 🚧 [#subagent:kotlinflush#1] do [#kotlinflushprep]
+- ~~do [#kotlinflushprep]~~
 - ~~do [#vscodekoffivsix]~~
 - ~~do [#vscodekoffisegv]~~
 ~~~done
@@ -863,7 +905,6 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#kotlinflushprep] Make the JetBrains prepareLocalEditorEditsUtil step proportional to the edit: it is now the size-dependent part of a replica flush (about 30 us at 125 KB, 170 us at 500 KB); gate on make jetbrains-keystroke-bench.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->
@@ -873,6 +914,7 @@ kotlin.UninitializedPropertyAccessException: lateinit property mainSplitters has
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#jbropeshadow] Make the JetBrains replica shadow a non-String text (rope or piece table) in CrdtReplicaManager and CrdtReplicaForwarder (knownReplicaText, the next flush base), so a flush stops allocating and copying the whole next shadow; that copy is now the only document-size-dependent part of prepareLocalEditorEditsUtil (about 25 us at 125 KB, 177 us at 500 KB). Gate on make jetbrains-keystroke-bench.
 - [ ] [#jbfrontendswap] [agent-doc] Remote Dev frontend implementation swaps for the GH #339 shell design: let the JetBrains Client load the swappable implementation from the backend so frontend changes stop needing a restart. Parked 2026-10-26: it pushes backend code into the local client JVM without a plugin install, which changes the security boundary. The frontend stays shell-only (editors/jetbrains/SPEC.md, "Restart-free implementation generations").
 - [ ] [#ghrecvpolicy] [agent-doc] Recipient-side [receive] auto_create_components policy for multi-user workspaces (GH #40, https://github.com/btakita/agent-doc/issues/40). Parked until multi-user workspace support exists.
 <!-- /agent:icebox -->

@@ -485,6 +485,7 @@ entries, and the `agent:done archive=` file):
 | No `id=`; action cites exactly one OPEN `agent:review`, `agent:backlog`, or `agent:icebox` id (`Verify [#gate1] live`; unknown ids such as `GH #267` beside it do not count) | Minted: `- [ ] [#t1a2] Verify [#gate1] live (source: agent:review [#gate1])`. | Appended for that item. |
 | …and an OPEN todo is already linked to that item (its locator, or a legacy row sharing the id) | No-op: duplicate todos for one item fold into the existing row (`--todo-edit` changes its text). | — |
 | …and only a CHECKED todo is linked to it | A follow-up action: minted id. | Appended. |
+| …and THIS closeout resolves that item (`--done` / `--review-resolve` in the same write, `#todoaddonsamecycledone`) | A standalone follow-up: minted id, never folded into the item's open todo. | None. |
 | No `id=`; action cites several open tracked ids, or none (only resolved/unknown ids such as `GH #267`) | Minted like a backlog id. | None. |
 | Explicit `id=<id>` / `[#<id>]` naming nothing tracked | Used verbatim, whatever the action cites; never folded into another row. | Appended when the action cites exactly one open tracked item. |
 | Explicit id OWNED by an open review/backlog/icebox item | Rejected with an actionable error naming the owner: pass a new `id=` and cite the item, or drop `id=`. | — |
@@ -494,7 +495,33 @@ entries, and the `agent:done archive=` file):
 
 A replayed add the document already shows (same action text, any checkbox
 state) stays a no-op before any rejection, so replaying a closeout recorded by
-an older binary never fails on a row it already wrote. Legacy rows whose own id
+an older binary never fails on a row it already wrote. The binary-owned
+`(source: agent:<component> [#<id>])` suffix is not part of the action for this
+match: a replay evaluated after the source resolved computes no locator, and
+must still find the row an earlier pass wrote with one.
+
+**Same-closeout resolution (`#todoaddonsamecycledone`).** A closeout's todo
+ops run before its `--done`, so `--todo-add` is evaluated against the tracked
+state from BEFORE that closeout's resolutions (the item is still open). An add
+whose action cites an item the same closeout resolves never layers on it: it
+mints a standalone own id with no source locator, does not fold into an open
+todo already linked to that item, and is exempt from that closeout's
+auto-completion and `#tododone` advisory. Exactly one open todo results, and a
+replay of the closeout folds into it. Why standalone rather than layered: a
+layered todo is the operator prompt for its source item, and an item finished
+in this cycle has no prompt left to show. The locator would be an
+auto-completion edge to finished work, so the row would be checked off by this
+closeout (or, if exempted here, by preflight's `linked_work_resolved` signal
+and the next closeout), and could never survive. An action written in the
+cycle that finishes an item is a follow-up that finishing it raised (`raised by
+the #<id> fix`); the cited id is context, like a citation of work resolved in
+an earlier cycle, which also mints a standalone row. Observed on 2026-10-27:
+`--done claimfollowstruck` plus a `--todo-add` citing `#claimfollowstruck`
+left `[x] [#12t8] ... (source: agent:backlog [#claimfollowstruck])`, checked
+off by its own closeout, beside a surrogate `[ ] [#krwr] ...` that a replay of
+the captured mutation plan minted because the locator-less action no longer
+matched the layered row. Todos added in EARLIER cycles keep their semantics:
+one layered on an item a closeout resolves is checked off by it. Legacy rows whose own id
 equals a tracked id keep every link behavior: the link index reads that shared
 id as a backlink.
 
@@ -623,7 +650,8 @@ and its done archive; no network, no clock, no prose heuristics:
   repeat until the state changes.
 - **Closeout** (any write that carries tracked-work flags) checks off every
   OPEN todo whose OWN id, or every linked source, is resolved — including ids this closeout resolved with
-  `--done` / `--review-resolve` — in the same transaction, prints
+  `--done` / `--review-resolve`, but never a todo this closeout's own
+  `--todo-add` created (`#todoaddonsamecycledone`) — in the same transaction, prints
   `[todo] auto-done: #<id>`, and logs `todo_auto_done ... reason=linked_work_resolved`
   to `ops.log` once the envelope publishes. This is the only automatic todo
   completion. A todo that only cites resolved work is never auto-completed —
@@ -793,7 +821,8 @@ tracked-id/surrogate layering described above for newly emitted packets.
 
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that
-owns the id was already checked off by the `#todoids` closeout check), the
+owns the id was already checked off by the `#todoids` closeout check; a todo
+this closeout's `--todo-add` created is a fresh follow-up and is not named), the
 write prints a non-blocking `[todo] advisory (#tododone)` line
 naming the ids and the exact `--todo-done <selector>` command, and logs
 `operator_todo_done_advisory` to `ops.log`. Like the gate advisory it is

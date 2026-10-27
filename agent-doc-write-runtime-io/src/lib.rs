@@ -2338,8 +2338,24 @@ fn apply_pending_and_status_mutations_with_mode(
                         // closeout moved names the component it now lives in
                         // (`(source: agent:review [#id])` for a fresh gate) and
                         // can layer on an item this closeout added.
+                        // `#todoaddonsamecycledone`: evaluated against the
+                        // tracked state from before this closeout's `--done`
+                        // (which runs below), but never layered on an item this
+                        // closeout resolves: one standalone follow-up per add,
+                        // exempt from this closeout's auto-done and advisory.
+                        let resolving_this_closeout =
+                            resolved_ids_this_cycle(&options.pending_done, &options.review_resolve);
+                        let mut todo_added_ids: Vec<String> = Vec::new();
                         for text in &options.todo_add {
-                            backlog_cmd::todo_add(file, text)?;
+                            if let Some(id) = backlog_cmd::todo_add_in_closeout(
+                                file,
+                                text,
+                                &resolving_this_closeout,
+                            )?
+                            .new_todo_id
+                            {
+                                todo_added_ids.push(id);
+                            }
                         }
                         // `#tododone`: close operator actions in the same closeout
                         // that finished them. Edits run first so a same-cycle
@@ -2513,12 +2529,13 @@ fn apply_pending_and_status_mutations_with_mode(
                         // check it off in this same transaction. Runs before the
                         // `#tododone` advisory so only cite-only items remain
                         // for it to name.
-                        todo_auto_done.replace(backlog_cmd::todo_auto_complete_linked(
+                        todo_auto_done.replace(backlog_cmd::todo_auto_complete_linked_except(
                             file,
                             &resolved_ids_this_cycle(
                                 &options.pending_done,
                                 &options.review_resolve,
                             ),
+                            &todo_added_ids,
                         )?);
                         // `#operatortodo`: a human gate opened by this closeout is
                         // an operator action. Read (not write) the final virtual
@@ -2533,12 +2550,13 @@ fn apply_pending_and_status_mutations_with_mode(
                             .replace(backlog_cmd::todo_unreferenced_ids(file, &opened_gate_ids)?);
                         // `#tododone`: an operator action tied to work this closeout
                         // resolved is usually finished too; name the open ones.
-                        open_todo_refs.replace(backlog_cmd::todo_open_references(
+                        open_todo_refs.replace(backlog_cmd::todo_open_references_except(
                             file,
                             &resolved_ids_this_cycle(
                                 &options.pending_done,
                                 &options.review_resolve,
                             ),
+                            &todo_added_ids,
                         )?);
                         added_ids.replace(Some((
                             same_cycle_added_ids,

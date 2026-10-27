@@ -30,7 +30,7 @@ use crate::dispatch_recovery::{
     StartingPaneRecoveryWaitOptions, resolve_fresh_dispatch_target_after_ready_wait,
     settle_post_launch_dispatch_target, wait_for_starting_pane_recovery_target,
 };
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_target::bind_running_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::pane_provenance::pane_route_provenance;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
@@ -796,7 +796,7 @@ pub fn resolve_or_create_pane_dispatch_only(
                         winner.source_summary()
                     ),
                 );
-                register_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
+                bind_running_dispatch_target(tmux, session_id, &winner.pane_id, file_path)?;
                 rescue_target(&winner.pane_id);
                 return dispatch_only_reopen_existing_pane(
                     tmux,
@@ -1351,7 +1351,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                     true,
                     true,
                 )?;
-                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
+                bind_running_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 let supervisor_recovered_without_path_owner =
                     live_owner.is_none() && matches!(supervisor_health, SupervisorHealth::Healthy);
                 match ensure_existing_pane_ready_for_dispatch(
@@ -1421,7 +1421,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                         );
                     }
                 }
-                register_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
+                bind_running_dispatch_target(tmux, session_id, &registered_pane, file_path)?;
                 eprintln!("[route] Pane {} is alive, sending command", registered_pane);
                 let dispatch_start = dispatch_existing_managed_reopen(
                     tmux,
@@ -1508,7 +1508,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
         && is_agent_process(tmux, &new_pane, harness)
     {
         eprintln!("[route] Lazy-claiming to pane {} (dead pane)", new_pane);
-        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
+        bind_running_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         match ensure_existing_pane_ready_for_dispatch(
             tmux,
             file,
@@ -1563,7 +1563,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                 );
             }
         }
-        register_dispatch_target(tmux, session_id, &new_pane, file_path)?;
+        bind_running_dispatch_target(tmux, session_id, &new_pane, file_path)?;
         let dispatch_start = dispatch_existing_managed_reopen(
             tmux,
             file,
@@ -1837,7 +1837,7 @@ pub fn rescue_from_stash(
                 Err(e) => eprintln!("[route] join-pane rescue failed for {} ({})", pane_id, e),
             }
         }
-        if let Err(e) = register_dispatch_target(tmux, session_id, pane_id, file_path) {
+        if let Err(e) = bind_running_dispatch_target(tmux, session_id, pane_id, file_path) {
             eprintln!("[route] warning: re-register failed: {}", e);
         }
         return moved;
@@ -1876,7 +1876,9 @@ pub fn optimistic_busy_pane_dispatch(
         detail,
         harness.binary
     );
-    register_dispatch_target(tmux, session_id, pane, file_path)?;
+    // `#predispatchreadyoverwrite`: the pane is busy and authoritative; keep
+    // the owner's `Busy` record rather than re-projecting it as `Ready`.
+    bind_running_dispatch_target(tmux, session_id, pane, file_path)?;
     let dispatch_start = dispatch_existing_managed_reopen(
         tmux,
         file,

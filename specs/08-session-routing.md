@@ -897,6 +897,7 @@ When the user navigates to a document in the editor:
    - Starts Claude asynchronously in the new pane
    - Registers before the launch and never after it: from the launch on, the child `agent-doc start` owns the document's actor generation, so a provision returns the pane it bound without writing the binding again (`#claimpanecasrace`)
    - A waiting (non-provision) route re-validates the fresh pane after the ready wait through the fenced post-launch bind, as does every route path that restarted a supervisor: it writes nothing when the owner's record already names the pane, reclaims a pane a projection rebind moved away (compare-and-swapped on the generation it decided against, so a supervisor restart committing in between wins), and follows an owner that committed a newer generation for another live pane (`#dispatchrebindaudit`)
+   - A pre-dispatch rebind of an already-running pane never writes `Ready` over a live owner: a record already binding the session to the pane in a live state (`Starting`/`Ready`/`Busy`/`WaitingInput`) is left as the owner wrote it and only registry metadata is refreshed; an owner on another live pane is never bound over (the route fails closed); any other binding is written `Ready`, compare-and-swapped on the generation the route decided against (`#predispatchreadyoverwrite`). Admission needs only the pane/session/generation binding; the controller's `actor_busy_draining` gate reads the owner's real state
 
 ### Cross-Repository Owner Guard (`#cross-repo-owner-guard`)
 

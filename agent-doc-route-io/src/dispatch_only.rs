@@ -31,7 +31,7 @@ use crate::dispatch::{
 use crate::dispatch_recovery::{
     StartingPaneRecoveryWaitOptions, wait_for_starting_pane_recovery_target,
 };
-use crate::dispatch_target::register_dispatch_target;
+use crate::dispatch_target::bind_running_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
 use crate::startup_ready::{pane_composer_projection, wait_for_agent_ready_outcome};
@@ -559,7 +559,7 @@ pub fn dispatch_only_send_reopen(
                             return Ok(dispatch_pane);
                         }
                         drop(pre_dispatch_route_guard.take());
-                        register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+                        bind_running_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
                         resubmit_stranded_dispatch_only_trigger(
                             tmux,
                             file,
@@ -758,7 +758,7 @@ pub fn dispatch_only_send_reopen(
                         return Ok(dispatch_pane);
                     }
                     drop(pre_dispatch_route_guard.take());
-                    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+                    bind_running_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
                     resubmit_stranded_dispatch_only_trigger(
                         tmux,
                         file,
@@ -1048,7 +1048,7 @@ pub fn dispatch_only_send_reopen(
             &dispatch_pane,
         );
     }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    bind_running_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     let direct_pane_submit_policy = classify_direct_pane_submit_policy(options.intent);
     let await_start_proof = direct_pane_submit_policy
         == DirectPaneSubmitPolicy::ObserveHarnessAcceptance
@@ -1246,7 +1246,7 @@ pub fn dispatch_only_reopen_existing_pane(
             },
         );
     }
-    register_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
+    bind_running_dispatch_target(tmux, session_id, &dispatch_pane, file_path)?;
     match ensure_existing_pane_ready_for_dispatch(
         tmux,
         file,

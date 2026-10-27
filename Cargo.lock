@@ -1664,6 +1664,7 @@ dependencies = [
  "agent-doc-editor-surface",
  "agent-doc-frontmatter",
  "agent-doc-fs",
+ "agent-doc-project-root-io",
  "anyhow",
  "tempfile",
  "toml 1.1.2+spec-1.1.0",

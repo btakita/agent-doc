@@ -15,6 +15,7 @@ agent-doc-config = { path = "../agent-doc-config", version = "0.35.556" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.556" }
 agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.556" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.556" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.556" }
 anyhow = "1"
 toml = "1.1"
 

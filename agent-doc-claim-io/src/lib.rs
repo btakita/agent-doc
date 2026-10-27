@@ -43,7 +43,8 @@
 //!   project's authoritative tmux session. Ambient last-active tmux state is
 //!   never treated as ownership proof.
 //! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
-//!   the project's configured tmux session (`project_tmux_session()`). Cross-session
+//!   the document store's configured tmux session (`project_tmux_session_for_root`,
+//!   never the process cwd's pin, `#loadprojectfordoccwd`). Cross-session
 //!   mismatches fail closed while the configured session is still alive; stale
 //!   configured sessions are auto-accepted, and explicit `--force` is required to
 //!   override a live cross-session mismatch. `--force` additionally overrides the
@@ -399,10 +400,11 @@ pub fn run(
     // session, else the allowed project pin; a pane in a disallowed session is
     // refused before any file mutation (`--force` does not widen the list).
     // The single-session default keeps the project pin unchanged.
-    let session_policy = {
-        let file_arg = file.to_string_lossy().into_owned();
-        agent_doc_sync_io::sync::tmux_session_policy_for_scope(&[], Some(&file_arg))
-    };
+    // `#loadprojectfordoccwd`: the session policy and the `tmux_session` pin are
+    // the document store's config, never the process cwd's (a rootless
+    // document's store has none until it is created).
+    let session_policy = agent_doc_sync_io::sync::tmux_session_policy_for_root(&store_root);
+    let project_tmux_session = project_config_io::project_tmux_session_for_root(&store_root);
     let configured_session = if session_policy.is_multi_session() {
         let claiming_pane_session = pane_id
             .as_deref()
@@ -421,12 +423,12 @@ pub fn run(
             &session_policy,
             claiming_pane_session.as_deref(),
             agent_doc_sync_io::sync::document_tmux_session_binding(file).as_deref(),
-            project_config_io::project_tmux_session().as_deref(),
+            project_tmux_session.as_deref(),
         )
         .map_err(|refused| anyhow::anyhow!("[claim] {refused}"))?
         .map(|target| target.session)
     } else {
-        project_config_io::project_tmux_session()
+        project_tmux_session
     };
 
     // `#ideriderindependentnav` P6: the requester's own navigation lane, when

@@ -101,12 +101,32 @@ pub fn load_project() -> ProjectConfig {
     load_project_from(&project_config_path())
 }
 
-/// Resolve project config by walking up from a document path to find `.agent-doc/config.toml`.
+/// Load the config of the store that owns `file` ([`project_store_for_doc`]),
+/// or defaults when that store has no config yet.
+///
+/// Never the process cwd's project (`#loadprojectfordoccwd`): a document with
+/// no `.agent-doc` ancestor reads its canonical parent's store, the store start
+/// (`#startcwdfallback`), claim (`#claimwrongstore`), the route and sync's
+/// recovered-owner bind (`#syncnorootfallback`) bind it in. Until that store is
+/// created its config is absent, so the document gets defaults; reading it
+/// creates nothing.
 pub fn load_project_for_doc(file: &Path) -> ProjectConfig {
-    if let Some(root) = project_root_for_doc(file) {
-        return load_project_from(&root.join(".agent-doc").join("config.toml"));
+    match project_store_for_doc(file) {
+        Some(store) => load_project_for_root(&store),
+        None => ProjectConfig::default(),
     }
-    load_project()
+}
+
+/// The store that owns a document's project config:
+/// [`agent_doc_project_root_io::project_root_or_file_parent`] (the nearest
+/// `.agent-doc` project of the canonical document, else its canonical parent).
+/// A path that cannot be canonicalized yet (a document not created) keeps the
+/// lexical project walk ([`project_root_for_doc`]) and has no store when that
+/// finds no project. Never the process cwd's project.
+pub fn project_store_for_doc(file: &Path) -> Option<PathBuf> {
+    agent_doc_project_root_io::project_root_or_file_parent(file)
+        .ok()
+        .or_else(|| project_root_for_doc(file))
 }
 
 /// Resolve the nearest project root for a document by walking up to `.agent-doc/`.
@@ -251,10 +271,10 @@ pub fn project_config_path_for_root(project_root: &Path) -> PathBuf {
 
 /// Load the config of the project rooted at `project_root` (default when absent).
 ///
-/// Unlike [`load_project_for_doc`], this never falls back to the process cwd's
-/// project: a caller that already resolved a document's store
+/// A caller that already resolved a document's store
 /// (`project_root_or_file_parent`) reads that store's config, even when the
-/// store has no config yet (`#startcwdfallback`).
+/// store has no config yet (`#startcwdfallback`); [`load_project_for_doc`]
+/// resolves the store itself.
 pub fn load_project_for_root(project_root: &Path) -> ProjectConfig {
     load_project_from(&project_config_path_for_root(project_root))
 }
@@ -505,6 +525,97 @@ mod tests {
         let doc = dir.path().join("nested/deep/file.md");
         let root = project_root_for_doc(&doc).unwrap();
         assert_eq!(root, dir.path());
+    }
+
+    /// Serializes the tests that move the process cwd (`#loadprojectfordoccwd`).
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct ScopedCurrentDir {
+        previous: PathBuf,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let lock = CWD_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let previous = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.previous);
+        }
+    }
+
+    /// `#loadprojectfordoccwd`: a document's config is its store's, never the
+    /// process cwd's project. A rootless document's store is its canonical
+    /// parent (the store start, claim, the route and sync bind it in), which has
+    /// no config until it is created, so the document reads defaults even from
+    /// inside another configured project, and the read creates no store.
+    #[test]
+    fn load_project_for_doc_reads_the_document_store_never_the_cwd_project() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let cwd_project = base.join("cwd-project");
+        std::fs::write(
+            setup_project(&cwd_project),
+            "default_agent = \"codex\"\ntmux_session = \"cwd-pin\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(cwd_project.join("sub")).unwrap();
+        let doc_project = base.join("doc-project");
+        std::fs::write(setup_project(&doc_project), "tmux_session = \"doc-pin\"\n").unwrap();
+        std::fs::create_dir_all(doc_project.join("tasks")).unwrap();
+        let tracked = doc_project.join("tasks/doc.md");
+        std::fs::write(&tracked, "# tracked\n").unwrap();
+        let notes = base.join("notes/deep");
+        std::fs::create_dir_all(&notes).unwrap();
+        let rootless = notes.join("rootless.md");
+        std::fs::write(&rootless, "# rootless\n").unwrap();
+        let unborn = notes.join("unborn.md");
+        assert!(
+            agent_doc_fs::find_project_root(&notes).is_none(),
+            "fixture document must have no .agent-doc ancestor"
+        );
+
+        let _cwd = ScopedCurrentDir::set(&cwd_project.join("sub"));
+        assert_eq!(
+            load_project().tmux_session.as_deref(),
+            Some("cwd-pin"),
+            "fixture: the process cwd is inside a configured project"
+        );
+
+        assert_eq!(project_store_for_doc(&rootless), Some(notes.clone()));
+        let rootless_config = load_project_for_doc(&rootless);
+        assert_eq!(rootless_config.tmux_session, None);
+        assert_eq!(rootless_config.default_agent, None);
+        assert_eq!(project_store_for_doc(&unborn), None);
+        assert_eq!(load_project_for_doc(&unborn).tmux_session, None);
+        assert!(
+            !notes.join(".agent-doc").exists(),
+            "reading a rootless document's config must not create its store"
+        );
+
+        assert_eq!(project_store_for_doc(&tracked), Some(doc_project.clone()));
+        assert_eq!(
+            load_project_for_doc(&tracked).tmux_session.as_deref(),
+            Some("doc-pin")
+        );
+        assert_eq!(
+            load_project_for_doc(&doc_project.join("tasks/unborn.md"))
+                .tmux_session
+                .as_deref(),
+            Some("doc-pin"),
+            "a not-yet-created document still reads its project's config"
+        );
     }
 
     #[test]

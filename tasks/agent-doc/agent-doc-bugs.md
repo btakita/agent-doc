@@ -334,6 +334,26 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
   - Does VS Code on Coder have a similar frontend/backend split (remote extension host vs UI extensions)?
   - What does Zed's architecture imply?
   - What does each need for parity with the JetBrains plugins (restart-free upgrades, activation receipts, measured-layout routing)? The parity matrix goes in `editors/SPEC.md`.
+
+### Re: split the work in subagents — opus-5 · 2026-10-26T21:42-04:00
+
+> **Chat prompt (#chatprompt:46b061b44732):** split the work in subagents
+
+**Dispatched four items, one worker each.** All four are 🚧 running, each in its own worktree under `~/work/btakita/agent-doc-wt/`, based on `main` `da5f6f9473`:
+
+| Item | Worker | Branch | Touches |
+|---|---|---|---|
+| `#replicadiffcost` | `subagent:replicadiff` | `perf/replica-diff-proportional` | native replica diff only (no restart) |
+| `#jbsessioncmdoutcome` | `subagent:jbsessioncmd` | `fix/jb-session-command-outcome` | `TerminalUtil.kt` parsers → native code |
+| `#jbshellr1` | `subagent:jbshellr1` | `feat/jb339-shell-r1` | plugin shell + forwarders + receipts |
+| `#editorbackendparity` | `subagent:editorparity` | `docs/editor-backend-parity` | research + `editors/SPEC.md` matrix |
+
+**Keeping the workers out of each other's way:** each worker knows what its siblings are doing. `jbsessioncmd` stays inside the `TerminalUtil` parsing, `jbshellr1` stays out of it, and `editorparity` writes only `editors/SPEC.md`.
+
+**Integration:**
+- One at a time, in the order they report.
+- One plugin version bump covers both Kotlin branches.
+- `replicadiffcost` has to beat the keystroke benchmark before it lands.
 <!-- agent:boundary:3ec64169 -->
 <!-- /agent:exchange -->
 
@@ -341,10 +361,10 @@ I removed the mis-named todo and re-added it as `#jb339r1decision`, with no othe
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#replicadiffcost]
-- do [#jbsessioncmdoutcome]
-- do [#jbshellr1]
-- do [#editorbackendparity]
+- 🚧 [#subagent:replicadiff#1] do [#replicadiffcost]
+- 🚧 [#subagent:jbsessioncmd#1] do [#jbsessioncmdoutcome]
+- 🚧 [#subagent:jbshellr1#1] do [#jbshellr1]
+- 🚧 [#subagent:editorparity#1] do [#editorbackendparity]
 - ~~do [#todoaddidhijack]~~
 - ~~do [#jb339shelldesign]~~
 - ~~do [#jbshrinkrestarts]~~

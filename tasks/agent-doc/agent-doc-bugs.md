@@ -225,6 +225,19 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 `#restartagentharness` (your Restart Agent → Grok Build report) is running in its own worktree.
 > **Queue prompt:** I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.
 
+### Re: Subagent completed: `subagent:restartagentharness` returned work for queue item “I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.” — agent-doc
+<!-- agent-doc-subagent-response sha256=ada8e360a0d6a9d27fef7acfc67a5bd731e72a0999bafb529564417bfe2ac827 -->
+> **Subagent response:**
+>
+> Branch fix/restartagentharness, commit fe32f5a781 (pushed; Kotlin changed, JetBrains plugin generation bump still needed, so make -k check fails only plugin-version-check; nextest 11929 passed). This does NOT make Restart Agent start Grok Build: it makes it refuse with both agent values named instead of silently relaunching Claude Code.
+> Evidence: 16:31-16:34:53Z five restart_agent_menu_invoked, each agent_restart_respec_refreshed running_harness=claude resolved_harness=claude resolved_from=frontmatter:claude reading source=start_runtime_restart_frontmatter authority=cp_model text_hash=f22b45bd4a49 (128777 bytes = committed 206af5eef3, agent: claude). The operator's claude->grok edit was recorded (editor_ops_recorded at offset 168, lineage_post=8d23a9e29b5c = disk at the time) but never reached the controller: at 16:07:54Z a crdt_cp_write source=retained_transition_projection_effect (f22b45) landed while the operator typed; the editor's update was crdt_document_op_delta_ingested outcome=StructuralQuarantined -> crdt_replica_update_quarantined recovery=lazy_canonical_projection, never recovered (retained_persistence_visible_roll_forward_requested refusals=117 at 17:01Z) while logs reported delivery_converged=true diverged=false.
+> Root cause: harness resolution is correct (agent-doc-supervisor/src/harness_authority.rs resolve_harness_authority puts the document's agent: first); agent-doc-start-runtime-io/src/run.rs:1690 try_resolve_current_document_content returns the stale controller copy because of the stuck sync (agent-doc-crdt-relay-io/src/lib.rs:3881-3900 ReprojectCanonical gate, 4096-4104 quarantine log). Also fixed: the resolved_from= log printed the post-override value.
+> Change: agent-doc session restart-agent <FILE> --expect-agent <AGENT> compares the editor's agent with the controller copy's before any restart (claude/claude-code, grok/grok-build equivalent) and refuses on mismatch (restart_agent_refused reason=authority_lags_editor); no flag = unchanged. Not overriding with the editor value because the agent-change watch reads the same stale copy and would switch back. JetBrains: NativeLib.kt (agent_doc_frontmatter_agent export), TerminalUtil.kt (Restart Agent + --force retry pass --expect-agent), TerminalUtilTest.kt.
+> Tests: supervisor restart_agent_agreement 2, ffi frontmatter_agent 1, bin restart_agent_ 4 (incl. source-order guard); mutations confirmed.
+> Follow-ups: (1) URGENT lazily.md editor sync stuck since 16:07:54Z (StructuralQuarantined, refusals=117) with false delivery_converged=true / diverged=false; (2) VS Code Restart Agent needs the same --expect-agent; (3) track the id used in comments.
+<!-- agent-doc-subagent-completion key=de31e99b6dd843240e5e9e4745bb3c6421ddb4d97d3b53fcc26243c5eb074444 -->
+> **Queue prompt:** I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.
+
 ### Re: Restart Agent kept Claude Code — and lazily.md lost your edits — opus-5 · 2026-10-27T13:17-04:00
 
 **Your `tasks/software/lazily.md` edits were overwritten. Recover them from JetBrains Local History**, from the version before 13:09 EDT. That version has `agent: grok`, `queue: go` and your queue edits. The file on disk now holds a stale copy written at 13:10:19 EDT; it says `agent: claude`, at 128,777 bytes. No copy of your version survives in agent-doc's stores. I haven't touched the file, because the editor's text is the authority there and the IDE is the safe recovery path. I added a Todo for this.
@@ -239,6 +252,28 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 **Filed and to be dispatched as urgent: `#retainedprojectionclobber`.** A retained captured projection must never overwrite text you wrote; your ops have to roll forward onto it. Quarantine recovery must either converge or fail loudly, and agent-doc must stop reporting "converged" while an editor is quarantined.
 
 **The Restart Agent worker** (branch `fix/restartagentharness`, `fe32f5a781`, not merged yet) makes Restart Agent refuse and name both agent values when the editor and the controller disagree, instead of quietly relaunching the old harness. It doesn't make the switch work while the sync is stuck, so I'm holding it to merge with the clobber fix. It also changes Kotlin, so it needs a JetBrains plugin version bump. Your Restart Agent row stays open until the switch actually works.
+
+### Re: lazily.md clobber fix, Restart Agent, JetBrains plugins, [#ahfe] — opus-5 · 2026-10-27T14:48-04:00
+
+**The clobber fix and the Restart Agent check are on `main` and installed** (`c7e7de85fc..7a92742ece`, fast-forward). On the merge, `make check` passed 11946/11946 and `make tmux-ci` passed 207. Before installing I confirmed no editor had been quarantined in the previous 30 minutes. The JetBrains plugins are bumped to classic 0.2.865, 2026.2 0.2.867 and 2026.3 0.2.866, so **your 2026.3 IDE needs a restart.**
+
+| Item | Commit | What changed |
+|---|---|---|
+| `#retainedprojectionclobber` | `fe3131b67a` | Four changes:<br>• A retained captured write can no longer replace your text. Frontmatter merges field by field, sections both sides changed merge 3-way, and a write that would drop a line you added is refused and logged (`retained_transition_refused_operator_text_loss`).<br>• A quarantined editor now fails loudly after 3 undelivered roll-forwards instead of retrying silently.<br>• An editor that is still quarantined holds the convergence barrier, so agent-doc stops reporting "converged".<br>• A reproduction test runs your exact sequence: retained write, quarantine, controller reseed, editor re-register. |
+| Restart Agent (your Grok report) | `f111fc6288` | Restart Agent now compares the editor's `agent:` with the controller's copy and refuses, naming both values, instead of silently relaunching the old harness. Harness resolution itself was correct; it was reading the stale controller copy that the clobber bug left behind. |
+| `#movedsingleplugin` (your question) | — | **No single JetBrains plugin.** One plugin ID ships three builds with disjoint IDE ranges: classic 2024.2–2026.1, exact 2026.2, exact 2026.3. 2026.2 and 2026.3 are the same code. Classic can't share a ZIP with the modular builds: they need platform modules that only exist from 2026.2, and Java 25. The 2026.2/2026.3 split is a policy clamp on internal APIs, not a code difference. **Recommendation:** keep classic, and decide whether to merge 2026.2+2026.3 into one modular ZIP (option B). |
+| `[#ahfe]` (GH #267 live check) | — | **Not enough evidence.** Run Agent Doc worked after every hot reload today, but every one happened with a current plugin, so none tested the old-jar case. The 2026.3 detection is also blind (`#jb263probeblind`, filed). **Your IDE is in the test window right now:** restart is pending for 0.2.866. Before restarting, run Agent Doc once. It passes if `idea.log` shows `[route] SUCCESS`; expect no advisory line until `#jb263probeblind` lands. Then restart. GH #267 stays closed and `#ahfe` stays open. |
+
+**`lazily.md`:** the controller is no longer stuck, and you had already re-typed `agent: grok`. Your other queue edits and `queue: go` from before 13:09 EDT can only be restored from JetBrains Local History (Todo `#v829`). After restarting the IDE, retry Restart Agent; that's a new Todo.
+
+**Dispatched:**
+- The parent-plus-subtasks worker (`feat/nestedsubprompts`): it implements nested sub-prompts as children of their parent across the list components, and writes a design doc for `agent:github`/`agent:gitlab`/`agent:jira` sync for your review. **Workaround:** the binary binds one worker to one row, so the other three subtask rows are bound to that same worker as `<worker>/sub2`, `/sub3` and `/sub4`. That's the limit this work removes.
+- A design-only worker for your automation-API question (`design/automationapi`): should the controller be the API server?
+
+**Filed:**
+- Backlog (go queue): `#clobberfollowups` (why the replay built its target from stale text, refusing commits while an editor is quarantined, deriving `diverged`, surfacing the refusal in session-check).
+- Backlog (go queue): `#jb263probeblind`.
+- Icebox: `#jbdocdrift`.
 <!-- agent:boundary:fc531cdc -->
 <!-- /agent:exchange -->
 
@@ -246,10 +281,17 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#retainedprojectionclobber]
-- ~~do [#cwdfallbackrest]~~
-- ~~do [#compactabsorbsedit]~~
-- ~~I changed lazily.md from `agent: claude` to `agent: grok` then ran Restart Agent. The session restarted in Claude Code. It should have started Grok Build.~~
+- do [#clobberfollowups]
+- do [#jb263probeblind]
+- ~~do [#movedsingleplugin]~~
+- ~~do [#retainedprojectionclobber]~~
+- ☑️ [#subagent:ahfe#1] do [#ahfe]
+- 📥 I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
+  - 🚧 [#subagent:pmsync#1] So this is the first subtask.
+  - 🚧 [#subagent:pmsync#1] This is the second subtask.
+  - 🚧 [#subagent:pmsync#1] Subtasks should be editable and steerable.
+  - 🚧 [#subagent:pmsync#1] Make sure these subtasks are being deterministically associated with the parent task.
+- 🚧 [#subagent:automationapi#1] agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -263,12 +305,13 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
-- [x] [#krwr] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).
-- [x] [#ddj8] Decide whether ~/.agent-doc/ (which holds state.db) should make $HOME a project root: today any pane under $HOME with no closer .agent-doc/ resolves $HOME as its project root (found by #prunetestisolation; cf. the earlier ~/.tsift-made-$HOME-a-workspace fix).
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
+- [ ] [#v829] Recover your lost tasks/software/lazily.md edits from JetBrains Local History: restore the version from before 13:09 EDT (2026-10-27), which has 'agent: grok', 'queue: go' and your queue edits. agent-doc wrote a stale copy over it at 13:10:19 EDT (see #retainedprojectionclobber); no copy survives in agent-doc's stores. (source: agent:backlog [#retainedprojectionclobber])
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] ☑️ [#movedsingleplugin] ☑️ [#subagent:jbsingleplugin#1] Have we moved to a single JB plugin version to support all JB architectures?
+- [ ] ☑️ [#retainedprojectionclobber] URGENT data loss: a retained captured-response projection overwrote operator edits in tasks/software/lazily.md. At 16:07:54Z a crdt_cp_write source=retained_transition_projection_effect (text f22b45bd4a49) landed while the operator typed; the editor's update was StructuralQuarantined (recovery=lazy_canonical_projection) and never recovered (retained_persistence_visible_roll_forward_requested refusals=117) while logs said delivery_converged=true diverged=false. At 17:09:03Z the editor replica still projected the operator's 8d23a9e29b5c (agent: grok + queue edits); at 17:09:04Z crdt_cp_write source=retained_transition_projection_effect re-asserted f22b45; after a make install reload_library the editor replicas re-registered (bootstrap_kind=full) from that stale canonical and the stale text reached disk at 17:10:19Z. Make a retained captured projection unable to overwrite operator-authored editor text (roll operator ops forward onto it, never back), make quarantine recovery converge or fail loudly, and stop reporting converged while an editor is quarantined. Evidence: agent-loop .agent-doc/logs/ops.log 16:07:54Z-17:10:19Z for lazily.md.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

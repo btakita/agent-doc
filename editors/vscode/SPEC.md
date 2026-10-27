@@ -121,6 +121,14 @@ Extends `editors/SPEC.md` with VS Code-specific behavior.
 - Replica registration opens the controller bootstrap and projects it downstream. Dirty operator changes originate only from subsequent editor events; disk candidates are never component-merged or promoted while a controller-owned document remains attached.
 - This is the same FFI and authority lifecycle as JetBrains. VS Code must not implement a private disk reread, Git fallback, or extension-local pending-response slot.
 
+## Native String Ownership
+
+Every C string the cdylib returns, whether as a function result or as a member of a `#[repr(C)]` result struct (`FfiPatchResult.text`/`.error`, `FfiJsonResult.json`/`.error`, `FfiProjectPath.project_root`/`.relative_path`), is a Rust allocation that must go back through `agent_doc_free_string` exactly once (`#vscodekoffisegv`):
+
+- Koffi bindings declare those returns and struct members as the opaque `OWNED_C_STRING_POINTER` (`void*`), never `char*`/`str`. Koffi turns a `char*` value into a JS string copy, which leaks the Rust allocation and leaves nothing that can be freed. JetBrains binds the same members as JNA `Pointer`.
+- The wrapper decodes the pointer with `koffi.decode(ptr, 'char', -1)` and then frees that pointer. Koffi accepts a JS string for a `void*` argument by passing its own temporary copy, so freeing a decoded string makes Rust `free()` memory it never allocated. Under code-server 4.143.1 (node v24) that crashed the extension host with SIGSEGV in `free`. Every free goes through `freeOwnedCString`, which hands only a pointer value (a BigInt under Koffi 3) to the native free. It refuses any other value and logs the refusal, accepting a leak rather than a crash.
+- A regression test drives the real wrappers against the built `libagent_doc` in a child process, so a crash at this boundary fails the test instead of killing the runner.
+
 ## Editor Performance Parity
 
 VS Code must match the JetBrains plugin's editor-hot-path discipline so neither plugin can slow the host editor:

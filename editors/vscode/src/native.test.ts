@@ -17,8 +17,12 @@ import {
     utf16RangeToUtf8Bytes,
     koffiModuleAvailable,
     OWNED_C_STRING_POINTER,
+    OWNED_C_STRING_STRUCT_FIELDS,
+    freeOwnedCString,
 } from './native.js';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { spawnSync } from 'node:child_process';
 
 // ESM has no `__dirname`; derive it from the module URL.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -283,5 +287,106 @@ describe('nativeShadowCopyPath (#nativehotreload — dlopen-fresh-inode reload)'
             fs.rmSync(root, { recursive: true, force: true });
             fs.rmSync(src, { force: true });
         }
+    });
+});
+
+describe('Rust-owned C string ownership at the koffi boundary (#vscodekoffisegv)', () => {
+    const koffi = createRequire(import.meta.url)('koffi');
+
+    it('binds every owned result-struct member as an opaque pointer', () => {
+        for (const [name, fields] of Object.entries(OWNED_C_STRING_STRUCT_FIELDS)) {
+            for (const [field, type] of Object.entries(fields)) {
+                assert.strictEqual(type, OWNED_C_STRING_POINTER, `${name}.${field}`);
+            }
+        }
+    });
+
+    it('pins why: koffi decodes a char* member to a JS string copy, a void* member to the pointer', () => {
+        const owned = koffi.alloc('char', 6);
+        try {
+            koffi.encode(owned, 'char', 'hello', 6);
+            const slot = Buffer.alloc(2 * koffi.sizeof('void*'));
+            koffi.encode(slot, 0, 'void*', owned);
+            const asCharStar = koffi.decode(slot, koffi.struct({ text: 'char*', error: 'char*' }));
+            // A string here cannot be freed: the Rust allocation is already lost.
+            assert.strictEqual(typeof asCharStar.text, 'string');
+            const asOwned = koffi.decode(slot, koffi.struct(OWNED_C_STRING_STRUCT_FIELDS.patch));
+            assert.notStrictEqual(typeof asOwned.text, 'string');
+            assert.strictEqual(asOwned.error, null);
+            assert.strictEqual(koffi.decode(asOwned.text, 'char', -1), 'hello');
+        } finally {
+            koffi.free(owned);
+        }
+    });
+
+    it('never hands a decoded JS string to agent_doc_free_string', () => {
+        const freed: unknown[] = [];
+        const free = (p: unknown) => { freed.push(p); };
+        const errors: unknown[] = [];
+        const originalError = console.error;
+        console.error = (...args: unknown[]) => { errors.push(args.join(' ')); };
+        try {
+            assert.strictEqual(freeOwnedCString('decoded text', free), false);
+            assert.strictEqual(freeOwnedCString(42, free), false);
+        } finally {
+            console.error = originalError;
+        }
+        assert.deepStrictEqual(freed, []);
+        assert.strictEqual(errors.length, 2);
+
+        assert.strictEqual(freeOwnedCString(null, free), false);
+        assert.strictEqual(freeOwnedCString(undefined, free), false);
+        assert.strictEqual(freeOwnedCString(0n, free), false);
+        assert.strictEqual(freeOwnedCString(0x1000n, free), true);
+        assert.deepStrictEqual(freed, [0x1000n]);
+    });
+
+    // Drives the real wrappers against the built cdylib in a child process, so
+    // the pre-fix SIGSEGV in `free` (Rust freeing Koffi's temporary string copy)
+    // fails this test instead of killing the runner.
+    const libName = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
+    const repoRoot = path.resolve(__dirname, '..', '..', '..');
+    const libPath = [
+        process.env.AGENT_DOC_LIB_PATH,
+        path.join(repoRoot, 'target', 'debug', libName),
+        path.join(repoRoot, 'target', 'release', libName),
+    ].find((candidate) => candidate && fs.existsSync(candidate));
+
+    it('round-trips owned strings through the built library without crashing', { skip: libPath ? false : 'no built libagent_doc (cargo build --lib)' }, () => {
+        const nativeUrl = pathToFileURL(path.join(__dirname, 'native.js')).href;
+        const script = `
+            const n = await import(${JSON.stringify(nativeUrl)});
+            const doc = '<!-- agent:exchange -->\\nhi\\n<!-- /agent:exchange -->\\n';
+            const out = {};
+            for (let i = 0; i < 25; i++) {
+                out.normalize = n.normalizeTemplateStructure(doc);
+                out.reposition = n.repositionBoundaryToEnd(doc);
+                out.preserveHead = n.repositionBoundaryToEndPreserveHead(doc);
+                out.nodePatches = n.applyNodePatches(doc, []);
+                out.nodePatchesError = n.applyNodePatches(doc, [{ bogus: 1 }]);
+                out.deriveError = n.editorDeriveJson('{}');
+                out.resolved = n.resolveProjectPath(${JSON.stringify(path.join(__dirname, 'native.js'))});
+            }
+            process.stdout.write('RESULT ' + JSON.stringify(out) + '\\n');
+        `;
+        const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+            env: { ...process.env, AGENT_DOC_LIB_PATH: libPath },
+            encoding: 'utf-8',
+            timeout: 60_000,
+        });
+        assert.strictEqual(child.signal, null, `child died by ${child.signal}: ${child.stderr}`);
+        assert.strictEqual(child.status, 0, child.stderr);
+        assert.doesNotMatch(child.stderr, /refusing to free/);
+        const line = child.stdout.split('\n').find((l) => l.startsWith('RESULT '));
+        assert.ok(line, child.stdout);
+        const out = JSON.parse(line.slice('RESULT '.length));
+        const doc = '<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n';
+        assert.strictEqual(out.normalize, doc);
+        assert.strictEqual(out.nodePatches, doc);
+        assert.match(out.reposition, /agent:boundary:/);
+        assert.match(out.preserveHead, /agent:boundary:/);
+        assert.strictEqual(out.nodePatchesError, null);
+        assert.strictEqual(out.deriveError, null);
+        assert.strictEqual(out.resolved?.relativePath?.endsWith('native.js'), true);
     });
 });

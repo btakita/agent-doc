@@ -57,6 +57,12 @@
   quarantined live replicas; and `session-check` reports the operator-text
   refusal and the terminal roll-forward refusal with their remedies.
 
+- `agent-doc serve`'s `POST /save` is a whole-document write with no base
+  (`#servesavebypass`). It is refused with `409 Conflict` while an editor
+  replica holds the document, and writes nothing and commits nothing then;
+  otherwise it writes through `atomic_write_through_authority`, never a bare
+  `std::fs::write`. See [Core Commands: serve](specs/07-core-commands.md#serve).
+
 - Grok Build uses a native final-JSON backend and the existing managed
   supervisor lifecycle, with exact document-bound resume IDs and structural
   composer readiness. Passive hooks are not admission/continuation authority;

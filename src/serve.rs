@@ -15,8 +15,10 @@
 //!   - `GET /api/sessions` → project session list.
 //!   - `GET /board` → embedded fleet work board page (`BOARD_HTML`).
 //!   - `GET /api/board` → read-only fleet work board JSON (`agent-doc board --json`).
-//!   - `POST /save` → body = full document text; calls `write --commit`,
-//!     returns JSON with the new HEAD short SHA.
+//!   - `POST /save` → body = full document text; writes it through the
+//!     document authority and commits (`write --commit` during an open cycle,
+//!     a plain git commit otherwise), returns JSON with the new HEAD short SHA.
+//!     `409 Conflict` while an editor replica holds the document.
 //!   - `GET /events` → Server-Sent Events stream with `ready`, `doc-changed`,
 //!     `agent-response`, and `doc-error` events.
 //!   - `GET /healthz` → `ok`.
@@ -31,12 +33,25 @@
 //! - Browser writes use plain git commits only when no agent-doc response cycle
 //!   is open for the document; during an open cycle they close through
 //!   `agent-doc write --commit --origin serve`.
+//! - A browser save never writes the document with a bare `std::fs::write`
+//!   (`#servesavebypass`). It goes through `atomic_write_through_authority`
+//!   (serialized per-document write queue, detached compare-and-swap, atomic
+//!   rename) in both branches.
+//! - While an editor replica holds the document (the CRDT authority is
+//!   `MultiReplica`, including a controller whose authority cannot be
+//!   observed), `POST /save` is refused with `409 Conflict`, writes nothing,
+//!   commits nothing, and logs `serve_save_refused reason=editor_replica_attached`.
+//!   The browser body is a whole-document replacement with no base, so it can
+//!   neither overwrite the editor's text nor be merged without risking
+//!   operator-typed lines (`#retainedprojectionclobber`).
 //! - When `write --commit` exits nonzero, the HTTP response surfaces the
 //!   stderr verbatim so the operator sees the actionable error.
 //!
 //! ## Evals
 //! - `serve_get_doc_returns_current_file_contents`
 //! - `serve_post_save_writes_through_commit_boundary`
+//! - `serve_post_save_refuses_while_editor_replica_holds_document`
+//! - `serve_post_save_refuses_open_cycle_while_editor_replica_holds_document`
 //! - `serve_sse_stream_emits_doc_changed_after_file_mutation`
 
 use anyhow::{Context, Result};
@@ -1111,45 +1126,16 @@ fn handle_save(
         );
     }
 
-    let active_cycle = match active_cycle_in_scope(&doc) {
-        Ok(active) => active,
-        Err(e) => {
+    let commit_mode = match save_document(&doc, &body) {
+        Ok(commit_mode) => commit_mode,
+        Err(failure) => {
             return respond(
                 request,
-                &format!("failed to inspect active cycle: {e}\n"),
+                &failure.message,
                 "text/plain; charset=utf-8",
-                StatusCode(500),
+                StatusCode(failure.status),
             );
         }
-    };
-    let commit_mode = if active_cycle {
-        if let Err(e) = write_and_close_active_cycle(&doc, &body) {
-            return respond(
-                request,
-                &format!("agent-doc write --commit failed: {e}\n"),
-                "text/plain; charset=utf-8",
-                StatusCode(500),
-            );
-        }
-        "agent-doc write --commit"
-    } else {
-        if let Err(e) = std::fs::write(&doc, &body) {
-            return respond(
-                request,
-                &format!("failed to write {}: {e}\n", doc.display()),
-                "text/plain; charset=utf-8",
-                StatusCode(500),
-            );
-        }
-        if let Err(e) = git_commit_user_edit(&doc) {
-            return respond(
-                request,
-                &format!("git commit failed: {e}\n"),
-                "text/plain; charset=utf-8",
-                StatusCode(500),
-            );
-        }
-        "git"
     };
 
     let head = git_head_short(&doc).unwrap_or_else(|_| "<unknown>".to_string());
@@ -1164,6 +1150,84 @@ fn handle_save(
         &payload.to_string(),
         "application/json; charset=utf-8",
         StatusCode(200),
+    )
+}
+
+/// A browser save that did not land, with the HTTP status that reports it.
+#[derive(Debug)]
+struct SaveFailure {
+    status: u16,
+    message: String,
+}
+
+impl SaveFailure {
+    fn new(status: u16, message: String) -> Self {
+        Self { status, message }
+    }
+}
+
+/// Apply one whole-document browser save (`#servesavebypass`).
+///
+/// The browser posts the full textarea text with no base: it is a whole-document
+/// replacement derived from a `GET /doc` disk read. While an editor replica holds
+/// the document, the editor's CRDT canonical is the authority and disk is only
+/// its lagging projection, so neither branch below may run:
+/// - a raw disk write overwrites the editor's unsaved text on disk and diverges
+///   disk from the live replica;
+/// - a rebase through the authority could only use disk as its merge base, and a
+///   component rebase over an editor cut that both sides changed keeps the
+///   browser's side, dropping operator-typed lines (the
+///   `#retainedprojectionclobber` class).
+///
+/// So the save is refused with `409 Conflict` and a remedy. Without an attached
+/// editor the write goes through `atomic_write_through_authority` (the
+/// serialized per-document write queue, the detached compare-and-swap, and an
+/// atomic rename), never a bare `std::fs::write`; an open response cycle then
+/// closes through `agent-doc write --commit`, otherwise a plain git commit
+/// records the edit.
+fn save_document(doc: &Path, body: &str) -> std::result::Result<&'static str, SaveFailure> {
+    if editor_replica_holds_document(doc) {
+        agent_doc_ops_log_io::log_op(
+            doc,
+            &format!(
+                "serve_save_refused file={} reason=editor_replica_attached len={} hash={} action=refuse_whole_document_write",
+                doc.display(),
+                body.len(),
+                agent_doc_hash::content_hash(body),
+            ),
+        );
+        return Err(SaveFailure::new(409, editor_attached_refusal(doc)));
+    }
+    let active_cycle = active_cycle_in_scope(doc)
+        .map_err(|e| SaveFailure::new(500, format!("failed to inspect active cycle: {e}\n")))?;
+    if active_cycle {
+        write_and_close_active_cycle(doc, body).map_err(|e| {
+            SaveFailure::new(500, format!("agent-doc write --commit failed: {e}\n"))
+        })?;
+        return Ok("agent-doc write --commit");
+    }
+    agent_doc_document_realtime_io::atomic_write_through_authority(doc, body).map_err(|e| {
+        SaveFailure::new(500, format!("failed to write {}: {e:#}\n", doc.display()))
+    })?;
+    git_commit_user_edit(doc)
+        .map_err(|e| SaveFailure::new(500, format!("git commit failed: {e}\n")))?;
+    Ok("git")
+}
+
+/// Whether an editor replica holds `doc`, so the editor (not disk) is the
+/// authority. This is the same predicate the write-convergence direct-disk
+/// guard uses: the routed CRDT model, then durable reliable-sync liveness, and
+/// a controller whose authority cannot be observed fails closed as attached.
+fn editor_replica_holds_document(doc: &Path) -> bool {
+    agent_doc_controller_io::project_controller::crdt_authority_for_file(&doc.to_string_lossy())
+        .editor_attached()
+}
+
+fn editor_attached_refusal(doc: &Path) -> String {
+    format!(
+        "refused: an editor holds {} (live CRDT replica), so a whole-document browser save would overwrite its text. \
+         Edit the document in that editor, or close it there, reload this page, and save again.\n",
+        doc.display()
     )
 }
 
@@ -1698,5 +1762,189 @@ mod tests {
         assert!(INDEX_HTML.contains("Authorization"));
         assert!(INDEX_HTML.contains("token=\" + encodeURIComponent(authToken)"));
         assert!(INDEX_HTML.contains("read-only token cannot save"));
+    }
+
+    // -------- `#servesavebypass`: POST /save routes through the authority --------
+
+    const SERVE_SAVE_DISK: &str = concat!(
+        "---\n",
+        "agent_doc_session: serve-save\n",
+        "agent_doc_format: template\n",
+        "---\n\n",
+        "<!-- agent:exchange -->\n",
+        "on disk\n",
+        "<!-- /agent:exchange -->\n"
+    );
+
+    fn git(root: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// A temp git project holding one committed session document.
+    fn serve_save_project() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::write(root.join(".gitignore"), ".agent-doc/\n").unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(&doc, SERVE_SAVE_DISK).unwrap();
+        git(&root, &["init", "-q"]);
+        git(&root, &["config", "user.name", "serve test"]);
+        git(
+            &root,
+            &["config", "user.email", "serve-test@example.invalid"],
+        );
+        git(&root, &["config", "commit.gpgsign", "false"]);
+        git(&root, &["add", "."]);
+        git(&root, &["commit", "-q", "--no-verify", "-m", "seed"]);
+        (dir, doc)
+    }
+
+    /// Serve exactly one `POST /save` for `doc` on an ephemeral loopback port
+    /// and return the status code and body. The server lives on this test's
+    /// threads only and is dropped before returning.
+    fn post_save_once(doc: &Path, body: &str) -> (u16, String) {
+        use std::io::Write;
+        let state = ServeState::new(Some(doc.to_path_buf()), ServeAuth::Disabled).unwrap();
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let handler = thread::spawn(move || {
+            let request = server.recv().unwrap();
+            handle_request(request, &state).unwrap();
+        });
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        write!(
+            stream,
+            "POST /save HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: text/markdown\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        handler.join().unwrap();
+        let status = response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse::<u16>().ok())
+            .unwrap_or_else(|| panic!("no HTTP status in {response:?}"));
+        let payload = response
+            .split_once("\r\n\r\n")
+            .map(|(_, payload)| payload.to_string())
+            .unwrap_or_default();
+        (status, payload)
+    }
+
+    fn ops_log(doc: &Path) -> String {
+        std::fs::read_to_string(doc.parent().unwrap().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn serve_post_save_writes_through_commit_boundary() {
+        let (dir, doc) = serve_save_project();
+        let root = dir.path().canonicalize().unwrap();
+        let head_before = git(&root, &["rev-parse", "HEAD"]);
+        let edited = SERVE_SAVE_DISK.replace("on disk\n", "on disk\nbrowser edit\n");
+        assert!(!editor_replica_holds_document(&doc));
+
+        let (status, payload) = post_save_once(&doc, &edited);
+
+        assert_eq!(status, 200, "detached save must succeed: {payload}");
+        let json: serde_json::Value = serde_json::from_str(&payload).unwrap();
+        assert_eq!(json["commit_mode"], "git", "{payload}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), edited);
+        assert_ne!(git(&root, &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(
+            git(&root, &["show", "HEAD:session.md"]),
+            edited.trim_end(),
+            "the browser edit is committed"
+        );
+        assert!(git(&root, &["log", "-1", "--format=%s"]).starts_with("agent-doc serve: web edit"),);
+        let log = ops_log(&doc);
+        assert!(
+            log.contains("write_authority action=routed transport=write_queue")
+                && log.contains(&agent_doc_hash::content_hash(&edited)),
+            "the save must route through atomic_write_through_authority, not a bare disk write:\n{log}"
+        );
+    }
+
+    #[test]
+    fn serve_post_save_refuses_while_editor_replica_holds_document() {
+        let (dir, doc) = serve_save_project();
+        let root = dir.path().canonicalize().unwrap();
+        let head_before = git(&root, &["rev-parse", "HEAD"]);
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
+        let mut editor = crate::sim_world::SimEditor::generic(&doc).unwrap();
+        let operator_text =
+            SERVE_SAVE_DISK.replace("on disk\n", "on disk\noperator typed this, unsaved\n");
+        editor.type_unsaved(&operator_text).unwrap();
+        assert!(editor_replica_holds_document(&doc));
+
+        let browser_text = SERVE_SAVE_DISK.replace("on disk\n", "browser replacement\n");
+        let (status, payload) = post_save_once(&doc, &browser_text);
+
+        assert_eq!(status, 409, "{payload}");
+        assert!(payload.starts_with("refused: an editor holds"), "{payload}");
+        assert!(payload.contains("close it there"), "remedy: {payload}");
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            SERVE_SAVE_DISK,
+            "a refused save writes nothing to disk"
+        );
+        assert_eq!(git(&root, &["rev-parse", "HEAD"]), head_before);
+        let current = editor.resolve().unwrap();
+        assert_eq!(
+            current.content, operator_text,
+            "the editor's unsaved operator text survives the browser save"
+        );
+        let log = ops_log(&doc);
+        assert!(
+            log.contains("serve_save_refused")
+                && log.contains("reason=editor_replica_attached")
+                && !log.contains("write_authority action=routed"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn serve_post_save_refuses_open_cycle_while_editor_replica_holds_document() {
+        let (dir, doc) = serve_save_project();
+        let root = dir.path().canonicalize().unwrap();
+        let head_before = git(&root, &["rev-parse", "HEAD"]);
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(SERVE_SAVE_DISK),
+            Some(SERVE_SAVE_DISK),
+        )
+        .unwrap();
+        assert!(active_cycle_in_scope(&doc).unwrap());
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
+        let mut editor = crate::sim_world::SimEditor::generic(&doc).unwrap();
+        let operator_text =
+            SERVE_SAVE_DISK.replace("on disk\n", "on disk\noperator typed mid-cycle\n");
+        editor.type_unsaved(&operator_text).unwrap();
+
+        let browser_text = SERVE_SAVE_DISK.replace("on disk\n", "browser replacement\n");
+        let (status, payload) = post_save_once(&doc, &browser_text);
+
+        assert_eq!(status, 409, "{payload}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), SERVE_SAVE_DISK);
+        assert_eq!(git(&root, &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(editor.resolve().unwrap().content, operator_text);
+        assert!(
+            active_cycle_in_scope(&doc).unwrap(),
+            "a refused save does not close the open cycle"
+        );
     }
 }

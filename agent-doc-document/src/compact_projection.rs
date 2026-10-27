@@ -343,9 +343,86 @@ pub fn changed_non_exchange_opening_markers(
         .collect()
 }
 
+/// Re-root a compact's committed projection on the pre-compact `baseline`.
+///
+/// `#compactabsorbsedit`: Compact owns only the archiveable region of its
+/// `target` cell. Every other byte of the committed projection (frontmatter,
+/// prose, and every sibling component such as `queue`, `backlog`, or `status`)
+/// therefore comes from `baseline`, the last snapshot the agent saw, and only
+/// `target`'s content comes from `committed`. An operator edit outside the
+/// target that the agent has not answered stays out of the snapshot and HEAD,
+/// so the next preflight still diffs it as an unanswered edit instead of
+/// reading it as answered, committed work.
+///
+/// Returns `None` when `baseline` cannot carry the target: either side fails to
+/// parse or lacks a `target` component.
+pub fn confine_committed_to_compact_owned_cell(
+    committed: &str,
+    baseline: &str,
+    target: &str,
+) -> Option<String> {
+    let committed_components = element::parse(committed).ok()?;
+    let baseline_components = element::parse(baseline).ok()?;
+    let committed_target = committed_components
+        .iter()
+        .find(|component| component.name == target)?;
+    let baseline_target = baseline_components
+        .iter()
+        .find(|component| component.name == target)?;
+    Some(baseline_target.replace_content(baseline, committed_target.content(committed)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CONFINE_BASELINE: &str = concat!(
+        "---\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n",
+        "### Re: one\n\nbody one\n",
+        "<!-- /agent:exchange -->\n\n",
+        "<!-- agent:queue -->\n",
+        "- do [#answered]\n",
+        "<!-- /agent:queue -->\n",
+    );
+
+    #[test]
+    fn confine_committed_keeps_operator_sibling_drift_out_of_the_commit() {
+        let live = CONFINE_BASELINE
+            .replace("### Re: one\n\nbody one\n", "*Compacted.*\n")
+            .replace("- do [#answered]\n", "- do [#answered]\n- do [#operator]\n")
+            .replace(
+                "agent_doc_format: template\n",
+                "agent_doc_format: template\nx: y\n",
+            );
+        let confined =
+            confine_committed_to_compact_owned_cell(&live, CONFINE_BASELINE, "exchange").unwrap();
+        assert_eq!(
+            confined,
+            CONFINE_BASELINE.replace("### Re: one\n\nbody one\n", "*Compacted.*\n"),
+            "only the exchange cell may move into the committed projection"
+        );
+    }
+
+    #[test]
+    fn confine_committed_keeps_a_sibling_deletion_live_only() {
+        let live = CONFINE_BASELINE
+            .replace("### Re: one\n\nbody one\n", "*Compacted.*\n")
+            .replace("- do [#answered]\n", "");
+        let confined =
+            confine_committed_to_compact_owned_cell(&live, CONFINE_BASELINE, "exchange").unwrap();
+        assert!(confined.contains("- do [#answered]"), "{confined}");
+        assert!(confined.contains("*Compacted.*"), "{confined}");
+    }
+
+    #[test]
+    fn confine_committed_refuses_a_baseline_without_the_target() {
+        let baseline = "<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        assert_eq!(
+            confine_committed_to_compact_owned_cell(CONFINE_BASELINE, baseline, "exchange"),
+            None
+        );
+    }
 
     #[test]
     fn parse_inline_exchanges_basic() {

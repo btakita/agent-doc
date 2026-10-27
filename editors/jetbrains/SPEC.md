@@ -1095,6 +1095,29 @@ it. On a copied 32 KB live session document the diff takes about 4.9 ms, so
 the diff cost grows faster than linearly with the document's size. The diff is
 native, so a fix to it ships with a library hot reload.
 
+`#replicadiffcost` made the native flush proportional to the edit. The fix is
+described in `specs/14-realtime-workflow.md`: local minting from a visible-order
+index, and diffs answered from a journal of local mints. Against a fresh
+baseline of the unmodified build on the same machine (synthetic document,
+`p50_best`):
+
+| Document | Case | Before | After |
+|----------|------|--------|-------|
+| 127,583 B | `replica_flush_1` | 21,718 us | 59 us |
+| 127,583 B | `replica_flush_16` | 22,798 us | 83 us |
+| 127,583 B | `replica_flush_1.diff` | 20,627 us | 16 us |
+| 127,583 B | `replica_flush_1.state_vector` | 982 us | 2.4 us |
+| 34,701 B | `replica_flush_1` | 5,343 us | 43 us |
+| 34,701 B | `replica_flush_1.diff` | 5,055 us | 17 us |
+| 528,985 B | `replica_flush_1` | 305,279 us | 203 us |
+| 528,985 B | `replica_flush_1.diff` | 297,927 us | 17 us |
+
+`typing_report` stayed within noise: 105.7 to 108.0 us at 125 KB. The 2026-10-26
+reference baseline (54,672 and 55,156 us for the two flush cases) passes the gate
+too. The diff and the state vector now cost the same at every document size.
+What still grows with the document is the Kotlin `prepare` step, which reads the
+whole shadow text: about 30 us at 125 KB and about 170 us at 500 KB.
+
 The two `#jbshrinkrestarts` moves left every gated case within noise of that
 baseline (`typing_report` 106.1 -> 105.8 us, `replica_flush_1` 54,672 ->
 49,029 us, `replica_flush_16` 55,156 -> 54,264 us). They are not on the

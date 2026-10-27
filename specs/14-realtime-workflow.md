@@ -808,10 +808,35 @@ resume the already-owned continuation.
 
 The replica also memoizes the exact serialized current state vector. A revision
 probe is a compact wire reply and must remain O(1) while the replica is unchanged;
-it must not walk retained CRDT history on every supervisor idle-watch poll. A real
-local edit or novel remote update invalidates that memo, while an idempotent replay
-preserves it. The next state-bearing operation flushes pending local edits before
-recomputing the frontier, so memoization never exposes a stale revision.
+it must not walk retained CRDT history on every supervisor idle-watch poll. A
+novel remote update invalidates that memo, while an idempotent replay preserves
+it. A local edit advances it in place: local minting only raises the replica's
+own counter, so the exact frontier is the previous one with that peer's entry
+raised to the last minted counter, byte-identical to a full recomputation. The
+next state-bearing operation flushes pending local edits before it answers, so
+memoization never exposes a stale revision.
+
+A local editor flush costs time proportional to the edit, not to the document
+(`#replicadiffcost`). The replica keeps its visible elements in projection order
+(chunked) and a journal of the elements it minted since an exact frontier base.
+Flushing a pending edit reads the left origin at `offset - 1` from that order and
+mints exactly the ids, origins, and tombstones the CRDT's own `delete_range` and
+`insert_str` would mint, in the same order. `diff` answers a peer whose state
+vector dominates the journal base from the journal suffix past that peer's
+counter for this replica, filtered by the same unseen-op predicate as
+`delta_since`, so it returns the same operation set. A peer behind the base gets
+the full `delta_since`. A novel remote update drops the order and the journal.
+The next local edit rebuilds the order from the operation graph, and the next
+frontier restarts the journal. The rebuilt order is used only after it spells
+the replica's projection exactly. A replica whose order cannot be proven keeps
+the CRDT's own edit and delta paths for its lifetime. Projection text therefore
+always comes from the CRDT, and an optimization never decides which text wins.
+Past 32,768 journal events, the journal rebases at the next flush. On a
+synthetic session document, one keystroke flush (state vector, splice, and diff
+against the pre-burst frontier) takes about 6 to 9 us natively whether the
+document is 32 KB, 125 KB, or 500 KB. The full-scan path takes about 4 ms,
+16 ms, and 300 ms. The first local flush after a remote update still pays one
+O(document) order rebuild.
 
 Retained delivery has an explicit reactive fixed point. When the retained
 Base→Target delta projected over the converged visible cut produces that same

@@ -27,6 +27,44 @@ const requireFromExtension = createRequire(import.meta.url);
 /** Owned Rust C strings must remain pointers until decoded and explicitly freed. */
 export const OWNED_C_STRING_POINTER = 'void*' as const;
 
+/**
+ * Field types of the `#[repr(C)]` result structs whose members are Rust-owned
+ * C strings (`agent-doc-ffi` `FfiPatchResult`, `src/ffi.rs` `FfiJsonResult`,
+ * `FfiProjectPath`). Every member must be {@link OWNED_C_STRING_POINTER}: a
+ * `char*` member is decoded by Koffi into a JS string copy, the Rust allocation
+ * leaks, and the copy can never be freed (#vscodekoffisegv).
+ */
+export const OWNED_C_STRING_STRUCT_FIELDS = {
+    patch: { text: OWNED_C_STRING_POINTER, error: OWNED_C_STRING_POINTER },
+    json: { json: OWNED_C_STRING_POINTER, error: OWNED_C_STRING_POINTER },
+    projectPath: { project_root: OWNED_C_STRING_POINTER, relative_path: OWNED_C_STRING_POINTER },
+} as const;
+
+/**
+ * Release a Rust-owned C string through `agent_doc_free_string`.
+ *
+ * Only a Koffi pointer is a Rust allocation: a BigInt address under Koffi 3
+ * (an External object under Koffi 2). Koffi also accepts a JS string for a
+ * `void*` argument, passing a pointer to its own temporary copy, so freeing a
+ * string value makes Rust `free()` memory it never allocated and SIGSEGVs the
+ * extension host (#vscodekoffisegv). Anything that is not a pointer is refused
+ * loudly instead: a leaked allocation is recoverable, a dead host is not.
+ * Returns whether the value was handed to the native free.
+ */
+export function freeOwnedCString(ptr: unknown, free: ((p: unknown) => void) | null = _free_string): boolean {
+    if (ptr === null || ptr === undefined || ptr === 0n) return false;
+    if (typeof ptr !== 'bigint' && typeof ptr !== 'object') {
+        console.error(
+            `[agent-doc/native] refusing to free a ${typeof ptr} as a Rust-owned C string; `
+            + 'the binding decoded an owned pointer (bind it as OWNED_C_STRING_POINTER)',
+        );
+        return false;
+    }
+    if (!free) return false;
+    free(ptr);
+    return true;
+}
+
 // Result struct returned by FFI functions that produce text
 interface FfiPatchResult {
     text: any; // koffi pointer
@@ -479,20 +517,15 @@ function bindFunctions(): void {
     // Koffi's named types survive library unloads. Keep these ABI descriptors
     // anonymous so rebinding after a native reload cannot collide with the
     // previous generation's process-global type registrations.
-    const FfiPatchResultType = koffi.struct({
-        text: 'char*',
-        error: 'char*',
-    });
+    // #vscodekoffisegv: every owned field stays an opaque pointer. Koffi decodes a
+    // `char*` member to a JS string copy, and handing that copy back to
+    // agent_doc_free_string made Rust `free()` Koffi's temporary — the extension
+    // host SIGSEGV. JetBrains binds the same fields as JNA `Pointer`.
+    const FfiPatchResultType = koffi.struct(OWNED_C_STRING_STRUCT_FIELDS.patch);
 
-    const FfiJsonResultType = koffi.struct({
-        json: 'char*',
-        error: 'char*',
-    });
+    const FfiJsonResultType = koffi.struct(OWNED_C_STRING_STRUCT_FIELDS.json);
 
-    const FfiProjectPathType = koffi.struct({
-        project_root: OWNED_C_STRING_POINTER,
-        relative_path: OWNED_C_STRING_POINTER,
-    });
+    const FfiProjectPathType = koffi.struct(OWNED_C_STRING_STRUCT_FIELDS.projectPath);
 
     _reposition_boundary_to_end = lib.func('agent_doc_reposition_boundary_to_end', FfiPatchResultType, ['str']);
     _reposition_boundary_to_end_with_id = lib.func(
@@ -631,7 +664,7 @@ function bindFunctions(): void {
     try {
         _peer_replicas_missing = lib.func(
             'agent_doc_peer_replicas_missing',
-            'char*',
+            OWNED_C_STRING_POINTER,
             ['str', 'uint64', 'str'],
         );
     } catch (e: any) {
@@ -665,7 +698,7 @@ function bindFunctions(): void {
     try {
         _deferred_write_reconnect_content = lib.func(
             'agent_doc_deferred_write_reconnect_content',
-            'char*',
+            OWNED_C_STRING_POINTER,
             ['str', 'str'],
         );
         _deferred_write_reconnect_propagated = lib.func(
@@ -836,7 +869,7 @@ function decodeOwnedString(call: () => any): string | null {
     try {
         return koffi.decode(ptr, 'char', -1);
     } finally {
-        _free_string(ptr);
+        freeOwnedCString(ptr);
     }
 }
 
@@ -869,7 +902,7 @@ function verifyVersion(libPath: string): void {
         const ptr = _version();
         if (ptr) {
             const version = koffi.decode(ptr, 'char', -1);
-            _free_string(ptr);
+            freeOwnedCString(ptr);
             nativeVersion = version;
             console.log(`[agent-doc/native] loaded libagent_doc v${version} from ${libPath}`);
         } else {
@@ -918,7 +951,7 @@ export function documentBaseHash(filePath: string, projectRoot?: string): string
         console.warn(`[agent-doc/native] document_base_hash error: ${e.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -1070,7 +1103,7 @@ export class NativeReplicaNode {
             console.warn(`[agent-doc/native] replica_text error: ${e.message}`);
             return null;
         } finally {
-            if (ptr) _free_string(ptr);
+            if (ptr) freeOwnedCString(ptr);
         }
     }
 
@@ -1161,7 +1194,7 @@ export function stateProjection(documentHashValue: string, projectRoot?: string)
         console.warn(`[agent-doc/native] state_projection error: ${e.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -1206,7 +1239,7 @@ export function reconcileText(
         console.warn(`[agent-doc/native] reconcile_text error: ${e.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -1236,7 +1269,7 @@ export function stateSubscribe(
         console.warn(`[agent-doc/native] state_subscribe error: ${e.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -1279,7 +1312,7 @@ export function peerReplicasMissing(
         console.warn(`[agent-doc/native] peer_replicas_missing error: ${e.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -1665,14 +1698,14 @@ export function repositionBoundaryToEnd(doc: string, projectRoot?: string, bound
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] reposition_boundary error: ${error}`);
-            _free_string(result.error);
+            freeOwnedCString(result.error);
             return null;
         }
         if (!result.text) return null;
         const text = koffi.decode(result.text, 'char', -1);
         return text;
     } finally {
-        if (result.text) _free_string(result.text);
+        if (result.text) freeOwnedCString(result.text);
     }
 }
 
@@ -1691,14 +1724,14 @@ export function repositionBoundaryToEndPreserveHead(doc: string, projectRoot?: s
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] reposition_boundary_preserve_head error: ${error}`);
-            _free_string(result.error);
+            freeOwnedCString(result.error);
             return null;
         }
         if (!result.text) return null;
         const text = koffi.decode(result.text, 'char', -1);
         return text;
     } finally {
-        if (result.text) _free_string(result.text);
+        if (result.text) freeOwnedCString(result.text);
     }
 }
 
@@ -1715,13 +1748,13 @@ export function normalizeTemplateStructure(doc: string, projectRoot?: string): s
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] normalize_template_structure error: ${error}`);
-            _free_string(result.error);
+            freeOwnedCString(result.error);
             return null;
         }
         if (!result.text) return null;
         return koffi.decode(result.text, 'char', -1);
     } finally {
-        if (result.text) _free_string(result.text);
+        if (result.text) freeOwnedCString(result.text);
     }
 }
 
@@ -1739,13 +1772,13 @@ export function applyNodePatches(doc: string, nodePatches: unknown[], projectRoo
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] apply_node_patches error: ${error}`);
-            _free_string(result.error);
+            freeOwnedCString(result.error);
             return null;
         }
         if (!result.text) return null;
         return koffi.decode(result.text, 'char', -1);
     } finally {
-        if (result.text) _free_string(result.text);
+        if (result.text) freeOwnedCString(result.text);
     }
 }
 
@@ -1771,13 +1804,13 @@ function decodeJsonResult(result: FfiJsonResult, label: string): string | null {
         if (result.error) {
             const error = koffi.decode(result.error, 'char', -1);
             console.warn(`[agent-doc/native] ${label} error: ${error}`);
-            _free_string(result.error);
+            freeOwnedCString(result.error);
             return null;
         }
         if (!result.json) return null;
         return koffi.decode(result.json, 'char', -1);
     } finally {
-        if (result.json) _free_string(result.json);
+        if (result.json) freeOwnedCString(result.json);
     }
 }
 
@@ -2083,7 +2116,7 @@ export function visualTokens(doc: string, projectRoot?: string): VisualToken[] {
         console.warn(`[agent-doc/native] visual_tokens_json error: ${err.message}`);
         return [];
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -2105,7 +2138,7 @@ export function documentIdForPath(filePath: string, projectRoot?: string): strin
         console.warn(`[agent-doc/native] document_id_for_path error: ${err.message}`);
         return null;
     } finally {
-        if (ptr) _free_string(ptr);
+        if (ptr) freeOwnedCString(ptr);
     }
 }
 
@@ -2136,8 +2169,8 @@ export function resolveProjectPath(
         console.warn(`[agent-doc/native] resolve_project_path error: ${err.message}`);
         return null;
     } finally {
-        if (rootPtr) _free_string(rootPtr);
-        if (relativePtr) _free_string(relativePtr);
+        if (rootPtr) freeOwnedCString(rootPtr);
+        if (relativePtr) freeOwnedCString(relativePtr);
     }
 }
 
@@ -2281,7 +2314,7 @@ export function deferredWriteReconnectContent(
     try {
         return koffi.decode(ptr, 'char', -1);
     } finally {
-        _free_string(ptr);
+        freeOwnedCString(ptr);
     }
 }
 

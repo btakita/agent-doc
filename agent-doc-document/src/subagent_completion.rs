@@ -316,6 +316,45 @@ pub fn strip_completion_cells_matching(
         .collect()
 }
 
+/// `current` without the binary-attested completion cells that `baseline`
+/// does not already carry (matched by keyed marker).
+///
+/// `#statussynccommitrefusal`: `queue report-complete` publishes its cell to
+/// the current authority without attributing it to the document baseline, so
+/// a later focused write (`status set`) leaves the baseline exactly "current
+/// minus the pending cells". Comparisons that ask whether the baseline is a
+/// faithful projection of current authority use this form so pending binary
+/// feedback is never mistaken for agent or operator drift. A cell whose body
+/// was edited is no longer attested and is therefore kept.
+pub fn strip_completion_cells_absent_from(current: &str, baseline: &str) -> String {
+    strip_completion_cells_matching(current, |evidence| {
+        !baseline.contains(&marker(&evidence.key))
+    })
+}
+
+/// Whether the ONLY difference between `baseline` and `current` is one or more
+/// binary-attested completion cells that `baseline` does not yet carry.
+///
+/// Blank lines are ignored in the comparison because [`strip_completion_cells`]
+/// removes a cell's blank separator, which may already have been present.
+pub fn only_pending_completion_cells_between(baseline: &str, current: &str) -> bool {
+    if baseline == current {
+        return false;
+    }
+    let stripped = strip_completion_cells_absent_from(current, baseline);
+    if stripped == current {
+        return false;
+    }
+    let non_blank = |text: &str| -> Vec<String> {
+        crate::transient_markers::normalize_transient_agent_doc_markers(text)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    non_blank(&stripped) == non_blank(baseline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +496,39 @@ mod tests {
         assert!(stripped.contains("key=k3"));
         assert!(stripped.contains("operator-authored body"));
         assert_eq!(completion_evidence(&stripped).len(), 1);
+    }
+
+    /// `#statussynccommitrefusal`: the baseline is a faithful projection of
+    /// current authority when the only difference is pending attested cells.
+    #[test]
+    fn only_pending_completion_cells_between_recognizes_unattributed_cells() {
+        let attested = cell_with_response("subagent:a", "do [#a]", "ka", "Done a.").unwrap();
+        let older = cell_with_response("subagent:b", "do [#b]", "kb", "Done b.").unwrap();
+        let baseline =
+            format!("### Re: x — claude\n\nDid it.\n{older}\n<!-- /agent:exchange -->\n");
+        let current = baseline.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{attested}\n<!-- /agent:exchange -->"),
+        );
+        assert!(only_pending_completion_cells_between(&baseline, &current));
+        assert_eq!(
+            strip_completion_cells_absent_from(&current, &baseline),
+            baseline,
+            "only the cell the baseline lacks is stripped"
+        );
+
+        // Identical text is not "pending cells only".
+        assert!(!only_pending_completion_cells_between(&baseline, &baseline));
+        // Any other drift beside the cell is real drift.
+        let with_prompt = current.replace("Did it.", "Did it.\nnew operator prompt");
+        assert!(!only_pending_completion_cells_between(
+            &baseline,
+            &with_prompt
+        ));
+        // An edited body loses its attestation, so it is drift, not feedback.
+        let edited = current.replace("> Done a.", "> Done a, edited.");
+        assert!(!only_pending_completion_cells_between(&baseline, &edited));
+        // A cell the baseline already carries is not pending.
+        assert!(!only_pending_completion_cells_between(&current, &baseline));
     }
 }

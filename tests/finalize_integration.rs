@@ -289,6 +289,167 @@ fn status_set_updates_only_status_and_leaves_the_response_cycle_open() {
     );
 }
 
+/// `#statussynccommitrefusal`: the final status-sync checkpoint prescribes
+/// `agent-doc status set` then `agent-doc commit`. After a committed cycle,
+/// a `queue report-complete` cell sits uncommitted in `agent:exchange`; the
+/// commit used to rebase the status-attributed baseline back to HEAD
+/// (`committed_capture` historical-drift repair) and then refuse the pending
+/// cell as an uncommitted response, naming `write --commit` with a body the
+/// agent does not own. The status change must land; the binary-owned cell
+/// lands with it, exactly as the next preflight's document-only auto-commit
+/// would land it (`#subagentcompletionfeedback`); a repeat commit is a no-op.
+#[test]
+fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\nagent_doc_session: status-sync-commit\nagent_doc_format: template\n",
+        "agent: claude\n---\n\n",
+        "<!-- agent:exchange patch=append -->\n❯ please do the thing\n",
+        "<!-- agent:boundary:ab12cd34 -->\n<!-- /agent:exchange -->\n\n",
+        "<!-- agent:status sync=\"Keep the release current\" -->\nold\n<!-- /agent:status -->\n\n",
+        "<!-- agent:run subagents -->\n- do [#work]\n<!-- /agent:run -->\n\n",
+        "<!-- agent:backlog -->\n- [ ] [#work] the work\n<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    let file = doc.to_str().unwrap();
+    let run = |args: &[&str]| {
+        agent_doc()
+            .current_dir(tmp.path())
+            .args(args)
+            .assert()
+            .success()
+    };
+
+    // 1. A committed cycle whose captured response is in HEAD.
+    run(&["preflight", file]);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", file, "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: the thing — claude\n\nDid the thing.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
+    );
+    assert!(head_blob(tmp.path()).contains("Did the thing."));
+
+    // 2. A worker reports back; the binary-owned cell stays uncommitted.
+    run(&[
+        "queue",
+        "claim",
+        file,
+        "--item",
+        "do [#work]",
+        "--owner",
+        "subagent:work",
+    ]);
+    run(&[
+        "queue",
+        "start",
+        file,
+        "--item",
+        "do [#work]",
+        "--owner",
+        "subagent:work",
+        "--generation",
+        "1",
+        "--worker-id",
+        "w1",
+    ]);
+    run(&[
+        "queue",
+        "report-complete",
+        file,
+        "--item",
+        "do [#work]",
+        "--generation",
+        "1",
+        "--response",
+        "Completed work.\n\n- tests passed",
+    ]);
+    let completion_marker = "<!-- agent-doc-subagent-completion key=";
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains(completion_marker)
+    );
+
+    // 3. The final status-sync checkpoint: `status set`, then `commit`.
+    run(&["status", "set", file, "--text", "Published: v9"]);
+    let first = run(&["commit", file]);
+    let first_stdout = String::from_utf8_lossy(&first.get_output().stdout).into_owned();
+    assert!(
+        first_stdout.contains("[commit] committed"),
+        "the checkpoint's commit must land the status change:\n{first_stdout}\n{}",
+        String::from_utf8_lossy(&first.get_output().stderr)
+    );
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("Published: v9"),
+        "status reached HEAD:\n{head}"
+    );
+    assert!(
+        head.contains(completion_marker) && head.contains("> Completed work."),
+        "the binary-owned cell lands with the document-only commit, as the preflight auto-commit lands it:\n{head}"
+    );
+    assert_eq!(
+        normalize_head_markers(&fs::read_to_string(&doc).unwrap()),
+        normalize_head_markers(&head),
+        "a terminal document-only commit leaves HEAD equal to current authority"
+    );
+
+    // A repeated commit is a clean no-op, not the `write --commit` refusal.
+    let second = run(&["commit", file]);
+    assert!(
+        String::from_utf8_lossy(&second.get_output().stdout).contains("nothing to commit"),
+        "{}",
+        String::from_utf8_lossy(&second.get_output().stderr)
+    );
+    run(&["session-check", file]);
+
+    let log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        !log.contains("commit_blocked_response_patchback_uncommitted"),
+        "pending completion cells are binary feedback, not an uncommitted response:\n{log}"
+    );
+    assert!(
+        log.contains("snapshot_repair_skipped") && log.contains("pending_completion_cells_only"),
+        "the status-attributed baseline must not be rebased to HEAD:\n{log}"
+    );
+
+    // 4. The coordinator's next closeout still runs cleanly.
+    run(&["preflight", file]);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", file, "--force-disk"])
+        .write_stdin(
+            "<!-- patch:exchange -->\n### Re: integrated work — claude\n\nIntegrated.\n<!-- /patch:exchange -->\n",
+        )
+        .assert()
+        .success();
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("Integrated.") && head.contains("Published: v9"),
+        "{head}"
+    );
+    assert_eq!(
+        normalize_head_markers(&fs::read_to_string(&doc).unwrap()),
+        normalize_head_markers(&head),
+        "closeout leaves no residue in the worktree"
+    );
+}
+
+fn normalize_head_markers(text: &str) -> String {
+    agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(text)
+}
+
 #[test]
 fn status_repair_folds_nested_status_sync_and_leaves_the_cycle_open() {
     let tmp = TempDir::new().unwrap();

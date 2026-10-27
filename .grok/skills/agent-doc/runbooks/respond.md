@@ -323,6 +323,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      not your response: never
      hand-commit, edit, or replay it — the next preflight's document-only
      auto-commit (or your closeout) lands it, however many workers reported.
+     A binary-owned `agent-doc commit` (for example the final status-sync
+     checkpoint's, after `agent-doc status set`) lands pending cells with its
+     own change, so run it as prescribed.
      If an earlier v0.34 binary wrote
      bodyless completion headings, migrate those exact artifacts with
      `agent-doc queue repair-completion-feedback <FILE>`; this does not replay

@@ -3663,6 +3663,28 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     if current_doc == snapshot_doc {
         return Ok(None);
     }
+    // `#statussynccommitrefusal`: `queue report-complete` publishes its
+    // binary-attested completion cell to current authority WITHOUT attributing
+    // it to the baseline, and a later focused agent write (`status set`)
+    // attributes only its own delta. The baseline is then exactly "current minus
+    // the pending cells": a faithful, forward projection of authority, not
+    // historical drift. Rebasing it to HEAD here discarded the attributed status
+    // update, and the commit then refused the pending cells as an uncommitted
+    // response, so the final status-sync checkpoint's `agent-doc commit` could
+    // never land a status-only change.
+    if agent_doc_document::subagent_completion::only_pending_completion_cells_between(
+        &snapshot_doc,
+        &current_doc,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "snapshot_repair_skipped file={} reason=pending_completion_cells_only (#statussynccommitrefusal)",
+                file.display()
+            ),
+        );
+        return Ok(None);
+    }
 
     let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);

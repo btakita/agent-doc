@@ -3693,8 +3693,19 @@ fn prompt_match_key_for_commit(text: &str) -> String {
 }
 
 fn response_bearing_exchange_drift_after_committed_head(head_doc: &str, current_doc: &str) -> bool {
+    // `#statussynccommitrefusal`: a binary-attested `queue report-complete` cell
+    // opens with an inert `### Re:` heading, so the append test below read every
+    // pending cell as an uncommitted agent response and told the agent to run
+    // `write --commit` with a body it does not own. The cells are binary
+    // feedback awaiting coordinator integration (`#subagentcompletionfeedback`),
+    // recognized structurally; a body-edited cell loses its attestation and is
+    // still counted.
+    let current_doc = agent_doc_document::subagent_completion::strip_completion_cells_absent_from(
+        current_doc,
+        head_doc,
+    );
     let normalized_head = normalize_committed_exchange_artifacts(head_doc);
-    let normalized_current = normalize_committed_exchange_artifacts(current_doc);
+    let normalized_current = normalize_committed_exchange_artifacts(&current_doc);
     if normalized_head == normalized_current {
         return false;
     }
@@ -3800,6 +3811,43 @@ mod controller_commit_scope_tests {
             "<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\
              <!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
         )
+    }
+
+    /// `#statussynccommitrefusal`: a pending binary-attested completion cell is
+    /// not a response-bearing edit, so the already-committed refusal never
+    /// names `write --commit` for a body the agent does not own. A real agent
+    /// response appended beside it, or a body-edited cell, still counts.
+    #[test]
+    fn response_bearing_drift_ignores_attested_completion_cells() {
+        let head = "---\nagent_doc_session: s\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — claude\n\nDone.\n<!-- /agent:exchange -->\n";
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:work",
+            "do [#work]",
+            "k1",
+            "Completed work.",
+        )
+        .unwrap();
+        let with_cell = head.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{cell}\n<!-- /agent:exchange -->"),
+        );
+        assert!(!response_bearing_exchange_drift_after_committed_head(
+            head, &with_cell
+        ));
+
+        let with_response = with_cell.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: unwritten — claude\n\nbody\n<!-- /agent:exchange -->",
+        );
+        assert!(response_bearing_exchange_drift_after_committed_head(
+            head,
+            &with_response
+        ));
+
+        let edited = with_cell.replace("> Completed work.", "> Completed work, edited.");
+        assert!(response_bearing_exchange_drift_after_committed_head(
+            head, &edited
+        ));
     }
 
     #[test]

@@ -1,0 +1,1260 @@
+{
+  "derivation": "session_command_outcome",
+  "about": "#jbsessioncmdoutcome parity cases. The Rust `session_command_outcome` derivation (agent-doc-editor-surface) and the plugin's frozen Kotlin floor (SessionCommandOutcomeTest) both answer every case. `input` is exactly what the plugin sends: the session command (`clear` or `restart`), whether it exited zero, whether a restart was forced, the command's trimmed output, and the document's relative path. The rules reproduce the pre-move Kotlin: java.util.regex ASCII `\\s`/`\\S`/`\\d`/`\\b` with DOT_MATCHES_ALL headers, Kotlin `trim`/`isBlank` whitespace, `toLongOrNull`, `substringBefore`, `removeSuffix`, and `removeSurrounding`. A native rule change updates this file and may diverge from the frozen floor only on purpose; a case whose native answer diverged on purpose keeps the frozen floor's answer in `frozen_expected`.",
+  "cases": [
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": null,
+          "file": "/repo/tasks/agent-doc/agent-doc-bugs.md",
+          "pane": "%149",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/agent-doc/agent-doc-bugs.md: it runs when the turn in pane %149 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tasks/agent-doc/agent-doc-bugs.md — a turn is live in pane %149 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs.md",
+        "succeeded": true
+      },
+      "name": "a clear queued behind a live turn is a queued notice"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": 42,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease, 42s old). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=42, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "a queued clear carries its live-turn evidence age"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": 4000,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": true,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context re-armed for tmp/doc.md: still one clear, it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease, 66m 40s old). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=4000, source=authoritative_actor), so no `/clear` was typed into the running turn. The clear that was already queued is re-armed for this turn (still one clear) and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=true. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "a re-armed queued clear says it is still one clear"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": null,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=unknown, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "an unknown evidence age shows the evidence only"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": 7385,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease, 2h 3m old). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=7385, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "an evidence age of two hours reads in hours and minutes"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": null,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=99999999999999999999, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends; it is dropped instead if a newer prompt starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/tmp/doc.md` to interrupt the turn and clear now.",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "an evidence age too large for a Long is unknown"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "abandoned_prompt_settling",
+          "evidence_age_secs": null,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": 16
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/sdk.md: it runs automatically in about 16s.\nThe last prompt in pane %180 never started a turn (it looks cancelled); agent-doc waits for that to be confirmed before typing /clear. Pressing Clear again does not make it sooner. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — the last prompt in pane %180 has not started a turn (harness_turn_live=pending evidence=abandoned_prompt_settling settles_in_secs=16 settle_window_secs=20, source=authoritative_actor): Claude Code wrote no prompt record after its snapshot, which is what a prompt cancelled during its `UserPromptSubmit` hooks leaves. A prompt can still start up to 20s after its snapshot, so no `/clear` was typed yet. One clear is queued and the supervisor delivers it automatically in about 16s; pressing Clear Session Context again does not make it sooner. It is dropped instead if that prompt or a newer one starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false. Run `agent-doc session interrupt-clear /repo/src/haiven-dev/tasks/sdk.md` to clear now.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a clear queued behind a cancelled prompt says when it runs"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "abandoned_prompt_settling",
+          "evidence_age_secs": null,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": null,
+          "rearmed": true,
+          "settles_in_secs": 10
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context is already queued for tasks/sdk.md: it runs automatically in about 10s.\nThe last prompt in pane %180 never started a turn (it looks cancelled); agent-doc waits for that to be confirmed before typing /clear. Pressing Clear again does not make it sooner. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — the last prompt in pane %180 has not started a turn (harness_turn_live=pending evidence=abandoned_prompt_settling settles_in_secs=10 settle_window_secs=20, source=authoritative_actor): Claude Code wrote no prompt record after its snapshot, which is what a prompt cancelled during its `UserPromptSubmit` hooks leaves. A prompt can still start up to 20s after its snapshot, so no `/clear` was typed yet. One clear is queued and the supervisor delivers it automatically in about 10s; pressing Clear Session Context again does not make it sooner. It is dropped instead if that prompt or a newer one starts first or the session restarts. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=true. Run `agent-doc session interrupt-clear /repo/src/haiven-dev/tasks/sdk.md` to clear now.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a re-armed clear behind a cancelled prompt is already queued"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": 42,
+          "file": "/repo/tmp/doc.md",
+          "pane": "%185",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tmp/doc.md: it runs when the turn in pane %185 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease, 42s old). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tmp/doc.md — a turn is live in pane %185 (harness_turn_live=true evidence=turn_active_lease evidence_age_secs=42, source=authoritative_actor). rearmed=false",
+        "relative_path": "tmp/doc.md",
+        "succeeded": true
+      },
+      "name": "a short live-turn queue keeps the turn-end wording"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "dispatch_turn_pending",
+          "evidence_age_secs": 12,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": 120,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/sdk.md: it runs after the Run Agent Doc accepted 12s ago finishes.\nThat run has not started its turn in pane %180 yet, so nothing is running and nothing was typed; a clear pressed after Run Agent Doc runs after that run, and that run does not cancel it. If the run never starts, the clear runs within about 108s. Pressing Clear again or Interrupt and clear does not make it sooner."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=12 pre_turn_grace_secs=120, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a clear queued behind an accepted run says it runs after that run"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "dispatch_turn_pending",
+          "evidence_age_secs": null,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": 120,
+          "rearmed": true,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context is already queued for tasks/sdk.md: it runs after the Run Agent Doc already accepted finishes.\nThat run has not started its turn in pane %180 yet, so nothing is running and nothing was typed; a clear pressed after Run Agent Doc runs after that run, and that run does not cancel it. If the run never starts, the clear runs within about 2m 0s. Pressing Clear again or Interrupt and clear does not make it sooner."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=unknown pre_turn_grace_secs=120, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=true.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a re-armed clear behind a run of unknown age counts the whole grace"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "dispatch_turn_pending",
+          "evidence_age_secs": 300,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": 120,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/sdk.md: it runs after the Run Agent Doc accepted 5m 0s ago finishes.\nThat run has not started its turn in pane %180 yet, so nothing is running and nothing was typed; a clear pressed after Run Agent Doc runs after that run, and that run does not cancel it. If the run never starts, the clear runs within about 0s. Pressing Clear again or Interrupt and clear does not make it sooner."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=300 pre_turn_grace_secs=120, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a run older than its grace runs the clear within zero seconds"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "dispatch_turn_pending",
+          "evidence_age_secs": 12,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/sdk.md: it runs after the Run Agent Doc accepted 12s ago finishes.\nThat run has not started its turn in pane %180 yet, so nothing is running and nothing was typed; a clear pressed after Run Agent Doc runs after that run, and that run does not cancel it. Pressing Clear again or Interrupt and clear does not make it sooner."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=12, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a pending run without a grace omits the never-starts line"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "dispatch_turn_pending",
+          "evidence_age_secs": 12,
+          "file": "/repo/src/haiven-dev/tasks/sdk.md",
+          "pane": "%180",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": 5
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/sdk.md: it runs automatically in about 5s.\nThe last prompt in pane %180 never started a turn (it looks cancelled); agent-doc waits for that to be confirmed before typing /clear. Pressing Clear again does not make it sooner. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/src/haiven-dev/tasks/sdk.md — Run Agent Doc for pane %180 was accepted 12s ago and has not started its turn yet (harness_turn_live=pending evidence=dispatch_turn_pending evidence_age_secs=12 settles_in_secs=5, source=authoritative_actor); its trigger has not reached the harness or is still being submitted, so no turn is running. A clear pressed after Run Agent Doc runs after that run, so no `/clear` was typed ahead of its trigger. One clear is queued and the supervisor delivers it automatically when that run's turn ends; that run does not drop it, but a prompt started after this press or a session restart does. If that run never starts, the clear runs within about 108s, when its pre-turn grace expires. Pressing Clear Session Context again, or Interrupt and clear, does not make it sooner: there is no turn to interrupt yet. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none rearmed=false.",
+        "relative_path": "tasks/sdk.md",
+        "succeeded": true
+      },
+      "name": "a settling prompt wins over a pending-run evidence"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "clear_deferred",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context deferred for tasks/root.md.\nThe pane is busy under an active queue auto-loop, so the loop was paused and the clear will run automatically at the next idle gap, then the loop resumes. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear deferred for /repo/tasks/root.md: pane %2 is busy under an active queue auto-loop; the loop is paused and the clear runs at the next idle gap.",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a clear deferred under a busy auto-loop is a deferred notice"
+    },
+    {
+      "expected": {
+        "clear_queued": {
+          "evidence": "turn_active_lease",
+          "evidence_age_secs": null,
+          "file": "/repo/tasks/agent-doc/agent-doc-bugs.md",
+          "pane": "%149",
+          "pre_turn_grace_secs": null,
+          "rearmed": false,
+          "settles_in_secs": null
+        },
+        "clear_refused": null,
+        "kind": "clear_queued",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context queued for tasks/agent-doc/agent-doc-bugs.md: it runs when the turn in pane %149 ends.\nNothing was typed into the running turn (live-turn evidence: turn_active_lease). The clear is dropped if a new prompt starts first. Use Interrupt and clear to clear immediately instead."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tasks/agent-doc/agent-doc-bugs.md — a turn is live in pane %149 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none.\nsession_clear deferred for /repo/tasks/root.md: pane %2 is busy under an active queue auto-loop; the loop is paused and the clear runs at the next idle gap.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs.md",
+        "succeeded": true
+      },
+      "name": "a queued clear wins over a deferred marker"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "cleared",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Cleared session context for /repo/tasks/root.md (pane %2)"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Cleared session context for /repo/tasks/root.md (pane %2)",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a clear that ran now hints its own output"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "cleared",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Cleared session context for tasks/root.md"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a clear that ran now with no output hints the default"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "cleared",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Cleared session context for tasks/root.md"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": " 　",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a clear whose output is only a no-break space is blank"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "cleared",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": ""
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a clear whose output is only a next-line is not blank"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+          "live_turn_evidence": "",
+          "pane": "%1",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/agent-doc/agent-doc-bugs2.md.\nPane %1 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used\"). Run `agent-doc session status /repo/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md",
+        "succeeded": false
+      },
+      "name": "a busy clear refusal reads its pane details"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/agent-doc/agent-doc-bugs.md",
+          "live_turn_evidence": "dispatch_turn_running",
+          "pane": "%149",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "unknown"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context was not queued for tasks/agent-doc/agent-doc-bugs.md.\nA turn is running in pane %149 (dispatch_turn_running), and no agent-doc supervisor owns that pane to run the clear when the turn ends. Nothing was sent. Retry Clear Session Context after the turn finishes, or use Interrupt and clear to discard the running turn."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor) and no supervisor owns the pane to deliver a queued clear when it ends; no `/clear` was sent or queued. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=wait_for_turn_end_no_supervisor_to_queue_clear. Wait for the turn to finish and run Clear Session Context again.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs.md",
+        "succeeded": false
+      },
+      "name": "a live-turn clear refusal says nothing was sent"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/agent-doc/agent-doc-bugs.md",
+          "live_turn_evidence": "dispatch_turn_running",
+          "pane": "%149",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "unknown"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context was not queued for tasks/agent-doc/agent-doc-bugs.md.\nA turn is running in pane %149 (dispatch_turn_running), and no agent-doc supervisor owns that pane to run the clear when the turn ends. Nothing was sent. Retry Clear Session Context after the turn finishes, or use Interrupt and clear to discard the running turn."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs.md because a turn is live in pane %149 (harness_turn_live=true evidence=dispatch_turn_running, source=authoritative_actor) and no supervisor owns the pane to deliver a queued clear when it ends; no `/clear` was sent or queued. ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=wait_for_turn_or_interrupt_then_retry unblocker=wait_for_turn_end_no_supervisor_to_queue_clear. Wait for the turn to finish and run Clear Session Context again.\nsession_clear refused for /repo/x.md because pane %9 is busy (source=registry)",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs.md",
+        "succeeded": false
+      },
+      "name": "a live-turn refusal wins over a busy header"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/home/u/agent-loop/src/sample-app/tasks/sampleorders.md",
+          "live_turn_evidence": "",
+          "pane": "%13",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "● Tip Override global tool settings per agent configuration"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for src/sample-app/tasks/sampleorders.md.\nPane %13 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: ● Tip Override global tool settings per agent configuration"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_clear refused for /home/u/agent-loop/src/sample-app/tasks/sampleorders.md because pane %13 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"● Tip Override global tool settings per agent configuration\"). Run `agent-doc session status /home/u/agent-loop/src/sample-app/tasks/sampleorders.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+        "relative_path": "src/sample-app/tasks/sampleorders.md",
+        "succeeded": false
+      },
+      "name": "a busy clear refusal through the command wrapper"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/home/u/agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+          "live_turn_evidence": "",
+          "pane": "%23",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/agent-doc/agent-doc-bugs2.md.\nPane %23 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_clear refused for /home/u/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %23 is active_agent_doc (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 41% used\"). Wait for an idle prompt, or run `agent-doc session interrupt-clear /home/u/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` to intentionally interrupt the pane and clear context.",
+        "relative_path": "tasks/agent-doc/agent-doc-bugs2.md",
+        "succeeded": false
+      },
+      "name": "an active agent-doc pane refuses a clear"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "",
+          "source": "authoritative_actor",
+          "tail": "Tip says \"Override\" settings (per agent) at C:\\tmp"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: Tip says \"Override\" settings (per agent) at C:\\tmp"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"Tip says \\\"Override\\\" settings (per agent) at C:\\\\tmp\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy tail keeps its quoted and parenthesized text"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "codex",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "",
+          "source": "registry",
+          "tail": "Working (esc to interrupt"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 is busy (codex). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: Working (esc to interrupt"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 is busy (source=registry, current_command=codex, tail=Working (esc to interrupt)).",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy tail ending the output drops its closing parenthesis and period"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "",
+          "source": "registry",
+          "tail": "\""
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 is busy. Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: \""
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 is busy (source=registry, tail=\")",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy tail that is one quote keeps the quote"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "",
+          "source": "unknown",
+          "tail": ""
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 is busy. Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 is busy.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy refusal without source, command, or tail reads unknown"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "",
+          "source": "registry",
+          "tail": "unknown"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 is busy. Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 is alive-busy (source=registry, current_command=unknown, tail=unknown). Wait for an idle prompt.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy refusal with an unknown command omits it"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2 x",
+          "protected_reason": "",
+          "source": "registry",
+          "tail": ""
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for tasks/root.md.\nPane %2 x is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 x is busy (source=registry, current_command=agent-doc)",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy refusal whose pane token holds a no-break space keeps it (ASCII \\S)"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/repo/odd\nname.md",
+          "live_turn_evidence": "",
+          "pane": "%4",
+          "protected_reason": "",
+          "source": "registry",
+          "tail": "> "
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Session is still running for odd\nname.md.\nPane %4 is busy (agent-doc). Wait for the turn to finish, then retry Clear Session Context. Use Refresh and retry if the pane has returned to an idle prompt, or Interrupt and clear to discard the running turn.\nLatest pane output: > "
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/odd\nname.md because pane %4 is busy (source=registry, current_command=agent-doc, tail=\"> \")",
+        "relative_path": "odd\nname.md",
+        "succeeded": false
+      },
+      "name": "a refused file name may span lines (DOT_MATCHES_ALL)"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "drafted prompt input",
+          "source": "authoritative_actor",
+          "tail": "› unfinished prompt"
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context is blocked for tasks/root.md.\nPane %2 contains protected prompt input (drafted prompt input). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session.\nLatest pane output: › unfinished prompt"
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 contains protected prompt input (reason=drafted prompt input, source=authoritative_actor, current_command=agent-doc, tail=\"› unfinished prompt\"). Clear the prompt input manually, or run `agent-doc session interrupt-clear /repo/tasks/root.md` to intentionally interrupt the pane and clear context.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a protected prompt input refusal reads its reason"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": {
+          "current_command": "unknown",
+          "file": "/repo/tasks/root.md",
+          "live_turn_evidence": "",
+          "pane": "%2",
+          "protected_reason": "protected prompt input",
+          "source": "unknown",
+          "tail": ""
+        },
+        "kind": "clear_refused",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Clear Session Context is blocked for tasks/root.md.\nPane %2 contains protected prompt input (protected prompt input). Use Interrupt and clear to discard the prompt input, or Show status to inspect the session."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/root.md because pane %2 contains protected prompt input.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a protected prompt input refusal without a reason or tail"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: project controller socket closed",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a clear failure of another shape is generic"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "session_clear queued for /repo/tasks/agent-doc/agent-doc-bugs.md — a turn is live in pane %149 (harness_turn_live=true evidence=turn_active_lease, source=authoritative_actor), so no `/clear` was typed into the running turn. One clear is queued and the supervisor delivers it automatically when the turn ends. ui_outcome=queued ui_outcome_class=queued next_action=none unblocker=none.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a queued-clear shape in a failed clear is generic"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "cleared",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used\"). Run `agent-doc session status /repo/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it."
+      },
+      "input": {
+        "command": "clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used\"). Run `agent-doc session status /repo/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a refusal shape in a successful clear is a clear that ran"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_busy",
+        "restart_refused_busy": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "gpt-5 high - ~/repo - Context 20% used"
+        },
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nPane %2 is busy (agent-doc). Use Interrupt and restart to stop the running turn and restart the supervisor, or Show status to inspect the session.\nLatest pane output: gpt-5 high - ~/repo - Context 20% used"
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5 high - ~/repo - Context 20% used\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy restart refusal offers interrupt and restart"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "restart",
+        "force": true,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5 high - ~/repo - Context 20% used\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a forced restart never reads a busy refusal"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_starting",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": {
+          "file": "/repo/tasks/root.md",
+          "reason": "the document changed after the last committed cycle"
+        },
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nThe authoritative actor is still starting and the document changed after the last committed cycle. Use Interrupt and restart to stop the current supervisor generation and restart anyway, or Show status to inspect the session."
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /repo/tasks/root.md` to inspect the pane. Pass `--force` to interrupt the running turn and restart anyway.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a starting restart refusal reads its reason"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_starting",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": {
+          "file": "/repo/tasks/root.md",
+          "reason": " waits on boot"
+        },
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nThe authoritative actor is still starting and  waits on boot. Use Interrupt and restart to stop the current supervisor generation and restart anyway, or Show status to inspect the session."
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because the authoritative actor is still starting and \u001f waits on boot 　. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /repo/tasks/root.md` to inspect the pane. Pass `--force` to interrupt the running turn and restart anyway.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a starting restart reason is Kotlin-trimmed"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_busy",
+        "restart_refused_busy": {
+          "current_command": "agent-doc",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "gpt-5 high - ~/repo - Context 20% used"
+        },
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nPane %2 is busy (agent-doc). Use Interrupt and restart to stop the running turn and restart the supervisor, or Show status to inspect the session.\nLatest pane output: gpt-5 high - ~/repo - Context 20% used"
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5 high - ~/repo - Context 20% used\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.\nagent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because the authoritative actor is still starting and the document changed after the last committed cycle. Wait for a dispatch-ready prompt (`prompt_ready=true`) and retry, or run `agent-doc session status /repo/tasks/root.md` to inspect the pane. Pass `--force` to interrupt the running turn and restart anyway.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a busy refusal wins over a starting refusal"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_editor_holds_pane",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": {
+          "current_command": "nvim",
+          "editor": "nvim",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "-- INSERT --"
+        },
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nA terminal editor (nvim) holds pane %2 — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session.\nLatest pane output: -- INSERT --"
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor nvim (source=authoritative_actor, current_command=nvim, tail=\"-- INSERT --\"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "an editor holding the pane refuses a restart"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_editor_holds_pane",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": {
+          "current_command": "nvim",
+          "editor": "nvim",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "-- INSERT --"
+        },
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nA terminal editor (nvim) holds pane %2 — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session.\nLatest pane output: -- INSERT --"
+      },
+      "input": {
+        "command": "restart",
+        "force": true,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor nvim (source=authoritative_actor, current_command=nvim, tail=\"-- INSERT --\"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "an editor holding the pane refuses a forced restart too"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_editor_holds_pane",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": {
+          "current_command": "nvim",
+          "editor": "nvim",
+          "file": "/repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5 high - ~/repo - Context 20% used\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.\nagent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "-- INSERT --"
+        },
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nA terminal editor (nvim) holds pane %2 — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session.\nLatest pane output: -- INSERT --"
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5 high - ~/repo - Context 20% used\"). Run `agent-doc session status /repo/tasks/root.md` and wait for an idle prompt, or pass `--force` to interrupt the running turn and restart anyway.\nagent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor nvim (source=authoritative_actor, current_command=nvim, tail=\"-- INSERT --\"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "an editor refusal wins over a busy refusal; its lazy file starts at the first header"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_editor_holds_pane",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": {
+          "current_command": "nvim",
+          "editor": " ",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "authoritative_actor",
+          "tail": "-- INSERT --"
+        },
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nA terminal editor (nvim) holds pane %2 — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session.\nLatest pane output: -- INSERT --"
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor   (source=authoritative_actor, current_command=nvim, tail=\"-- INSERT --\"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a blank editor name falls back to the current command"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "restart_refused_editor_holds_pane",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": {
+          "current_command": "unknown",
+          "editor": "unknown",
+          "file": "/repo/tasks/root.md",
+          "pane": "%2",
+          "source": "unknown",
+          "tail": ""
+        },
+        "restart_refused_starting": null,
+        "summary": "Restart Supervisor is blocked for tasks/root.md.\nA terminal editor holds pane %2 — e.g. Claude Code `ctrl+g` edit-in-nvim. Close the editor (for example `:wq` in nvim) and retry; Interrupt and restart will not bypass it. Use Show status to inspect the session."
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor unknown (current_command=unknown)",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "an unknown editor and command name no editor"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "Error: supervisor socket unreachable",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "a restart failure of another shape is generic"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "Restarted supervisor for /repo/tasks/root.md",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a successful restart is generic"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "restart",
+        "force": false,
+        "output": "agent-doc command failed (exit 1): Error: session_restart refused for /repo/tasks/root.md because pane %2 is held by editor nvim (source=authoritative_actor, current_command=nvim, tail=\"-- INSERT --\"). Run `agent-doc session status /repo/tasks/root.md` to inspect the pane. A terminal editor (for example Claude Code `ctrl+g` edit-in-nvim) owns the pane, so the restart interrupt is swallowed and the restart command would type into the editor buffer. Close the editor (for example `:wq` in nvim) and retry.",
+        "relative_path": "tasks/root.md",
+        "succeeded": true
+      },
+      "name": "a refusal shape in a successful restart is generic"
+    },
+    {
+      "expected": {
+        "clear_queued": null,
+        "clear_refused": null,
+        "kind": "generic",
+        "restart_refused_busy": null,
+        "restart_refused_editor_holds_pane": null,
+        "restart_refused_starting": null,
+        "summary": null
+      },
+      "input": {
+        "command": "interrupt-clear",
+        "force": false,
+        "output": "Error: session_clear refused for /repo/tasks/agent-doc/agent-doc-bugs2.md because pane %1 is alive-busy (source=authoritative_actor, current_command=agent-doc, tail=\"gpt-5.5 high - ~/work/btakita/agent-loop - Context 15% used\"). Run `agent-doc session status /repo/tasks/agent-doc/agent-doc-bugs2.md` and wait for an idle prompt, or inspect/stop the pane explicitly before clearing or restarting it.",
+        "relative_path": "tasks/root.md",
+        "succeeded": false
+      },
+      "name": "an unknown command is generic"
+    }
+  ]
+}

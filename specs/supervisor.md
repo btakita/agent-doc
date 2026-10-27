@@ -221,6 +221,41 @@ A restart iteration that re-resolves the harness records its outcome in
 (`agent_restart_performed` / `agent_restart_respec_refreshed` /
 `agent_restart_respec_failed` / `agent_restart_respec_skipped`), so "the restart
 came back on the old agent" is answerable from the log instead of inferred.
+`agent_restart_respec_refreshed resolved_from=frontmatter:<value>` names the
+`agent:` the authority text itself declared (`frontmatter:<unset>` when it has
+none), never the actor the resolver substituted for an absent key.
+
+Restart Agent re-resolves the harness from the controller's document
+authority, not from the editor buffer, so it cannot see an `agent:` edit the
+authority has not merged yet (`#restartagentharness`). Observed 2026-10-27 on
+`tasks/software/lazily.md`: the editor replica was fenced at 16:07:54Z
+(`crdt_document_op_delta_ingested outcome=StructuralQuarantined`, then
+`crdt_replica_update_quarantined recovery=lazy_canonical_projection`), the
+operator's later `agent: claude` → `agent: grok` edit was recorded by op capture
+but never reached the authority, and five Restart Agent invocations each logged
+`resolved_harness=claude resolved_from=frontmatter:claude` and relaunched
+Claude Code. The editor therefore sends the `agent:` it shows:
+
+- `agent-doc session restart-agent <FILE> --expect-agent <AGENT>`. JetBrains
+  reads the open buffer's frontmatter through the native
+  `agent_doc_frontmatter_agent` export (the binary's own parser) and passes the
+  value whenever the buffer names an agent; an older native library, an
+  unparsable frontmatter, or no `agent:` key sends no flag.
+- Before requesting any replacement, the CLI compares that value with the
+  authority's declared `agent:` through the pure
+  `agent_doc_supervisor::harness_authority::restart_agent_frontmatter_agreement`.
+  Both sides are compared as declared names after `normalize_harness_name`
+  (`claude`/`claude-code` and `grok`/`grok-build` agree), not as resolved
+  binaries, so an unknown name never agrees with `claude` merely because both
+  fall back to it at launch. An absent or `default` editor value is no evidence
+  and admits the restart unchanged.
+- On disagreement the restart is refused with both values named and nothing is
+  replaced; the ops log records
+  `restart_agent_refused reason=authority_lags_editor editor_agent=<x> authority_agent=<y|<unset>>`.
+  Failing closed is deliberate: honouring the editor value over the authority
+  would let the idle agent-change watch (which reads the same authority) switch
+  the harness straight back, and the remedy for the stale authority is editor
+  sync convergence, not a supervisor-side override.
 
 The replacement child must not auto-trigger the document while that document has
 a retained binary-owned editor delivery. The supervisor keeps resetting the

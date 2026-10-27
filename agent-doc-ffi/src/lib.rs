@@ -288,6 +288,33 @@ pub unsafe extern "C" fn agent_doc_merge_frontmatter(
     }
 }
 
+/// Read the `agent:` value a document's frontmatter declares.
+///
+/// Editor plugins call this on their *visible* buffer and pass the result to
+/// `agent-doc session restart-agent --expect-agent`, so Restart Agent can refuse
+/// to relaunch from a controller authority that has not yet seen the operator's
+/// `agent:` edit (`#restartagentharness`). Uses the canonical frontmatter
+/// parser, so quoting and comments resolve exactly as the binary resolves them.
+///
+/// Returns the trimmed value via [`FfiPatchResult::text`], an empty string when
+/// the frontmatter has no `agent:` key (or no frontmatter at all), and an error
+/// when the frontmatter does not parse.
+///
+/// # Safety
+///
+/// `doc` must be a valid, NUL-terminated UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_frontmatter_agent(doc: *const c_char) -> FfiPatchResult {
+    let doc_str = match unsafe { CStr::from_ptr(doc) }.to_str() {
+        Ok(s) => s,
+        Err(e) => return ffi_patch_err(&format!("invalid doc UTF-8: {e}")),
+    };
+    match frontmatter::parse(doc_str) {
+        Ok((fm, _)) => ffi_patch_ok(fm.agent.as_deref().map(str::trim).unwrap_or("").to_string()),
+        Err(e) => ffi_patch_err(&format!("{e:#}")),
+    }
+}
+
 /// Converge the `agent:queue` opening-tag `auto` attribute to `want_auto`.
 ///
 /// A content patch replaces only a component's body, so it cannot add or remove
@@ -1347,6 +1374,39 @@ mod tests {
         let json = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
         unsafe { agent_doc_free_string(ptr) };
         serde_json::from_str(&json).unwrap()
+    }
+
+    fn frontmatter_agent(doc: &str) -> Result<String, String> {
+        let c_doc = CString::new(doc).unwrap();
+        let result = unsafe { agent_doc_frontmatter_agent(c_doc.as_ptr()) };
+        let read = |ptr: *mut c_char| unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_string();
+        let outcome = if result.error.is_null() {
+            Ok(read(result.text))
+        } else {
+            Err(read(result.error))
+        };
+        unsafe {
+            agent_doc_free_string(result.text);
+            agent_doc_free_string(result.error);
+        }
+        outcome
+    }
+
+    #[test]
+    fn frontmatter_agent_reads_the_visible_declared_agent() {
+        // The 2026-10-27 lazily.md frontmatter shape (`#restartagentharness`).
+        let doc = "---\nagent_doc_session: d818612d\nresume:\n  claude: 62d9849d\nagent: grok\nclaude_model: opus\n---\nBody\n";
+        assert_eq!(frontmatter_agent(doc).as_deref(), Ok("grok"));
+        assert_eq!(
+            frontmatter_agent("---\nagent: \"codex\" # switched\n---\n").as_deref(),
+            Ok("codex")
+        );
+        assert_eq!(
+            frontmatter_agent("---\nagent_doc_session: abc\n---\nBody\n").as_deref(),
+            Ok("")
+        );
+        assert_eq!(frontmatter_agent("no frontmatter\n").as_deref(), Ok(""));
+        assert!(frontmatter_agent("---\nagent: [unclosed\n---\n").is_err());
     }
 
     #[test]

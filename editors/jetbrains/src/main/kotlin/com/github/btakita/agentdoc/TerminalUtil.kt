@@ -1395,10 +1395,14 @@ object TerminalUtil {
     ) {
         val (telemetryCwd, _) = resolveProject(project, file)
         val telemetryStartLine = restartTelemetryOpsLogLineCount(telemetryCwd)
+        // `#restartagentharness`: Restart Agent re-resolves the harness from the
+        // controller's document authority, which can lag this buffer. Send the
+        // agent the operator can SEE so the binary refuses a stale relaunch.
+        val expectAgent = if (target == RestartTarget.AGENT) editorVisibleFrontmatterAgent(file) else null
         runSessionCommand(
             project = project,
             file = file,
-            args = restartCommandArgs(target, force),
+            args = restartCommandArgs(target, force, expectAgent),
             startedMessage = "Restarting ${target.noun} for ${file.name}",
             failureAction = "restart the ${target.noun}",
             onSuccess = { relativePath, output ->
@@ -1809,8 +1813,31 @@ object TerminalUtil {
         add(relativePath)
     }
 
-    internal fun restartCommandArgs(target: RestartTarget, force: Boolean): List<String> =
-        if (force) listOf(target.commandName, "--force") else listOf(target.commandName)
+    internal fun restartCommandArgs(
+        target: RestartTarget,
+        force: Boolean,
+        expectAgent: String? = null,
+    ): List<String> = buildList {
+        add(target.commandName)
+        if (force) add("--force")
+        if (target == RestartTarget.AGENT && !expectAgent.isNullOrBlank()) {
+            add("--expect-agent")
+            add(expectAgent.trim())
+        }
+    }
+
+    /** The `agent:` the open editor buffer for [file] declares, or null when unknown. */
+    private fun editorVisibleFrontmatterAgent(file: VirtualFile): String? {
+        val text =
+            try {
+                ReadAction.compute<String?, RuntimeException> {
+                    FileDocumentManager.getInstance().getCachedDocument(file)?.text
+                }
+            } catch (_: RuntimeException) {
+                null
+            } ?: return null
+        return NativePatching.frontmatterAgent(text)
+    }
 
     internal fun buildAdminQueueResumeCommand(
         agentDoc: String,

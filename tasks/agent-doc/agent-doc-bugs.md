@@ -58,6 +58,37 @@ Both are on `main` (`eebfdfef07..16484ef75b`, fast-forward) and installed locall
 - Backlog (go queue): `#loadprojectfordoccwd`. Config loading still falls back to the cwd for a document with no project (19 caller files).
 - Backlog (go queue): `#queuerowdup`. Each claimed row now appears twice in `agent:run`, once behind a `☑️` marker and once plain. Preflight then selected the plain copy as a drainable head; I didn't drain it inline.
 - Icebox: `#rootlessstorecreate`. The first start of a document with no project now creates `.agent-doc/` in its parent directory.
+
+### Re: [#ddj8] Is `~` as an agent-doc project safe? — opus-5 · 2026-10-27T09:09-04:00
+
+Short answers: **tsift will not index your home directory.** Making `~` an agent-doc project **works but isn't a good idea.** And **an agent-doc session can't finish a cycle outside a git repo.** These come from a read-only research pass over agent-doc `16484ef75b` and tsift `5ebe6e3`, with experiments in a throwaway HOME. Nothing was changed.
+
+**1. Would tsift index all of `~`? No.**
+- tsift chooses its root from `.tsift/`, `.gitmodules` or `.git`. `.agent-doc/` is not one of them.
+- It refuses to index `$HOME`, `$TMPDIR` or `/` unless `TSIFT_ALLOW_AMBIENT_ROOT=1` is set. That refusal was the earlier `~/.tsift` fix. In a temp HOME containing `.agent-doc/`, both `tsift status` and `tsift index` refused.
+- agent-doc never runs `tsift init`, `index` or `status --fix` itself. Every tsift call it makes is skipped unless an index already exists.
+
+**2. Is `~` as an agent-doc project safe? It works, but it costs a lot.**
+- **One guard reads every markdown file under the project root.** It runs at preflight and session-check whenever a document deletes open ids. At `$HOME` that's about 277k directories walked and 20k `.md` files, 216 MB read. At agent-loop it's 12 MB.
+- **Repos under `~` would split.** In a git repo without its own `.agent-doc/`, IPC routing would use the repo, while the state store, registry and controller sat at `$HOME`.
+- **Editors ignore the root limit.** The JetBrains and VS Code plugins walk upward without one, so opening any loose `.md` under `~` starts a listener for `$HOME`.
+- **`~/.agent-doc` already exists by accident.** agent-doc never meant it as user state; it appeared because commands ran with `~` as the working directory. It holds 1.8G now, of which 1.7G is a retired `live-buffer/` last written in July. It also has a controller record with a dead pid and registered scratch files, and it collects a debug log every day.
+
+**3. Can a project work outside a git repo? Only partly.** With a `.agent-doc/` folder but no git, preflight runs. But `finalize` and `write --commit` refuse ("requires a git repository for session documents"), so the cycle never closes and its boundary marker stays in the document. With neither git nor `.agent-doc/`, preflight fails with "no project root found".
+
+**Options:**
+- **(a)** Never treat `$HOME`, `/` or the temp dir as a project root, as the tsift fix does, with an opt-in override. Move user-level logs to `$XDG_STATE_HOME`. Recorded as icebox `#homerootguard`.
+- **(b)** Keep agent-doc activity in a child git repo such as `~/notes`, with its own `.agent-doc/`. That's the only notes setup where cycles complete.
+- **(c)** Leave things as they are.
+
+**I recommend (a)+(b).** I've added a Todo for your choice. You can archive or delete the existing `~/.agent-doc`; the 1.7G `live-buffer/` in it is retired data.
+
+**Filed (concrete bugs found along the way, so they go to the backlog):**
+- `#tracingrootceiling`: the debug-log location walks up from the current directory, ignoring the root ceiling. That's why `~/.agent-doc` gets a daily log, and it's also a test-isolation leak.
+- `#commitoutsidegit`: `agent-doc commit` outside git falsely reports "already matches HEAD".
+- `#livebuffergc`: retired `live-buffer/` stores are never cleaned up.
+
+The four in-flight fixes (`#krwr`, `#autoclearorphandrain`, `#loadprojectfordoccwd`, `#queuerowdup`) are still running. Then I'll do the release you queued.
 <!-- agent:boundary:d7b4ac5d -->
 <!-- /agent:exchange -->
 
@@ -65,16 +96,15 @@ Both are on `main` (`eebfdfef07..16484ef75b`, fast-forward) and installed locall
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#autoclearorphandrain]
-- do [#loadprojectfordoccwd]
-- do [#queuerowdup]
-- ~~do [#clearqueuedciflake]~~
-- ~~do [#startcwdfallback]~~
-- ~~do [#clearqueuedciflake]~~
-- ~~do [#startcwdfallback]~~
+- do [#tracingrootceiling]
+- do [#commitoutsidegit]
+- do [#livebuffergc]
+- 🚧 [#subagent:autoclearorphandrain#1] do [#autoclearorphandrain]
+- 🚧 [#subagent:loadprojectfordoccwd#1] do [#loadprojectfordoccwd]
+- 🚧 [#subagent:queuerowdup#1] do [#queuerowdup]
 - 🚧 [#subagent:krwr#1] [#krwr]: deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit
-- 📥 release + publish after "deleting a claimed queue row while adding a different row..." is integrated.
-- 📥 [#ddj8]: Will making ~ a project cause tsift to index the entire home directory? This would cause bad performance implications. I don't mind having agent-doc activity contained in a child directory...it's safe. Would making ~ an agent-doc project be safe? Also, ~ is not a git repo. Can an agent-doc project work outside of a git repo?
+- 📥 release + publish after "deleting a claimed queue row while adding a different row..." + [#autoclearorphandrain] [#loadprojectfordoccwd] [#queuerowdup] is integrated.
+- ~~[#ddj8]: Will making ~ a project cause tsift to index the entire home directory? This would cause bad performance implications. I don't mind having agent-doc activity contained in a child directory...it's safe. Would making ~ an agent-doc project be safe? Also, ~ is not a git repo. Can an agent-doc project work outside of a git repo?~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -89,10 +119,14 @@ Both are on `main` (`eebfdfef07..16484ef75b`, fast-forward) and installed locall
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#krwr] Decide whether deleting a claimed queue row while adding a different row at the same position should cancel the claim instead of handing it to the new row as an edit (current #queue-mutation-steering design; raised by the #claimfollowstruck fix).
-- [ ] [#ddj8] Decide whether ~/.agent-doc/ (which holds state.db) should make $HOME a project root: today any pane under $HOME with no closer .agent-doc/ resolves $HOME as its project root (found by #prunetestisolation; cf. the earlier ~/.tsift-made-$HOME-a-workspace fix).
+- [x] [#ddj8] Decide whether ~/.agent-doc/ (which holds state.db) should make $HOME a project root: today any pane under $HOME with no closer .agent-doc/ resolves $HOME as its project root (found by #prunetestisolation; cf. the earlier ~/.tsift-made-$HOME-a-workspace fix).
+- [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#tracingrootceiling] agent-doc's tracing setup walks up from the process cwd with no ceiling to pick its debug.log location and ignores AGENT_DOC_ROOT_CEILING_DIRECTORIES (src/main.rs:5260-5272), so ~/.agent-doc gets a debug.log daily and tests can leak into an ancestor project. Use find_project_root (which honors the ceiling).
+- [ ] [#commitoutsidegit] agent-doc commit on a document outside any git repo exits 0 with 'nothing to commit: ... already matches HEAD' (src/main.rs:182-190) although there is no HEAD; report that the file is not in a git repository (and what to do) instead of a false success.
+- [ ] [#livebuffergc] Retired live-buffer/ directories are never cleaned up (~/.agent-doc/live-buffer is 1.7G across 2,928 files, last written 2026-07-14; agent-loop/.agent-doc/live-buffer 2.0M) and no current code writes or prunes them. Make agent-doc gc remove the retired live-buffer store (with a dry-run listing).
 - [ ] [#autoclearorphandrain] During a supervisor re-exec the controller's orphan drain (controller_orphan_drain_dispatch reason=no_supervisor_idle_watch, degraded_supervisor=supervisor_health_is_unreachable) dispatches the next queue item straight to the pane and skips the pending between-items queue auto-clear. tests/clear_queued_live_turn_tmux.rs::queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec failed 1/3 whole-file runs under load ('exactly one /clear between the two items', none sent). The orphan drain must honor a pending auto-clear (or defer to the restarting supervisor).
 - [ ] [#loadprojectfordoccwd] agent_doc_project_config_io::load_project_for_doc still falls back to the process cwd's config for a document with no .agent-doc ancestor (19 caller files, e.g. agent-doc-start-runtime-io/src/idle_watch.rs:3637); resolve it from project_root_or_file_parent like #startcwdfallback / #claimwrongstore / #syncnorootfallback.
 - [ ] [#queuerowdup] The agent:run queue now shows each claimed id row twice: '- ☑️ [#subagent:clearqueuedciflake#1] do [#clearqueuedciflake]' plus a plain '- do [#clearqueuedciflake]' (same for #startcwdfallback; committed at 493b81b9bd), and preflight then selected the plain duplicate as a drainable selected_queue_prompts head. Find which writer (backlog->queue mirror on --backlog-add, the claim projection, or the strike/prune) re-adds an id-backed head that is already present behind a lifecycle marker, and make it marker-aware.
@@ -105,6 +139,7 @@ Both are on `main` (`eebfdfef07..16484ef75b`, fast-forward) and installed locall
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#homerootguard] Option (a) from the #ddj8 research, pending the operator's choice: never treat $HOME, / or the temp dir as an agent-doc project root (agent-doc-fs/src/lib.rs:44-61 find_project_root plus the JetBrains PatchWatcher.kt:288-297 / TurnStateBridge.kt:295 / CrdtReplicaManager.kt:5104 and VS Code extension.ts:318 root walkers, which also ignore the root ceiling) unless an override such as AGENT_DOC_ALLOW_HOME_ROOT=1 is set or ~/.git exists; move user-level logs to $XDG_STATE_HOME/agent-doc.
 - [ ] [#rootlessstorecreate] Since #startcwdfallback, the first start of a document with no .agent-doc ancestor creates .agent-doc/ in the document's parent directory (as the bootstrap paths always did). Readers that skip rootless documents (turn-status, session-actor generation/log paths, start-runtime-io lib.rs:304/339, run.rs:196/404/1012) then find that store; decide whether a rootless store should be created at all or whether those readers should treat it consistently.
 - [ ] [#citedworknag] Since #todoaddonsamecycledone, a follow-up todo created in the closeout that resolved its cited item is standalone, so preflight's cited_work_resolved advisory fires on every preflight for it (e.g. #krwr, #ddj8) even though it is outstanding by design. Quieting it needs a creation marker the document does not record. Also: claim still reads the process cwd's registry in find_alive_project_window (--window fallback) and the cwd config in project_tmux_session() (read-only; left to keep admission behavior).
 - [ ] [#ownerlifecyclerevive] The owner lifecycle writer (store_lifecycle_actor_record_for_runtime callers, agent-doc-controller-io rpc.rs ~27253) decides from the runtime actor record and writes on generation only, so a same-generation Closed landing in that window could be overwritten by Ready. It is an owner write (kept generation-only by #controllerclosefence/#bindingcallersaudit); decide whether it should refuse to revive a Closed actor. Also unverified from #drainbusymask: a durable Busy with in-memory Ready would still block an admin drain (no writer found that produces it).

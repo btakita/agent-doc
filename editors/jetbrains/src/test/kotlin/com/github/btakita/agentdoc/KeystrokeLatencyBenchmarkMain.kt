@@ -93,6 +93,9 @@ internal class KeystrokeBenchmark(
     private val cases = linkedMapOf<String, MutableList<Long>>()
     private val roundMedians = linkedMapOf<String, MutableList<Long>>()
 
+    /** Moved rules the measured library does not answer. */
+    private val skipped = mutableListOf<String>()
+
     /** Per-step samples of a composite case, recorded only outside its warmup. */
     private var recording = false
 
@@ -110,52 +113,56 @@ internal class KeystrokeBenchmark(
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "bench-native-worker").apply { isDaemon = true } }
         val flush1 = ReplicaFlush("keystroke.replica_flush_1", burst = 1)
         val flush16 = ReplicaFlush("keystroke.replica_flush_16", burst = 16)
-        val all =
-            buildList {
-                add(Case("keystroke.typing_report", iterations, warmup) { typingReport() })
-                add(Case(flush1.name, flushIterations, flushWarmup, flush1::open, flush1::close) { flush1.flush() })
-                add(Case(flush16.name, flushIterations, flushWarmup, flush16::open, flush16::close) { flush16.flush() })
-                add(Case("boundary.worker_hop", iterations, warmup) { worker.submit<Int> { 1 }.get() })
-                add(
-                    Case("boundary.derive_capabilities", iterations, warmup) {
-                        NativeAdminControls.deriveEditor("capabilities", "{}") ?: error("derive_json unavailable")
-                    },
-                )
-                for (rule in movedRules()) {
-                    add(
-                        Case(
-                            "move.${rule.name}.native",
-                            iterations,
-                            warmup,
-                            prepare = {
-                                val listed = NativeAdminControls.deriveEditor("capabilities", "{}").orEmpty()
-                                check(listed.contains("\"${rule.name}\"")) { "the library does not answer ${rule.name}" }
-                            },
-                        ) { rule.native() },
+        val keystroke =
+            listOf(
+                Case("keystroke.typing_report", iterations, warmup) { typingReport() },
+                Case(flush1.name, flushIterations, flushWarmup, flush1::open, flush1::close) { flush1.flush() },
+                Case(flush16.name, flushIterations, flushWarmup, flush16::open, flush16::close) { flush16.flush() },
+                Case("boundary.worker_hop", iterations, warmup) { worker.submit<Int> { 1 }.get() },
+                Case("boundary.derive_capabilities", iterations, warmup) {
+                    NativeAdminControls.deriveEditor("capabilities", "{}") ?: error("derive_json unavailable")
+                },
+            )
+        // A library that predates a moved rule (a baseline build) skips its cases, so one harness
+        // measures both sides of a move.
+        val listed = NativeAdminControls.deriveEditor("capabilities", "{}").orEmpty()
+        val moved =
+            movedRules().flatMap { rule ->
+                if (!listed.contains("\"${rule.name}\"")) {
+                    skipped += rule.name
+                    emptyList()
+                } else {
+                    listOf(
+                        Case("move.${rule.name}.native", iterations, warmup) { rule.native() },
+                        Case("move.${rule.name}.frozen", iterations, warmup) { rule.frozen() },
                     )
-                    add(Case("move.${rule.name}.frozen", iterations, warmup) { rule.frozen() })
                 }
             }
+        val all = keystroke + moved
         try {
             all.forEach { it.prepare() }
-            // Rounds interleave the cases, so a slow stretch of the machine lands on every case
-            // instead of on whichever one happened to run then. The gate reads the best round.
-            for (round in 1..rounds) {
-                for (case in all) {
-                    recording = false
-                    if (round == 1) repeat(case.warm) { case.op() }
-                    recording = true
-                    val samples = LongArray(case.count)
-                    for (i in 0 until case.count) {
-                        val started = System.nanoTime()
-                        case.op()
-                        samples[i] = System.nanoTime() - started
+            // The keystroke phase runs alone and first, so the gated cases see the same process
+            // whatever moved rules a build adds. Within a phase, rounds interleave the cases, so
+            // a slow stretch of the machine lands on every case. The gate reads the best round.
+            for (phase in listOf(keystroke, moved)) {
+                System.gc()
+                for (round in 1..rounds) {
+                    for (case in phase) {
+                        recording = false
+                        if (round == 1) repeat(case.warm) { case.op() }
+                        recording = true
+                        val samples = LongArray(case.count)
+                        for (i in 0 until case.count) {
+                            val started = System.nanoTime()
+                            case.op()
+                            samples[i] = System.nanoTime() - started
+                        }
+                        recording = false
+                        cases.getOrPut(case.name) { ArrayList() }.addAll(samples.asList())
+                        roundMedians.getOrPut(case.name) { ArrayList() } += samples.sortedArray()[(samples.size - 1) / 2]
                     }
-                    recording = false
-                    cases.getOrPut(case.name) { ArrayList() }.addAll(samples.asList())
-                    roundMedians.getOrPut(case.name) { ArrayList() } += samples.sortedArray()[(samples.size - 1) / 2]
+                    if (phase === keystroke) for (flush in listOf(flush1, flush16)) flush.closeRound()
                 }
-                for (flush in listOf(flush1, flush16)) flush.closeRound()
             }
         } finally {
             all.forEach { it.close() }
@@ -171,6 +178,7 @@ internal class KeystrokeBenchmark(
             addProperty("fixture_bytes", fixture.toByteArray(Charsets.UTF_8).size)
             addProperty("fixture_utf16", fixture.length)
             addProperty("rounds", rounds)
+            add("skipped_moves", com.google.gson.JsonArray().apply { skipped.forEach(::add) })
             addProperty("iterations", iterations)
             addProperty("warmup", warmup)
             addProperty("flush_iterations", flushIterations)
@@ -195,7 +203,24 @@ internal class KeystrokeBenchmark(
                 native = { RouteOutcome.derive(ROUTE_OUTPUT, "plan.md") },
                 frozen = { RouteOutcome.frozen(ROUTE_OUTPUT, "plan.md") },
             ),
+            // PatchWatcher: the prefix repair of a patched document, once per patch that names
+            // targets. The worst case: the whole document crosses both ways.
+            MovedRule(
+                "exchange_prefix_repair",
+                native = { ExchangePrefixRepair.repair(unprefixedFixture, PREFIX_TARGETS) },
+                frozen = { ExchangePrefixRepair.frozen(unprefixedFixture, PREFIX_TARGETS) },
+            ),
         )
+
+    /** The fixture with its operator line unprefixed, so the repair changes it. */
+    private val unprefixedFixture: String by lazy {
+        val anchor = typingAnchor(fixture)
+        val unprefixed = fixture.substring(0, anchor) + PREFIX_TARGETS.single() + "\n" + fixture.substring(anchor)
+        check(ExchangePrefixRepair.frozen(unprefixed, PREFIX_TARGETS) != unprefixed) {
+            "the prefix case must change the document"
+        }
+        unprefixed
+    }
 
     private fun typingReport() {
         lib.agent_doc_lazily_current_observed_v1(
@@ -312,6 +337,9 @@ internal class KeystrokeBenchmark(
         /** Outside every `.agent-doc` project, so no controller is ever contacted. */
         val BENCH_DOCUMENT_PATH: String =
             File(System.getProperty("java.io.tmpdir"), "agent-doc-keystroke-bench/session.md").absolutePath
+
+        /** An operator prompt the prefix case types, unprefixed, into the operator region. */
+        val PREFIX_TARGETS = listOf("please run the next step")
 
         /** A representative route output: an unproven dispatch with its snapshot and attempt. */
         val ROUTE_OUTPUT: String =

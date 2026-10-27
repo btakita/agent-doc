@@ -1,0 +1,1781 @@
+{
+  "derivation": "exchange_prefix_repair",
+  "about": "#jbshrinkrestarts parity cases. The Rust `exchange_prefix_repair` derivation (agent-doc-editor-surface) and the plugin's frozen Kotlin floor `normalizeExchangePrefixesUtil` (ExchangePrefixRepairTest) both answer every case. `input` is exactly what the patch worker sends: the patched document and the patch's `normalize_prefix_lines`. `expected.document` is present exactly when the repair changed the document. The named cases pin the rule; the generated cases (a seeded mix of prompt, response-label, list, quote, heading, boundary, whitespace, CRLF, and non-ASCII lines) pin the port. A native rule change updates this file and may diverge from the frozen floor only on purpose; such a case keeps the frozen floor's answer in `frozen_expected`.",
+  "cases": [
+    {
+      "name": "a matching operator line gains the prefix",
+      "input": {
+        "document": "<!-- agent:exchange -->\nSome prompt text.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Some prompt text."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ Some prompt text.\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "an already prefixed line is unchanged",
+      "input": {
+        "document": "<!-- agent:exchange -->\n❯ Some prompt text.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Some prompt text."
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "a target with trailing whitespace matches the stripped buffer line",
+      "input": {
+        "document": "<!-- agent:exchange -->\ndeterministic software.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "deterministic software. "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ deterministic software.\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "a buffer line with trailing whitespace matches",
+      "input": {
+        "document": "<!-- agent:exchange -->\ndeterministic software.   \n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "deterministic software."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ deterministic software.   \n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "the agent region after the last boundary is untouched",
+      "input": {
+        "document": "<!-- agent:exchange -->\nUser prompt here.\n<!-- agent:boundary:abc12345 -->\nUser prompt here.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "User prompt here."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ User prompt here.\n<!-- agent:boundary:abc12345 -->\nUser prompt here.\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "no targets leave the document unchanged",
+      "input": {
+        "document": "<!-- agent:exchange -->\nSome prompt text.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": []
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "no exchange component leaves the document unchanged",
+      "input": {
+        "document": "Just plain text without any components.\n",
+        "prefix_lines": [
+          "Just plain text without any components."
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "an exchange tag with attributes is found",
+      "input": {
+        "document": "---\nagent_doc_session: x\n---\n<!-- agent:exchange patch=append -->\nFirst line.\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "First line."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "---\nagent_doc_session: x\n---\n<!-- agent:exchange patch=append -->\n❯ First line.\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "blank targets are ignored",
+      "input": {
+        "document": "<!-- agent:exchange -->\nSome text.\n\n  \n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "",
+          "  ",
+          "Some text."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ Some text.\n\n  \n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "the last of several boundaries ends the operator region",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: old\n\nanswer\n<!-- agent:boundary:aaaa1111 -->\nNew user prompt.\n<!-- agent:boundary:bbbb2222 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "New user prompt."
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: old\n\nanswer\n<!-- agent:boundary:aaaa1111 -->\n❯ New user prompt.\n<!-- agent:boundary:bbbb2222 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "an assistant verification list is response, not prompts",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: verify (HEAD)\n\nVerification:\n- make check passed\n- run the suite again\n<!-- agent:boundary:cc33 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "- make check passed",
+          "- run the suite again"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "a prefixed markdown response label is not a fresh prompt",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: x\n\n❯ **Plan:** do the thing\nplease do the thing\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "**Plan:** do the thing",
+          "please do the thing"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: x\n\n❯ **Plan:** do the thing\n❯ please do the thing\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "a quoted target inside a response stays quoted",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: x\n\n> Please rerun the tests\nplease rerun the tests\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "> Please rerun the tests",
+          "please rerun the tests"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: x\n\n> Please rerun the tests\n❯ please rerun the tests\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "a command-shaped target ends the response block",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: done\n\nfixed it\ndo #nextthing\nfixed it\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "fixed it",
+          "do #nextthing"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: done\n\nfixed it\n❯ do #nextthing\n❯ fixed it\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "a prefixed list item inside a response does not end it",
+      "input": {
+        "document": "<!-- agent:exchange -->\n## Assistant\n❯ - item one\nplain target\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "plain target"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "a prefixed non-list line inside a response ends it",
+      "input": {
+        "document": "<!-- agent:exchange -->\n## Assistant\n❯ anything at all\nplain target\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "plain target"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n## Assistant\n❯ anything at all\n❯ plain target\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "a question target inside a response is not a prompt-run start",
+      "input": {
+        "document": "<!-- agent:exchange -->\n#### Re: q\nwhy is this slow?\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "why is this slow?"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "a boundary line resets the response block",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: y\n<!-- agent:boundary:dd44 -->\nplain target\n<!-- agent:boundary:ee55 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "plain target"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: y\n<!-- agent:boundary:dd44 -->\n❯ plain target\n<!-- agent:boundary:ee55 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "CRLF lines keep their carriage return and still match",
+      "input": {
+        "document": "<!-- agent:exchange -->\r\nfix the crlf thing\r\n<!-- /agent:exchange -->\r\n",
+        "prefix_lines": [
+          "fix the crlf thing"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\r\n❯ fix the crlf thing\r\n<!-- /agent:exchange -->\r\n"
+      }
+    },
+    {
+      "name": "a no-break space and a unit separator are Kotlin whitespace",
+      "input": {
+        "document": "<!-- agent:exchange -->\ntarget with nbsp \u001f\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "target with nbsp"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ target with nbsp \u001f\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "NEL is not Kotlin whitespace",
+      "input": {
+        "document": "<!-- agent:exchange -->\ntarget with nel\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "target with nel"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "every occurrence of a target is prefixed",
+      "input": {
+        "document": "<!-- agent:exchange -->\nsame line\nsame line\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "same line"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ same line\n❯ same line\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "an emphasis label after a list marker is a response label",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: z\n1. __Follow-up:__ later\nplease go on\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "1. __Follow-up:__ later",
+          "please go on"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: z\n1. __Follow-up:__ later\n❯ please go on\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "an unclosed exchange is unchanged",
+      "input": {
+        "document": "<!-- agent:exchange -->\nSome prompt text.\n",
+        "prefix_lines": [
+          "Some prompt text."
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "a Unicode-uppercase prompt word lowercases like Kotlin",
+      "input": {
+        "document": "<!-- agent:exchange -->\n### Re: k\nPLEASE İnspect this\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "PLEASE İnspect this"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n### Re: k\n❯ PLEASE İnspect this\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "astral text and decomposed accents pass through",
+      "input": {
+        "document": "<!-- agent:exchange -->\nfix the émoji 😀 thing\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "fix the émoji 😀 thing"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "<!-- agent:exchange -->\n❯ fix the émoji 😀 thing\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 000",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n  <!-- agent:boundary:ff00 -->  \npush it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "  <!-- agent:boundary:ff00 -->  "
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 001",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nPlan: the plan\n2) numbered paren\n2) numbered paren\ntest it\n### Re: a response (HEAD)\n❯ already prefixed\nwhy does this fail?\nadded a test\n2) numbered paren\nplain prose line\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "❯ already prefixed",
+          "added a test"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nPlan: the plan\n2) numbered paren\n2) numbered paren\ntest it\n### Re: a response (HEAD)\n❯ already prefixed\nwhy does this fail?\n❯ added a test\n2) numbered paren\nplain prose line\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 002",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nfix #route\nnbsp end\nWhat changed: stuff\nCommit / push: done\nnbsp end\n* another item\ncommit + push\n\ttabbed line\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "nbsp end",
+          "* another item",
+          "commit + push"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nfix #route\n❯ nbsp end\nWhat changed: stuff\nCommit / push: done\n❯ nbsp end\n❯ * another item\n❯ commit + push\n\ttabbed line\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 003",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n*Verification*: em\nünïcödé line?\n\nFixed the bug\nVerification: ok\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "ünïcödé line?"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n*Verification*: em\n❯ ünïcödé line?\n\nFixed the bug\nVerification: ok\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 004",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\nverify the install\r\n\ttabbed line\r\ngo\r\nünïcödé line?\r\nBacklog: none\r\nplain prose line\r\nFollow-up: later\r\ndo [#bench2]\r\nFollow-up: later\r\n* another item\r\n❯ 3. prefixed number\r\n> Please quote\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "do [#bench2]"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\nverify the install\r\n\ttabbed line\r\ngo\r\nünïcödé line?\r\nBacklog: none\r\nplain prose line\r\nFollow-up: later\r\n❯ do [#bench2]\r\nFollow-up: later\r\n* another item\r\n❯ 3. prefixed number\r\n> Please quote\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 005",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nrerun it\ngo\nwhy does this fail?\n   \nwhy does this fail?\n<!-- agent:boundary:Bad -->\n❯ already prefixed\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "why does this fail?",
+          "<!-- agent:boundary:Bad -->",
+          "❯ already prefixed"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nrerun it\ngo\n❯ why does this fail?\n   \n❯ why does this fail?\n❯ <!-- agent:boundary:Bad -->\n❯ already prefixed\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 006",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nplease fix the route notice\n* another item\n> quoted context\n1. numbered\n/compact\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "/compact"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nplease fix the route notice\n* another item\n> quoted context\n1. numbered\n❯ /compact\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 007",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nPlan: the plan\nnbsp end\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "nbsp end",
+          "not in the doc",
+          "Plan: the plan"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ Plan: the plan\n❯ nbsp end\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 008",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ 3. prefixed number\nadded a test\n<!-- agent:boundary:Bad -->\nBacklog: none\nbuild the plugin\nVerification: ok\nplain prose line\n* another item\nWhat changed: stuff\n`#tag` note\nBacklog: none\nBacklog: none\n> quoted context\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Verification: ok ",
+          "added a test",
+          "Backlog: none"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ 3. prefixed number\n❯ added a test\n<!-- agent:boundary:Bad -->\n❯ Backlog: none\nbuild the plugin\n❯ Verification: ok\nplain prose line\n* another item\nWhat changed: stuff\n`#tag` note\n❯ Backlog: none\n❯ Backlog: none\n> quoted context\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 009",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nİstanbul please\nPlan: the plan\ntest it\nİstanbul please\n* another item\n* another item\ntrailing space   \n**Plan:** bold label\ninvestigate the wedge\n> quoted context\n\ttabbed line\n* another item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "investigate the wedge",
+          "trailing space   ",
+          "**Plan:** bold label",
+          "İstanbul please"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ İstanbul please\nPlan: the plan\ntest it\n❯ İstanbul please\n* another item\n* another item\n❯ trailing space   \n❯ **Plan:** bold label\n❯ investigate the wedge\n> quoted context\n\ttabbed line\n* another item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 010",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nrun make check\n#### Re: deeper\n__Backlog__: underscore\n* another item\nI updated the file\n/compact\ncommit + push\nnbsp end\nWhat changed: stuff\n*Verification*: em\nPlan: the plan\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "*Verification*: em ",
+          "nbsp end",
+          "/compact"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nrun make check\n#### Re: deeper\n__Backlog__: underscore\n* another item\nI updated the file\n❯ /compact\ncommit + push\n❯ nbsp end\nWhat changed: stuff\n❯ *Verification*: em\nPlan: the plan\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 011",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\npush it\ntest it\nrerun it\nwhy does this fail?\n### Re: a response (HEAD)\n#### Re: deeper\n## Assistant\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "#### Re: deeper",
+          "why does this fail?"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\npush it\ntest it\nrerun it\n❯ why does this fail?\n### Re: a response (HEAD)\n#### Re: deeper\n## Assistant\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 012",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n  <!-- agent:boundary:ff00 -->  \n- a list item\nCommit / push: done\nünïcödé line?\nİstanbul please\ndo #bench1\n*Verification*: em\n> Please quote\n  <!-- agent:boundary:ff00 -->  \n## Assistant\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "> Please quote"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n  <!-- agent:boundary:ff00 -->  \n- a list item\nCommit / push: done\nünïcödé line?\nİstanbul please\ndo #bench1\n*Verification*: em\n❯ > Please quote\n  <!-- agent:boundary:ff00 -->  \n## Assistant\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 013",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n> Please quote\n<!-- agent:boundary:Bad -->\nünïcödé line?\nfix #route\nbuild the plugin\nCommit / push: done\n❯ already prefixed\n<!-- agent:boundary:ab12cd34 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "ünïcödé line?"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n> Please quote\n<!-- agent:boundary:Bad -->\n❯ ünïcödé line?\nfix #route\nbuild the plugin\nCommit / push: done\n❯ already prefixed\n<!-- agent:boundary:ab12cd34 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 014",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\npush it\r\n2) numbered paren\r\n   \r\nplease fix the route notice\r\nnbsp end\r\ncommit + push\r\n2) numbered paren\r\n__Backlog__: underscore\r\n- a list item\r\nfix #route\r\nPlease rerun the tests\r\n## Assistant\r\n**Plan:** bold label\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "push it",
+          "2) numbered paren"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\n❯ push it\r\n❯ 2) numbered paren\r\n   \r\nplease fix the route notice\r\nnbsp end\r\ncommit + push\r\n❯ 2) numbered paren\r\n__Backlog__: underscore\r\n- a list item\r\nfix #route\r\nPlease rerun the tests\r\n## Assistant\r\n**Plan:** bold label\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 015",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nplain prose line\n*Verification*: em\nplain prose line\n`#tag` note\nrun make check\nİstanbul please\ncontinue\nİstanbul please\ncontinue\nBacklog: none\nCommit / push: done\nPlan: the plan\nFixed the bug\n   \n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "   ",
+          "`#tag` note",
+          "İstanbul please",
+          "Plan: the plan"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nplain prose line\n*Verification*: em\nplain prose line\n❯ `#tag` note\nrun make check\n❯ İstanbul please\ncontinue\n❯ İstanbul please\ncontinue\nBacklog: none\nCommit / push: done\n❯ Plan: the plan\nFixed the bug\n   \n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 016",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n\nbuild the plugin\nplain prose line\n\ttabbed line\nplease fix the route notice\ncommit + push\n❯ 3. prefixed number\ndo #bench1\n\nPlease rerun the tests\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "build the plugin",
+          "not in the doc",
+          "plain prose line"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n\n❯ build the plugin\n❯ plain prose line\n\ttabbed line\nplease fix the route notice\ncommit + push\n❯ 3. prefixed number\ndo #bench1\n\nPlease rerun the tests\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 017",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n*Verification*: em\nPlease rerun the tests\nrun make check\nplain prose line\n### Re: a response (HEAD)\nPlan: the plan\n> Please quote\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Plan: the plan ",
+          "Please rerun the tests",
+          "plain prose line",
+          "run make check"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n*Verification*: em\n❯ Please rerun the tests\n❯ run make check\n❯ plain prose line\n### Re: a response (HEAD)\nPlan: the plan\n> Please quote\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 018",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n### Re: a response (HEAD)\nFixed the bug\nplain prose line\nünïcödé line?\nrerun it\nWhat changed: stuff\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "rerun it ",
+          "### Re: a response (HEAD)"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n### Re: a response (HEAD)\nFixed the bug\nplain prose line\nünïcödé line?\n❯ rerun it\nWhat changed: stuff\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 019",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ - prefixed item\ntest it\ninvestigate the wedge\n/compact\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "test it",
+          "not in the doc ",
+          "investigate the wedge "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ - prefixed item\n❯ test it\n❯ investigate the wedge\n/compact\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 020",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nVerification: ok\nI updated the file\nPlease rerun the tests\nfix #route\n❯ 3. prefixed number\nFixed the bug\nCommit / push: done\nrun make check\n   \n❯ - prefixed item\nnbsp end\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Commit / push: done",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nVerification: ok\nI updated the file\nPlease rerun the tests\nfix #route\n❯ 3. prefixed number\nFixed the bug\n❯ Commit / push: done\nrun make check\n   \n❯ - prefixed item\nnbsp end\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 021",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\ndo [#bench2]\nİstanbul please\nadded a test\ncan you check this\nPlan: the plan\nFixed the bug\nI updated the file\ndo #bench1\ndo #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "added a test",
+          "do [#bench2] ",
+          "İstanbul please"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ do [#bench2]\n❯ İstanbul please\n❯ added a test\ncan you check this\nPlan: the plan\nFixed the bug\nI updated the file\ndo #bench1\ndo #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 022",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nwhy does this fail?\nünïcödé line?\nİstanbul please\n\n*Verification*: em\nverify the install\nPlease rerun the tests\n`#tag` note\nFollow-up: later\nplain prose line\ntrailing space   \nİstanbul please\nFixed the bug\ntest it\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Please rerun the tests",
+          "trailing space   ",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nwhy does this fail?\nünïcödé line?\nİstanbul please\n\n*Verification*: em\nverify the install\n❯ Please rerun the tests\n`#tag` note\nFollow-up: later\nplain prose line\n❯ trailing space   \nİstanbul please\nFixed the bug\ntest it\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 023",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ - prefixed item\n**Plan:** bold label\n❯ - prefixed item\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "❯ - prefixed item"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 024",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\n1. numbered\n❯ - prefixed item\ndo #bench1\ngo\ntest it\nwhy does this fail?\n/compact\n### Re: a response (HEAD)\nbuild the plugin\n\n<!-- agent:boundary:ab12cd34 -->\n`#tag` note\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "why does this fail?"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\n1. numbered\n❯ - prefixed item\ndo #bench1\ngo\ntest it\n❯ why does this fail?\n/compact\n### Re: a response (HEAD)\nbuild the plugin\n\n<!-- agent:boundary:ab12cd34 -->\n`#tag` note\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 025",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nPlan: the plan\n#### Re: deeper\npush it\n<!-- agent:boundary:ab12cd34 -->\n*Verification*: em\n❯ 3. prefixed number\ntrailing space   \n__Backlog__: underscore\nadded a test\nbuild the plugin\nwhy does this fail?\nİstanbul please\n❯ already prefixed\nünïcödé line?\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "__Backlog__: underscore",
+          "❯ 3. prefixed number",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nPlan: the plan\n#### Re: deeper\npush it\n<!-- agent:boundary:ab12cd34 -->\n*Verification*: em\n❯ 3. prefixed number\ntrailing space   \n❯ __Backlog__: underscore\nadded a test\nbuild the plugin\nwhy does this fail?\nİstanbul please\n❯ already prefixed\nünïcödé line?\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 026",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\n* another item\r\nbuild the plugin\r\ndo #bench1\r\nFixed the bug\r\n\ttabbed line\r\nCommit / push: done\r\nplain prose line\r\nBacklog: none\r\nCommit / push: done\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "Fixed the bug",
+          "Commit / push: done"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\n* another item\r\nbuild the plugin\r\ndo #bench1\r\n❯ Fixed the bug\r\n\ttabbed line\r\n❯ Commit / push: done\r\nplain prose line\r\nBacklog: none\r\n❯ Commit / push: done\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 027",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\ngo\nCommit / push: done\nbuild the plugin\nFollow-up: later\ntrailing space   \nimplemented it\nVerification: ok\nünïcödé line?\n### Re: a response (HEAD)\nverify the install\nfix #route\n*Verification*: em\nFollow-up: later\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "fix #route"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\ngo\nCommit / push: done\nbuild the plugin\nFollow-up: later\ntrailing space   \nimplemented it\nVerification: ok\nünïcödé line?\n### Re: a response (HEAD)\nverify the install\n❯ fix #route\n*Verification*: em\nFollow-up: later\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 028",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nFixed the bug\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "Fixed the bug"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ Fixed the bug\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 029",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n**Plan:** bold label\ncan you check this\n> Please quote\n## Assistant\n\ttabbed line\n/compact\ncan you check this\n> Please quote\nPlan: the plan\n<!-- agent:boundary:ab12cd34 -->\nadded a test\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "can you check this"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n**Plan:** bold label\n❯ can you check this\n> Please quote\n## Assistant\n\ttabbed line\n/compact\n❯ can you check this\n> Please quote\nPlan: the plan\n<!-- agent:boundary:ab12cd34 -->\nadded a test\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 030",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nnbsp end\n* another item\nnbsp end\ngo\n> quoted context\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "nbsp end ",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ nbsp end\n* another item\n❯ nbsp end\ngo\n> quoted context\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 031",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nadded a test\ndo #bench1\nCommit / push: done\n<!-- agent:boundary:ab12cd34 -->\nrerun it\n/compact\n❯ 3. prefixed number\nimplemented it\n1. numbered\nPlan: the plan\nCommit / push: done\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "added a test",
+          "1. numbered ",
+          "not in the doc",
+          "Plan: the plan"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ added a test\ndo #bench1\nCommit / push: done\n<!-- agent:boundary:ab12cd34 -->\nrerun it\n/compact\n❯ 3. prefixed number\nimplemented it\n❯ 1. numbered\n❯ Plan: the plan\nCommit / push: done\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 032",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\ttabbed line\n/compact\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "/compact "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\ttabbed line\n❯ /compact\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 033",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\ncommit + push\nplain prose line\nI updated the file\n* another item\npush it\n❯ 3. prefixed number\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "commit + push",
+          "❯ 3. prefixed number "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ commit + push\nplain prose line\nI updated the file\n* another item\npush it\n❯ 3. prefixed number\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 034",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\nİstanbul please\r\n- a list item\r\nrun make check\r\nPlease rerun the tests\r\nPlan: the plan\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Please rerun the tests",
+          "run make check"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\nİstanbul please\r\n- a list item\r\n❯ run make check\r\n❯ Please rerun the tests\r\nPlan: the plan\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 035",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nI updated the file\nBacklog: none\n\n  <!-- agent:boundary:ff00 -->  \n/compact\ninvestigate the wedge\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "I updated the file"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ I updated the file\nBacklog: none\n\n  <!-- agent:boundary:ff00 -->  \n/compact\ninvestigate the wedge\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 036",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nBacklog: none\n   \n1. numbered\n> quoted context\ntest it\ngo\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "test it",
+          "go ",
+          "> quoted context "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nBacklog: none\n   \n1. numbered\n❯ > quoted context\n❯ test it\n❯ go\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 037",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ - prefixed item\n`#tag` note\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "`#tag` note",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ - prefixed item\n❯ `#tag` note\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 038",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n__Backlog__: underscore\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc ",
+          "__Backlog__: underscore"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ __Backlog__: underscore\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 039",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ 3. prefixed number\ndo [#bench2]\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "❯ 3. prefixed number",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 040",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nFollow-up: later\ntest it\nünïcödé line?\nBacklog: none\nI updated the file\npush it\nPlan: the plan\nplease fix the route notice\nfix #route\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "ünïcödé line?",
+          "I updated the file",
+          "Plan: the plan"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nFollow-up: later\ntest it\n❯ ünïcödé line?\nBacklog: none\n❯ I updated the file\npush it\n❯ Plan: the plan\nplease fix the route notice\nfix #route\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 041",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nCommit / push: done\nPlan: the plan\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "Commit / push: done",
+          "Plan: the plan "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ Commit / push: done\n❯ Plan: the plan\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 042",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nbuild the plugin\nCommit / push: done\nFollow-up: later\nrun make check\n**Plan:** bold label\nCommit / push: done\nnbsp end\nplease fix the route notice\n   \nünïcödé line?\n## Assistant\nplain prose line\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "build the plugin",
+          "Commit / push: done",
+          "**Plan:** bold label"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ build the plugin\n❯ Commit / push: done\nFollow-up: later\nrun make check\n❯ **Plan:** bold label\n❯ Commit / push: done\nnbsp end\nplease fix the route notice\n   \nünïcödé line?\n## Assistant\nplain prose line\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 043",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nwhy does this fail?\ncan you check this\ndo [#bench2]\nCommit / push: done\nBacklog: none\nrun make check\nPlan: the plan\nrun make check\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Backlog: none",
+          "do [#bench2] ",
+          "not in the doc ",
+          "can you check this "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nwhy does this fail?\n❯ can you check this\n❯ do [#bench2]\nCommit / push: done\n❯ Backlog: none\nrun make check\nPlan: the plan\nrun make check\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 044",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\ttabbed line\ncontinue\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "continue"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\ttabbed line\n❯ continue\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 045",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nPlan: the plan\nCommit / push: done\n*Verification*: em\ncontinue\nPlan: the plan\n  <!-- agent:boundary:ff00 -->  \n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "Plan: the plan",
+          "Plan: the plan ",
+          "continue"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ Plan: the plan\nCommit / push: done\n*Verification*: em\n❯ continue\n❯ Plan: the plan\n  <!-- agent:boundary:ff00 -->  \n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 046",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nBacklog: none\n\ttabbed line\n#### Re: deeper\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "\ttabbed line ",
+          "Backlog: none ",
+          "#### Re: deeper "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ Backlog: none\n❯ \ttabbed line\n#### Re: deeper\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 047",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n### Re: a response (HEAD)\r\nwhy does this fail?\r\n### Re: a response (HEAD)\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "### Re: a response (HEAD)"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 048",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nünïcödé line?\n/compact\ntest it\nBacklog: none\n   \n<!-- agent:boundary:Bad -->\n## Assistant\n2) numbered paren\n❯ 3. prefixed number\nİstanbul please\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "❯ 3. prefixed number ",
+          "/compact"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nünïcödé line?\n❯ /compact\ntest it\nBacklog: none\n   \n<!-- agent:boundary:Bad -->\n## Assistant\n2) numbered paren\n❯ 3. prefixed number\nİstanbul please\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 049",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\ninvestigate the wedge\ncan you check this\nrun make check\n> quoted context\nimplemented it\n## Assistant\n❯ - prefixed item\nbuild the plugin\nrun make check\n> quoted context\nPlease rerun the tests\nadded a test\ngo\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "> quoted context"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\ninvestigate the wedge\ncan you check this\nrun make check\n❯ > quoted context\nimplemented it\n## Assistant\n❯ - prefixed item\nbuild the plugin\nrun make check\n> quoted context\nPlease rerun the tests\nadded a test\ngo\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 050",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\n* another item\nadded a test\ntest it\nplease fix the route notice\nwhy does this fail?\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "* another item ",
+          "please fix the route notice",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n\n❯ * another item\nadded a test\ntest it\n❯ please fix the route notice\nwhy does this fail?\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 051",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nwhy does this fail?\ndo [#bench2]\nplease fix the route notice\nI updated the file\ngo\n❯ 3. prefixed number\npush it\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "why does this fail? ",
+          "go ",
+          "please fix the route notice ",
+          "not in the doc "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ why does this fail?\ndo [#bench2]\n❯ please fix the route notice\nI updated the file\n❯ go\n❯ 3. prefixed number\npush it\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 052",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n*Verification*: em\ncommit + push\nplease fix the route notice\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "*Verification*: em",
+          "commit + push"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ *Verification*: em\n❯ commit + push\nplease fix the route notice\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 053",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ already prefixed\n- a list item\nCommit / push: done\nplain prose line\ntrailing space   \nPlease rerun the tests\n### Re: a response (HEAD)\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "- a list item ",
+          "plain prose line",
+          "### Re: a response (HEAD) "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ already prefixed\n❯ - a list item\nCommit / push: done\n❯ plain prose line\ntrailing space   \nPlease rerun the tests\n### Re: a response (HEAD)\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 054",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n### Re: a response (HEAD)\n*Verification*: em\n1. numbered\ndo #bench1\nWhat changed: stuff\n**Plan:** bold label\n**Plan:** bold label\n❯ 3. prefixed number\nİstanbul please\ncontinue\n### Re: a response (HEAD)\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "do #bench1",
+          "**Plan:** bold label",
+          "**Plan:** bold label ",
+          "İstanbul please"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n### Re: a response (HEAD)\n*Verification*: em\n1. numbered\n❯ do #bench1\nWhat changed: stuff\n❯ **Plan:** bold label\n❯ **Plan:** bold label\n❯ 3. prefixed number\n❯ İstanbul please\ncontinue\n### Re: a response (HEAD)\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 055",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ already prefixed\nplain prose line\nwhy does this fail?\nadded a test\n> quoted context\nünïcödé line?\n   \n- a list item\n❯ 3. prefixed number\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "plain prose line ",
+          "- a list item"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ already prefixed\n❯ plain prose line\nwhy does this fail?\nadded a test\n> quoted context\nünïcödé line?\n   \n❯ - a list item\n❯ 3. prefixed number\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 056",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\nbuild the plugin\nrun make check\n<!-- agent:boundary:Bad -->\n❯ 3. prefixed number\ngo\nadded a test\n<!-- agent:boundary:Bad -->\n  <!-- agent:boundary:ff00 -->  \nPlease rerun the tests\ncan you check this\nPlan: the plan\nadded a test\n1. numbered\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "can you check this",
+          "run make check"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\nbuild the plugin\n❯ run make check\n<!-- agent:boundary:Bad -->\n❯ 3. prefixed number\ngo\nadded a test\n<!-- agent:boundary:Bad -->\n  <!-- agent:boundary:ff00 -->  \nPlease rerun the tests\n❯ can you check this\nPlan: the plan\nadded a test\n1. numbered\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 057",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n- a list item\n❯ already prefixed\ntest it\nplease fix the route notice\n## Assistant\nimplemented it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "test it"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n- a list item\n❯ already prefixed\n❯ test it\nplease fix the route notice\n## Assistant\nimplemented it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 058",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n> Please quote\n<!-- agent:boundary:ab12cd34 -->\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc ",
+          "<!-- agent:boundary:ab12cd34 -->",
+          "> Please quote "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ > Please quote\n<!-- agent:boundary:ab12cd34 -->\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 059",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n`#tag` note\n#### Re: deeper\nBacklog: none\ntest it\n<!-- agent:boundary:Bad -->\nbuild the plugin\n> quoted context\nFixed the bug\n* another item\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc ",
+          "* another item ",
+          "test it",
+          "> quoted context"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n`#tag` note\n#### Re: deeper\nBacklog: none\n❯ test it\n<!-- agent:boundary:Bad -->\nbuild the plugin\n❯ > quoted context\nFixed the bug\n❯ * another item\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 060",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nI updated the file\ncommit + push\n*Verification*: em\n❯ - prefixed item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "I updated the file "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ I updated the file\ncommit + push\n*Verification*: em\n❯ - prefixed item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 061",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ - prefixed item\n> quoted context\n   \nbuild the plugin\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "❯ - prefixed item"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 062",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nnbsp end\n__Backlog__: underscore\n<!-- agent:boundary:ab12cd34 -->\ntest it\n❯ already prefixed\ntest it\n/compact\ndo [#bench2]\n`#tag` note\n\ttabbed line\n*Verification*: em\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "test it",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nnbsp end\n__Backlog__: underscore\n<!-- agent:boundary:ab12cd34 -->\n❯ test it\n❯ already prefixed\n❯ test it\n/compact\ndo [#bench2]\n`#tag` note\n\ttabbed line\n*Verification*: em\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 063",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nPlease rerun the tests\n<!-- agent:boundary:Bad -->\n> Please quote\ncan you check this\ndo #bench1\n`#tag` note\n/compact\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "do #bench1"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nPlease rerun the tests\n<!-- agent:boundary:Bad -->\n> Please quote\ncan you check this\n❯ do #bench1\n`#tag` note\n/compact\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 064",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n* another item\n\ttabbed line\nİstanbul please\nBacklog: none\ntrailing space   \nPlease rerun the tests\nrun make check\n*Verification*: em\nrerun it\nFixed the bug\ncan you check this\nplease fix the route notice\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "can you check this ",
+          "trailing space   "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n* another item\n\ttabbed line\nİstanbul please\nBacklog: none\n❯ trailing space   \nPlease rerun the tests\nrun make check\n*Verification*: em\nrerun it\nFixed the bug\n❯ can you check this\nplease fix the route notice\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 065",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nplease fix the route notice\nfix #route\nFollow-up: later\nrun make check\n__Backlog__: underscore\nFixed the bug\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "__Backlog__: underscore ",
+          "fix #route",
+          "Follow-up: later "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nplease fix the route notice\n❯ fix #route\n❯ Follow-up: later\nrun make check\n❯ __Backlog__: underscore\nFixed the bug\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 066",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nadded a test\nfix #route\ninvestigate the wedge\nnbsp end\n\nVerification: ok\nI updated the file\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "nbsp end",
+          "not in the doc",
+          "Verification: ok "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nadded a test\nfix #route\ninvestigate the wedge\n❯ nbsp end\n\n❯ Verification: ok\nI updated the file\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 067",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nPlease rerun the tests\n> quoted context\n<!-- agent:boundary:ab12cd34 -->\nünïcödé line?\npush it\nPlan: the plan\nBacklog: none\n1. numbered\n__Backlog__: underscore\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "1. numbered",
+          "push it ",
+          "> quoted context",
+          "Backlog: none "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nPlease rerun the tests\n❯ > quoted context\n<!-- agent:boundary:ab12cd34 -->\nünïcödé line?\npush it\nPlan: the plan\nBacklog: none\n1. numbered\n__Backlog__: underscore\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 068",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n## Assistant\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "## Assistant ",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 069",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\ncommit + push\nplease fix the route notice\ndo [#bench2]\ncommit + push\nfix #route\npush it\nCommit / push: done\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "do [#bench2]"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\ncommit + push\nplease fix the route notice\n❯ do [#bench2]\ncommit + push\nfix #route\npush it\nCommit / push: done\n> Please quote\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 070",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n`#tag` note\n\ttabbed line\nFixed the bug\n__Backlog__: underscore\n*Verification*: em\nverify the install\n1. numbered\ncommit + push\n**Plan:** bold label\nplease fix the route notice\nimplemented it\nbuild the plugin\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 071",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nverify the install\n## Assistant\n1. numbered\nwhy does this fail?\nPlan: the plan\nI updated the file\nCommit / push: done\ninvestigate the wedge\n* another item\ncontinue\ndo #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "verify the install",
+          "* another item "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ verify the install\n## Assistant\n1. numbered\nwhy does this fail?\nPlan: the plan\nI updated the file\nCommit / push: done\ninvestigate the wedge\n* another item\ncontinue\ndo #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 072",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n1. numbered\r\n\ttabbed line\r\nfix #route\r\nWhat changed: stuff\r\nfix #route\r\n> quoted context\r\n❯ already prefixed\r\n*Verification*: em\r\ninvestigate the wedge\r\nBacklog: none\r\nbuild the plugin\r\ncontinue\r\ninvestigate the wedge\r\ncommit + push\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "continue",
+          "investigate the wedge",
+          "1. numbered"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n❯ 1. numbered\r\n\ttabbed line\r\nfix #route\r\nWhat changed: stuff\r\nfix #route\r\n> quoted context\r\n❯ already prefixed\r\n*Verification*: em\r\n❯ investigate the wedge\r\nBacklog: none\r\nbuild the plugin\r\n❯ continue\r\n❯ investigate the wedge\r\ncommit + push\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 073",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n1. numbered\r\nimplemented it\r\npush it\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "implemented it ",
+          "1. numbered ",
+          "push it",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n❯ 1. numbered\r\n❯ implemented it\r\n❯ push it\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 074",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ 3. prefixed number\n> Please quote\n**Plan:** bold label\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "> Please quote",
+          "**Plan:** bold label",
+          "❯ 3. prefixed number"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ 3. prefixed number\n❯ > Please quote\n❯ **Plan:** bold label\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 075",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nplease fix the route notice\n/compact\nnbsp end\nfix #route\n❯ - prefixed item\nİstanbul please\n❯ - prefixed item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "/compact",
+          "İstanbul please"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nplease fix the route notice\n❯ /compact\nnbsp end\nfix #route\n❯ - prefixed item\n❯ İstanbul please\n❯ - prefixed item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 076",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 077",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nverify the install\nBacklog: none\n   \n- a list item\n/compact\n<!-- agent:boundary:ab12cd34 -->\nFollow-up: later\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "<!-- agent:boundary:ab12cd34 --> "
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 078",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\ninvestigate the wedge\nünïcödé line?\npush it\n**Plan:** bold label\n### Re: a response (HEAD)\ncommit + push\n❯ - prefixed item\ntest it\n- a list item\nİstanbul please\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "**Plan:** bold label",
+          "❯ - prefixed item",
+          "investigate the wedge",
+          "commit + push"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ investigate the wedge\nünïcödé line?\npush it\n❯ **Plan:** bold label\n### Re: a response (HEAD)\n❯ commit + push\n❯ - prefixed item\ntest it\n- a list item\nİstanbul please\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 079",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nünïcödé line?\nadded a test\ninvestigate the wedge\n`#tag` note\n/compact\nWhat changed: stuff\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "What changed: stuff"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nünïcödé line?\nadded a test\ninvestigate the wedge\n`#tag` note\n/compact\n❯ What changed: stuff\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 080",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\ndo [#bench2]\r\ncontinue\r\n  <!-- agent:boundary:ff00 -->  \r\ncontinue\r\nPlan: the plan\r\nPlan: the plan\r\nimplemented it\r\n2) numbered paren\r\nCommit / push: done\r\n   \r\nVerification: ok\r\npush it\r\nwhy does this fail?\r\ncommit + push\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "implemented it",
+          "Plan: the plan"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 081",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nCommit / push: done\nnbsp end\nrun make check\ncontinue\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Commit / push: done",
+          "not in the doc",
+          "run make check"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ Commit / push: done\nnbsp end\n❯ run make check\ncontinue\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 082",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nBacklog: none\nFollow-up: later\nVerification: ok\n❯ - prefixed item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "❯ - prefixed item"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 083",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nadded a test\nplease fix the route notice\nplain prose line\nrerun it\ncontinue\ntrailing space   \n❯ already prefixed\n\ttabbed line\nwhy does this fail?\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "added a test",
+          "trailing space   ",
+          "continue"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ added a test\nplease fix the route notice\nplain prose line\nrerun it\n❯ continue\n❯ trailing space   \n❯ already prefixed\n\ttabbed line\nwhy does this fail?\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 084",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n   \n**Plan:** bold label\n<!-- agent:boundary:Bad -->\nimplemented it\nünïcödé line?\n- a list item\n   \n*Verification*: em\ncan you check this\n- a list item\n<!-- agent:boundary:ab12cd34 -->\nI updated the file\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "**Plan:** bold label ",
+          "*Verification*: em"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n   \n❯ **Plan:** bold label\n<!-- agent:boundary:Bad -->\nimplemented it\nünïcödé line?\n- a list item\n   \n❯ *Verification*: em\ncan you check this\n- a list item\n<!-- agent:boundary:ab12cd34 -->\nI updated the file\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 085",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nünïcödé line?\ninvestigate the wedge\nCommit / push: done\nPlease rerun the tests\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 086",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\r\n  <!-- agent:boundary:ff00 -->  \r\ntrailing space   \r\nplease fix the route notice\r\nPlease rerun the tests\r\ninvestigate the wedge\r\nadded a test\r\nCommit / push: done\r\nBacklog: none\r\n- a list item\r\nfix #route\r\ndo #bench1\r\n`#tag` note\r\n`#tag` note\r\nVerification: ok\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Backlog: none ",
+          "  <!-- agent:boundary:ff00 -->  "
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 087",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\nFollow-up: later\ncan you check this\n## Assistant\n\n> quoted context\n❯ 3. prefixed number\nrun make check\n/compact\nPlease rerun the tests\ncan you check this\n❯ - prefixed item\n2) numbered paren\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Follow-up: later"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n❯ Follow-up: later\ncan you check this\n## Assistant\n\n> quoted context\n❯ 3. prefixed number\nrun make check\n/compact\nPlease rerun the tests\ncan you check this\n❯ - prefixed item\n2) numbered paren\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 088",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n2) numbered paren\ndo [#bench2]\n### Re: a response (HEAD)\nPlease rerun the tests\nimplemented it\ndo #bench1\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Please rerun the tests"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n2) numbered paren\ndo [#bench2]\n### Re: a response (HEAD)\n❯ Please rerun the tests\nimplemented it\ndo #bench1\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 089",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n### Re: a response (HEAD)\nwhy does this fail?\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "why does this fail?",
+          "### Re: a response (HEAD)"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 090",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\ntrailing space   \r\n\ttabbed line\r\nadded a test\r\nİstanbul please\r\n**Plan:** bold label\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "trailing space   ",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\r\n❯ trailing space   \r\n\ttabbed line\r\nadded a test\r\nİstanbul please\r\n**Plan:** bold label\r\n<!-- agent:boundary:zz99 -->\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 091",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n\ttabbed line\nplease fix the route notice\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "not in the doc",
+          "\ttabbed line",
+          "please fix the route notice"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ \ttabbed line\n❯ please fix the route notice\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 092",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\nFixed the bug\r\nrun make check\r\n`#tag` note\r\nFixed the bug\r\nrerun it\r\ntrailing space   \r\ncontinue\r\nwhy does this fail?\r\n- a list item\r\n`#tag` note\r\n❯ 3. prefixed number\r\n2) numbered paren\r\nPlan: the plan\r\n__Backlog__: underscore\r\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Fixed the bug",
+          "`#tag` note",
+          "- a list item",
+          "2) numbered paren"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\r\n❯ Fixed the bug\r\nrun make check\r\n❯ `#tag` note\r\n❯ Fixed the bug\r\nrerun it\r\ntrailing space   \r\ncontinue\r\nwhy does this fail?\r\n❯ - a list item\r\n❯ `#tag` note\r\n❯ 3. prefixed number\r\n❯ 2) numbered paren\r\nPlan: the plan\r\n__Backlog__: underscore\r\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 093",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\n## Assistant\n1. numbered\n- a list item\nFollow-up: later\nplease fix the route notice\nimplemented it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "Follow-up: later",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": false,
+        "document": null
+      }
+    },
+    {
+      "name": "generated case 094",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n  <!-- agent:boundary:ff00 -->  \n> quoted context\n* another item\ndo #bench1\n   \n\ttabbed line\ndo #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "do #bench1",
+          "not in the doc"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange\tmode=x -->\n  <!-- agent:boundary:ff00 -->  \n> quoted context\n* another item\n❯ do #bench1\n   \n\ttabbed line\n❯ do #bench1\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 095",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\npush it\n❯ 3. prefixed number\nVerification: ok\n### Re: a response (HEAD)\n2) numbered paren\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "push it"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\n❯ push it\n❯ 3. prefixed number\nVerification: ok\n### Re: a response (HEAD)\n2) numbered paren\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 096",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nWhat changed: stuff\n  <!-- agent:boundary:ff00 -->  \ninvestigate the wedge\ndo [#bench2]\nFixed the bug\ntrailing space   \nWhat changed: stuff\n* another item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "  <!-- agent:boundary:ff00 -->   ",
+          "* another item",
+          "investigate the wedge",
+          "do [#bench2] "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nWhat changed: stuff\n  <!-- agent:boundary:ff00 -->  \n❯ investigate the wedge\n❯ do [#bench2]\nFixed the bug\ntrailing space   \nWhat changed: stuff\n❯ * another item\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 097",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\nfix #route\n1. numbered\n* another item\nfix #route\nplain prose line\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "fix #route",
+          "1. numbered",
+          "not in the doc "
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n❯ fix #route\n❯ 1. numbered\n* another item\n❯ fix #route\nplain prose line\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 098",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\nFollow-up: later\n- a list item\ninvestigate the wedge\n__Backlog__: underscore\npush it\n/compact\n### Re: a response (HEAD)\npush it\nrerun it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "rerun it"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange patch=append -->\n- a list item\nFollow-up: later\n- a list item\ninvestigate the wedge\n__Backlog__: underscore\npush it\n/compact\n### Re: a response (HEAD)\npush it\n❯ rerun it\n<!-- agent:boundary:zz99 -->\n<!-- /agent:exchange -->\n"
+      }
+    },
+    {
+      "name": "generated case 099",
+      "input": {
+        "document": "# Doc\n<!-- agent:exchange -->\nFixed the bug\ncommit + push\nplain prose line\n\ttabbed line\nFixed the bug\npush it\nrun make check\nI updated the file\nplain prose line\nünïcödé line?\n> quoted context\ntest it\npush it\n<!-- /agent:exchange -->\n",
+        "prefix_lines": [
+          "\ttabbed line"
+        ]
+      },
+      "expected": {
+        "changed": true,
+        "document": "# Doc\n<!-- agent:exchange -->\nFixed the bug\ncommit + push\nplain prose line\n❯ \ttabbed line\nFixed the bug\npush it\nrun make check\nI updated the file\nplain prose line\nünïcödé line?\n> quoted context\ntest it\npush it\n<!-- /agent:exchange -->\n"
+      }
+    }
+  ]
+}

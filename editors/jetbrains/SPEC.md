@@ -466,6 +466,24 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   `\b`, Kotlin's `trim`/`isBlank` whitespace (which keeps U+0085 and strips
   U+001C..U+001F), and `lines()` splitting at CRLF, LF, and CR. The parity file
   `editor-derivations/route_outcome.json` is answered by both.
+- `exchange_prefix_repair` (`#jbshrinkrestarts`): the patch watcher's `❯ `
+  prompt-prefix repair (`PatchWatcher.computePatchOnWorker`, after the patches
+  and the boundary reposition). Evidence is the patched document and the patch's
+  `normalize_prefix_lines`. Native owns the operator region (before the last
+  boundary marker), the target match (trailing whitespace ignored; every
+  occurrence), the response-block heuristic (response headings; which lines read
+  as a fresh prompt, a response label, list or quoted context, or response prose),
+  and the repaired text. The answer is `{"changed": false}` or
+  `{"changed": true, "document": ...}`, so an unchanged document does not cross
+  back. The patch worker asks off the EDT; with no prefix targets nothing is
+  asked. `ExchangePrefixRepair.frozen` is the pre-move
+  `normalizeExchangePrefixesUtil` and is never extended. This is a port of the
+  plugin's rule, not the binary's `normalize_exchange_prefixes_for_targets`
+  (which counts target occurrences and tracks prefixed response headings);
+  converging the two is now a native-only change. The parity file
+  `editor-derivations/exchange_prefix_repair.json` (named cases plus a seeded,
+  generated mix including CRLF, no-break and other Kotlin whitespace, U+0085,
+  dotted capital I, and astral text) is answered by both.
 - `capabilities`: the derivations the loaded library answers, and (phase 5c)
   `captured_splice_inputs`, the optional inputs its captured-splice calls accept.
 
@@ -628,7 +646,19 @@ every entry.
   ordering, not a rule.
 - `PatchWatcher`: no pure decision changed more than twice. Its text utilities
   (boundary reposition, exchange prefix repair, replay detection) are stable, and
-  `extractResumeDecision` is a three-way operation-id match added once.
+  `extractResumeDecision` is a three-way operation-id match added once. The
+  prefix repair moved anyway (`#jbshrinkrestarts`, the `exchange_prefix_repair`
+  derivation): it is a heuristic word list, the one PatchWatcher rule an editor
+  wording fix would touch. The rest of PatchWatcher is the socket intent
+  dispatch, IntelliJ document mutation, and receipt ordering, which stay in
+  Kotlin by design; its document text operations already call `NativePatching`.
+- `TerminalUtil` (not in the phase 5 audit): the Run Agent Doc route-output rules
+  changed in more commits since 2026-08-01 than any other `TerminalUtil` code and
+  moved as the `route_outcome` derivation (`#jbshrinkrestarts`). The remaining
+  `TerminalUtil` code spawns `agent-doc` subprocesses, builds their argument
+  lists, and shows notifications. The clear and restart refusal parsers
+  (`parseBusySessionClearRefusal`, `parseLiveTurnQueuedClear`, and the restart
+  refusals) are the next candidates of the same shape.
 - `CpRouteClient`: the most changed functions build the controller request
   (`editorRoutePayload`, `editorRouteRequest`, `editorCommandSubmitRequest`, five
   commits each). Every change added a captured field the controller reads (order
@@ -717,23 +747,37 @@ Cases, in microseconds per operation:
 - `move.<rule>.native` and `.frozen`: each moved rule, asked through the
   derivation channel next to its frozen Kotlin floor, on the same input.
 
-The cases run interleaved in five rounds, so a slow stretch of the machine
-lands on every case. `p50_best` is the median of a case's fastest round; two
-runs of one build agree on it to within about 10%.
+The keystroke and boundary cases run first, as a phase of their own, so the
+gated cases see the same process whatever moved rules a build adds; the
+`move.*` cases follow. A library that predates a moved rule skips its cases
+(`skipped_moves`), so one harness measures both sides of a move. Within a
+phase the cases run interleaved in five rounds, so a slow stretch of the
+machine lands on every case. `p50_best` is the median of a case's fastest
+round; two runs of one build agree on it to within about 10%.
 `JETBRAINS_BENCH_BASELINE=<report.json>` compares this run with an earlier
 report. The run fails when the `p50_best` of `typing_report`, `replica_flush_1`,
 or `replica_flush_16` grows by more than max(5 us, 15%). Other cases, and the
 per-step breakdowns, are reported but not gated.
 
 The 2026-10-26 baseline (0.35.556, release-local, synthetic 127,583-byte
-document) puts the cost of the keystroke path in the replica diff, not in the
-plugin. `typing_report` is about 91 us. A flush costs about 50 ms whether the
-burst is 1 or 16 keystrokes: `agent_doc_replica_diff` takes about 48 ms of it
-and the state vector about 1.4 ms. `prepare` (about 51 us), `apply_local`
-(13 us for one splice, 36 us for 16), the worker hop (2.6 us), and the
-smallest derivation round trip (6.3 us) are small next to it. On a copied
-32 KB live session document the diff takes about 4.9 ms, so the diff cost grows
-faster than linearly with the document's size.
+document, two runs) puts the cost of the keystroke path in the replica diff,
+not in the plugin. `typing_report` is about 106 us. A flush costs about 50 to
+55 ms whether the burst is 1 or 16 keystrokes: `agent_doc_replica_diff` takes
+about 47 to 53 ms of it and the state vector about 1.4 ms. `prepare` (about
+51 us), `apply_local` (about 14 us for one splice, 37 us for 16), the worker
+hop (2.4 us), and the smallest derivation round trip (6.5 us) are small next to
+it. On a copied 32 KB live session document the diff takes about 4.9 ms, so
+the diff cost grows faster than linearly with the document's size. The diff is
+native, so a fix to it ships with a library hot reload.
+
+The two `#jbshrinkrestarts` moves left every gated case within noise of that
+baseline (`typing_report` 106.1 -> 105.8 us, `replica_flush_1` 54,672 ->
+49,029 us, `replica_flush_16` 55,156 -> 54,264 us). They are not on the
+keystroke path. `route_outcome` costs 38 us natively against 25 us for the
+frozen floor, once per Run Agent Doc. `exchange_prefix_repair` costs 1.2 ms
+natively against 0.3 ms for the floor on the 125 KB document when the repair
+changes it, because the document crosses both ways. That happens once per
+patch that names prefix targets, on the patch worker.
 
 Local package convergence compares every ZIP payload byte and relative path
 with the installed plugin tree before replacing it. A byte-identical package is

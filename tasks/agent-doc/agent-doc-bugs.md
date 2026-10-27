@@ -276,18 +276,6 @@ Both are on `main` (`fec25bdee1..c7e7de85fc`, fast-forward) and installed locall
 - Backlog (go queue): `#jb263probeblind`.
 - Icebox: `#jbdocdrift`.
 
-### Re: Subagent completed: `subagent:automationapi` returned work for queue item “agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?” — agent-doc
-<!-- agent-doc-subagent-response sha256=fe1802ea6b3711a453c38f3e6d861f5d785427f42663d199a1f43934dd00b049 -->
-> **Subagent response:**
->
-> Design only (no production code): branch design/automationapi, commit a1fff34641 "docs(proposal): language-agnostic automation API", new specs/proposals/automation-api.md (non-normative); make audit-docs exit 0.
-> Recommendation: No - keep the controller as the authority behind the API, but do not publish its internal RPC. Today: local socket <root>/.agent-doc/controller.sock (agent-doc-controller/src/paths.rs:5,15), one newline JSON request/reply per connection (rpc.rs:21659-21707), 106 commands (rpc.rs:21843-22575) with 236 pub(crate) ControllerRequest literals, typed payloads as JSON strings in diagnostic_payload, prose errors (rpc.rs:22720), 50 rpc.rs commits in 30 days, exact binary-version match for writes (rpc.rs:22695; omitting the version skips it, rpc.rs:21823), no auth (specs/10-security.md:5), start-on-use/idle-retire/install-handoff lifecycle (08b:729-760); Kotlin and TS clients hand-write the JSON. command-plane-v1 (editors/command-payloads.md:1-31) already has the right shape; queue add (specs/07-orchestration-commands.md:1048) is the write path to copy; MCP (src/mcp.rs:362-441) is turn-oriented; 50 CLI --json subcommands (~3 with schema_version); agent-doc serve is an HTTP server with bearer tokens/TLS/SSE (src/serve.rs:1-40).
-> Options: (a) versioned socket command (best authority fit, small socket client per language); (b) HTTP facade inside serve OK, gRPC conflicts with the no-async rule, a separate daemon would be a second authority; (c) CLI JSON (cheapest universal); (d) MCP should consume the API, not be it.
-> Plan: one versioned agent-doc/api/v1 op table + JSON Schema with stable error codes in a pure agent-doc-api crate; phase 1 agent-doc api <op> --json (capabilities, documents.list, document.read, document.status, queue.add); phase 2 the same bytes as one controller socket command checked against the API version, with socket/dir permissions + SO_PEERCRED and Python/TS reference clients; phase 3 events.subscribe with a resumable document_version cursor across handoff; phase 4 optional /api/v1 + SSE in serve and generated MCP tools. v1 excludes document-text writes and run-a-turn.
-> Open questions: first real caller; local-only vs remote/multi-user; is start-a-turn ever an API op; will automation write document text and which components; plain JSON vs Lazily CommandSubmit envelope; should API calls launch a controller and subscribers keep it alive; v1 stability/deprecation window; per-project endpoint vs user-level gateway.
-> Follow-ups: (1) agent-doc serve POST /save with no open cycle writes the whole body with std::fs::write and commits (src/serve.rs:1135-1150), bypassing atomic_write_through_authority while an editor may hold the document; (2) lock down the controller socket (permissions, peer uid) and stop a request without binary_version from skipping the stale-binary refusal (rpc.rs:21823-21833); (3) specs/10-security.md:10 says no network services are exposed, but serve can bind non-loopback with bearer tokens.
-<!-- agent-doc-subagent-completion key=8758a5a656d92cd060ca6e509199ab8fa4e3cf8858c793bf00fda3879a719e8e -->
-
 ### Re: Subagent completed: `subagent:jb263probeblind` returned work for queue item “do [#jb263probeblind]” — agent-doc
 <!-- agent-doc-subagent-response sha256=479aaf5cc92e197a53e461708e9d3ba4688182991ca8cbbba481dc01777eed9b -->
 > **Subagent response:**
@@ -430,7 +418,7 @@ v1 has no document-text writes and no "run a turn now": automation queues work a
   - This is the second subtask.
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
-- ☑️ [#subagent:automationapi#1] agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?
+- ~~agent-doc should have an API for automation. This API should work across all languages. Should we make the controller an api server?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

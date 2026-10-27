@@ -36,23 +36,23 @@ import {
 } from './commandPlane.js';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition.js';
 import {
-    buildBusySessionRestartBlockedMessage,
-    buildBusySessionClearBlockedMessage,
     buildForcedRestartSupervisorCommandArgs,
     buildRouteFailurePresentation,
     buildSessionCommandArgs,
     buildSessionStatusPresentation,
     buildSessionSuccessHint,
-    buildStartingSessionRestartBlockedMessage,
     buildTurnStatePresentation,
     buildDeferredClearSupersededMessage,
     DeferredClearSupersededNotices,
-    parseBusySessionRestartRefusal,
-    parseBusySessionClearRefusal,
-    parseStartingSessionRestartRefusal,
     sessionStatusShowsIdleDirectPane,
     type SessionCommandName,
 } from './sessionUi.js';
+import {
+    combinedCommandOutput,
+    deriveSessionCommandOutcome,
+    type SessionCommandOutcome,
+    type SessionOutcomeCommand,
+} from './sessionCommandOutcome.js';
 import {
     buildOverflowPopupMenuItems,
     buildPrimaryPopupMenuItems,
@@ -328,6 +328,8 @@ function resolveProject(
 interface RunCliOptions {
     timeoutMs?: number;
     signal?: AbortSignal;
+    /** Resolve with stdout and stderr combined, as JetBrains reads a session command. */
+    combineStderr?: boolean;
 }
 
 function isCliCancelled(err: unknown): boolean {
@@ -379,7 +381,7 @@ env: {
                 }
                 reject(new Error(stderr?.trim() || err.message));
             } else {
-                resolve(stdout.trim());
+                resolve(options?.combineStderr ? combinedCommandOutput(stdout, stderr ?? '') : stdout.trim());
             }
         });
         options?.signal?.addEventListener('abort', abortHandler, { once: true });
@@ -1486,17 +1488,20 @@ async function restartSessionAction(): Promise<void> {
         },
         'supervisor restart failed',
         async (errorMessage, rel, cwd) => {
-            const busyRefusal = parseBusySessionRestartRefusal(errorMessage);
-            const startingRefusal = parseStartingSessionRestartRefusal(errorMessage);
-            if (!busyRefusal && !startingRefusal) {
+            const outcome = deriveSessionOutcome(cwd, 'restart', false, false, errorMessage, rel);
+            if (outcome.kind === 'restart_refused_editor_holds_pane' && outcome.summary) {
+                await showEditorHoldsPaneRestartBlocked(cwd, rel, outcome.summary, errorMessage);
+                return;
+            }
+            if (
+                (outcome.kind !== 'restart_refused_busy' && outcome.kind !== 'restart_refused_starting')
+                || !outcome.summary
+            ) {
                 showError(`supervisor restart failed: ${errorMessage}`);
                 return;
             }
-            const message = busyRefusal
-                ? buildBusySessionRestartBlockedMessage(rel, busyRefusal)
-                : buildStartingSessionRestartBlockedMessage(rel, startingRefusal!);
             const action = await vscode.window.showWarningMessage(
-                message,
+                outcome.summary,
                 { modal: false },
                 'Interrupt and restart',
                 'Show status',
@@ -1828,8 +1833,8 @@ async function executeClearSessionContext(
 ): Promise<void> {
     try {
         if (!(await ensureDocumentCleanForCommand(filePath, 'Clear Session Context'))) return;
-        const output = await runCli(buildSessionCommandArgs('clear', rel), cwd);
-        showHint(buildSessionSuccessHint('clear', rel, output));
+        const output = await runCli(buildSessionCommandArgs('clear', rel), cwd, { combineStderr: true });
+        showClearSessionContextSuccess(cwd, rel, output);
     } catch (err: any) {
         await handleClearSessionContextFailure(err.message, rel, cwd);
     } finally {
@@ -1848,15 +1853,16 @@ async function handleClearSessionContextFailure(
     rel: string,
     cwd: string,
 ): Promise<void> {
-    const refusal = parseBusySessionClearRefusal(errorMessage);
-    if (!refusal) {
+    const outcome = deriveSessionOutcome(cwd, 'clear', false, false, errorMessage, rel);
+    const refusal = outcome.clear_refused;
+    if (outcome.kind !== 'clear_refused' || !refusal || !outcome.summary) {
         showError(`session clear failed: ${errorMessage}`);
         return;
     }
     const action = await vscode.window.showWarningMessage(
-        buildBusySessionClearBlockedMessage(rel, refusal),
+        outcome.summary,
         { modal: false },
-        ...(refusal.protectedReason ? [] : ['Refresh and retry']),
+        ...(refusal.protected_reason.trim() ? [] : ['Refresh and retry']),
         'Interrupt and clear',
         'Show status',
         'Copy details',
@@ -1884,8 +1890,8 @@ async function showSessionStatusFor(cwd: string, rel: string): Promise<string> {
 async function refreshAndRetryClearSessionContext(cwd: string, rel: string): Promise<void> {
     const output = await showSessionStatusFor(cwd, rel);
     if (!sessionStatusShowsIdleDirectPane(output)) return;
-    const clearOutput = await runCli(buildSessionCommandArgs('clear', rel), cwd);
-    showHint(buildSessionSuccessHint('clear', rel, clearOutput));
+    const clearOutput = await runCli(buildSessionCommandArgs('clear', rel), cwd, { combineStderr: true });
+    showClearSessionContextSuccess(cwd, rel, clearOutput);
 }
 
 async function interruptAndClearSessionContext(cwd: string, rel: string): Promise<void> {
@@ -1906,8 +1912,75 @@ async function interruptAndRestartSupervisor(cwd: string, rel: string): Promise<
         'Interrupt and restart',
     );
     if (decision !== 'Interrupt and restart') return;
-    const output = await runCli(buildForcedRestartSupervisorCommandArgs(rel), cwd);
+    let output: string;
+    try {
+        output = await runCli(buildForcedRestartSupervisorCommandArgs(rel), cwd);
+    } catch (err: any) {
+        // An editor holding the pane refuses Interrupt and restart too (`#hj7s`).
+        const outcome = deriveSessionOutcome(cwd, 'restart', false, true, err.message, rel);
+        if (outcome.kind === 'restart_refused_editor_holds_pane' && outcome.summary) {
+            await showEditorHoldsPaneRestartBlocked(cwd, rel, outcome.summary, err.message);
+        } else {
+            showError(`supervisor restart failed: ${err.message}`);
+        }
+        return;
+    }
     showHint(buildSessionSuccessHint('restart-supervisor', rel, output));
+}
+
+/**
+ * `#vscodesessionparsers`: what a finished Clear Session Context or Restart
+ * Supervisor command's output means is the hot-reloaded native
+ * `session_command_outcome` derivation; `sessionCommandOutcome.ts` keeps the
+ * frozen floor for a library that cannot answer. Callers only execute it.
+ */
+function deriveSessionOutcome(
+    cwd: string,
+    command: SessionOutcomeCommand,
+    succeeded: boolean,
+    force: boolean,
+    output: string,
+    rel: string,
+): SessionCommandOutcome {
+    const { outcome, native: answered } = deriveSessionCommandOutcome(
+        { command, succeeded, force, output: output.trim(), relative_path: rel },
+        (request) => native.editorDeriveJson(request, cwd),
+    );
+    console.debug(
+        `[agent-doc/session] session_command_outcome command=${command} kind=${outcome.kind} `
+        + `derivation=${answered ? 'native' : 'floor'}`,
+    );
+    return outcome;
+}
+
+/** A clear that exited zero: it ran now, or was queued or deferred. */
+function showClearSessionContextSuccess(cwd: string, rel: string, output: string): void {
+    const outcome = deriveSessionOutcome(cwd, 'clear', true, false, output, rel);
+    if ((outcome.kind === 'clear_queued' || outcome.kind === 'clear_deferred') && outcome.summary) {
+        void vscode.window.showInformationMessage(outcome.summary);
+        return;
+    }
+    showHint(outcome.summary ?? buildSessionSuccessHint('clear', rel, output));
+}
+
+async function showEditorHoldsPaneRestartBlocked(
+    cwd: string,
+    rel: string,
+    summary: string,
+    rawOutput: string,
+): Promise<void> {
+    const action = await vscode.window.showWarningMessage(
+        summary,
+        { modal: false },
+        'Show status',
+        'Copy details',
+    );
+    if (action === 'Show status') {
+        await showSessionStatusFor(cwd, rel);
+    } else if (action === 'Copy details') {
+        await vscode.env.clipboard.writeText(rawOutput);
+        showHint(`Copied restart details for ${rel}`);
+    }
 }
 
 async function copySessionDiagnosticsAction(): Promise<void> {

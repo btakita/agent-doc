@@ -31,6 +31,7 @@
 pub mod attach_failure;
 pub mod editor_view_policy;
 pub mod endpoint_retirement;
+pub mod exchange_prefix_repair;
 pub mod graph;
 pub mod installation_focus;
 pub mod navigation_lane;
@@ -57,6 +58,9 @@ pub use editor_view_policy::{
 pub use endpoint_retirement::{
     MutedLiveEndpoint, RETIRED_ENDPOINT_MUTE_THRESHOLD, RetiredEndpointMonitor,
     SurfaceObservationRejection, reregistration_generation,
+};
+pub use exchange_prefix_repair::{
+    ExchangePrefixRepair, ExchangePrefixRepairEvidence, derive_exchange_prefix_repair,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use installation_focus::{

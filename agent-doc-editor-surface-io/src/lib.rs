@@ -304,6 +304,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "registration_projection",
     "attach_failure_diagnosis",
     "route_outcome",
+    "exchange_prefix_repair",
 ];
 
 #[derive(serde::Deserialize)]
@@ -413,6 +414,17 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             let evidence: agent_doc_editor_surface::RouteOutcomeEvidence =
                 serde_json::from_value(input).context("parse route outcome evidence")?;
             serde_json::to_value(agent_doc_editor_surface::derive_route_outcome(&evidence))?
+        }
+        "exchange_prefix_repair" => {
+            // `#jbshrinkrestarts`: the patch watcher's `❯ ` prompt-prefix repair
+            // of a patched document (`PatchWatcher.computePatchOnWorker`). The
+            // document crosses once per patch that names prefix targets; an
+            // unchanged answer does not carry it back.
+            let evidence: agent_doc_editor_surface::ExchangePrefixRepairEvidence =
+                serde_json::from_value(input).context("parse exchange prefix repair evidence")?;
+            serde_json::to_value(agent_doc_editor_surface::derive_exchange_prefix_repair(
+                &evidence,
+            ))?
         }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",
@@ -1030,6 +1042,29 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let request = serde_json::json!({
                 "derivation": "attach_failure_diagnosis",
+                "input": case["input"].clone(),
+            });
+            let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();
+            assert_eq!(output, case["expected"], "{name}");
+        }
+    }
+
+    /// `#jbshrinkrestarts`: the native `exchange_prefix_repair` derivation
+    /// answers every shared parity case. The plugin's frozen Kotlin floor
+    /// (`normalizeExchangePrefixesUtil`) answers the same file in
+    /// `ExchangePrefixRepairTest`, so the two cannot drift silently.
+    #[test]
+    fn exchange_prefix_repair_answers_the_shared_parity_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../editors/jetbrains/src/test/resources/editor-derivations/exchange_prefix_repair.json"
+        ))
+        .unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(cases.len() >= 120, "the parity file lost cases");
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let request = serde_json::json!({
+                "derivation": "exchange_prefix_repair",
                 "input": case["input"].clone(),
             });
             let output = derive_editor_from_json(&request.to_string()).unwrap()["output"].clone();

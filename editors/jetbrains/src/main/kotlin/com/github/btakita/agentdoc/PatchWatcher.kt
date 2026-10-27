@@ -1558,10 +1558,11 @@ class PatchWatcher(private val project: Project) : Disposable {
 
     /**
      * Add `❯ ` prefix to specific lines within the exchange component.
-     * Delegates to [normalizeExchangePrefixesUtil] for testability.
+     * `#jbshrinkrestarts`: the native `exchange_prefix_repair` derivation; its frozen floor is
+     * [normalizeExchangePrefixesUtil].
      */
     private fun normalizeExchangePrefixes(doc: String, lines: List<String>): String =
-        normalizeExchangePrefixesUtil(doc, lines)
+        ExchangePrefixRepair.repair(doc, lines)
 
     /**
      * Find a boundary marker UUID inside a component's content.
@@ -2914,6 +2915,9 @@ private fun extractIntField(json: String, field: String): Int? {
 
 /**
  * Add `❯ ` prefix to specific lines within the exchange component's user region.
+ *
+ * `#jbshrinkrestarts`: frozen. This is [ExchangePrefixRepair]'s compatibility floor; the live rule
+ * is the native `exchange_prefix_repair` derivation. Never extend it or call it from a new site.
  *
  * Uses line-by-line scanning with [String.trimEnd] comparison so trailing whitespace
  * differences between the binary's disk-side payload and IntelliJ's editor buffer

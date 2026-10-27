@@ -5251,28 +5251,38 @@ fn run_requote_unlandable_capture(file: &Path) -> anyhow::Result<()> {
     report_resume_capture_outcome(file, outcome)
 }
 
+/// The `debug.log` directory for a process whose working directory is `cwd`:
+/// `<root>/.agent-doc/logs` of the nearest project root, resolved through the
+/// ceiling-aware [`agent_doc_fs::find_project_root`] (`#tracingrootceiling`).
+///
+/// The old walk climbed from the cwd with no limit to the first ancestor that
+/// already had a `.agent-doc/logs/` directory. It ignored
+/// `AGENT_DOC_ROOT_CEILING_DIRECTORIES`, so a test process wrote the operator's
+/// `~/.agent-doc/logs/debug.log.<date>`, and a nested project without `logs/`
+/// yet logged into an outer project. The nearest root now owns the log, and
+/// its `logs/` is created like `ops.log` creates it. No root within the
+/// ceiling means no file log: there is no user-level log location to fall
+/// back to, and an ancestor beyond the ceiling is never adopted.
+fn tracing_log_dir(cwd: &Path) -> Option<PathBuf> {
+    let logs = agent_doc_fs::find_project_root(cwd)?.join(".agent-doc/logs");
+    std::fs::create_dir_all(&logs).ok()?;
+    Some(logs)
+}
+
 fn init_tracing() {
     let filter = match std::env::var("AGENT_DOC_LOG") {
         Ok(val) => val,
         Err(_) => return, // No logging configured — zero overhead
     };
 
-    // Find .agent-doc/logs/ directory (walk up from CWD)
-    let log_dir = {
-        let mut dir = std::env::current_dir().unwrap_or_default();
-        loop {
-            let candidate = dir.join(".agent-doc/logs");
-            if candidate.is_dir() {
-                break Some(candidate);
-            }
-            if !dir.pop() {
-                break None;
-            }
-        }
-    };
-
-    let Some(log_dir) = log_dir else {
-        eprintln!("[tracing] AGENT_DOC_LOG set but no .agent-doc/logs/ found — logging disabled");
+    let Some(log_dir) = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| tracing_log_dir(&cwd))
+    else {
+        eprintln!(
+            "[tracing] AGENT_DOC_LOG set but no agent-doc project root (within any {}) owns the working directory — logging disabled",
+            agent_doc_fs::ROOT_CEILING_ENV
+        );
         return;
     };
 

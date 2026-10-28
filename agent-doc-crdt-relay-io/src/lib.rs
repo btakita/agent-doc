@@ -1342,6 +1342,9 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     // scheduler-selected queue may reopen a struck row; a sibling's struck row
     // is its own terminal (or `agent:loop` pass-owned) evidence.
     let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+        // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
+        // queue is an earlier attempt's record, never the claim's row.
+        let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         block
             .entries
             .iter()
@@ -1360,8 +1363,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     let receipt = receipts.get(&identity);
                     // `#strikeisterminal`: only a live attempt reopens a struck
                     // row; receipts and completion cells agree with the strike.
-                    let durable_on_struck =
-                        struck && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(claim);
+                    let durable_on_struck = struck
+                        && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
+                            claim, &identity, &live_rows,
+                        );
                     if struck && !durable_on_struck {
                         return None;
                     }

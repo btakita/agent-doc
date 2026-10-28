@@ -265,6 +265,9 @@ pub fn derive_claim_runtime_projection_scoped(
     // duplicate twice.
     let mut persisted_heads = Vec::new();
     let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+        // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
+        // queue is an earlier attempt's record, never the claim's row.
+        let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         let targets = block
             .entries
             .iter()
@@ -293,8 +296,10 @@ pub fn derive_claim_runtime_projection_scoped(
                     // `#strikeisterminal`: only a live attempt reopens a struck
                     // row; receipts and completion cells agree with the strike.
                     let durable_on_struck = struck
-                        && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(
+                        && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
                             claim_states.get(&identity),
+                            &identity,
+                            &live_rows,
                         );
                     if struck && !durable_on_struck {
                         return None;
@@ -2013,6 +2018,80 @@ mod tests {
             "{}",
             projection.target_content
         );
+    }
+
+    /// `#strikeisterminal`, per queue: replay of `haiven-dev/tasks/sdk/game-sessions.md`
+    /// (2026-10-28). At 06:01Z `--ack-id` struck four reported heads; at 06:02Z
+    /// `backlog requeue` appended a fresh live row per id beside the struck
+    /// one. A new claim must mark only the live row. It used to also reopen
+    /// the struck row (`❔`, then `🟡`), which left two identical claimed rows
+    /// in `agent:run`. The rows then stayed doubled through `☑️`.
+    #[test]
+    fn claim_on_requeued_row_never_reopens_its_struck_predecessor() {
+        let dir = tempfile::tempdir().unwrap();
+        let heads = [
+            "do [#publish-session-contracts]",
+            "do [#session-liveness-resume]",
+            "do [#session-ws-events]",
+            "do [#session-roster-list-update]",
+        ];
+        let mut body = String::from("- ~~do [#commitpush]~~\n");
+        for head in heads {
+            body.push_str(&format!("- ~~{head}~~\n"));
+        }
+        for head in heads {
+            body.push_str(&format!("- 📥 {head}\n"));
+        }
+        let doc = write_claim_projection_doc(dir.path(), &body);
+        let effects = FakeEffects::with_current(std::fs::read_to_string(&doc).unwrap());
+
+        for (index, head) in heads.iter().enumerate() {
+            let owner = format!("subagent:row-{index}");
+            let (_, claimed) = crate::queue_claim::claim(&doc, head, &owner, 600).unwrap();
+            project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
+            let projected = std::fs::read_to_string(&doc).unwrap();
+            let claimed_row = format!("- 🟡 [#{owner}#{}] {head}\n", claimed.generation);
+            assert_eq!(
+                projected.matches(&claimed_row).count(),
+                1,
+                "exactly one row may carry the claim: {projected}"
+            );
+            assert!(
+                projected.contains(&format!("- ~~{head}~~\n")),
+                "the earlier attempt's struck row must stay struck: {projected}"
+            );
+            assert!(!projected.contains('❔'), "{projected}");
+        }
+
+        // Running and Reported keep the single row through the whole cycle.
+        for (index, head) in heads.iter().enumerate() {
+            let owner = format!("subagent:row-{index}");
+            let running = crate::queue_claim::start_attempt(
+                &doc,
+                head,
+                &owner,
+                &format!("/root/{owner}"),
+                600,
+                1,
+            )
+            .unwrap();
+            crate::queue_claim::report_attempt(&doc, head, Some(running.generation)).unwrap();
+        }
+        project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
+        let reported = std::fs::read_to_string(&doc).unwrap();
+        for (index, head) in heads.iter().enumerate() {
+            assert_eq!(
+                reported
+                    .matches(&format!("- ☑️ [#subagent:row-{index}#1] {head}\n"))
+                    .count(),
+                1,
+                "{reported}"
+            );
+            assert_eq!(reported.matches(&format!("- ~~{head}~~\n")).count(), 1);
+        }
+        // The projection is a fixpoint: a fresh pass changes nothing.
+        let settled = derive_claim_runtime_projection(&doc, &reported, None).unwrap();
+        assert!(!settled.changed, "{}", settled.target_content);
     }
 
     #[test]

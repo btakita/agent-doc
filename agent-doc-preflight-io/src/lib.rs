@@ -7247,6 +7247,9 @@ pub fn run_queue_maintenance_with_coin_gate(
             .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
             .collect::<std::collections::HashSet<_>>();
     let row_blockers = agent_doc_queue::queue_blocked::queue_blockers(&current_content);
+    // `#strikeisterminal`, per queue: a struck row whose identity is also live in this queue
+    // is an earlier attempt's record, never the claim's row.
+    let live_rows = agent_doc_queue::queue_claim::live_row_identities(&activation.entries_after);
     let lifecycle_targets = activation
         .entries_after
         .iter()
@@ -7265,7 +7268,11 @@ pub fn run_queue_maintenance_with_coin_gate(
             let durable_on_struck = matches!(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)
-            ) && agent_doc_queue::queue_claim::struck_row_reopened_by_claim(claim);
+            ) && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
+                claim,
+                &identity,
+                &live_rows,
+            );
             if matches!(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)

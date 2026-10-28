@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1256,12 +1255,19 @@ The Stop-hook fix (`edc4debc24`) is still in its integration `make check`.
 > **Queue prompt:** The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 
 Fixed on `main` and installed (`67413e99fd..939f306bbb`, commit `edc4debc24`). The combined `make check` exited 0: 12078 of 12078 tests passed, with 187 skipped. Claude's Stop hook now pauses once when a subagent row is reported or released but not yet struck. It names the closeout that strikes the row, the same way Codex already did.
+
+### Re: undo fix integrating — opus-5 · 2026-10-28T12:40-04:00
+
+`subagent:stalereplay` finished your "re-sync agent-owned text" decision in commit `dffba0edcb`. Undo still works everywhere. Every status write now records the synced text it wrote. Preflight, the mid-turn check and the final Stop check compare the document against that record. If an undo reverted the synced block, they show both texts and require a re-sync with `agent-doc status set`. That covers only the synced block of a status that has `sync=`. Its own `make check` passed: 12086 of 12086 tests.
+
+It's merged onto `main` in integration branch `integrate/20261028d`, and the combined `make check` is running. I released the worker's claim so the row isn't left reported at turn end. Once the check passes, I'll push, run `make install`, strike the row, and close your answer row and its Todo with `--done subagent-operator-request-undo-agent-writes`.
+
+**Bug found while doing this:** your answer row (`- [#subagent-operator-request-undo-agent-writes]` with the answer nested under it) makes the queue marker projection count one row too few (`before=3, after=2`). `report-complete` was refused for that reason, and preflight logged the same mismatch earlier. `--ack-id` also refuses that row because it was never dispatched. I'll file it once this closes.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- ~~The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended~~ — auto-struck: answered this cycle (#ftstrike)
 - [#subagent-operator-request-undo-agent-writes]
   - I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->

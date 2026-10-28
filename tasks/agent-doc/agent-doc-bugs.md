@@ -191,7 +191,7 @@ The release row stays open until `#subagent:nestedproject` is on main. That clai
   - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
-- 🚧 [#subagent:release#5] release + publish
+- ☑️ [#subagent:release#5] release + publish
   - Include #subagent:nestvector + #subagent:nestedproject
 <!-- /agent:run -->
 

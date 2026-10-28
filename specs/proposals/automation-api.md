@@ -3,7 +3,11 @@
 > **Status:** proposal, non-normative. Nothing here is implemented. Normative
 > behavior stays in [`SPEC.md`](../../SPEC.md) and the numbered `specs/` files;
 > a phase below becomes normative only when its queue item lands spec + tests.
-> Citations are `path:line` against `origin/main` at `7a92742ece`.
+> Citations are `path:line` against `origin/main` at `7a92742ece`, except in
+> [§5](#5-where-does-lazily-fit), which cites agent-doc `origin/main` at
+> `7f1bf60b7e` and the Lazily checkouts at `lazily-spec` `90a2498ab6`,
+> `lazily-rs` `87da9e7494`, `lazily-py` `aa323c2318`, and `lazily-go`
+> `e5e082a2d7`.
 
 ## Question
 
@@ -25,7 +29,15 @@ three steps, all served by the same in-controller handlers:
    generated from the same operation table.
 
 Do not build a separate long-lived daemon, gRPC, or a "bless the internal RPC"
-API. The reasons are in [Should the controller be the API server?](#should-the-controller-be-the-api-server).
+API. The reasons are in [Should the controller be the API server?](#2-should-the-controller-be-the-api-server).
+
+**Lazily supplies the semantics, not the API.** The public envelope is plain
+JSON whose fields map one-to-one onto Lazily's `CommandSubmit` and
+`CausalReceipt`. The controller turns each request into a real `CommandSubmit`
+internally, and `events.subscribe` implements the producer side of Lazily's
+boundary-ingress contract. Lazily bindings are an optional client convenience,
+not a requirement. The endpoints, transports, auth, and the HTTP server stay in
+agent-doc. See [§5](#5-where-does-lazily-fit).
 
 ## What exists today
 
@@ -302,10 +314,13 @@ schema, error codes, and version are owned separately from the internal 106.
 
 ### (a) A versioned public subset of the controller RPC on its socket, plus a schema and thin clients
 
-One new controller command, `api`, carries `{"api":"agent-doc/v1","op":"queue.add","request_id":…,"idempotency_key":…,"params":{…}}`
+One new controller command, `api`, carries `{"api":"agent-doc/v1","op":"queue.add","request_id":…,"idempotency_key":…,"source":…,"if_generation":…,"params":{…}}`
 and returns
-`{"api":"agent-doc/v1","ok":…,"data":…,"error":{"code":"…","message":"…","retryable":…}}`.
-The ops dispatch to the same functions the CLI uses.
+`{"api":"agent-doc/v1","ok":…,"data":…,"receipt":{…},"error":{"code":"…","message":"…","retryable":…}}`.
+The ops dispatch to the same functions the CLI uses. A write op's `receipt` has
+the shape of a Lazily `CausalReceipt`, and the controller runs each write as a
+real `CommandSubmit` internally. [§5](#5-where-does-lazily-fit) gives the field
+mapping.
 
 | Aspect | Assessment |
 |---|---|
@@ -374,6 +389,10 @@ below.
   never a stale disk read while an editor holds the document), `document.status`,
   and `queue.add`. `queue.add` is a re-export of the `#queueinbound` path with
   `idempotency_key` mapped to `--key`, so it adds no new write path.
+- The envelope is plain JSON with the `CommandSubmit` field mapping in
+  [§5](#5-where-does-lazily-fit). Each write's result carries a
+  `CausalReceipt`-shaped `receipt`. `document.status` is read from the existing
+  Lazily document-state projection, never from a second cache.
 - Errors carry a stable `code` (`not_a_session_document`, `component_not_found`,
   `operator_text_loss_refused`, `duplicate`, `controller_unavailable`,
   `api_version_unsupported`, …) and `retryable`.
@@ -385,12 +404,19 @@ below.
 **Phase 2: the socket transport and hardening.**
 
 - A controller `api` command carrying the same bytes, exempt from the exact
-  binary gate and checked against the `api` major version instead.
+  binary gate and checked against the `api` major version instead. The handler
+  normalizes each write into a `lazily::CommandSubmit`
+  (`payload_type: agent-doc.api.<op>.v1`) and routes it through the existing
+  command-plane dispatch, so dedupe, the generation fence, and handoff
+  forwarding come from the command plane, not from new code.
 - Socket and directory modes, plus a peer-uid check, for *all* controller
   commands, not only `api`.
 - `agent-doc api` becomes a thin client of the socket.
 - Reference clients in Python and TypeScript (standard library only, about 100
   lines each) plus a shell example, generated from or tested against the schema.
+  They do not depend on a Lazily binding. A short note shows a client that
+  already uses Lazily how to fold `receipt` into a `CommandProjection` and feed
+  events into an `IngressCell`.
 - `queue.control` (pause, resume, drain), mapped onto the 08b `QueueControl`
   path.
 
@@ -398,6 +424,14 @@ below.
 
 - `events.subscribe` with a resumable cursor built on the `state_subscribe`
   `document_version` (monotonic across retention, `rpc.rs:22735-22743`).
+- Specified as the producer side of Lazily's boundary-ingress contract
+  (`lazily-spec` `docs/transport-ingress.md` § Boundary-ingress adapters):
+  - every event carries `{generation, cursor}`;
+  - a subscribe sends `{generation, after}` and is answered with a `snapshot`
+    event, then contiguous events;
+  - a cursor gap is answered with `replay_required` and a fresh snapshot, never a
+    silent skip;
+  - a controller handoff advances `generation`, and the client resubscribes.
 - Typed events: `cycle.opened`, `cycle.closed`, `queue.changed`,
   `claim.changed`, `steering.batch`, and `controller.handoff` (reconnect with
   the cursor).
@@ -412,6 +446,8 @@ below.
   mapping the read-only token to read ops.
 - Add Origin and Host checks for loopback.
 - MCP gains generated tools for the read, enqueue, and status ops.
+- The HTTP server stays in `agent-doc serve`, on the sync `tiny_http` stack. It
+  does not move into Lazily (see [§5](#5-where-does-lazily-fit)).
 
 **Invariants every phase must keep:**
 
@@ -420,6 +456,188 @@ below.
 - every write is attributed (`from:<source>`) and idempotent;
 - every write that would drop operator bytes is refused with a typed error;
 - the API never starts harness processes directly.
+
+## 5. Where does Lazily fit?
+
+The operator asked three follow-up questions:
+
+> - Can we use lazily's built-in features for this?
+> - Should we extend lazily to provide api endpoints?
+> - We have effective made lazily the api with different language bindings. Is
+>   this a good route or should we expand to a web-like api server? If yes, does
+>   the web server implementation belong in lazily?
+
+### What agent-doc already takes from Lazily
+
+- **The Rust crate.** agent-doc pins `lazily = "0.61.0"` in the workspace
+  (`Cargo.toml:331`) and in 28 member crates. It uses the reactive kernel
+  (`Source`, `Effect`, `ThreadSafeSourceMap`, `ThreadSafeComputedMap`), the text
+  CRDTs, `SqliteOutbox`, the latest-durable projection, and the command plane
+  types (`CommandSubmit`, `CausalReceipt`, `CommandEvents`, `CommandProjection`).
+- **The command plane, on the controller wire.** `command_plane_submit` decodes a
+  `lazily::CommandSubmit` from the `diagnostic_payload` string, refuses a foreign
+  namespace, and routes by name (`agent-doc-controller-io/src/project_controller/rpc.rs:25687-25760`).
+  Three names are routed today: `closeout_advance`, `closeout_owner_claim`, and
+  `closeout_owner_release`. Any other name gets a terminal `rejected` receipt.
+  The editor commands (`editor_route`, `sync_tmux_layout`, `focus_document_pane`)
+  are bound to the same envelope (`editors/command-payloads.md:38-44`). The
+  controller folds their async progress into a `lazily::CommandProjection`
+  image (`rpc.rs:13396-13434`). The submit still rides the internal request
+  type, so it still has the exact-binary gate (`rpc.rs:22230-22253`).
+- **The editor plugins, as Lazily clients.** VS Code pins
+  `@lazily-hub/lazily-js` `^0.37.0` (`editors/vscode/package.json:274`).
+  JetBrains pins `io.github.lazily:lazily` `0.46.0`
+  (`editors/jetbrains/build.gradle.kts:48`). Both mirror controller state through
+  Lazily `GraphView` over the Snapshot/Delta wire. The `#lzsync` 3B split already
+  moved the agent-doc *domain* projection out of Lazily and into the plugins
+  (`editors/vscode/src/agentDocProjection.ts:1-8`).
+
+So the operator's reading is right for first-party clients. The editors already
+use Lazily as their wire to the controller, in Kotlin and TypeScript. That works
+because the plugins ship and upgrade with the binary, so lockstep versioning
+costs them little.
+
+### Q1: Can the automation API use Lazily's built-in features?
+
+Yes, for the semantics. The client-side dependency stays optional.
+
+| Lazily feature | Fits? | Where it goes in the API |
+|---|---|---|
+| `CommandSubmit` envelope: `command_id`, `idempotency_key`, `authority_generation`, `required_features`, dedupe policy (`lazily-rs` `src/command.rs:23-87`) | **Yes, inside the controller.** | The controller `api` handler (Phase 2) turns each write into a real `CommandSubmit` with `payload_type: agent-doc.api.<op>.v1`. The public envelope maps onto it field by field (see the table below). |
+| `CausalReceipt` and "progress is not proof" (`lazily-spec` `docs/message-passing.md:28-39`, `docs/receipts.md`) | **Yes, on the wire.** | Every write response carries a `receipt` with the `CausalReceipt` fields (`causation_id`, `outcome`, `reason`). `accepted` or `queued` is never reported as done. |
+| `CommandProjection`: replaying the same id is a no-op, reconnect, a terminal conflict fails closed | **Yes, inside the controller.** | Dedupe on `request_id`/`idempotency_key`, and survival across handoff. agent-doc's async editor commands already use it this way (`#handoffrouteforward`). |
+| Boundary-ingress contract: snapshot plus events, one cursor per producer generation, `ReplayRequired(from)` on a gap, a generation fence and a resubscribe on handoff (`lazily-spec` `docs/transport-ingress.md:239-286`) | **Yes, as the spec for `events.subscribe`.** | This is exactly the resume problem Phase 3 has. `lazily-spec` already names "the controller state-event channel" of agent-doc as the reference integration (`transport-ingress.md:281-286`). |
+| `IngressCell` (shipped in all nine bindings, GDScript excepted) | **Optional, on the client.** | A client that already uses Lazily can feed `events.subscribe` envelopes into it for dedupe, reordering, and fencing. The reference clients don't need it. |
+| The agent-doc document-state projection (`ThreadSafeSourceMap`/`ComputedMap` nodes, the `agent_doc.*` type tags) | **Yes, as the read source.** | `document.status` and the event stream are Computeds over the projection the controller already keeps, per `#lazily-reactive-first` (`AGENTS.md:16`). There is no second cache. |
+| `HealthCell` / `ReadinessCell` (`lazily-spec` `docs/service.md`) | **Possibly.** | Pure aggregations built for `/health` and `/ready`. They could compute the readiness field of `api.capabilities`. |
+| The raw Snapshot/Delta graph wire (`state_plane_subscribe`, `schemas/agent-doc-state.json`) | **No, not as the public API.** | Node ids are `fnv1a` slot hashes, and payloads are base64 copies of internal Rust structs ("decodes to the named source struct"). Publishing it would freeze the controller's internal state shape. That is the same problem as publishing the 106 commands. |
+| `CommandSubmit` as the public bytes | **No, not as the required format.** | `payload` is an `IpcValue` encoded as a JSON array of `u8` integers, with base64 only as a negotiated option (`lazily-spec` `schemas/defs.json:76-79`, `protocol.md:131`). `payload_hash` is a sha256 over the exact payload bytes. A shell or `curl` caller cannot build that comfortably. |
+| `PeerPermissions` / `RemoteOp` (`protocol.md:1752-1766`) | **As a model only.** | Read, write, and trigger-effect are granted separately, which matches the per-op read/write split. But it *authorizes* a `PeerId`; it does not *authenticate* one. Caller identity still has to come from the transport (`SO_PEERCRED`, bearer token). |
+| The `websocket` and `signaling-client` features (`lazily-rs` `Cargo.toml:116`, `:119`) | **No.** | They need `tokio`, which breaks agent-doc's no-async rule (`AGENTS.md:14`). They carry `IpcMessage` frames between peers. They are not a request/response endpoint. |
+
+Two limits on "the bindings are the clients":
+
+- **No binding ships a transport for the command plane.** `CommandTransport` is
+  a trait that the caller implements: "I/O specifics (Unix socket, WebSocket)
+  live behind this trait, outside the pure type module" (`lazily-rs`
+  `src/command.rs:767-778`; Python has the same `Protocol`,
+  `lazily-py` `src/lazily/command.py:711`). A Python or Go caller with Lazily
+  installed still has to write the socket client, and the launch, retire, and
+  handoff rules.
+- **No binding ships a `BoundaryIngressAdapter` type.** The contract is replayed
+  by test-local models (for example `lazily-go`
+  `boundary_ingress_adapter_conformance_test.go:18`,
+  `lazily-py` `tests/test_boundary_ingress_adapter_conformance.py`). A client
+  gets `IngressCell`, but writes the cursor-and-resubscribe loop itself.
+
+**Public envelope to `CommandSubmit` mapping:**
+
+| Public v1 field | `CommandSubmit` field | Notes |
+|---|---|---|
+| `request_id` | `command_id`, `causation_id` | Client-chosen and replay-safe. If omitted, the controller derives one. |
+| `idempotency_key` | `idempotency_key` | `policy.dedupe = same_idempotency_key` for writes. |
+| `source` | `source` | Also the `from:<source>` attribution tag. |
+| `if_generation` (optional) | `authority_generation` | If omitted, the controller fills in the current generation. If present and stale, the request is refused with `generation_stale`. |
+| `api` + `op` | `namespace: "agent-doc"`, `name: "api.<op>"`, `payload_type: "agent-doc.api.<op>.v1"`, `required_features` | The client never computes these. |
+| `params` (a JSON object) | `payload` (inline UTF-8 JSON bytes), `payload_hash` | The controller encodes and hashes. The client never does. |
+| response `receipt` | `CausalReceipt` | Same field names, so a Lazily client can fold it unchanged. |
+
+### Q2: Should Lazily be extended to provide API endpoints?
+
+**Not agent-doc's endpoints.** Lazily's own rule is "lazily owns the envelope;
+the **namespace owns the payload**. lazily never decodes `payload`"
+(`lazily-spec` `docs/message-passing.md:23-26`). `queue.add`,
+`document.status`, the error codes, and the "no text writes in v1" rule are all
+agent-doc domain. The `#lzsync` 3B split already went the other way: it moved
+agent-doc's projection *out* of Lazily.
+
+There is still agent-doc material in `lazily-spec`:
+
+- `schemas/agent-doc-state.json`;
+- `conformance/agent-doc/`;
+- `conformance/message-passing/editor_route_submit.json` and
+  `sync_tmux_layout_submit.json`.
+
+Under `lazily-spec`'s publishing rule, a new canonical fixture reddens every
+binding until each one is swept (`lazily-spec` `AGENTS.md`, § Publishing a
+corpus change). Putting the automation API's endpoints there would make every
+agent-doc API change a ten-repository change.
+
+**Generic, domain-free extensions would be worth having.** None of them blocks
+Phases 1-3:
+
+1. a standard-library, blocking `CommandTransport` over a newline-JSON local
+   socket in each binding, so `CommandRpcClient` works out of the box against
+   any namespace's server;
+2. a shipped `BoundaryIngressAdapter` type, since the contract already exists
+   and every binding replays it;
+3. a JSON-native payload form, or base64 by default, so a `CommandSubmit` can be
+   written by hand.
+
+These are Lazily features for any product, not agent-doc endpoints. They are
+listed as an open question below.
+
+### Q3: Lazily as the API, or a web-like API server? Does the server belong in Lazily?
+
+**Recommendation:** keep Lazily as the semantic model and an optional client
+toolkit. Make the API agent-doc's own versioned op set, served over agent-doc's
+transports: the CLI first, then the local socket, then HTTP/SSE in
+`agent-doc serve`. Build the web server when a caller needs it (Phase 4), and
+build it in agent-doc, not in Lazily. Do not add a separate server crate or
+package yet.
+
+- **Cross-language reach.** Lazily reaches nine languages (GDScript has no
+  command plane; Zig's is partial: `lazily-spec` `coverage.json`, row
+  `message-passing-rpc-command-plane`), but only callers that take a Lazily
+  dependency *and* write a transport. Plain JSON over the CLI reaches every
+  language today, including shell, Ruby, CI YAML, and Makefiles. HTTP adds
+  browsers and remote machines. Being a Lazily binding is a convenience on top,
+  not the floor.
+- **Transport.** For local automation, use the local socket: it is cheapest,
+  and access comes from filesystem modes plus a peer-uid check. For dashboards,
+  browsers, and remote callers, use HTTP with SSE. WebSockets aren't needed:
+  `POST` plus SSE covers request/response and push, and both fit `tiny_http`
+  without async. Lazily's only WebSocket backend needs `tokio`.
+- **Security.** Authentication is a property of the transport and of the
+  product: bearer tokens and TLS in `serve` (`src/serve.rs:250-280`), Origin and
+  Host checks for loopback, `SO_PEERCRED` on the socket. Lazily has
+  authorization over graph nodes (`PeerPermissions`) but no authentication, and
+  a reactive library should not own token issuance or CSRF rules.
+- **Versioning and stability.** The two Lazily layers move at different speeds.
+  The command-plane schema has had one commit since it was introduced
+  (`lazily-spec` `schemas/message-passing.json`, 2026-07-08). The libraries are
+  pre-1.0 and fast: `lazily-rs` went from 0.20.0 to 0.61.0 in 42 minor releases
+  between 2026-07-02 and 2026-10-22, and every 0.x minor may break under Cargo
+  semver. The bindings are not on one version line either: agent-doc pins rs
+  0.61.0, js ^0.37.0, and kt 0.46.0. So depend on the stable *wire contract*, not
+  on library versions. agent-doc's API v1 promise must hold regardless of which
+  Lazily version a caller has, or whether it has one at all.
+- **Coupling.** If the endpoints or the server lived in Lazily, every agent-doc
+  API change would need a Lazily release across the bindings and a corpus change
+  that reddens all nine. Lazily would also carry agent-doc concepts again,
+  undoing `#lzsync` 3B. The reverse is just as bad: agent-doc's API stability
+  would depend on Lazily's breaking cadence.
+- **The split.** Lazily supplies the wire model (envelope, receipt, and the
+  ingress cursor contract) and, later, the generic transports from Q2. agent-doc
+  owns the op table, the schemas, the error codes, the endpoints, the
+  transports, and auth. The HTTP facade lives in the existing `agent-doc serve`.
+  The pure `agent-doc-api` crate from Phase 1 holds the types and the op table.
+  The reference clients are standard-library packages versioned with the API
+  major, not with the binary or with Lazily. A generic "command plane over HTTP"
+  bridge would only belong in Lazily if a second product needed the same
+  bridge. Today none does, so it stays out.
+
+**What this changes in the plan:**
+
+- open question 5 now has a recommended answer: plain JSON public envelope, a
+  `CommandSubmit` internally;
+- Phase 1 pins the field mapping above;
+- Phase 2 routes `api` writes through the command-plane dispatch;
+- Phase 3's `events.subscribe` is specified against the boundary-ingress
+  contract;
+- Phase 4 keeps HTTP in `serve`.
+
+The rest of the layering is unchanged.
 
 ## Open questions for the operator
 
@@ -436,11 +654,14 @@ below.
 4. **Will automation ever write document text?** For example, appending a
    status block or replacing a component it owns. If yes, which components can
    an external writer own, and how is that ownership declared in the document?
-5. **What should the public envelope be?** Plain JSON (proposed, with fields
-   that map 1:1 onto Lazily `CommandSubmit`: `idempotency_key`, generation
-   guard, receipt), or the Lazily `CommandSubmit` envelope itself, which gives
-   receipts and handoff forwarding for free but requires a Lazily binding per
-   client language?
+5. **Confirm the public envelope.** [§5](#5-where-does-lazily-fit) recommends
+   plain JSON with a `CausalReceipt`-shaped `receipt`, normalized into a real
+   `CommandSubmit` inside the controller. That keeps receipts, dedupe, and
+   handoff forwarding without making callers byte-encode and hash payloads.
+   The alternative is to require the `CommandSubmit` envelope itself from
+   callers. Should v1 *also* accept a raw `CommandSubmit` with
+   `payload_type: agent-doc.api.<op>.v1` from Lazily-native clients, or leave
+   that to a later v1.x?
 6. **Should an API call launch a controller?** Writes need one. Should reads
    fall back to a cold read when no controller is running, and should event
    subscribers keep a controller from retiring?
@@ -449,6 +670,12 @@ below.
 8. **Is there a project-spanning gateway?** One user-level endpoint across
    project roots, for a fleet dashboard, or one endpoint per project as
    proposed?
+9. **Should Lazily get the generic client pieces?** These are a standard-library
+   local-socket `CommandTransport`, a shipped `BoundaryIngressAdapter`, and a
+   JSON-native payload form ([§5 Q2](#q2-should-lazily-be-extended-to-provide-api-endpoints)).
+   They are Lazily work, they serve any namespace, and they do not block
+   Phases 1-3. Request them now, or wait until a Lazily-native external client
+   exists?
 
 ## Follow-ups found while mapping
 
@@ -466,3 +693,12 @@ These are independent of the direction chosen:
 - **Spec drift.** `specs/10-security.md:10` says "No network services are
   exposed", but `agent-doc serve` can bind non-loopback addresses with bearer
   tokens (`src/serve.rs:25-26`).
+- **agent-doc material inside `lazily-spec`.** `schemas/agent-doc-state.json`,
+  `conformance/agent-doc/`, and the `editor_route` and `sync_tmux_layout`
+  message-passing fixtures put agent-doc payload shapes in the shared Lazily
+  corpus, so a change to them is a cross-binding corpus change. Consider moving
+  them into agent-doc, or making them generic, in line with `#lzsync` 3B.
+- **`command_plane_submit` inherits the exact-binary gate.** The `CommandSubmit`
+  path rides the internal request type and is refused on a version mismatch
+  (`rpc.rs:22230-22253` at `7f1bf60b7e`). The Phase 2 `api` command has to be
+  exempt from that gate, or a public write would break on every install.

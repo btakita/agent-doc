@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -498,21 +498,56 @@ Release run 40602109793 succeeded in every job: all six builds, plugins, the Git
 - The JetBrains Gateway backend plugin zips and the VS Code 0.2.89 VSIX are attached.
 
 A workspace image that installs the latest agent-doc gets 558. One that pins a version needs the pin moved to 0.35.558. GH #380's harness-path fallback (0.35.557) is included, so a workspace without `~/.local/bin` on PATH still finds `claude`, `codex` or `grok`. I haven't run an install inside a live Coder workspace.
-<!-- agent:boundary:dbf949d5 -->
+> **Queue prompt:** I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
+>   - So this is the first subtask.
+>   - This is the second subtask.
+>   - Subtasks should be editable and steerable.
+>   - Make sure these subtasks are being deterministically associated with the parent task.
+
+> **Queue prompt:** sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.
+
+> **Queue prompt:** There are remaining ☑️ items in this queue.
+
+> **Queue prompt:** [#automationapiquestions]: give me the full path to specs/proposals/automation-api.md if it's in a worktree
+
+### Re: ☑️ rows closed, sdk-demo.md subtask sync, automation-API path — opus-5 · 2026-10-27T22:52-04:00
+
+**The leftover ☑️ rows are closed.** I closed `do [#ahfe]` with the new `queue consume --ack-id ahfe`, which ends its reported claim and leaves the `#ahfe` Todo open for your live check. This echo closes the PM-sync row and its four sub-prompts: an echo of a nested row, one quoted line per row, now strikes the parent.
+
+Both fixes are on agent-doc `main` (`00caa013ac..dd65b2dfa9`, fast-forward) and installed (`make install` exit 0, no JetBrains restart needed). Combined `make check`: 12004 of 12004 tests passed. I checked that no editor was quarantined before installing. Not released.
+
+| Item | Commit | What changed |
+|---|---|---|
+| `sdk-demo.md` subtask out of sync | `ddc48d30e3` | The answer closed the struck parent and its child as one item, but only the parent was drawn struck, so the child looked open. The line you added later was folded into the closed block: no queue item, no steering, and no wake for the idle session until it was routed by hand. Now closing a row strikes its children too. A new line under a struck parent reopens the block as one live item, with the parent and the answered children as context, and it shows up as steering. The next preflight on `sdk-demo.md` strikes both of its children; both were answered in that session. |
+| Leftover ☑️ rows (`#nestedechostrike`) | `dd65b2dfa9` | Each quoted echo line was compared against the whole multi-line head, so a nested parent could never strike. `--ack-id` accepted only backlog ids, never ended the claim, and never checked the claim state. Now a run of quoted lines that covers the whole head strikes it. `--ack-id` closes a dispatched row backed by a backlog item or a Todo, leaves the item open, and refuses work that is still running, lost, or owned by another session, naming the command to run instead. |
+
+**`automation-api.md` path:** `/home/brian/work/btakita/agent-doc-wt/automationapi/specs/proposals/automation-api.md`. It had no worktree, so I created one on branch `design/automationapi` (`a1fff34641`). That branch is 9 commits behind `main` and isn't merged.
+
+**Dispatched:**
+- `do [#pmsyncquestions]`: a worker is writing your inline answers into `specs/proposals/pm-sync-integrations.md` as decisions, and answering your two questions back: a refresh recommendation that relies on deterministic change detection, and what happens when a status changes.
+- The `agent:todo` sync row: a second worker is checking where Todo-backed rows differ from backlog-backed ones. This turn showed one: `queue brief` couldn't find `#pmsyncquestions` because it only searches backlog and review.
+
+**Follow-ups from the workers:**
+- If you strike a parent by hand and add a child before the next preflight runs, that child is still read as closed.
+- The owner-session check on `--ack-id` can be bypassed by a plain shell that has no session env.
+<!-- agent:boundary:cb642efd -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:ahfe#1] do [#ahfe]
-- ☑️ [#subagent:pmsync#1] I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
-  - So this is the first subtask.
-  - This is the second subtask.
-  - Subtasks should be editable and steerable.
-  - Make sure these subtasks are being deterministically associated with the parent task.
-- 📥 sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.
-- 📥 There are remaining ☑️ items in this queue.
+- ~~do [#ahfe]~~
+- ~~I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.~~
+  - ~~So this is the first subtask.~~
+  - ~~This is the second subtask.~~
+  - ~~Subtasks should be editable and steerable.~~
+  - ~~Make sure these subtasks are being deterministically associated with the parent task.~~
+- ~~sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~There are remaining ☑️ items in this queue.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:pmsyncdecisions#1] do [#pmsyncquestions]
+- ~~[#automationapiquestions]: give me the full path to specs/proposals/automation-api.md if it's in a worktree~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:todosync#1] `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -530,13 +565,23 @@ A workspace image that installs the latest agent-doc gets 558. One that pins a v
 - [x] [#ena0] Retry Restart Agent on tasks/software/lazily.md (agent: grok) after restarting the 2026.3 IDE onto plugin 0.2.866: it should start Grok Build, or refuse and name both agent values if the controller copy still lags (#retainedprojectionclobber + the --expect-agent check are installed).
 - [ ] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
   - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
+    - One per provider.
   - Do credential profiles live in project config or user-global config?
+    - The credential profiles can live in both 60 it should also be configurable in the frontmatter.
+    - Precedence: frontmatter > project config > global config
   - What default refresh intervals, and should refresh pause when no editor has the document open?
+    - Configurable. If we use deterministic logic to detect changes, then what do you recommend?
   - Should tracker refreshes be committed to git?
+    - Only when there is a change.
   - When you edit a synced row: overwrite and log it, treat the edit as a command, or refuse visibly?
+    - Treat the edit as a diffable command.
+    - We want to encourable operators to use subitems, but the intent of appending should be clear to the agent. What happens when a status is updated? agent-doc should use the source of truth which is github/gitlab/jira/etc
   - What gesture sends a command (component `go`, a per-row marker, or both), and do destructive verbs need per-row confirmation?
+    - Same rules as queue items. We should have a list. `subagents` attribute should be supported.
   - Can a tracker row feed `agent:run` automatically?
+    - yes...and agent:todo.
   - Does "related to me" mean `involves:@me`, or only review-requested and assigned?
+    - `involves:@me`
 - [ ] [#automationapiquestions] Answer the automation-API design questions (specs/proposals/automation-api.md on branch design/automationapi)
   - Who is the first real caller: CI, a dashboard, another agent, or a bridge?
   - Local-only, or remote and multi-user (which needs a security spec first)?
@@ -558,7 +603,6 @@ A workspace image that installs the latest agent-doc gets 558. One that pins a v
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
-- [ ] [#nestedechostrike] A reported (☑️) subagent row cannot be closed. A `> **Queue prompt:**` echo of a parent with nested sub-prompts does not strike it (the pmsync row), and `queue consume --ack-id` refuses an id-backed reported row (the ahfe row). Both stay ☑️ after their work closed.
 - [ ] [#echosteermisread] Exchange steering reports the coordinator's own committed `> **Queue prompt:**` echo cells as new operator prompts, on almost every cycle.
 - [ ] [#claimmarkersteer] Steering reports a claimed row as operator-edited (dispatch=forward_to_owner) when the only difference is the binary ☑️ claim marker plus nested rows that were there at claim time. It asks to forward to a worker that already finished.
 - [ ] [#servegetdisk] serve follow-ups: GET /doc still reads disk, not the authority; a browser save carries no base revision, so it cannot be merged; the editor-attached check races the commit.

@@ -809,9 +809,19 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
     // Strikethrough wrapper. Tolerates an `#qstrikenote` annotation appended
     // outside the `~~…~~` wrapper (`~~text~~ — auto-struck: …`): the line is still
     // a struck node whose text is the inner content.
-    let (struck, inner) = split_struck_body(body);
+    let (mut struck, inner) = split_struck_body(body);
     if struck {
         body = inner;
+    }
+    // `#struckparentkids`: a live child written beside struck children under a
+    // struck parent reopens the block as one live node (the same rule
+    // `document_queue::parse_spans` applies), so the strike/consume path can
+    // close it again once the new child is answered.
+    if struck
+        && subprompt_block
+            .is_some_and(agent_doc_element_queue::subprompts::struck_parent_block_reopens)
+    {
+        struck = false;
     }
 
     // Pins (may stack, e.g. operator + agent).

@@ -163,6 +163,130 @@ pub fn subprompt_rows(text: &str) -> Vec<String> {
     rows
 }
 
+/// True when a sub-prompt row is closed: its content (after the list marker
+/// and any stale projection prefix) is struck (`  - ~~done~~`). An answered
+/// child reads as closed because the parent's strike strikes it too
+/// ([`strike_subprompt_block`]); an operator can also close one by hand.
+pub fn subprompt_row_is_struck(content: &str) -> bool {
+    strip_attempt_projection_prefix(content)
+        .trim_start()
+        .starts_with("~~")
+}
+
+/// Whether the sub-prompt block beneath a **struck** parent carries new live
+/// work (`#struckparentkids`): it holds at least one closed (struck) child and
+/// at least one live, non-empty child.
+///
+/// The binary closes a parent by striking it and every child
+/// ([`strike_subprompt_block`]), so a canonical closed block has no live
+/// child. A live child beside struck ones was written under the closed
+/// parent afterwards: it is new operator work for that parent, so the block
+/// reopens as one live head instead of being swallowed by the strike.
+///
+/// A block with no struck child at all is the whole-block strike shape (a
+/// parent struck by hand, or a strike from 0.35.558 that left the children
+/// unstruck). It stays closed as before, and the next projection pass makes it
+/// canonical by striking its children.
+pub fn struck_parent_block_reopens(block: &str) -> bool {
+    let mut struck = false;
+    let mut live = false;
+    for line in block.lines() {
+        let Some(content) = list_item_content(line) else {
+            continue;
+        };
+        if content.trim().is_empty() {
+            continue;
+        }
+        if subprompt_row_is_struck(content) {
+            struck = true;
+        } else {
+            live = true;
+        }
+    }
+    struck && live
+}
+
+/// Strike every live child row of a sub-prompt block (`#struckparentkids`).
+///
+/// Closing a parent closes its children, and the document has to say so: an
+/// answered child left unstruck under a struck parent reads as open work the
+/// state already considers done. A child keeps its indentation and list
+/// marker; the strike wraps its work text, from the first line through its
+/// last wrapped line, and drops a stale binary-owned projection prefix as a
+/// struck row does. Already-struck children and editor placeholders are kept
+/// byte for byte. Returns the block unchanged when nothing is live.
+pub fn strike_subprompt_block(block: &str) -> String {
+    let lines: Vec<&str> = block.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(block.len() + 8);
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let body = line.trim_end_matches(['\n', '\r']);
+        let Some(content) = list_item_content(body) else {
+            out.push_str(line);
+            index += 1;
+            continue;
+        };
+        // The row's wrapped lines: following lines that are not list items.
+        let mut last = index;
+        while last + 1 < lines.len()
+            && list_item_content(lines[last + 1].trim_end_matches(['\n', '\r'])).is_none()
+            && !lines[last + 1].trim().is_empty()
+        {
+            last += 1;
+        }
+        if content.trim().is_empty() || subprompt_row_is_struck(content) {
+            for row_line in &lines[index..=last] {
+                out.push_str(row_line);
+            }
+            index = last + 1;
+            continue;
+        }
+        let marker_len = body.len() - content.len();
+        let work = crate::struck_work_text(content);
+        out.push_str(&body[..marker_len]);
+        out.push_str("~~");
+        if last == index {
+            out.push_str(work);
+            out.push_str("~~");
+            out.push_str(&line[body.len()..]);
+        } else {
+            out.push_str(work);
+            out.push_str(&line[body.len()..]);
+            for row_line in &lines[index + 1..last] {
+                out.push_str(row_line);
+            }
+            let tail = lines[last];
+            let tail_body = tail.trim_end_matches(['\n', '\r']);
+            out.push_str(tail_body.trim_end());
+            out.push_str("~~");
+            out.push_str(&tail[tail_body.len()..]);
+        }
+        index = last + 1;
+    }
+    out
+}
+
+/// The parent part of a struck row without its strike wrapper, so a strike of
+/// an already-struck parent (a reopened block, `#struckparentkids`) never
+/// nests `~~~~x~~~~`. Accepts `~~x~~` and the annotated `#qstrikenote` shape
+/// (`~~x~~ — auto-struck: …`); anything else is returned unchanged.
+pub fn unwrap_struck_parent(head: &str) -> &str {
+    let trimmed = head.trim();
+    let Some(rest) = trimmed.strip_prefix("~~") else {
+        return trimmed;
+    };
+    let inner = match rest.find("~~ — auto-struck: ") {
+        Some(close) => &rest[..close],
+        None => match rest.strip_suffix("~~") {
+            Some(inner) => inner,
+            None => return trimmed,
+        },
+    };
+    let inner = inner.trim();
+    if inner.is_empty() { trimmed } else { inner }
+}
+
 /// Remove binary-owned attempt projections (lifecycle markers, the
 /// `[#owner#generation]` annotation) that a child row carries.
 ///
@@ -255,6 +379,53 @@ mod tests {
         ] {
             assert!(subprompt_row_is_eligible(eligible), "{eligible:?}");
         }
+    }
+
+    /// `#struckparentkids`: closing a parent strikes every live child so an
+    /// answered child reads closed; struck children and placeholders keep
+    /// their bytes, a wrapped child is struck through its last line, and a
+    /// stale child projection is dropped inside the strike.
+    #[test]
+    fn striking_a_block_closes_every_live_child() {
+        assert_eq!(
+            strike_subprompt_block(concat!(
+                "  - Describe the choices. Why do we need a SBX/STG id?\n",
+                "  - ~~already done~~\n",
+                "  - 🚧 [#subagent:x#1] legacy marked\n",
+                "  - wrapped child\n",
+                "    second line\n",
+                "  1. ordered child",
+            )),
+            concat!(
+                "  - ~~Describe the choices. Why do we need a SBX/STG id?~~\n",
+                "  - ~~already done~~\n",
+                "  - ~~legacy marked~~\n",
+                "  - ~~wrapped child\n",
+                "    second line~~\n",
+                "  1. ~~ordered child~~",
+            )
+        );
+        let closed = "  - ~~a~~\n  - ~~b~~\n";
+        assert_eq!(strike_subprompt_block(closed), closed);
+    }
+
+    /// A struck parent reopens only for a live child beside struck ones; the
+    /// whole-block strike shape (no child struck) and a fully struck block
+    /// stay closed.
+    #[test]
+    fn a_live_child_beside_struck_children_reopens_a_struck_parent() {
+        assert!(struck_parent_block_reopens(
+            "  - ~~Describe the choices.~~\n  - I don't know if you understand that we moved onto project templates."
+        ));
+        assert!(!struck_parent_block_reopens("  - ~~a~~\n  - ~~b~~"));
+        assert!(!struck_parent_block_reopens("  - a\n  - b"));
+        assert!(!struck_parent_block_reopens("  - ~~a~~\n  - "));
+        assert_eq!(unwrap_struck_parent("~~#req-id~~"), "#req-id");
+        assert_eq!(
+            unwrap_struck_parent("~~x~~ — auto-struck: answered (#ftstrike)"),
+            "x"
+        );
+        assert_eq!(unwrap_struck_parent("live parent"), "live parent");
     }
 
     #[test]

@@ -1974,6 +1974,26 @@ mod tests {
         assert!(scoped.contains("Unrelated answer."), "{scoped}");
     }
 
+    /// `#struckparentkids`: a reopened block (struck parent and answered
+    /// child as context, then the new row) is proven answered by its own
+    /// `> **Queue prompt:**` echo, so the answered strike closes it again;
+    /// the echo of the earlier, closed block is not evidence for it.
+    #[test]
+    fn a_reopened_struck_parent_is_answered_by_its_own_echo() {
+        let head = "~~#subagent-operator-request-handoff-integration-id~~\n  - ~~Describe the choices in more detail. Why do we need a SBX/STG id?~~\n  - I don't know if you understand that we moved onto project templates.";
+        let echo = format_consumed_prompt_echo(&[head.to_string()], None);
+        let response = format!("### Re: templates mint the id\n\n{echo}\nYou're right.\n");
+        assert!(
+            free_text_head_answered_by_response(&response, head),
+            "{response}"
+        );
+        let earlier = "### Re: why SBX/STG need an integration id\n\n> **Queue prompt:** #subagent-operator-request-handoff-integration-id\n>   - Describe the choices in more detail. Why do we need a SBX/STG id?\n\nAn id is how haiven-api recognises the build.\n";
+        assert!(
+            !free_text_head_answered_by_response(earlier, head),
+            "{earlier}"
+        );
+    }
+
     #[test]
     fn free_text_head_answered_by_response_accepts_short_explicit_queue_prompt_echo() {
         let labeled = "### Re: deploy\n\n> **Queue prompt:**\n>\n> deploy\n\nDone.\n";

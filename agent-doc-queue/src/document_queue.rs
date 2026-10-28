@@ -448,10 +448,20 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     let block = lines[head_end..block_end].join("\n");
                     // A struck parent retires its children with it: one
                     // completed entry spanning the whole block. Its render
-                    // strikes the parent part only (`- ~~parent~~` + the
-                    // children), exactly as a struck flat row normalizes a
-                    // `~x~` / annotated strike spelling to `~~x~~`.
-                    let entry = match parse_completed_inline(&head_text) {
+                    // strikes the parent part and every live child
+                    // (`- ~~parent~~` + `  - ~~child~~`), exactly as a struck
+                    // flat row normalizes a `~x~` / annotated strike spelling
+                    // to `~~x~~`.
+                    //
+                    // `#struckparentkids`: a live child written beside struck
+                    // ones under a struck parent is new operator work for that
+                    // parent. The block is then ONE live head, verbatim (the
+                    // struck parent and children are its context), never a
+                    // completed entry that silently swallows the new row.
+                    let completed = parse_completed_inline(&head_text).filter(|_| {
+                        !agent_doc_element_queue::subprompts::struck_parent_block_reopens(&block)
+                    });
+                    let entry = match completed {
                         Some(inner) => QueueEntry::Completed(QueuePrompt {
                             text: format!("{inner}\n{block}"),
                             multiline: false,
@@ -958,15 +968,23 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     }
                     out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
                     out.push(' ');
-                    // `#nestedsubprompts`: strike the parent part only; the
-                    // sub-prompt block stays a Markdown list beneath it.
+                    // `#nestedsubprompts`: strike the parent part; the
+                    // sub-prompt block stays a Markdown list beneath it, and
+                    // every live child is struck with the parent
+                    // (`#struckparentkids`) so an answered child reads closed.
+                    // A reopened block's parent is already struck and is not
+                    // wrapped twice.
                     let (head, block) =
                         agent_doc_element_queue::subprompts::split_subprompt_block(&p.text);
                     out.push_str("~~");
-                    out.push_str(head);
+                    out.push_str(agent_doc_element_queue::subprompts::unwrap_struck_parent(
+                        head,
+                    ));
                     out.push_str("~~\n");
                     if let Some(block) = block {
-                        out.push_str(block.trim_end_matches('\n'));
+                        let struck =
+                            agent_doc_element_queue::subprompts::strike_subprompt_block(block);
+                        out.push_str(struck.trim_end_matches('\n'));
                         out.push('\n');
                     }
                 }
@@ -1624,6 +1642,22 @@ pub fn set_prompt_runtime_projections(
                     changed = true;
                     QueueEntry::Prompt(next)
                 } else if matches!(entry, QueueEntry::Completed(_)) {
+                    // `#struckparentkids`: a closed parent's children read
+                    // closed. A whole-block strike that left them unstruck (a
+                    // hand strike, or a 0.35.558 strike) is made canonical
+                    // here, so a row written under it later is told apart
+                    // from the answered ones and reopens the block.
+                    if !next.multiline
+                        && let (head, Some(block)) =
+                            agent_doc_element_queue::subprompts::split_subprompt_block(&next.text)
+                    {
+                        let struck =
+                            agent_doc_element_queue::subprompts::strike_subprompt_block(block);
+                        if struck != block {
+                            next.text = format!("{head}\n{struck}");
+                            changed = true;
+                        }
+                    }
                     QueueEntry::Completed(next)
                 } else {
                     QueueEntry::Prompt(next)
@@ -7995,10 +8029,11 @@ mod tests {
         );
     }
 
-    /// A strike covers the parent and its children: the agent's strike wraps
-    /// the parent part only (the children stay a Markdown list), the struck
-    /// shape reads back as ONE completed entry, renders byte for byte, and
-    /// unstrike restores the live head.
+    /// A strike covers the parent and its children: the strike wraps the
+    /// parent part AND every live child (`#struckparentkids`), so an answered
+    /// child reads closed. The struck shape reads back as ONE completed entry,
+    /// renders byte for byte, and unstrike restores the live parent (the
+    /// children keep their strikes: no operator byte is guessed back).
     #[test]
     fn striking_a_parent_retires_its_subprompts_with_it() {
         let doc = format!("<!-- agent:run -->\n{SUBPROMPT_BODY}<!-- /agent:run -->\n");
@@ -8006,13 +8041,13 @@ mod tests {
         let struck =
             agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
                 .unwrap();
-        assert!(
-            struck.contains(concat!(
-                "- ~~Sync PR and Jira state into this document.~~\n",
-                "  - So this is the first subtask.\n",
-            )),
-            "{struck}"
+        let struck_block = concat!(
+            "- ~~Sync PR and Jira state into this document.~~\n",
+            "  - ~~So this is the first subtask.~~\n",
+            "  - ~~This is the second subtask.\n",
+            "    wrapped onto a second line~~\n",
         );
+        assert!(struck.contains(struck_block), "{struck}");
         let body = &struck[struck.find('\n').unwrap() + 1..struck.find("<!-- /agent:run").unwrap()];
         let entries = parse(body).unwrap();
         assert!(
@@ -8047,25 +8082,30 @@ mod tests {
             std::slice::from_ref(&patch),
         )
         .unwrap();
-        assert_eq!(restored, doc);
+        assert_eq!(
+            restored,
+            struck.replace(
+                "- ~~Sync PR and Jira state into this document.~~",
+                "- Sync PR and Jira state into this document."
+            )
+        );
+        let restored_body =
+            &restored[restored.find('\n').unwrap() + 1..restored.find("<!-- /agent:run").unwrap()];
+        assert!(matches!(
+            parse(restored_body).unwrap()[0],
+            QueueEntry::Prompt(_)
+        ));
 
         // The entries-based completion path renders the same canonical shape.
         let QueueEntry::Prompt(live) = parse(SUBPROMPT_BODY).unwrap()[0].clone() else {
             unreachable!()
         };
-        assert_eq!(
-            render(&[QueueEntry::Completed(live)]),
-            SUBPROMPT_BODY[..SUBPROMPT_BODY.find("- separate").unwrap()].replacen(
-                "- Sync PR and Jira state into this document.",
-                "- ~~Sync PR and Jira state into this document.~~",
-                1
-            )
-        );
+        assert_eq!(render(&[QueueEntry::Completed(live)]), struck_block);
     }
 
     /// Any other strike spelling still retires the children with the parent:
     /// one completed entry whose render normalizes the strike spelling (as a
-    /// struck flat row's does) and keeps the children verbatim.
+    /// struck flat row's does) and strikes the children with it.
     #[test]
     fn a_non_canonical_parent_strike_retires_its_children() {
         let body =
@@ -8079,7 +8119,7 @@ mod tests {
         assert!(prompts(&entries).is_empty(), "{entries:?}");
         assert_eq!(
             render(&entries),
-            "- ~~parent~~\n  - child one\n  - child two\n"
+            "- ~~parent~~\n  - ~~child one~~\n  - ~~child two~~\n"
         );
         let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
@@ -8087,6 +8127,134 @@ mod tests {
         assert!(nodes[0].item.struck);
         let body_start = doc.find('\n').unwrap() + 1;
         assert_eq!(nodes[0].item.end_byte - body_start, body.len());
+    }
+
+    /// The `agent:run` block from `tasks/sdk/sdk-demo.md` (2026-10-27): a
+    /// bare-hashtag free-text parent (a subagent operator-request id, not a
+    /// `[#id]` reference) whose first child the response answered.
+    const STRUCK_PARENT_ID: &str = "#subagent-operator-request-handoff-integration-id";
+    const ANSWERED_CHILD: &str =
+        "Describe the choices in more detail. Why do we need a SBX/STG id?";
+    const NEW_CHILD: &str = "I don't know if you understand that we moved onto project templates. This means a studio will install a Boss Room project template.";
+
+    fn run_doc(body: &str) -> String {
+        format!("<!-- agent:run priority subagents go -->\n{body}<!-- /agent:run -->\n")
+    }
+
+    fn run_body(doc: &str) -> &str {
+        &doc[doc.find('\n').unwrap() + 1..doc.find("<!-- /agent:run").unwrap()]
+    }
+
+    /// `#struckparentkids`: the bare-hashtag head is a free-text parent that
+    /// owns its child, and answering it closes the child visibly: the strike
+    /// writes `  - ~~child~~`, never a struck parent over a live-looking child.
+    #[test]
+    fn answering_a_bare_hashtag_parent_strikes_its_answered_child() {
+        let doc = run_doc(&format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n"));
+        let entries = parse(run_body(&doc)).unwrap();
+        assert_eq!(entries.len(), 1, "one head, not a group: {entries:?}");
+        let QueueEntry::Prompt(head) = &entries[0] else {
+            panic!("{entries:?}");
+        };
+        assert_eq!(
+            head.text,
+            format!("{STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}")
+        );
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        let struck =
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+                .unwrap();
+        assert_eq!(
+            run_body(&struck),
+            format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n")
+        );
+        let entries = parse(run_body(&struck)).unwrap();
+        assert!(
+            matches!(entries[0], QueueEntry::Completed(_)),
+            "{entries:?}"
+        );
+        assert!(prompts(&entries).is_empty());
+    }
+
+    /// `#struckparentkids`: a row the operator writes under a closed parent is
+    /// new work. The block reopens as ONE live head, verbatim (struck parent
+    /// and answered child are its context), in both enumerators; it is a new
+    /// work identity, never the answered one; and striking it closes the new
+    /// child too, after which the block is completed again.
+    #[test]
+    fn a_row_added_under_a_closed_parent_reopens_it_as_live_work() {
+        let body = format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n  - {NEW_CHILD}\n");
+        let doc = run_doc(&body);
+        let entries = parse(&body).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        let QueueEntry::Prompt(head) = &entries[0] else {
+            panic!("the new child must not be swallowed by the strike: {entries:?}");
+        };
+        assert_eq!(
+            head.text,
+            format!("~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n  - {NEW_CHILD}")
+        );
+        assert_eq!(render(&entries), body);
+        assert_eq!(prompts(&entries).len(), 1);
+        assert_ne!(
+            agent_doc_element_queue::queue_head_identity(&head.text),
+            agent_doc_element_queue::queue_head_identity(STRUCK_PARENT_ID),
+            "reopened work must not key to the answered (consumed) head"
+        );
+
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(!nodes[0].item.struck, "{:#?}", nodes[0]);
+        let body_start = doc.find('\n').unwrap() + 1;
+        assert_eq!(nodes[0].item.end_byte - body_start, body.len());
+
+        let closed =
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+                .unwrap();
+        assert_eq!(
+            run_body(&closed),
+            format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n  - ~~{NEW_CHILD}~~\n")
+        );
+        assert!(matches!(
+            parse(run_body(&closed)).unwrap()[0],
+            QueueEntry::Completed(_)
+        ));
+        // The entries-based completion renders the same shape, never `~~~~`.
+        assert_eq!(
+            render(&mark_first_n_prompts_completed(&entries, 1)),
+            run_body(&closed)
+        );
+    }
+
+    /// `#struckparentkids`: the whole-block strike shape (struck parent, no
+    /// child struck: a hand strike or a 0.35.558 strike, as in sdk-demo.md)
+    /// stays closed, and the projection pass makes it canonical by striking
+    /// its children. A row written under it afterwards reopens it.
+    #[test]
+    fn a_whole_block_strike_is_made_canonical_then_a_new_row_reopens_it() {
+        let legacy = format!("- ~~{STRUCK_PARENT_ID}~~\n  - {ANSWERED_CHILD}\n");
+        let entries = parse(&legacy).unwrap();
+        assert!(
+            matches!(entries[0], QueueEntry::Completed(_)),
+            "{entries:?}"
+        );
+        let (projected, _) = project_prompt_runtime_projections(&legacy, &[])
+            .unwrap()
+            .expect("the projection strikes the answered child");
+        assert_eq!(
+            projected,
+            format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n")
+        );
+        assert!(
+            project_prompt_runtime_projections(&projected, &[])
+                .unwrap()
+                .is_none(),
+            "canonical shape is a fixed point"
+        );
+        let added = format!("{projected}  - {NEW_CHILD}\n");
+        let entries = parse(&added).unwrap();
+        assert!(matches!(entries[0], QueueEntry::Prompt(_)), "{entries:?}");
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one

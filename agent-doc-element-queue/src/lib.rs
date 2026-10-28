@@ -472,13 +472,20 @@ pub fn struck_work_text(text: &str) -> &str {
 /// links, and images inside it.
 ///
 /// A head with nested sub-prompts (`#nestedsubprompts`) strikes its parent
-/// part only and keeps the sub-prompt block verbatim beneath it, so the struck
-/// item still renders as a Markdown list (`~~parent~~` with its children
-/// below). The queue enumerators read that shape back as one completed item.
+/// part and keeps the sub-prompt block beneath it as a Markdown list
+/// (`~~parent~~` with its children below). Closing the parent closes the
+/// children, so every live child is struck too (`  - ~~child~~`,
+/// `#struckparentkids`); an already-struck parent (a reopened block) is not
+/// struck twice. The queue enumerators read that shape back as one completed
+/// item.
 pub fn render_struck_row_body(text: &str) -> String {
     let (head, block) = subprompts::split_subprompt_block(text);
     match block {
-        Some(block) => format!("~~{}~~\n{block}", struck_work_text(head)),
+        Some(block) => format!(
+            "~~{}~~\n{}",
+            subprompts::unwrap_struck_parent(struck_work_text(head)),
+            subprompts::strike_subprompt_block(block)
+        ),
         None => format!("~~{}~~", struck_work_text(text)),
     }
 }

@@ -4013,11 +4013,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // counter (or the bare editor/path identity) can collide with a retiring
         // manager whose deregistration is still in flight.
         val identity = EditorIdentity.nextReplicaConnectionIdentity(filePath)
+        // `#ackedreplicabase`: the cached replica's text, read on both sides of the
+        // state capture, is the ancestor the controller's frontier answer is about.
+        val cachedReplicaTextBeforeCapture =
+            if (bootstrapFromControllerCanonical) null else cached?.replicaText()
+        val cachedResumeState =
+            if (bootstrapFromControllerCanonical) null else cached?.captureResumeState()
+        val cachedReplicaTextAfterCapture = cachedResumeState?.let { cached?.replicaText() }
         val retainedResumeState =
             if (bootstrapFromControllerCanonical) {
                 null
             } else {
-                cached?.captureResumeState() ?: nativeReloadResumeStates[filePath]
+                cachedResumeState ?: nativeReloadResumeStates[filePath]
             }
         val forwarder = CrdtReplicaForwarder(
             filePath = filePath,
@@ -4065,6 +4072,44 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val publishedShadowAtRegistration =
             settledShadows[filePath] ?: nativeReloadSettledShadows[filePath]
         val bufferTextAtRegistration = editorBufferText(filePath) ?: initialEditorText
+        val canonicalTextAtRegistration = forwarder.replicaText()
+        val acknowledgedBaseAtRegistration =
+            acknowledgedReplicaBaseUtil(
+                resumeStateFromCachedEndpoint = cachedResumeState != null,
+                cachedTextBeforeCapture = cachedReplicaTextBeforeCapture,
+                cachedTextAfterCapture = cachedReplicaTextAfterCapture,
+                canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
+            )
+        val causalProof =
+            registrationCausalProofUtil(
+                publishedShadow = publishedShadowAtRegistration,
+                bufferText = bufferTextAtRegistration,
+                canonicalText = canonicalTextAtRegistration,
+                acknowledgedBase = acknowledgedBaseAtRegistration,
+                shadowContained =
+                    canonicalContainsOperatorEditsAtRegistration(
+                        filePath = filePath,
+                        canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
+                        publishedShadow = publishedShadowAtRegistration,
+                        bufferText = bufferTextAtRegistration,
+                        canonicalText = canonicalTextAtRegistration,
+                    ),
+                contained = { base, buffer, canonical ->
+                    RegistrationSpliceShaping.operatorEditsContained(base, buffer, canonical)
+                },
+                merge = { base, buffer, canonical -> cleanRegistrationMerge(base, buffer, canonical) },
+            )
+        if (causalProof.mergeBase != null && causalProof.mergeBase != publishedShadowAtRegistration) {
+            log.info(
+                "[crdt-replica] registration proved ${File(filePath).name} from the acknowledged replica " +
+                    "text, not the stale settled shadow; contained=${causalProof.canonicalContainsOperatorEdits} " +
+                    "clean_merge=${causalProof.cleanMergeAvailable} " +
+                    "shadow_hash=${publishedShadowAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "acknowledged_hash=${contentHash(causalProof.mergeBase)} " +
+                    "buffer_hash=${bufferTextAtRegistration?.let(::contentHash) ?: "unavailable"} " +
+                    "canonical_hash=${forwarder.canonicalContentHash ?: "unknown"} (#ackedreplicabase)",
+            )
+        }
         // GH #326 phase 5: the facts are captured here, in the same order as before; which
         // direction they imply is the native `registration_projection` derivation
         // ([RegistrationProjection], frozen floor when no native generation answers). Executing
@@ -4078,21 +4123,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     canonicalCoversRetainedFrontier = forwarder.canonicalCoversRetainedFrontier,
                     publishedShadow = publishedShadowAtRegistration,
                     bufferText = bufferTextAtRegistration,
-                    canonicalText = forwarder.replicaText(),
-                    cleanMergeAvailable =
-                        cleanRegistrationMerge(
-                            publishedShadowAtRegistration,
-                            bufferTextAtRegistration,
-                            forwarder.replicaText(),
-                        ) != null,
-                    canonicalContainsOperatorEdits =
-                        canonicalContainsOperatorEditsAtRegistration(
-                            filePath = filePath,
-                            canonicalProjectionRetained = forwarder.canonicalProjectionRetained,
-                            publishedShadow = publishedShadowAtRegistration,
-                            bufferText = bufferTextAtRegistration,
-                            canonicalText = forwarder.replicaText(),
-                        ),
+                    canonicalText = canonicalTextAtRegistration,
+                    cleanMergeAvailable = causalProof.cleanMergeAvailable,
+                    canonicalContainsOperatorEdits = causalProof.canonicalContainsOperatorEdits,
                 ),
             )
         val retainedProjectionAction = registrationProjection.action
@@ -4269,6 +4302,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         action = retainedProjectionAction,
                         publishedShadow = publishedShadowAtRegistration,
                         bufferText = bufferTextAtRegistration,
+                        mergeBase = causalProof.mergeBase,
                     )
                 ) {
                     forwarders.replace(filePath, forwarder, cached)
@@ -4305,6 +4339,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 action = retainedProjectionAction,
                 publishedShadow = publishedShadowAtRegistration,
                 bufferText = bufferTextAtRegistration,
+                mergeBase = causalProof.mergeBase,
             )
         ) {
             forwarders.remove(filePath, forwarder)
@@ -4331,12 +4366,23 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         action: RetainedRegistrationProjectionAction,
         publishedShadow: String?,
         bufferText: String?,
+        mergeBase: String? = publishedShadow,
     ): Boolean {
         val committed =
             when (action) {
             RetainedRegistrationProjectionAction.ApplyCanonical -> {
-                retainCanonicalProjectionAfterRegistration(filePath, forwarder)
-                true
+                if (mergeBase != publishedShadow && editorBufferText(filePath) != bufferText) {
+                    // `#ackedreplicabase`: adoption was proven lossless for exactly
+                    // `bufferText`; a keystroke since then is not in that proof.
+                    log.warn(
+                        "[crdt-replica] acknowledged-base adoption raced for ${File(filePath).name}; " +
+                            "leaving the operator buffer untouched and retrying registration",
+                    )
+                    false
+                } else {
+                    retainCanonicalProjectionAfterRegistration(filePath, forwarder)
+                    true
+                }
             }
 
             RetainedRegistrationProjectionAction.PublishOperatorBuffer -> {
@@ -4399,7 +4445,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     ) {
                         null
                     } else {
-                        cleanRegistrationMerge(publishedShadow, bufferText, canonical)
+                        // `#ackedreplicabase`: from the ancestor the decision proved it from.
+                        registrationMergeFromBaseUtil(mergeBase, bufferText, canonical) { base, buffer, current ->
+                            cleanRegistrationMerge(base, buffer, current)
+                        }
                     }
                 if (merged == null || !forwarder.ensureEditorText(merged) || forwarder.replicaText() != merged) {
                     log.warn(
@@ -6629,6 +6678,118 @@ internal fun cleanRegistrationMergeUtil(
     if (shadow == null || buffer == null || canonical == null) return null
     if (buffer == canonical || buffer == shadow || canonical == shadow) return null
     return rebase(shadow, canonical, singleSpliceBatchUtil(shadow, buffer))?.resultingText
+}
+
+/**
+ * `#ackedreplicabase`: the cached endpoint's replica text, as a proven common ancestor of the
+ * live buffer and the controller canonical a replacement registration bootstrapped from, or
+ * null when it is not one.
+ *
+ * The settled shadow advances only when the controller accepts a visible projection, and a
+ * projection is deferred on every keystroke (`visible_length_mismatch`), so an operator who keeps
+ * typing never settles it. Their typing still reaches the controller: the cached replica applies
+ * each burst and pushes it durably. Measured 2026-10-28 12:57 on agent-doc-bugs.md: the shadow
+ * was 38 s old, canonical held all but the operator's last keystroke plus an undelivered
+ * resume-id write, and the containment proof and the line merge, both computed from that stale
+ * shadow, saw canonical's copy of the typing as a conflicting change of the same span. The
+ * registration held `ambiguous-retained-projection` although the two sides touched different
+ * lines.
+ *
+ * The cached replica text is the ancestor that matters: [canonicalCoversRetainedFrontier] is the
+ * controller's answer for the state vector captured from the same replica, so every operation in
+ * that text is in canonical. It is accepted only when the text read before and after the state
+ * capture agree (a burst applied in between would make them describe different frontiers), and
+ * only when the resume state came from the cached endpoint (a library-reload resume state has no
+ * text beside it).
+ */
+internal fun acknowledgedReplicaBaseUtil(
+    resumeStateFromCachedEndpoint: Boolean,
+    cachedTextBeforeCapture: String?,
+    cachedTextAfterCapture: String?,
+    canonicalCoversRetainedFrontier: Boolean?,
+): String? =
+    cachedTextBeforeCapture?.takeIf {
+        resumeStateFromCachedEndpoint &&
+            canonicalCoversRetainedFrontier == true &&
+            it == cachedTextAfterCapture
+    }
+
+/**
+ * `#ackedreplicabase`: the clean merge of [buffer] onto [canonical] from the proven ancestor
+ * [base], or null. When canonical has not moved past the ancestor, the merge is the buffer itself
+ * (publishing it loses nothing); otherwise it is [merge] (the native captured-splice rebase, with
+ * its line anchoring and refusals).
+ */
+internal fun registrationMergeFromBaseUtil(
+    base: String?,
+    buffer: String?,
+    canonical: String?,
+    merge: (base: String, buffer: String, canonical: String) -> String?,
+): String? {
+    if (base == null || buffer == null || canonical == null) return null
+    if (buffer == canonical || buffer == base) return null
+    if (canonical == base) return buffer
+    return merge(base, buffer, canonical)
+}
+
+/** The causal facts registration reports, and the ancestor they were proven from. */
+internal data class RegistrationCausalProof(
+    val canonicalContainsOperatorEdits: Boolean?,
+    val cleanMergeAvailable: Boolean,
+    /** The ancestor a [RetainedRegistrationProjectionAction.MergeForward] recomputes from. */
+    val mergeBase: String?,
+)
+
+/**
+ * `#ackedreplicabase`: registration's containment proof and clean merge, from the settled shadow
+ * first and then, only when that proves nothing, from the acknowledged replica text
+ * ([acknowledgedReplicaBaseUtil]).
+ *
+ * Both are sound from any true common ancestor of the buffer and canonical: a buffer equal to the
+ * acknowledged text holds nothing canonical's causal past lacks, and an operator edit made since
+ * that text is either already in canonical (containment) or merges beside canonical's own
+ * changes (the rebase), or the registration still holds. The settled shadow keeps priority so
+ * every decision it already proved is unchanged.
+ */
+internal fun registrationCausalProofUtil(
+    publishedShadow: String?,
+    bufferText: String?,
+    canonicalText: String?,
+    acknowledgedBase: String?,
+    shadowContained: Boolean?,
+    contained: (base: String, buffer: String, canonical: String) -> Boolean,
+    merge: (base: String, buffer: String, canonical: String) -> String?,
+): RegistrationCausalProof {
+    val shadowMerge =
+        if (publishedShadow != null && bufferText != null && canonicalText != null) {
+            merge(publishedShadow, bufferText, canonicalText)
+        } else {
+            null
+        }
+    val fromShadow = RegistrationCausalProof(shadowContained, shadowMerge != null, publishedShadow)
+    if (shadowContained == true || shadowMerge != null) return fromShadow
+    if (
+        // No settled shadow (a restarted IDE) keeps its historical adoption untouched.
+        publishedShadow == null ||
+        acknowledgedBase == null ||
+        acknowledgedBase == publishedShadow ||
+        bufferText == null ||
+        canonicalText == null ||
+        bufferText == canonicalText
+    ) {
+        return fromShadow
+    }
+    if (bufferText == acknowledgedBase) {
+        return RegistrationCausalProof(true, false, acknowledgedBase)
+    }
+    val ackContained =
+        canonicalText != acknowledgedBase && contained(acknowledgedBase, bufferText, canonicalText)
+    val ackMerge = registrationMergeFromBaseUtil(acknowledgedBase, bufferText, canonicalText, merge)
+    return if (ackContained || ackMerge != null) {
+        RegistrationCausalProof(ackContained, ackMerge != null, acknowledgedBase)
+    } else {
+        fromShadow
+    }
 }
 
 /**

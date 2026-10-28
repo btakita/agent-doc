@@ -3113,6 +3113,23 @@ pub fn merge_frontmatter_3way(
         }
     };
 
+    // `#fmquotepreserve`: a side whose block is byte-identical to base changed
+    // nothing, so the merge IS the other side, byte for byte. Re-serialising the
+    // merged mapping here stripped the operator's quoting from every key nobody
+    // touched (`'#repo': 'https://…'` became `'#repo': https://…`) whenever an
+    // agent managed write (a resume id) rebased over a live editor cut, and that
+    // re-serialised block then differed from the editor buffer on lines the
+    // operator never edited (agent-doc-bugs.md, 2026-10-28 12:57:10).
+    if let (Some(base), Some(ours), Some(theirs)) = (base_yaml, ours_yaml, theirs_yaml) {
+        let same = |a: &str, b: &str| a.trim_end_matches('\n') == b.trim_end_matches('\n');
+        if same(theirs, base) {
+            return Some(wrap(ours));
+        }
+        if same(ours, base) || same(ours, theirs) {
+            return Some(wrap(theirs));
+        }
+    }
+
     let (base_m, ours_m, theirs_m) = match (parse(base_yaml), parse(ours_yaml), parse(theirs_yaml))
     {
         (Some(b), Some(o), Some(t)) => (b, o, t),
@@ -3190,8 +3207,71 @@ pub fn merge_frontmatter_3way(
     if merged.is_empty() {
         return Some("---\n---\n".to_string());
     }
+    // `#fmquotepreserve`: emit each key from the bytes of a side that holds
+    // exactly the chosen value (operator first, since the operator owns layout),
+    // re-rendering only a key no side spells that way.
+    let sides = [
+        (theirs_yaml, &theirs_m),
+        (ours_yaml, &ours_m),
+        (base_yaml, &base_m),
+    ];
+    if let Some(yaml) = render_merged_frontmatter_preserving(&merged, &sides) {
+        return Some(wrap(&yaml));
+    }
     let yaml = serde_yaml::to_string(&serde_yaml::Value::Mapping(merged)).ok()?;
     Some(wrap(&yaml))
+}
+
+/// `#fmquotepreserve`: render a merged frontmatter mapping from the original key
+/// blocks of the merge's sides, in `sides` priority order.
+///
+/// A key is emitted verbatim from the first side whose own value for it equals
+/// the merged value and whose block bytes provably round-trip to that value
+/// ([`split_top_level_key_blocks`]); any other key is re-rendered on its own.
+/// The keyless preamble (comments before the first key) comes from the first
+/// side that has one. `None` when a key cannot be rendered or the result does
+/// not read back as exactly `merged`: the caller then re-serialises the whole
+/// mapping, which is always self-consistent.
+fn render_merged_frontmatter_preserving(
+    merged: &serde_yaml::Mapping,
+    sides: &[(Option<&str>, &serde_yaml::Mapping)],
+) -> Option<String> {
+    let side_blocks: Vec<(Vec<FrontmatterBlock>, &serde_yaml::Mapping)> = sides
+        .iter()
+        .filter_map(|(yaml, map)| {
+            let yaml = (*yaml)?.trim_end_matches('\n');
+            Some((split_top_level_key_blocks(yaml, map)?, *map))
+        })
+        .collect();
+    let mut out: Vec<String> = Vec::with_capacity(merged.len() + 1);
+    if let Some(preamble) = side_blocks.iter().find_map(|(blocks, _)| {
+        blocks
+            .iter()
+            .find(|block| block.key.is_none() && !block.text.is_empty())
+    }) {
+        out.push(preamble.text.clone());
+    }
+    for (key, value) in merged {
+        let key_str = key.as_str()?;
+        let verbatim = side_blocks.iter().find_map(|(blocks, map)| {
+            if map.get(key) != Some(value) {
+                return None;
+            }
+            blocks
+                .iter()
+                .find(|block| block.key.as_deref() == Some(key_str))
+                .map(|block| block.text.clone())
+        });
+        match verbatim {
+            Some(text) => out.push(text),
+            None => out.push(render_frontmatter_key(key_str, value)?),
+        }
+    }
+    let yaml = format!("{}\n", out.join("\n"));
+    match serde_yaml::from_str::<serde_yaml::Value>(&yaml).ok()? {
+        serde_yaml::Value::Mapping(read) if &read == merged => Some(yaml),
+        _ => None,
+    }
 }
 
 /// Apply required-SSH defaults to a frontmatter using a pre-resolved context.
@@ -3715,6 +3795,72 @@ mod tests {
     #[test]
     fn fm3way_none_when_no_frontmatter() {
         assert!(merge_frontmatter_3way(None, None, None).is_none());
+    }
+
+    /// The operator's frontmatter of agent-doc-bugs.md, 2026-10-28.
+    const QUOTED_PRESETS_FM: &str = concat!(
+        "agent_doc_session: 3f069c68\n",
+        "resume:\n",
+        "  claude: 5c496cf2\n",
+        "  codex: 01a17616\n",
+        "agent: claude\n",
+        "claude_model: opus\n",
+        "presets:\n",
+        "  '#agent-doc-causes': 'Fix agent-doc causes'\n",
+        "  '#repo': 'https://github.com/btakita/agent-doc'\n",
+        "  '#self': 'agent-doc-bugs.md'\n",
+        "queue: go\n",
+    );
+
+    /// `#fmquotepreserve` (live agent-doc-bugs.md, 2026-10-28 12:57:10): the
+    /// resume-id capture rebased over the operator's live typing. The operator
+    /// never touched the frontmatter, yet every preset lost its quotes because
+    /// the field-wise merge re-serialised the whole block.
+    #[test]
+    fn fm3way_agent_only_write_keeps_operator_bytes_on_untouched_keys() {
+        let base = QUOTED_PRESETS_FM;
+        let ours = base.replace("claude: 5c496cf2", "claude: 1e5af625");
+        let theirs = base;
+        let merged = merge_frontmatter_3way(Some(base), Some(&ours), Some(theirs)).unwrap();
+        assert_eq!(merged, format!("---\n{ours}---\n"));
+        assert!(merged.contains("  '#repo': 'https://github.com/btakita/agent-doc'\n"));
+    }
+
+    /// `#fmquotepreserve`: with both sides changed, every key a side left
+    /// untouched keeps that side's bytes; only the changed keys move.
+    #[test]
+    fn fm3way_concurrent_edits_keep_quoting_on_every_key_kept_verbatim() {
+        let base = QUOTED_PRESETS_FM;
+        let ours = base.replace("claude: 5c496cf2", "claude: 1e5af625");
+        let theirs = base.replace("claude_model: opus", "claude_model: 'sonnet'");
+        let merged = merge_frontmatter_3way(Some(base), Some(&ours), Some(&theirs)).unwrap();
+        assert_eq!(
+            merged,
+            format!(
+                "---\n{}---\n",
+                base.replace("claude: 5c496cf2", "claude: 1e5af625")
+                    .replace("claude_model: opus", "claude_model: 'sonnet'")
+            ),
+            "only the two changed keys differ from base, byte for byte"
+        );
+        let m = yaml_of(&merged);
+        assert_eq!(m["resume"]["claude"].as_str(), Some("1e5af625"));
+        assert_eq!(m["claude_model"].as_str(), Some("sonnet"));
+    }
+
+    /// `#fmquotepreserve`: an operator comment above the first key survives a
+    /// concurrent merge, and a key no side spells with the merged value is
+    /// re-rendered on its own line without disturbing the others.
+    #[test]
+    fn fm3way_preserving_render_keeps_preamble_and_renders_only_new_values() {
+        let base = "# operator note\nagent: 'claude'\nqueue: go\n";
+        let ours = "# operator note\nagent: 'claude'\nqueue: go\nresume: conv-1\n";
+        let theirs = "# operator note\nagent: 'claude'\nqueue: stop\n";
+        let merged = merge_frontmatter_3way(Some(base), Some(ours), Some(theirs)).unwrap();
+        assert_eq!(
+            merged,
+            "---\n# operator note\nagent: 'claude'\nqueue: stop\nresume: conv-1\n---\n"
+        );
     }
 
     #[test]

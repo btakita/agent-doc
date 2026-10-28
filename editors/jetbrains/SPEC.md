@@ -904,6 +904,24 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   resume state only at its two commit points
   (`releaseRetainedResumeStateOnCommitUtil`, `#resumefrontierlostonfailedattach`),
   and logs a swap refusal with whether that frontier was kept.
+  `#ackedreplicabase`: the containment proof and the clean merge are first asked
+  from the settled shadow; when that proves neither, they are asked again from
+  the cached endpoint's replica text (`registrationCausalProofUtil`). That text
+  is a proven common ancestor only when the controller answers
+  `canonical_covers_retained_frontier = true` for the state vector captured from
+  the same replica, and the replica text read before and after that capture is
+  identical (`acknowledgedReplicaBaseUtil`; a library-reload resume state has no
+  text and never qualifies). A buffer equal to it reports containment (canonical
+  holds everything the buffer has); a canonical equal to it merges to the buffer
+  itself; otherwise the native containment proof and rebase run from it. The
+  settled shadow advances only on an accepted visible projection, which every
+  keystroke defers, so an operator who kept typing while the controller wrote
+  another line (the resume id) held `ambiguous-retained-projection` although the
+  two sides touched different lines (agent-doc-bugs.md, 2026-10-28 12:57:53).
+  A merge-forward recomputes from the ancestor its decision was proven from, and
+  an adoption proven from the replica text refuses (and retries) unless the live
+  buffer is still exactly the text the proof covered. A same-line conflict still
+  holds. Model: `formal/tla/RegistrationAcknowledgedBase.tla`.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
   means for the operator. Evidence is the recorded failure reason and, for the
   operator notification, the document's file name. Native owns the one-line

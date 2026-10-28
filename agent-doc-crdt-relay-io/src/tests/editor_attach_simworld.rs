@@ -62,6 +62,8 @@ struct AttemptFacts {
     buffer: String,
     canonical: String,
     evidence: RegistrationProjectionEvidence,
+    /// The ancestor the facts were proven from (`RegistrationCausalProof.mergeBase`).
+    merge_base: Option<String>,
 }
 
 struct SimPluginEditor {
@@ -83,6 +85,10 @@ struct SimPluginEditor {
     /// (`retained_write_observation_basis`), so its `replica_register` RPC
     /// forces a full canonical bootstrap.
     controller_retains_visible_write: bool,
+    /// `#ackedreplicabase`: prove containment and the clean merge from the
+    /// cached replica's text when canonical covers its frontier
+    /// (`acknowledgedReplicaBaseUtil`). `false` is the plugin before it.
+    acknowledged_base: bool,
     last: Option<AttemptFacts>,
 }
 
@@ -104,6 +110,7 @@ impl SimPluginEditor {
             cached: None,
             release,
             controller_retains_visible_write: false,
+            acknowledged_base: true,
             last: None,
         };
         let registration = editor
@@ -184,6 +191,13 @@ impl SimPluginEditor {
         delta
     }
 
+    /// The operator edits the buffer to `to`, and the captured burst has not
+    /// reached the native replica yet (`TypingTracker` drains it at the next
+    /// quiet boundary), so neither the replica nor the controller has it.
+    fn type_unapplied(&mut self, to: &str) {
+        self.buffer = to.to_string();
+    }
+
     /// `make install`: the native library reloads. The plugin captures the
     /// committed replica as the retained resume state, and the manager and its
     /// forwarders are recreated, so nothing is cached any more.
@@ -198,6 +212,9 @@ impl SimPluginEditor {
     fn reregister(&mut self, swap_moves: bool) -> Attempt {
         self.generation += 1;
         let identity = format!("{}:refresh-{}", self.base_identity, self.generation);
+        // `#ackedreplicabase`: the cached replica's text beside the state the
+        // registration sends (the sim's replica cannot move during the capture).
+        let cached_text = self.cached.as_ref().map(|cached| cached.replica.text());
         let retained_resume_state = self
             .cached
             .as_ref()
@@ -230,8 +247,16 @@ impl SimPluginEditor {
         };
         let canonical = replica.text();
         let shadow = self.settled_shadow.clone();
-        let evidence =
-            registration_evidence(&registration, shadow.as_deref(), &self.buffer, &canonical);
+        let acknowledged = cached_text.filter(|_| {
+            self.acknowledged_base && registration.canonical_covers_retained_frontier == Some(true)
+        });
+        let (evidence, merge_base) = registration_evidence(
+            &registration,
+            shadow.as_deref(),
+            &self.buffer,
+            &canonical,
+            acknowledged.as_deref(),
+        );
         let decision = derive_registration_projection(&evidence);
         self.last = Some(AttemptFacts {
             sent_state_vector: retained_state_vector.is_some(),
@@ -242,6 +267,7 @@ impl SimPluginEditor {
             buffer: self.buffer.clone(),
             canonical: canonical.clone(),
             evidence,
+            merge_base: merge_base.clone(),
         });
         if decision.action == RegistrationProjectionAction::HoldOperatorBuffer {
             deregister_replica_for_file(&self.doc, &identity).unwrap();
@@ -261,9 +287,8 @@ impl SimPluginEditor {
             RegistrationProjectionAction::PublishOperatorBuffer => self.buffer.clone(),
             // Recomputed from exactly the captured generations.
             RegistrationProjectionAction::MergeForward => {
-                registration_rebase(shadow.as_deref().unwrap(), &self.buffer, &canonical)
-                    .expect("the clean merge recomputes")
-                    .resulting_text
+                merge_from_base(merge_base.as_deref().unwrap(), &self.buffer, &canonical)
+                    .expect("the clean merge recomputes from its proven ancestor")
             }
             RegistrationProjectionAction::HoldOperatorBuffer => unreachable!(),
         };
@@ -300,15 +325,49 @@ impl SimPluginEditor {
 /// (`RegistrationSpliceShaping.cleanMerge`) answered by the native calls the
 /// plugin makes, under the plugin's own guards: neither runs unless all three
 /// generations are present and distinct.
+///
+/// `#ackedreplicabase` (`registrationCausalProofUtil`): when the settled shadow
+/// proves neither, the same two calls run from `acknowledged`, the cached
+/// replica text whose frontier canonical covers. Returns the facts and the
+/// ancestor a merge-forward recomputes from.
 fn registration_evidence(
     registration: &ReplicaRegistration,
     shadow: Option<&str>,
     buffer: &str,
     canonical: &str,
-) -> RegistrationProjectionEvidence {
+    acknowledged: Option<&str>,
+) -> (RegistrationProjectionEvidence, Option<String>) {
     let distinct =
         shadow.filter(|shadow| buffer != *shadow && canonical != buffer && canonical != *shadow);
-    RegistrationProjectionEvidence {
+    let shadow_contained = distinct.map(|shadow| {
+        registration_contained(shadow, buffer, canonical, true)
+            .expect("the containment proof answers")
+    });
+    let shadow_merge =
+        distinct.is_some_and(|shadow| registration_rebase(shadow, buffer, canonical).is_ok());
+    let mut contained = shadow_contained;
+    let mut clean_merge = shadow_merge;
+    let mut merge_base = shadow.map(str::to_string);
+    if shadow_contained != Some(true)
+        && !shadow_merge
+        && let Some(base) = acknowledged.filter(|base| Some(*base) != shadow && buffer != canonical)
+    {
+        if buffer == base {
+            contained = Some(true);
+            merge_base = Some(base.to_string());
+        } else {
+            let ack_contained = canonical != base
+                && registration_contained(base, buffer, canonical, true)
+                    .expect("the containment proof answers");
+            let ack_merge = merge_from_base(base, buffer, canonical).is_some();
+            if ack_contained || ack_merge {
+                contained = Some(ack_contained);
+                clean_merge = ack_merge;
+                merge_base = Some(base.to_string());
+            }
+        }
+    }
+    let evidence = RegistrationProjectionEvidence {
         defer_canonical_projection_for_pending_local: false,
         canonical_projection_retained: registration.canonical_projection_retained,
         retained_replica_reseed_pending: registration.retained_replica_reseed_pending,
@@ -319,14 +378,24 @@ fn registration_evidence(
         buffer_equals_canonical: buffer == canonical,
         buffer_equals_shadow: shadow == Some(buffer),
         canonical_equals_shadow: shadow == Some(canonical),
-        canonical_contains_operator_edits: distinct.map(|shadow| {
-            registration_contained(shadow, buffer, canonical, true)
-                .expect("the containment proof answers")
-        }),
-        clean_merge_available: Some(
-            distinct.is_some_and(|shadow| registration_rebase(shadow, buffer, canonical).is_ok()),
-        ),
+        canonical_contains_operator_edits: contained,
+        clean_merge_available: Some(clean_merge),
+    };
+    (evidence, merge_base)
+}
+
+/// `registrationMergeFromBaseUtil`: the buffer itself when canonical has not
+/// moved past `base`, else the native rebase from `base`.
+fn merge_from_base(base: &str, buffer: &str, canonical: &str) -> Option<String> {
+    if buffer == canonical || buffer == base {
+        return None;
     }
+    if canonical == base {
+        return Some(buffer.to_string());
+    }
+    registration_rebase(base, buffer, canonical)
+        .ok()
+        .map(|batch| batch.resulting_text)
 }
 
 fn hub_text(doc: &std::path::Path) -> String {
@@ -598,4 +667,139 @@ fn a_lagging_canonical_with_a_controller_write_the_buffer_lacks_still_holds() {
     assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
     assert_eq!(editor.buffer, operator_text);
     assert_eq!(hub_text(&doc), responded);
+}
+
+const RUN_ROW: &str = "- operator row\n";
+const RUN_TYPED: &str = "- operator row the operator typed\n";
+const RUN_RETYPED: &str = "- operator row the operator typod\n";
+
+/// `#ackedreplicabase` (live agent-doc-bugs.md, 2026-10-28 12:57:15-12:57:53):
+/// the operator types a row without pause. Every burst reaches the controller
+/// through the cached replica, but no visible projection settles, so the
+/// settled shadow stays at the text before the typing. The resume-id capture
+/// writes the frontmatter (undelivered: the editor is mid-typing), and the
+/// operator retypes one character the replica has not applied yet. The
+/// re-registration then meets three distinct generations whose stale common
+/// ancestor makes canonical's copy of the typing and the buffer's copy two
+/// changes of one line. Returns the editor ready to re-register.
+fn continuous_typing_beside_an_undelivered_frontmatter_write(
+    acknowledged_base: bool,
+) -> (tempfile::TempDir, std::path::PathBuf, SimPluginEditor) {
+    let (dir, doc) = temp_doc("ackedreplicabase.md");
+    std::fs::write(
+        &doc,
+        format!(
+            "---\nresume:\n  claude: old-conversation\npresets:\n  '#repo': 'https://github.com/btakita/agent-doc'\n---\n\n## Notes\n\n{RUN_ROW}\n## Todo\nb\n"
+        ),
+    )
+    .unwrap();
+    let mut editor = SimPluginEditor::open(&doc, ResumeRelease::OnCommit);
+    editor.acknowledged_base = acknowledged_base;
+    let settled = editor.buffer.clone();
+    let identity = editor.forwarder().identity.clone();
+
+    let typed = settled.replacen(RUN_ROW, RUN_TYPED, 1);
+    let burst = editor.type_text(&typed);
+    relay_replica_update_for_file(&doc, &identity, &burst)
+        .unwrap()
+        .expect("the typing reaches the controller");
+    assert_eq!(hub_text(&doc), typed);
+
+    let resumed = typed.replacen("claude: old-conversation", "claude: new-conversation", 1);
+    apply_cp_write_for_file(&doc, &typed, &resumed, "start_resume_id_capture")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+    editor.controller_retains_visible_write = true;
+
+    editor.type_unapplied(&typed.replacen(RUN_TYPED, RUN_RETYPED, 1));
+    assert_eq!(
+        editor.settled_shadow.as_deref(),
+        Some(settled.as_str()),
+        "no projection settled while the operator typed"
+    );
+    (dir, doc, editor)
+}
+
+/// `#ackedreplicabase`: the cached replica's text is a proven ancestor
+/// (canonical covers its frontier), and from it the retype and the resume-id
+/// write touch different lines. Registration merges the buffer forward: the
+/// operator's retype and the controller's write both survive, nothing is
+/// inserted twice, and the operator's quoting is untouched.
+#[test]
+fn continuous_typing_beside_an_undelivered_controller_write_merges_from_the_acknowledged_replica() {
+    let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(true);
+    let operator_text = editor.buffer.clone();
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert!(facts.canonical_projection_retained, "{facts:?}");
+    assert_eq!(facts.canonical_covers_retained_frontier, Some(true));
+    assert_ne!(
+        facts.shadow, facts.merge_base,
+        "proven from the acknowledged text"
+    );
+    assert_eq!(
+        facts.evidence.clean_merge_available,
+        Some(true),
+        "{facts:#?}"
+    );
+    assert_eq!(
+        attempt,
+        Attempt::Committed(RegistrationProjectionAction::MergeForward),
+        "{facts:#?}"
+    );
+
+    let expected =
+        operator_text.replacen("claude: old-conversation", "claude: new-conversation", 1);
+    assert_eq!(editor.buffer, expected);
+    assert_eq!(hub_text(&doc), expected);
+    assert_eq!(expected.matches("the operator typ").count(), 1);
+    assert!(expected.contains("  '#repo': 'https://github.com/btakita/agent-doc'\n"));
+}
+
+/// The control: proven from the stale settled shadow alone (the plugin before
+/// `#ackedreplicabase`), the same sequence holds `ambiguous-retained-projection`
+/// -- the live 12:57:53 refusal -- and the hold leaves the buffer untouched.
+#[test]
+fn continuous_typing_beside_an_undelivered_controller_write_holds_from_the_stale_shadow() {
+    let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(false);
+    let operator_text = editor.buffer.clone();
+    let canonical = hub_text(&doc);
+
+    assert_eq!(
+        editor.reregister(false),
+        Attempt::Held(HOLD.to_string()),
+        "{:#?}",
+        editor.last()
+    );
+    let facts = editor.last();
+    assert_eq!(facts.canonical_covers_retained_frontier, Some(true));
+    assert_eq!(
+        facts.evidence.canonical_contains_operator_edits,
+        Some(false)
+    );
+    assert_eq!(facts.evidence.clean_merge_available, Some(false));
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), canonical);
+}
+
+/// The bound: from the acknowledged text, a controller rewrite of the very row
+/// the operator is retyping is still a conflict, so registration holds and
+/// neither side's text moves.
+#[test]
+fn a_controller_rewrite_of_the_retyped_row_still_holds_from_the_acknowledged_replica() {
+    let (_dir, doc, mut editor) = continuous_typing_beside_an_undelivered_frontmatter_write(true);
+    let operator_text = editor.buffer.clone();
+    let current = hub_text(&doc);
+    let rewritten = current.replacen(RUN_TYPED, "- operator row rewritten by the controller\n", 1);
+    apply_cp_write_for_file(&doc, &current, &rewritten, "test_controller_row_rewrite")
+        .unwrap()
+        .expect("the controller write uses the live relay");
+
+    let attempt = editor.reregister(false);
+    let facts = editor.last().clone();
+    assert_eq!(facts.canonical_covers_retained_frontier, Some(true));
+    assert_eq!(attempt, Attempt::Held(HOLD.to_string()), "{facts:#?}");
+    assert_eq!(editor.buffer, operator_text);
+    assert_eq!(hub_text(&doc), rewritten);
 }

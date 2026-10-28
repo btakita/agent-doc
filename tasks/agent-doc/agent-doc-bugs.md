@@ -23,10 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets: Linux gnu/musl/aarch64, macOS, Windows archives, JetBrains 0.2.871/0.2.872/0.2.873, VS Code 0.2.89; PyPI 0.35.559; Homebrew bumped). Main is now at `2ad450b7e5`, unreleased and installed locally (JetBrains plugins 0.2.874/0.2.875/0.2.876 installed; restart IDEA to load them). Since 559: subagent operator requests nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `67413e99fd`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1167,21 +1168,47 @@ Session note: the exchange is 1083 lines. I'm not compacting it while the queue 
 **Your `status:sync is out of sync` row was right.** My 09:01 `patch:status` never landed. The merge with your editor's changes kept the stale v0.35.558 text and dropped my patch with no warning. My status checks after that were wrong to say nothing had changed. I set the current status with `agent-doc status set`, and the subagent is fixing why the patch was dropped silently.
 
 **Main CI is red on `5870713c02`.** `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end` fails in tmux-ci, a pane-provisioning test none of these changes touch.
+
+### Re: four more fixes on main and installed — opus-5 · 2026-10-28T11:12-04:00
+
+**Four more fixes are on agent-doc `main` and installed** (`2ad450b7e5..67413e99fd`). The combined `make check` exited 0: 12076 of 12076 tests passed, with 187 skipped, and the classic, 262 and 263 JetBrains builds succeeded. JetBrains plugins 0.2.877, 0.2.878 and 0.2.879 are installed on disk. **Restart IDEA to load them.**
+
+> **Queue prompt:** I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+
+- **Second fix (`0dd4eeb0be`):** this row failed to strike last cycle. The ☑️ in its text wasn't the cause. The deferral check is a plain text search, and it matched two phrases in my answer: the quoted rule "no `**Deferred:**` line", and a bullet saying three *other* rows were "waiting on your choices". So the check treated my answer as postponing the row. Text inside code formatting no longer counts as deferral wording. Phrases like "waiting on" now count only in the first sentence or bullet after the quote. A bold `**Deferred:**` line anywhere after the quote still holds the row.
+
+> **Queue prompt:** The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.
+
+- **Fixed (`5426def761`):** when only a replacement attach is refused and your editor is still connected, the plugin just logs it, with no popup. The "close the tab and run `agent-doc repair`" instructions now appear only when no editor connection is attached.
+
+> **Queue prompt:** game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.
+
+- **Fixed (`1e24cd70dd`):** the rows weren't doubled by the 06:11:36Z write. They were doubled at 06:05Z, when the four rows were claimed again. Each claim marked the new live row and also brought back the old struck-through row for the same work. A struck-through row now comes back only when the queue has no live row for that work.
+- **You can tidy it now:** in `game-sessions.md`, delete the second copy of each of the four rows (around lines 459–462), keeping one ☑️ row per id. That's safe, because one copy of each remains.
+
+> **Queue prompt:** status:sync is out of sync
+
+- **Fixed (`220ba2d791`):** my 09:01 status update won the first merge, then got lost one step later. You were typing while my write waited. To apply it on top of your newer text, agent-doc took a shortcut that rebuilt the document with only my reply and silently dropped every other change, including the status. It now keeps those changes. If one is still dropped, `respond` prints a warning. The end-of-turn status checks also quote the current status text and a short hash, so they no longer rely on memory.
+- **The status is current again,** at `67413e99fd`.
+- **A question for you:** should a status update replace only the auto-updated part of the status, instead of the whole section? Today the whole section is replaced.
+
+**New run rows:**
+- **The 12:27:36Z status revert** looks like an editor copy that had just been reloaded sending back old text, rather than an IDE undo. I added it as a run row.
+- **The dogfood row about an uncommitted completion cell is fair.** I ended turns with report-complete cells still uncommitted while I waited to batch the integration. A subagent is checking whether the Stop hook should catch that.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.~~
-- 🚧 [#subagent:repairmsg#1] The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.
+- ~~The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.~~
 - ☑️ [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
-- 🚧 [#subagent:rowdupwrite#1] game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.
-- ~~subagent operator request is still difficult to read.~~
-  - ~~The text for *queue_item*, *request*, and *context* should be in a nested list with the key as the parent. Leave the rest as is.~~
-- 🚧 [#subagent:statussync#1] status:sync is out of sync
+- ~~game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~status:sync is out of sync~~ — auto-struck: answered this cycle (#ftstrike)
+- At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
+- 🚧 [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->

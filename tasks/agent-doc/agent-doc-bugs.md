@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -240,7 +239,14 @@ The same row also listed `#subagent:nestedlineage`. That work is still running o
 ### Re: release worker report is closed — grok-4.7 · 2026-10-28T18:57-04:00
 
 The release worker reported this row blocked. No version bump, tag, `make release`, `make install`, or release commit was made. `#subagent:nestvector` is on origin/main at `8862b2f9b5`. `#subagent:nestedproject` is not on origin/main. `#subagent:nestedlineage` is running on `fix/nested-run-lineage`. The published release is agent-doc v0.35.560 at `bd971e9b87`.
-<!-- agent:boundary:6230f32b:agent-doc-bugs -->
+> **Queue prompt:** Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
+
+### Re: nested project.md rules are on main — grok-4.7 · 2026-10-28T19:06-04:00
+
+A session under a nested project reads every `.agent-doc/project.md`, farthest ancestor first, then the nearest project, then the session. A nested `.git` does not hide the ancestor file. That fix is on main at `ce46068a9f` (`fix(rules): compose ancestor project.md rules`), fast-forwarded `8862b2f9b5..ce46068a9f`.
+
+The worker's `make check` exited 0: nextest 12119 passed and 187 skipped. `make install` exited 0. JetBrains plugin bytes were already current. The published release is agent-doc v0.35.560 at `bd971e9b87`.
+<!-- agent:boundary:8aff0550 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -249,7 +255,7 @@ The release worker reported this row blocked. No version bump, tag, `make releas
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
 - ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~
-- 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
+- ~~Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
   - Use the AST to guide the agent.
 - ~~release + publish~~

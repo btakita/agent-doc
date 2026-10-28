@@ -206,7 +206,24 @@ The release row stays open until `#subagent:nestedproject` is on main. That clai
 `#apikeepsrefusing` is claimed and running. The backlog text is that `src/haiven-dev/tasks/api.md` keeps refusing to push, rebase, and publish. The worker will find that refusal, update the spec and tests when the refusal is an agent-doc bug, and push `fix/api-keeps-refusing`. It will not install or cut a release.
 
 The nested `project.md` claim is still running and has no commit on main. The release row stays open until that fix lands. No new version has been published. Tag `v0.35.560` remains `bd971e9b87`.
-<!-- agent:boundary:bfcd60ea:agent-doc-bugs -->
+
+> **Queue prompt:** When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
+>   - Use the AST to guide the agent.
+
+**Deferred:** generation 1 is already running as `subagent:nestedlineage`, worker `01a184af-7e89-7dd2-bc93-f7fa9388a9a0`, on `fix/nested-run-lineage` in `/home/brian/worktrees/agent-doc-nestedlineage` at `8862b2f9b5`. The operator extended this item after dispatch, including the child "Use the AST to guide the agent." That text is in `OPERATOR-STEERING.md` in the same worktree for this worker. The same worker keeps the claim.
+
+> **Queue prompt:** release + publish
+>   - Include #subagent:nestvector + #subagent:nestedproject
+>   - Include #subagent:nestedlineage
+
+**Deferred:** generation 5 already reported this row blocked. The include list now also names `#subagent:nestedlineage`. The same release claim stays reported. The row stays open until `#subagent:nestedproject` and `#subagent:nestedlineage` are both on main.
+
+### Re: nested lineage stays with its worker — grok-4.7 · 2026-10-28T18:51-04:00
+
+`#subagent:nestedlineage` is claimed and running. A nested run submission has to carry the parent lineage. In the api.md example, the `#rebase` child under `https://github.com/haiven-dev/haiven-api/pull/758` became `[#subagent:pr767-rebase#1] #rebase` and bound to the wrong PR when only `#rebase` was sent. The same worker has the added instruction to use the AST, and that instruction is written in its worktree.
+
+`#subagent:nestedproject` is still on `fix/nested-project-md` at `8862b2f9b5` with uncommitted edits and no commit. `#apikeepsrefusing` is still running on a clean `fix/api-keeps-refusing`. The published release is still agent-doc v0.35.560 at `bd971e9b87`.
+<!-- agent:boundary:b34bda3d:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -216,9 +233,11 @@ The nested `project.md` claim is still running and has no commit on main. The re
   - ~~Where does this file live? My Coder agent is asking.~~
 - ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~
 - 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
-- When submitting a nested run item, include the parent lineage 
+- 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
+  - Use the AST to guide the agent.
 - ☑️ [#subagent:release#5] release + publish
   - Include #subagent:nestvector + #subagent:nestedproject
+  - Include #subagent:nestedlineage
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

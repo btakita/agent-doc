@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
+
 
 <!-- status:sync -->
 Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `67413e99fd`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).

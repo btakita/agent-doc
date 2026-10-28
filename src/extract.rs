@@ -9,8 +9,10 @@
 //! - `transfer(source, target, component_name, bypass_claim)`: moves the entire named component
 //!   content from `source` to `target`, clearing the source component and appending to the target
 //!   component (or end of file if the target has no matching component).  If `target` does not exist,
-//!   it is auto-created as a template document with the standard status/exchange/queue/backlog/icebox
-//!   scaffold.  Backlog transfers accept both the canonical `backlog` name and the legacy `pending`
+//!   it is auto-created as a template document with the standard
+//!   status/exchange/run/todo/backlog/review/icebox/done/notes scaffold, each `## Heading` on the
+//!   same line as its opener (`## Run <!-- agent:run ... -->`), reusing any heading the source wrote
+//!   on that component's opener line (`#extractlayout`).  Backlog transfers accept both the canonical `backlog` name and the legacy `pending`
 //!   alias. When `bypass_claim` is false and the target is owned by a different tmux pane, transfer
 //!   is rejected with an error. Pass `bypass_claim=true` (CLI: `--bypass-claim`) for cross-pane
 //!   transfers.
@@ -141,11 +143,124 @@ pub(crate) fn scaffold_inheritance_frontmatter(
         .context("failed to parse source document frontmatter for target scaffold")
 }
 
+/// `#extractlayout`: the heading key a component marker tag maps to. The
+/// legacy `agent:queue` spelling is the runnable-work component `agent:run`,
+/// and `agent:pending` is the backlog. Every other tag (`agent:loop`
+/// included) keys by its own name.
+fn heading_key(tag: &str) -> &str {
+    match tag {
+        "queue" => "run",
+        "pending" => "backlog",
+        other => other,
+    }
+}
+
+/// `#extractlayout`: the canonical heading text a generated component section
+/// carries, keyed by component marker tag.
+///
+/// The runnable-work component (`agent:run`, legacy `agent:queue`) is
+/// `## Run`, never `## Queue`, matching the default claim/sync template
+/// scaffold. Generated headings always share their line with the opening
+/// marker; see [`render_component_section`].
+pub(crate) fn canonical_component_heading(tag: &str) -> Option<&'static str> {
+    Some(match heading_key(tag) {
+        "status" => "Status",
+        "exchange" => "Exchange",
+        "run" => "Run",
+        "todo" => "Todo",
+        "backlog" => "Backlog",
+        "review" => "Review",
+        "icebox" => "Icebox",
+        "done" => "Done",
+        "notes" => "Notes",
+        _ => return None,
+    })
+}
+
+/// `#extractlayout`: heading text the source document wrote on the same line
+/// as a component's opening marker (`## Run <!-- agent:run ... -->`), keyed by
+/// [`heading_key`] of the marker's own tag. The element parser projects
+/// `agent:run`/`agent:queue`/`agent:loop` onto one internal `queue` name, so
+/// the raw tag is read from the marker bytes. The first opener of each key
+/// wins. A generated target section reuses this text so extraction never
+/// renames a heading the operator wrote; a source whose components cannot be
+/// parsed contributes no headings and the canonical names apply.
+pub(crate) fn source_component_headings(
+    source_content: &str,
+) -> std::collections::BTreeMap<String, String> {
+    let mut headings = std::collections::BTreeMap::new();
+    let Ok(components) = element::parse(source_content) else {
+        return headings;
+    };
+    for component in components {
+        let Some(tag) = source_content
+            .get(component.open_start..component.open_end)
+            .and_then(|marker| marker.strip_prefix("<!--"))
+            .and_then(|marker| marker.split_whitespace().next())
+            .filter(|tag| tag.starts_with("agent:"))
+        else {
+            continue;
+        };
+        let line_start = source_content[..component.open_start]
+            .rfind('\n')
+            .map_or(0, |pos| pos + 1);
+        let prefix = &source_content[line_start..component.open_start];
+        if !element::component_heading_prefix_matches_tag(prefix, tag) {
+            continue;
+        }
+        let text = prefix.trim_start().trim_start_matches('#').trim();
+        if text.is_empty() {
+            continue;
+        }
+        let key = heading_key(tag.trim_start_matches("agent:")).to_string();
+        headings.entry(key).or_insert_with(|| text.to_string());
+    }
+    headings
+}
+
+/// `#extractlayout`: one generated component section for marker tag `tag`,
+/// heading on the same line as its opening marker. The heading text is the
+/// source's own heading for that component when it has one, else the
+/// canonical name.
+pub(crate) fn render_component_section(
+    tag: &str,
+    attrs: &str,
+    source_headings: &std::collections::BTreeMap<String, String>,
+) -> Option<String> {
+    let heading = match source_headings.get(heading_key(tag)) {
+        Some(text) => text.as_str(),
+        None => canonical_component_heading(tag)?,
+    };
+    Some(format!(
+        "## {heading} <!-- agent:{tag}{attrs} -->\n<!-- /agent:{tag} -->\n"
+    ))
+}
+
+/// The managed components a new extract/transfer target is scaffolded with,
+/// in the default template order, with each opener's attributes.
+const TARGET_SCAFFOLD_COMPONENTS: &[(&str, &str)] = &[
+    ("status", " patch=replace"),
+    ("exchange", " patch=append"),
+    ("run", " priority subagents clear"),
+    ("todo", " priority"),
+    ("backlog", " priority queue"),
+    ("review", ""),
+    ("icebox", ""),
+    ("done", ""),
+    ("notes", ""),
+];
+
+/// Render a new extract/transfer target document.
+///
+/// `source_content` is the source document; it only contributes the heading
+/// text of components it already heads on their opener line
+/// (`#extractlayout`). Pass `""` for canonical headings.
 pub(crate) fn render_target_scaffold(
     title: &str,
     agent: &str,
     session_id: uuid::Uuid,
     source_fm: &frontmatter::Frontmatter,
+    source_content: &str,
 ) -> String {
     let fm = frontmatter::Frontmatter {
         session: Some(session_id.to_string()),
@@ -169,14 +284,16 @@ pub(crate) fn render_target_scaffold(
         prompt_presets: source_fm.prompt_presets.clone(),
         ..Default::default()
     };
-    frontmatter::write(
-        &fm,
-        &format!(
-            "\n# {}\n\n## Status\n\n<!-- agent:status patch=replace -->\n<!-- /agent:status -->\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n## Backlog\n\n<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n\n## Icebox\n\n<!-- agent:icebox -->\n<!-- /agent:icebox -->\n\n## Done\n\n<!-- agent:done -->\n<!-- /agent:done -->\n\n## Notes\n\n<!-- agent:notes -->\n<!-- /agent:notes -->\n",
-            title
-        ),
-    )
-    .expect("target scaffold frontmatter should serialize")
+    let source_headings = source_component_headings(source_content);
+    let mut body = format!("\n# {title}\n");
+    for (name, attrs) in TARGET_SCAFFOLD_COMPONENTS {
+        body.push('\n');
+        body.push_str(
+            &render_component_section(name, attrs, &source_headings)
+                .expect("target scaffold components have canonical headings"),
+        );
+    }
+    frontmatter::write(&fm, &body).expect("target scaffold frontmatter should serialize")
 }
 
 fn merge_list_component(
@@ -429,7 +546,8 @@ pub fn transfer(
             .clone()
             .unwrap_or_else(|| "claude".to_string());
         let inherited_fm = scaffold_inheritance_frontmatter(&source_content)?;
-        let target_content = render_target_scaffold(title, &agent, session_id, &inherited_fm);
+        let target_content =
+            render_target_scaffold(title, &agent, session_id, &inherited_fm, &source_content);
 
         if let Some(parent) = target.parent()
             && !parent.exists()
@@ -1029,6 +1147,7 @@ mod tests {
             "codex",
             uuid::Uuid::nil(),
             &frontmatter::Frontmatter::default(),
+            "",
         );
         assert!(scaffold.contains("<!-- agent:backlog priority queue -->"));
         assert!(scaffold.contains("<!-- /agent:backlog -->"));
@@ -1040,12 +1159,104 @@ mod tests {
         assert!(scaffold.contains("<!-- agent:notes -->"));
         assert!(
             scaffold.contains(concat!(
-                "<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->\n\n## Todo\n\n",
-                "<!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n## Backlog\n\n",
-                "<!-- agent:backlog priority queue -->"
+                "<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->\n\n",
+                "## Todo <!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n",
+                "## Backlog <!-- agent:backlog priority queue -->"
             )),
-            "agent:todo must sit below agent:queue and above agent:backlog"
+            "agent:todo must sit below agent:run and above agent:backlog"
         );
+    }
+
+    /// `#extractlayout`: the extracted game-sessions.md had every heading on
+    /// its own line above the opener and headed the runnable-work component
+    /// `## Queue`. Each generated heading shares its opener's line, and the
+    /// `agent:run` heading is `## Run`.
+    #[test]
+    fn render_target_scaffold_puts_each_heading_on_its_opener_line() {
+        let scaffold = render_target_scaffold(
+            "Title",
+            "codex",
+            uuid::Uuid::nil(),
+            &frontmatter::Frontmatter::default(),
+            "",
+        );
+        let (_, body) = frontmatter::parse(&scaffold).unwrap();
+        let headings: Vec<&str> = body
+            .lines()
+            .filter(|line| line.starts_with("## "))
+            .collect();
+        assert_eq!(
+            headings,
+            vec![
+                "## Status <!-- agent:status patch=replace -->",
+                "## Exchange <!-- agent:exchange patch=append -->",
+                "## Run <!-- agent:run priority subagents clear -->",
+                "## Todo <!-- agent:todo priority -->",
+                "## Backlog <!-- agent:backlog priority queue -->",
+                "## Review <!-- agent:review -->",
+                "## Icebox <!-- agent:icebox -->",
+                "## Done <!-- agent:done -->",
+                "## Notes <!-- agent:notes -->",
+            ],
+            "{body}"
+        );
+        assert!(!body.contains("## Queue"), "{body}");
+        assert!(
+            !body
+                .lines()
+                .any(|line| line.starts_with("<!-- agent:")
+                    && !line.starts_with("<!-- agent:boundary")),
+            "no opener may stand on its own line:\n{body}"
+        );
+        assert!(body.starts_with("\n# Title\n\n## Status "), "{body}");
+        let components = element::parse(body).unwrap();
+        assert_eq!(components.len(), 9, "{body}");
+    }
+
+    /// `#extractlayout`: a heading the operator wrote on a source opener line
+    /// is kept verbatim on the matching target component; components the
+    /// source does not head keep the canonical name. A separate-line source
+    /// heading is not an opener heading and never renames anything.
+    #[test]
+    fn render_target_scaffold_keeps_the_source_opener_headings() {
+        let source = concat!(
+            "# Source\n\n",
+            "## Run: Main <!-- agent:run priority subagents go -->\n",
+            "- do [#a]\n",
+            "<!-- /agent:run -->\n\n",
+            "### Parking lot <!-- agent:icebox -->\n",
+            "<!-- /agent:icebox -->\n\n",
+            "## Pending work <!-- agent:pending -->\n",
+            "<!-- /agent:pending -->\n\n",
+            "## Old todo heading\n\n",
+            "<!-- agent:todo -->\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let scaffold = render_target_scaffold(
+            "Title",
+            "codex",
+            uuid::Uuid::nil(),
+            &frontmatter::Frontmatter::default(),
+            source,
+        );
+        assert!(
+            scaffold.contains("\n## Run: Main <!-- agent:run priority subagents clear -->\n"),
+            "{scaffold}"
+        );
+        assert!(
+            scaffold.contains("\n## Parking lot <!-- agent:icebox -->\n"),
+            "{scaffold}"
+        );
+        assert!(
+            scaffold.contains("\n## Pending work <!-- agent:backlog priority queue -->\n"),
+            "{scaffold}"
+        );
+        assert!(
+            scaffold.contains("\n## Todo <!-- agent:todo priority -->\n"),
+            "{scaffold}"
+        );
+        assert!(!scaffold.contains("Old todo heading"), "{scaffold}");
+        assert!(scaffold.contains("\n## Notes <!-- agent:notes -->\n"));
     }
 
     #[test]
@@ -1059,6 +1270,7 @@ mod tests {
                 security_review: Some("sec-1".to_string()),
                 ..Default::default()
             },
+            "",
         );
         assert!(scaffold.contains("agent_doc_collaboration: shared"));
         assert!(scaffold.contains("agent_doc_security_review: sec-1"));

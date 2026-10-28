@@ -11,6 +11,7 @@ pub mod detached_child;
 pub mod in_process;
 pub mod io_handoff;
 pub mod io_threads;
+pub mod memory_guard;
 pub mod output_state;
 pub mod pty;
 pub mod reexec_bridge;

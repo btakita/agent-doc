@@ -309,6 +309,10 @@ a closed actor record is replaceable through the stale-authority path.
 ### Pty lifecycle
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.
+  The resize callback resizes the child PTY first and the detection screen
+  model second (`#paneoomrunaway`): the child's size never waits on the model's
+  lock, so a slow or wedged model cannot leave the harness drawing at a stale
+  width.
 - `pty.rs` owns allocation and exposes the master reader/writer handles; it does
   not start an alternate stdin reader. On Unix, `io_threads.rs` owns the sole
   stdin→pty path and polls both raw stdin and a stop pipe, allowing child exit
@@ -319,6 +323,27 @@ a closed actor record is replaceable through the stale-authority path.
   prefer that current viewport text and only fall back to the byte ring when the
   screen is empty, so cursor rewrites and line clears are interpreted as terminal
   state instead of append-only scrollback.
+- The screen model is bounded (`#paneoomrunaway`): `OwnedPtyScreen` clamps its
+  size to `MIN_SCREEN_COLS` (2) ..= `MAX_SCREEN_COLS` (1024) columns and
+  1 ..= `MAX_SCREEN_ROWS` (512) rows, whatever `TIOCGWINSZ` reports. The child
+  PTY keeps the real size. tmux can give a pane a 1-column width (a 3-column
+  layout that leaves the last pane at `x = window_width - 1`), and
+  `alacritty_terminal` 0.26 cannot hold a wide (2-cell) glyph in a 1-column
+  grid: `Term::resize` down to 1 column reflows forever in
+  `Grid::shrink_columns` (it pushes a new row per pass and never reaches its
+  scrollback truncation), and `Term::input` of a wide char at 1 column panics
+  with an index out of bounds. On 2026-10-27 the reflow loop grew six
+  `sdk-demo.md` supervisors at about 1.5 GB/s, while holding the screen lock,
+  until `systemd-oomd` killed each pane at 135-142 GB.
+- The supervisor carries a resident-memory ceiling (`#paneoomrunaway`,
+  `memory_guard.rs`). A `memory-guard` thread samples `/proc/self/statm` every
+  500 ms, logs `supervisor_memory_growth rss_mb= threshold_mb=` at each doubling
+  from 512 MiB, and at the ceiling (default 4 GiB, override
+  `AGENT_DOC_SUPERVISOR_RSS_LIMIT_MB`, `0` disables) logs
+  `supervisor_memory_ceiling_exceeded` to the session log, the document's
+  ops.log and stderr, then aborts the supervisor. Start logs
+  `supervisor_memory_guard status=armed limit_mb= rss_mb=`. A named abort at a
+  few gigabytes replaces an anonymous oomd kill of the whole pane.
 - That viewport keeps the composer ghost style (`#clearqueuedliveturn`):
   `OwnedPtyScreen::visible_text_with_ghost_style` re-emits faint (SGR `2`) and
   italic (SGR `3`) runs, and only those, so `child_output_for_detection` carries
@@ -802,7 +827,7 @@ From the previous exchange:
 
 ## Resize Handling
 
-**Unix (Linux/macOS):** `signal-hook` installs a SIGWINCH handler that pushes an event into a `crossbeam_channel`. A small resize thread blocks on the channel, queries `TIOCGWINSZ` on stdin fd, and calls `pty_master.resize(PtySize { rows, cols, .. })` from `portable-pty`.
+**Unix (Linux/macOS):** `signal-hook` installs a SIGWINCH handler that pushes an event into a `crossbeam_channel`. A small resize thread blocks on the channel, queries `TIOCGWINSZ` on stdin fd, and calls `pty_master.resize(PtySize { rows, cols, .. })` from `portable-pty`, then resizes the detection screen model, which clamps the size to a bounded shape of at least 2 columns (`#paneoomrunaway`, see Pty lifecycle).
 
 **Windows:** no SIGWINCH. Resize comes from the console input queue as `WINDOW_BUFFER_SIZE_EVENT`. Options, in order of preference:
 

@@ -662,6 +662,67 @@ fn clear_document_resume_id_if_matches(file: &Path, harness: &str, id: &str) -> 
 /// Codex relaunch.
 const STALE_RESUME_CLEAR_BUDGET: Duration = Duration::from_secs(5);
 
+/// `#paneoomrunaway`: start the supervisor's resident-memory ceiling. Growth
+/// steps and the ceiling verdict go to the session log, the document's
+/// ops.log, and stderr; at the ceiling the supervisor aborts loudly instead of
+/// growing until `systemd-oomd` kills the whole pane.
+fn spawn_supervisor_memory_guard(
+    canonical: &Path,
+    pane_id: &str,
+    session_log: &mut Option<SessionLog>,
+) -> Option<agent_doc_supervisor_process::memory_guard::MemoryGuard> {
+    use agent_doc_supervisor_process::memory_guard;
+    let Some(policy) = memory_guard::MemoryGuardPolicy::from_env() else {
+        log_event(
+            session_log,
+            &format!(
+                "supervisor_memory_guard status=disabled env={}=0",
+                memory_guard::SUPERVISOR_RSS_LIMIT_ENV
+            ),
+        );
+        return None;
+    };
+    log_event(
+        session_log,
+        &format!(
+            "supervisor_memory_guard status=armed limit_mb={} rss_mb={}",
+            policy.limit_bytes >> 20,
+            memory_guard::current_rss_bytes().unwrap_or(0) >> 20
+        ),
+    );
+    let thread_log = std::sync::Mutex::new(session_log.as_ref().and_then(|f| f.try_clone().ok()));
+    let document = canonical.to_path_buf();
+    let pane = pane_id.to_string();
+    let spawned = memory_guard::spawn_memory_guard(
+        policy,
+        memory_guard::MEMORY_GUARD_INTERVAL,
+        memory_guard::current_rss_bytes,
+        move |line| {
+            let line = format!("{line} pane={pane}");
+            {
+                let mut log = thread_log.lock().unwrap_or_else(|p| p.into_inner());
+                log_event(&mut log, &line);
+            }
+            agent_doc_ops_log_io::log_op(&document, &line);
+            eprintln!("[agent-doc] {line}");
+        },
+        |_line| {
+            // The line is already in the session log, ops.log and stderr.
+            std::process::abort();
+        },
+    );
+    match spawned {
+        Ok(guard) => Some(guard),
+        Err(err) => {
+            log_event(
+                session_log,
+                &format!("supervisor_memory_guard status=spawn_failed error={err}"),
+            );
+            None
+        }
+    }
+}
+
 /// Run `job` on a helper thread and wait at most `budget` for its result.
 ///
 /// `None` means the budget elapsed; the job keeps running detached and its late
@@ -1426,6 +1487,7 @@ pub fn run_with_reap_policy_resume_and_harness(
         actor_record.generation,
         &mut session_log,
     );
+    let _memory_guard = spawn_supervisor_memory_guard(&canonical, &pane_id, &mut session_log);
     if post_start_document_model_ensure {
         log_event(
             &mut session_log,
@@ -2362,11 +2424,15 @@ pub fn run_with_reap_policy_resume_and_harness(
         }
         let resize_handle = session.resize_handle()?;
         let resize_shared = shared.clone();
+        // `#paneoomrunaway`: the child PTY gets the real size FIRST. The
+        // detection screen model sits behind a lock the reader thread also
+        // takes; when its resize could not finish, the PTY resize queued
+        // behind it never ran and the harness kept drawing at the stale width.
         resize_watcher = resize::ResizeWatcher::spawn(move |size| {
-            resize_shared.output.resize_terminal_screen(size);
             if let Err(e) = resize_handle.resize(size) {
                 eprintln!("[supervisor::resize] resize error: {e}");
             }
+            resize_shared.output.resize_terminal_screen(size);
         })
         .ok();
 

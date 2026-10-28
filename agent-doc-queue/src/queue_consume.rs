@@ -1029,6 +1029,52 @@ pub fn answered_free_text_head_node_keys_with_authority(
     claimed_heads: &[String],
     selected_heads: &[String],
 ) -> Result<Vec<String>> {
+    Ok(answered_free_text_strike_decision(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        selected_heads,
+        &[],
+    )?
+    .node_keys)
+}
+
+/// Which answered free-text heads strike, and which answered heads the
+/// subagents-dispatch veto kept queued (`#subagentinlineveto`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AnsweredFreeTextStrikeDecision {
+    /// Node keys of the heads that strike.
+    pub node_keys: Vec<String>,
+    /// Texts of heads the response answered inline although the queue's
+    /// `subagents` attribute owns them for dispatch and no worker claim attempt
+    /// exists. They stay queued and the caller reports them loudly.
+    pub inline_vetoed_heads: Vec<String>,
+}
+
+/// [`answered_free_text_head_node_keys_with_authority`] plus the
+/// `#subagentinlineveto` rule.
+///
+/// `dispatch_owned_heads` are live heads a queue-level `subagents` / `fan-out`
+/// attribute owns for dispatch (the cycle's `queue_subagent_dispatch` items
+/// and capacity-held heads) that no worker claim attempt, reported-release
+/// receipt, or completion cell backs. Such a head is never closed by an inline
+/// answer: the coordinator must claim it and hand it to a subagent. An echo of
+/// one is reported in [`AnsweredFreeTextStrikeDecision::inline_vetoed_heads`]
+/// instead of striking, so the row is offered for dispatch again next cycle.
+/// A head in `claimed_heads` is backed by a worker attempt and keeps the
+/// ordinary `#claimstrike` behaviour.
+pub fn answered_free_text_strike_decision(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+    dispatch_owned_heads: &[String],
+) -> Result<AnsweredFreeTextStrikeDecision> {
+    let mut decision = AnsweredFreeTextStrikeDecision::default();
+    let dispatch_owned =
+        crate::queue_claim::ClaimedQueueItems::none().with_heads(dispatch_owned_heads);
     let claimed = crate::queue_claim::ClaimedQueueItems::none().with_heads(claimed_heads);
     let selected = crate::queue_claim::ClaimedQueueItems::none().with_heads(selected_heads);
     // `#claimstrike` (live, 2026-10-05): a worker claim does NOT hold an
@@ -1042,7 +1088,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
     // completed residue (`#qheadresidue`). The struck head's claim is released
     // by the caller (finalize) or pruned as closed at closeout reconciliation.
     if response_body.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok(decision);
     }
     let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue") {
         Ok(nodes) => nodes,
@@ -1052,7 +1098,7 @@ pub fn answered_free_text_head_node_keys_with_authority(
         // failed mutation. Preserve every other AST/mutation error so malformed
         // queue state remains visible to the operator.
         Err(MutationError::ComponentNotFound(component)) if component == "queue" => {
-            return Ok(Vec::new());
+            return Ok(decision);
         }
         Err(err) => {
             return Err(anyhow::anyhow!(
@@ -1106,7 +1152,6 @@ pub fn answered_free_text_head_node_keys_with_authority(
         }
         None => HashSet::new(),
     };
-    let mut keys = Vec::new();
     let mut struck_texts = already_applied;
     for node in nodes {
         if node.item.struck || is_loop_queue_node(&node.node_key) {
@@ -1170,10 +1215,22 @@ pub fn answered_free_text_head_node_keys_with_authority(
         {
             continue;
         }
+        // `#subagentinlineveto`: an answered head the `subagents` attribute
+        // owns, with no worker attempt behind it, was run inline. The answer
+        // is real but the lifecycle is not: keep the row queued for dispatch
+        // and report it, never close it as if a subagent had run it.
+        if dispatch_owned.claims(text) && !claimed.claims(text) {
+            decision.inline_vetoed_heads.push(
+                agent_doc_document::queue_projection::strip_priority_markers(text)
+                    .trim()
+                    .to_string(),
+            );
+            continue;
+        }
         struck_texts.insert(normalize_queue_prompt_text(text));
-        keys.push(node.node_key);
+        decision.node_keys.push(node.node_key);
     }
-    Ok(keys)
+    Ok(decision)
 }
 
 /// True when this cycle's diff introduced a prompt-bearing exchange change (a
@@ -1590,18 +1647,44 @@ pub fn project_answered_free_text_strike_with_authority(
     claimed_heads: &[String],
     selected_heads: &[String],
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
-    if response_body.trim().is_empty() {
-        return Ok(None);
-    }
-    agent_doc_frontmatter::frontmatter::parse(content)?;
-    let node_keys = answered_free_text_head_node_keys_with_authority(
+    project_answered_free_text_strike_with_dispatch(
         content,
         response_body,
         baseline,
         claimed_heads,
         selected_heads,
+        &[],
+    )
+    .map(|(projection, _)| projection)
+}
+
+/// [`project_answered_free_text_strike_with_authority`] plus the
+/// `#subagentinlineveto` rule (see [`answered_free_text_strike_decision`]).
+/// Returns the projection and the answered heads the veto kept queued.
+pub fn project_answered_free_text_strike_with_dispatch(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+    dispatch_owned_heads: &[String],
+) -> Result<(Option<AnsweredFreeTextStrikeProjection>, Vec<String>)> {
+    if response_body.trim().is_empty() {
+        return Ok((None, Vec::new()));
+    }
+    agent_doc_frontmatter::frontmatter::parse(content)?;
+    let decision = answered_free_text_strike_decision(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        selected_heads,
+        dispatch_owned_heads,
     )?;
-    project_free_text_strike_of_node_keys(content, node_keys)
+    Ok((
+        project_free_text_strike_of_node_keys(content, decision.node_keys)?,
+        decision.inline_vetoed_heads,
+    ))
 }
 
 /// `#qresiduewedge`: the answered-head strike for a response the replay guard
@@ -3112,6 +3195,107 @@ mod tests {
         assert!(
             keys(deferred).is_empty(),
             "a deferred nested echo stays queued"
+        );
+    }
+
+    /// `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28T03:22Z):
+    /// preflight listed `https://.../pull/74/changes` + its nested sub-prompt
+    /// under `queue_subagent_dispatch` for `<!-- agent:run priority subagents
+    /// go -->`; the coordinator fixed it inline, echoed it as `> **Queue
+    /// prompt:**`, and the answered-free-text projection struck it as done, so
+    /// the operator's `subagents` attribute was silently ignored. A
+    /// dispatch-owned head without a worker attempt is kept queued and named
+    /// as vetoed; a claimed one keeps `#claimstrike`.
+    const INLINE_VETO_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:run priority subagents go -->\n",
+        "- 📥 https://github.com/example/docs/pull/74/changes\n",
+        "  - The ADR links are malformed.\n",
+        "- 📥 later free-text work stays queued\n",
+        "<!-- /agent:run -->\n",
+    );
+    const INLINE_VETO_HEAD: &str = concat!(
+        "https://github.com/example/docs/pull/74/changes\n",
+        "  - The ADR links are malformed.",
+    );
+    const INLINE_VETO_ANSWER: &str = concat!(
+        "### Re: PR 74 links — opus\n\n",
+        "> **Queue prompt:** https://github.com/example/docs/pull/74/changes\n",
+        ">   - The ADR links are malformed.\n\n",
+        "Fixed and pushed: every link is inline now.\n",
+    );
+
+    #[test]
+    fn subagentinlineveto_unclaimed_dispatch_head_answered_inline_stays_queued() {
+        let dispatch = vec![INLINE_VETO_HEAD.to_string()];
+        let decision = answered_free_text_strike_decision(
+            INLINE_VETO_DOC,
+            INLINE_VETO_ANSWER,
+            Some(INLINE_VETO_DOC),
+            &[],
+            &[],
+            &dispatch,
+        )
+        .unwrap();
+        assert!(
+            decision.node_keys.is_empty(),
+            "an inline answer must not close a subagents dispatch head: {decision:?}"
+        );
+        assert_eq!(decision.inline_vetoed_heads, dispatch);
+        let (projection, vetoed) = project_answered_free_text_strike_with_dispatch(
+            INLINE_VETO_DOC,
+            INLINE_VETO_ANSWER,
+            Some(INLINE_VETO_DOC),
+            &[],
+            &[],
+            &dispatch,
+        )
+        .unwrap();
+        assert!(projection.is_none(), "{projection:?}");
+        assert_eq!(vetoed, dispatch);
+        // Without the dispatch ownership fact the same echo strikes (the
+        // pre-fix behaviour every other caller keeps).
+        assert_eq!(
+            answered_free_text_head_node_keys_with_authority(
+                INLINE_VETO_DOC,
+                INLINE_VETO_ANSWER,
+                Some(INLINE_VETO_DOC),
+                &[],
+                &[],
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn subagentinlineveto_claimed_dispatch_head_still_strikes_on_exact_echo() {
+        let dispatch = vec![INLINE_VETO_HEAD.to_string()];
+        let (projection, vetoed) = project_answered_free_text_strike_with_dispatch(
+            INLINE_VETO_DOC,
+            INLINE_VETO_ANSWER,
+            Some(INLINE_VETO_DOC),
+            &dispatch,
+            &[],
+            &dispatch,
+        )
+        .unwrap();
+        let projection = projection.expect("a worker-backed head strikes on its echo");
+        assert!(vetoed.is_empty(), "{vetoed:?}");
+        assert!(
+            projection
+                .target_content
+                .contains("~~https://github.com/example/docs/pull/74/changes~~"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("later free-text work stays queued"),
+            "{}",
+            projection.target_content
         );
     }
 

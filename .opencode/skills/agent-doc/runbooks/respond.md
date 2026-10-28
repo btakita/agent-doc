@@ -218,7 +218,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   recomputes it every cycle, so a missed claim is offered again. Heads held by
   the cap or by a still-queued `after=` / ordered-list predecessor are already
   excluded from the loop; do not drain them inline. Lines tagged `[inline]` or
-  `[operator-verify]` drain in queue order as usual. For each dispatch item:
+  `[operator-verify]` drain in queue order as usual. Never run a dispatch
+  item yourself, even a small one: an inline answer does not close it. The
+  closeout, the preflight catch-up, and the session-check residue guard all
+  keep an echoed dispatch item without a worker claim queued, warn
+  `queue_subagent_inline_answer_refused`, and offer it for dispatch again
+  (`#subagentinlineveto`). If this harness cannot spawn a subagent, leave the
+  item queued and write a `**Deferred:** no subagent available` line for it.
+  If you judge an item blocked, name it and the blocker in the response
+  instead of skipping it silently. For each dispatch item:
   1. Run its `claim_command` (`agent-doc queue claim <FILE> --item <...> --owner subagent:<label>`).
      Dispatch only after the command succeeds: success includes projecting the
      claimed row's visible `🟡` marker through the current editor/CRDT authority.

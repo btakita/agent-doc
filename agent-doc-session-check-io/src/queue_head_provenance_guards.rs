@@ -219,7 +219,7 @@ pub fn check_free_text_queue_head_provenance(
     // exact `> **Queue prompt:**` echo, the same proof its strike requires.
     let claimed_heads =
         agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &content);
-    let Some(decision) =
+    let Some(mut decision) =
         agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision_with_claims(
             &state.active_free_text_queue_heads,
             &content,
@@ -229,6 +229,26 @@ pub fn check_free_text_queue_head_provenance(
     else {
         return Ok(GuardResult::None);
     };
+    // `#subagentinlineveto`: an answered head the `subagents` attribute owns,
+    // with no worker attempt behind it, is not completed residue for repair to
+    // strike. It stays queued for dispatch; say so loudly instead.
+    if !decision.completed_residue.is_empty() {
+        let vetoed = agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(
+            &agent_doc_queue_io::subagent_dispatch::inline_answer_vetoed_heads_for_content(
+                file, &content,
+            ),
+        );
+        let (inline, residue): (Vec<String>, Vec<String>) =
+            std::mem::take(&mut decision.completed_residue)
+                .into_iter()
+                .partition(|head| vetoed.claims(head));
+        decision.completed_residue = residue;
+        agent_doc_queue_io::queue_consume::report_inline_answered_subagent_heads(
+            file,
+            &inline,
+            "session_check_residue",
+        );
+    }
     if decision.suppressed {
         if decision.bare_heading_residue {
             agent_doc_ops_log_io::log_op(
@@ -550,6 +570,50 @@ mod tests {
         assert!(
             log.contains("free_text_queue_completed_residue_guard_fired"),
             "residue guard should log the proved completed head:\n{log}"
+        );
+    }
+
+    #[test]
+    fn subagentinlineveto_inline_answered_dispatch_row_is_not_completed_residue() {
+        // `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28): the
+        // same answered head under a `subagents` run queue, with no worker
+        // claim, is dispatch work. Calling it completed residue would make
+        // repair strike it and close the inline run after all.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let committed = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\npending_done_guard: warn\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: explain the queue churn -- gpt-5\n\n",
+            "> **Queue prompt:**\n>\n> explain the queue churn\n\n",
+            "The churn comes from stale convergence.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run priority subagents go -->\n",
+            "- explain the queue churn\n",
+            "<!-- /agent:run -->\n",
+        );
+        let doc = make_doc(tmp.path(), committed);
+        mark_cycle_committed(&doc, committed, committed);
+        record_current_cycle_response(
+            &doc,
+            concat!(
+                "### Re: explain the queue churn -- gpt-5\n\n",
+                "> **Queue prompt:**\n>\n> explain the queue churn\n\n",
+                "The churn comes from stale convergence.\n",
+            ),
+        );
+
+        let rc = cycle_context(&doc, committed);
+        let result = check_free_text_queue_head_provenance(&doc, &rc).unwrap();
+        assert!(
+            matches!(result, GuardResult::None),
+            "an inline-answered subagents row is not repair residue: {result:?}"
+        );
+        let log = ops_log(tmp.path());
+        assert!(
+            !log.contains("free_text_queue_completed_residue_guard_fired")
+                && log.contains("queue_subagent_inline_answer_refused")
+                && log.contains("source=session_check_residue"),
+            "the inline answer must be reported, not treated as residue:\n{log}"
         );
     }
 

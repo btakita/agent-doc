@@ -90,90 +90,6 @@ Both `agent:run` heads are claimed and worker-bound.
 `sdk-demo.md` is generation 1 on worker `01a183ed-f565-74d3-afe0-b1aa7050daf0`. It owns the agent-doc fix, tests, and the branch push. This cycle does not edit that demo inline.
 
 No new backlog item. Both rows are the work, and both stay queued under their running claims.
-
-### Re: Subagent completed: `subagent:release` returned work for queue item “release + publish - include #subagent:agentrules” — agent-doc
-<!-- agent-doc-subagent-response sha256=32577c3cb25ed48da6a83294439b94279b912af9ebc041cbddf6e29dc908cec6 -->
-> **Subagent response:**
->
-> `#subagent:agentrules` is already on `origin/main`. No release defect to fix, so this worker did not bump, commit, tag, or publish.
->
-> ## Result
->
-> - **Branch:** `feat/release-readiness` (local only; upstream is `origin/main`)
-> - **Worktree:** `/home/brian/worktrees/agent-doc-release`
-> - **HEAD:** `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7` — `feat(rules): compose agent:rules into every admitted turn`
-> - **Committed:** no
-> - **Pushed:** no
-> - **Files changed by this worker:** none
-> - **Tests run by this worker:** none
->
-> `origin/feat/agent-rules` and `/home/brian/worktrees/agent-doc-agentrules` are clean at that same SHA. Nothing from that claim is left to merge. `fix/sdk-demo-agent-run` is also still at this SHA, so the open sdk-demo row is not in this batch.
->
-> ## Version
->
-> `make release` does **not** bump the version. It reads `Cargo.toml` (`0.35.559`) and runs:
->
-> ```text
-> python3 scripts/release-driver.py --version 0.35.559 --make make
-> ```
->
-> That creates `v0.35.559`, pushes `HEAD:main` plus the tag, runs `make install-full`, then `scripts/verify-release-publication.py --tag v0.35.559`. Tag `v0.35.559` already points at `5870713c02c946cbd59c3677f942f6aa73ecf4cd`, so `make release` on current `origin/main` fails at `git tag`. Workspace and `pyproject.toml` versions are still uniformly `0.35.559`. There is no `v0.35.560` tag. The next patch is `0.35.560`.
->
-> `make publish` is only the local twine fallback (`publish-pypi`). Publication of a normal release is the last phase of `make release`, not `make publish`.
->
-> ## Coordinator command
->
-> From a checkout of current `origin/main` (not `/home/brian/work/btakita/agent-doc`, whose local `main` is the old scaffold):
->
-> ```text
-> make release-version VERSION=0.35.560
-> ```
->
-> Then add one `VERSIONS.md` entry for the range below, run `make check` once, commit that projection, push it to `main`, and only then:
->
-> ```text
-> make release
-> ```
->
-> `make release-version` is what bumps Cargo manifests, lockfile, `pyproject.toml`, skill markers, and any JetBrains package generation the release check requires. `make release` tags that already-projected version. It also runs the one `make install-full`.
->
-> ## Range since `v0.35.559`
->
-> `v0.35.559..HEAD` is 18 commits, 85 files, +5823/−264. Non-merge commits:
->
-> - `2b7ef088ea` feat(rules): compose agent:rules into every admitted turn
-> - `dc7efbcbf6` fix(queueoperatoranswer): accept an operator answer row nested under its request id
-> - `dffba0edcb` fix(statussyncrevert): re-sync a status:sync block an editor undo reverted
-> - `edc4debc24` fix(uncommittedcell): Claude Stop holds once for a reported but unclosed queue row
-> - `220ba2d791` fix(statuspatchdrop): carry agent component patches through the response-only rebase
-> - `1e24cd70dd` fix(queue): a claim never reopens a struck row whose identity is live in the same queue
-> - `5426def761` fix(jetbrains): show the repair remedy only when no editor replica is attached
-> - `0dd4eeb0be` fix(queue): a quoted or unrelated deferral phrase never holds an exactly echoed head
-> - `b8932c1b90` fix(jetbrains): prove registration from the acknowledged replica text; keep operator frontmatter bytes
-> - `dc4fc37fcc` fix: nest only the queue_item, request, and context values in operator requests
-> - `5d8e76137b` fix: render subagent operator requests as a nested list
-> - `0b27368c0e` fix(queue): reported rows close — tagged id rows, answered requests, acked open backlog
->
-> ## CI
->
-> Current `origin/main` (`2b7ef088ea`):
->
-> - CI run [40748955632](https://github.com/btakita/agent-doc/actions/runs/40748955632): **in progress**. Job `check` is on `Run make check`; `make tmux-ci` has not started. No failed step.
-> - Book run 40748955649: success
-> - Pages run 40748955394: success
->
-> Previous `main` CI on parent `dc7efbcbf6` (run 40738098623) completed success. The `v0.35.559` Release workflow (run 40647917515) completed success.
->
-> ## Commands
->
-> | Command | Exit |
-> |---|---|
-> | `git -C /home/brian/work/btakita/agent-doc fetch origin` | 0 |
-> | `git worktree add -b feat/release-readiness /home/brian/worktrees/agent-doc-release origin/main` | 0 |
-> | range / tag / `gh run list` / `gh run view` inspections | 0 |
->
-> No `make` target was run. No follow-up queue item.
-<!-- agent-doc-subagent-completion key=f919db3262a6281b0bf6e1a937548c0885df1f89f5a9e57d6487f3caaa06edc6 -->
 > **Queue prompt:** Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 
 **Deferred:** dispatched to `subagent:apiroute` generation 1, worker `01a18406-3ec5-7240-98f1-39f3e11d88cd`, on `fix/api-md-route-error` in `/home/brian/worktrees/agent-doc-apiroute`. Spec, tests, commit, and push belong to that worker. Integration and the single `make install` wait for its report.
@@ -186,44 +102,27 @@ The api.md route row is claimed and running. The pasted diagnostic says two upda
 
 No new backlog item. The api.md row stays queued under the running claim.
 
-### Re: Subagent completed: `subagent:sdksync` returned work for queue item “sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.” — agent-doc
-<!-- agent-doc-subagent-response sha256=4af063e78f77f66418de5d30c6304330726d56b820e80482bca9496a371c1ac3 -->
-> **Subagent response:**
->
-> `fix/sdk-demo-agent-run` is pushed at `05340c5a6de1e5b4986efaf3280dcb5841d5ced5`. `origin/main` is still `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7`. No follow-up queue heads.
->
-> A completion cell whose item is `do [#id] - <child>` shares the parent's tracked id, so `agent:run` painted the parent as needing reconcile. The cell now matches a row only when its recorded item is that row's own work (`queue_claim::completion_evidence_matches_row`). Receipts stay identity-keyed. `extract_head_id` is unchanged.
->
-> Files (10, +193/−31):
->
-> - `agent-doc-queue/src/queue_claim.rs`
-> - `agent-doc-queue/src/queue_consume.rs`
-> - `agent-doc-queue-io/src/queue_cmd.rs`
-> - `agent-doc-queue-io/src/queue_claim.rs`
-> - `agent-doc-preflight-io/src/lib.rs`
-> - `agent-doc-crdt-relay-io/src/lib.rs`
-> - `agent-doc-document/src/queue_projection.rs`
-> - `agent-doc-queue-icons/src/legend.rs`
-> - `docs/guide/queue-markers.md`
-> - `specs/07-orchestration-commands.md`
->
-> Scratch files and `.agent-doc-private-denylist` stayed untracked. The denylist scan does not intersect this diff.
->
-> Tests:
->
-> - `./scripts/with-cargo-cache cargo test -p agent-doc-queue-io --lib completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent --offline -- --test-threads=8` — exit 0. 1 passed, 0 failed, 265 filtered out.
-> - Unsanitized `make check` — exit 2. Nextest fail-fast, exit 100: 4 failures (`bare_file_invocation_outside_supported_harness_fails_before_run_cycle`, `codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`, `codex_owned_pane_active_auto_queue_hands_off_without_drift`, `codex_owned_pane_independent_queue_edit_defers_until_closeout`), 11727 of 12108 not run. `detect_harness` sees `GROK_SESSION_ID` before `CODEX_SESSION`.
-> - `env -u TMUX -u TMUX_PANE -u GROK_SESSION_ID -u GROK_AGENT -u AGENT_DOC_SUPERVISOR -u AGENT_DOC_WRITE_AUTHORITY -u AGENT_DOC_LOG -u AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS make check` — the recipe finished and wrote `target/.agent-doc-full-check.json`. The wrapper then exited 1 on zsh's read-only `status`. Clippy (`-D warnings`) passed with no output. Nextest exit 0: 12108 passed, 0 failed, 187 skipped (the new test is in that run). Batched exit 0: 2065 passed, 0 failed, 148 ignored. Doctest exit 0: 0 failed. `sim-medium` exit 0: 1 passed, 0 failed. `sim-net` exit 0: 2 passed, 0 failed. Three JetBrains `BUILD SUCCESSFUL`. Python bootstrap: 8 tests, OK. TLA runner self-test ok; the model run was skipped on an existing passing receipt.
->
-> `make install` was not run.
-<!-- agent-doc-subagent-completion key=7a42ec09f9f82fb7f3ef761e140f89a0202e68b2bf1bf87221ccc9fc8801116d -->
-<!-- agent:boundary:d201dbb0 -->
+> **Queue prompt:** release + publish
+>   - include #subagent:agentrules
+
+> **Queue prompt:** sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
+
+### Re: v0.35.560 is published and the sdk-demo queue fix is on main — grok-4.7 · 2026-10-28T16:50-04:00
+
+agent-doc v0.35.560 is published. Tag `v0.35.560` points at `bd971e9b87` (`release: agent-doc 0.35.560`). `make release` pushed `2b7ef088ea..bd971e9b87` to `main` and pushed the tag. The GitHub Release is a stable public release with 24 assets, published 2026-10-28T20:11:42Z: https://github.com/btakita/agent-doc/releases/tag/v0.35.560. PyPI `agent-doc` is 0.35.560, and the wheel `agent_doc-0.35.560-py3-none-any.whl` is public. The release workflow https://github.com/btakita/agent-doc/actions/runs/40761053526 and the PyPI workflow https://github.com/btakita/agent-doc/actions/runs/40765602042 both completed. The release driver reported `tag_publish_handoff=complete`, `local_install_full=complete`, and `public_publication=complete`.
+
+The sealed batch includes `agent:rules` from ancestor `2b7ef088ea`. On the release tree, nextest ran 12107 tests: 12107 passed and 187 skipped. `make tmux-ci` passed, including `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`. `install-full` installed the tagged binary. `agent-doc --version` reports `agent-doc 0.35.560`.
+
+The sdk-demo `agent:run` mismatch is fixed on main at `343fe163c2` (`fix(queue): match completion cells to a row's own work`), the commit after the tag. A completion cell matches a row only when its recorded item is that row's own work, so a longer tracked child stays off its parent. Regression `completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent` passed on that tree. The push was `bd971e9b87..343fe163c2` to `main`. `make install` of that tree exited 0 and held JetBrains pluginVersions at 0.2.877, 0.2.878, and 0.2.879 because the plugin bytes were already current. The release worktree `feat/release-readiness` is clean and matches `origin/main` at `343fe163c2`. Tag `v0.35.560` stays at `bd971e9b87`. CI for `343fe163c2` was in progress as run 40766108880 when status was recorded.
+
+The api.md route claim stays open. `fix/api-md-route-error` has two local commits (`519352f34d`, `5291b1f93c`) and `make check` is still running in that worktree. The branch is unpushed, so it stays out of this closeout.
+<!-- agent:boundary:4be9b961 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:release#4] release + publish
-  - include #subagent:agentrules
-- ☑️ [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
+- ~~release + publish~~
+  - ~~include #subagent:agentrules~~
+- ~~sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 <!-- /agent:run -->
 

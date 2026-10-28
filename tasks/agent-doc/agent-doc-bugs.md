@@ -27,7 +27,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `a4a550c3a4`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`).
+Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `91cf5570c2`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`), retained writes never re-insert a stale snapshot of in-progress operator typing (`91cf5570c2`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -731,6 +731,7 @@ haiven-dev's ops log also shows a layout sync failing around 03:59Z:
 **Dispatched:** your extraction report (all `project.md` presets copied into `game-sessions.md`, 3 tmux panes when you open it, and `sdk-demo.md` at half width in the agent-doc-bugs.md | sdk-demo.md split) went to a worker, along with this layout snapshot and the log lines. It may only read your tmux server, so any pane cleanup will come back to you as instructions rather than being done for you.
 
 Still running: the duplicate-Todo-line fix and the `sdk-demo.md` `subagents` fix.
+> **Queue prompt:** todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
 
 ### Re: Subagent completed: `subagent:typingdupe` returned work for queue item “todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.” — agent-doc
 <!-- agent-doc-subagent-response sha256=ba74d2ac1534b4e2fca4b77c3b256d58b66086300bd80d788a3d76b3addc1313 -->
@@ -780,15 +781,51 @@ A regression test replays the exact incident and fails with either layer removed
 - `tmux sync failure`: this went to the extraction worker, since it's the same `game-sessions.md` | `sdk-demo.md` case. That worker also has your new repro for the half-width pane (agent-doc-bugs.md → game-sessions.md → back).
 
 **Filed `#deletedstruckmismatch`:** since the `agent:todo` sync row was pruned, steering has reported a `degraded_claim_mismatch` for it on nearly every call, although no todosync claim exists. Its work is merged and installed, so this is a false alarm.
-<!-- agent:boundary:e9f68224 -->
+
+### Re: Subagent completed: `subagent:sdksubagents` returned work for queue item “sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.” — agent-doc
+<!-- agent-doc-subagent-response sha256=f18a9f618200573a76c38d4674ad7aea76908e56f29655d8c9675469ee2e729d -->
+> **Subagent response:**
+>
+> Branch fix/sdksubagents, commit 7e3e50e1e9 on a4a550c3a4 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 12015 passed (186 skipped).
+> Root cause: preflight did list the rows in queue_subagent_dispatch every turn (count=8 at 03:22Z; the attribute order parses fine; the session runs 0.35.558), but the session answered the PR #74 row inline (no claim, no Agent) and the controller struck it (answered_free_text_strike_applied 03:25:44Z): only queue consume had the #queuesubagents refusal, and the closeout strike (queue-io + controller), preflight catch-up strike and session-check residue guard all recorded an inline run as done. The 📥 do [#bossroom-*] / [#template-*] / sbx-deploy-749 rows sat for hours because the session judged them blocked from free-text stays-open notes the binary cannot read.
+> Fix: a dispatch-owned row (listed dispatchable or cap-held by subagents, with no claim attempt, release receipt or completion cell) is never struck by an inline echo on any path; it stays queued and is re-offered, with a warning and queue_subagent_inline_answer_refused (#subagentinlineveto). Guidance and runbooks/respond.md: never run a dispatch item inline; defer visibly when no subagent is available; name rows judged blocked.
+> Files: agent-doc-queue/src/queue_consume.rs, agent-doc-queue-io/src/{queue_consume.rs, subagent_dispatch.rs}, agent-doc-controller-io/src/project_controller.rs, src/main.rs, agent-doc-preflight-io/src/lib.rs, agent-doc-session-check-io/src/queue_head_provenance_guards.rs, SPEC.md, runbooks/respond.md (+5 copies).
+> Tests: 6 new subagentinlineveto tests; with the veto disabled the unclaimed core, queue-io, controller, preflight and session-check tests fail.
+> Follow-ups: blocked-row marker (queue-blocked-marker, in flight); the #qresiduewedge committed-heading replay strike path lacks the veto.
+<!-- agent-doc-subagent-completion key=8bea5deec0e4184cf296fa75ee96e6561e03848c5956cf4fcb9085945ddcb4f9 -->
+> **Queue prompt:** sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+
+> **Chat prompt (#chatprompt:41c7841f748c):** should I restart Idea?
+
+### Re: sdk-demo.md subagents honored; no IDE restart needed — opus-5 · 2026-10-28T01:20-04:00
+
+**Fixed: an inline answer can no longer close a row that `subagents` hands to a worker** (`0624a41b9d`, on agent-doc `main` and installed). Integrated `make check`: 12020 of 12020 tests passed. No editor was quarantined before the install. Not released.
+
+**What was happening in `sdk-demo.md`.** That session runs the current build (0.35.558), and preflight listed the rows for subagent dispatch every turn (8 of them at 03:22Z). The attribute order `priority subagents go` parses fine. But:
+- **One row was answered inline.** The session answered the PR #74 row ("The ADR links are malformed…") itself, with no claim and no worker, and agent-doc then struck it as done at 03:25:44Z. Only `queue consume` refused an inline answer; the closeout strike, preflight's catch-up strike and session-check's repair all accepted one.
+- **Other rows sat idle for hours.** The 📥 `do [#bossroom-*]`, `do [#template-*]` and `do #sbx-deploy-749` rows were never dispatched, because the session judged them blocked from free-text "(stays open: blocked behind …)" notes that the binary can't read. That's what you saw: one item worked on, with many 📥 rows.
+
+**Now:**
+- A row that `subagents` lists for a worker and that has no claim stays queued when it's answered inline. It's offered for dispatch again, with a warning and `queue_subagent_inline_answer_refused`.
+- The guidance says never to run such a row inline. If no subagent is available, the session leaves the row queued with a visible note, and it names any row it judges blocked.
+- `do [#queue-blocked-marker]` (in flight) will make "blocked" something the binary can read, so those rows stop showing as idle 📥.
+- Nothing to recover in `sdk-demo.md`: its pane picks up the fix on its next cycle. The PR #74 work is done, so leave that row struck.
+
+**Should you restart IDEA? No.**
+- Every install today printed "No JetBrains restart is required; no installed plugin bytes changed", and the native library hot-reloaded into your editor each time (1 of 1 endpoints, 0 restarts required).
+- The 0.2.866 plugin restart you were waiting on is already done: you confirmed Restart Agent starts Grok Build.
+
+**Filed:** `#qresiduewedgeveto`, the one remaining strike path without this check.
+
+**Still running:**
+- `do [#queue-blocked-marker]`;
+- `do [#pmsyncstillopen]`;
+- the `game-sessions.md` extraction and tmux worker (presets, 3 panes, half width, the sync failure).
+<!-- agent:boundary:636ffbfa -->
 <!-- /agent:exchange -->
 
-<!--
--->
-
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
-- 🚧 [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+- ☑️ [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
 - 🚧 [#subagent:qblocked#1] do [#queue-blocked-marker]
 - 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
   - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
@@ -799,6 +836,7 @@ A regression test replays the exact incident and fails with either layer removed
   - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
   - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
 - 🚧 [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
+- 📥 do [#deletedstruckmismatch]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -849,6 +887,7 @@ A regression test replays the exact incident and fails with either layer removed
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#qresiduewedgeveto] The `#qresiduewedge` committed-heading replay strike path does not apply `#subagentinlineveto` yet, so it could still close a `subagents` dispatch row that was answered inline (rare).
 - [ ] [#deletedstruckmismatch] After the closeout that struck the `agent:todo` sync row ended its claim and agent-doc pruned the struck row, mid-turn steering reports `dispatch=degraded_claim_mismatch owner=subagent:todosync` on nearly every tool call ("durable claim, report, or completion-outbox evidence still owns that exact work"), although `queue claims` lists no todosync claim. Some leftover record (completion outbox or lineage) outlives the closed claim, and the prune is read as an operator deletion.
 - [ ] [#lazilyspecagentdocfixtures] agent-doc-specific schemas and fixtures still live in lazily-spec (`schemas/agent-doc-state.json`, `conformance/agent-doc/`, the `editor_route` and `sync_tmux_layout` fixtures): move them into agent-doc or make them generic (automation-API proposal section 5).
 - [ ] [#apiversionexempt] `command_plane_submit` refuses any caller whose binary version differs from the controller's; the future public `agent-doc api` command must be exempt or every install breaks automation clients (automation-API proposal, Phase 2).

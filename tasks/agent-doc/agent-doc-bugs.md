@@ -606,7 +606,16 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 > Follow-ups: (1) the CLI hold adds one controller round-trip (document_state_projection) to most CP writes; (2) possible 60 s stall when this path runs inside the controller (e.g. compaction) with the editor delta queued behind the same request (safe refusal, unreproduced); (3) session-check does not yet report a quarantined replica as its own state.
 <!-- agent-doc-subagent-completion key=bfeba7fa9d78b6656cfe2322c8d54de8027aa7ca92bbe11f706636ea7e9adb5c -->
 > **Queue prompt:** Add the questions as todo items. Use a nested list so each question is on its own line.
-<!-- agent:boundary:fe2be4a2 -->
+> **Queue prompt:** [#lazily-stale-cell-repair]: done
+
+### Re: lazily stale completion cells; automation-API lazily questions dispatched — opus-5 · 2026-10-27T23:31-04:00
+
+**`#lazily-stale-cell-repair` is checked off.** A fresh dry run of `agent-doc queue repair-stale-completion tasks/software/lazily.md` now reports **0** stale completion cells and **0** stale receipts (there were 14 on 2026-10-26).
+
+**Dispatched:** your `automation-api.md` questions (use lazily's built-in features? extend lazily with endpoints? keep lazily as the multi-language API, or add a web API server, and if so does it belong in lazily?) went to a worker. It's reading the lazily specs and bindings and how agent-doc already uses lazily, and will answer each question with evidence. It will update `specs/proposals/automation-api.md` on `design/automationapi`, after rebasing it onto `main`; the full path is `/home/brian/work/btakita/agent-doc-wt/automationapi/specs/proposals/automation-api.md`.
+
+`do [#pmsyncquestions]` is closed too. Its echo didn't strike the row, because the row is backed by a Todo, so I used `queue consume --id` after checking the Todo off. That's one more Todo-sync gap for the `agent:todo` worker that's still running.
+<!-- agent:boundary:032537a5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -615,8 +624,8 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#pmsyncquestions]~~
 - 🚧 [#subagent:todosync#1] `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
-- 📥 [#lazily-stale-cell-repair]: done
-- 📥 automation-api.md
+- ~~[#lazily-stale-cell-repair]: done~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:lazilyapi#1] automation-api.md
   - Can we use lazily's built-in features for this?
   - Should we extend lazily to provide api endpoints?
   - We have effective made lazily the api with different language bindings. Is this a good route or should we expand to a web-like api server? If yes, does the web server implementation belong in lazily?

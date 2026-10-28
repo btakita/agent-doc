@@ -180,6 +180,7 @@ No new backlog item. Both rows are the work, and both stay queued under their ru
 - ☑️ [#subagent:release#4] release + publish
   - include #subagent:agentrules
 - 🚧 [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
+- 📥 Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

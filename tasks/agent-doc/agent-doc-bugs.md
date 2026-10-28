@@ -1200,20 +1200,26 @@ Session note: the exchange is 1083 lines. I'm not compacting it while the queue 
 > **Queue prompt:** I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
 
 Closed. Both fixes for this row are on `main` and installed: `0b27368c0e` and `0dd4eeb0be`. The previous cycle's echo didn't strike it because my explanation repeated a deferral phrase in plain quotes inside its first bullet, and the deferral rule still reads plain quoted text as deferral wording.
+
+### Re: GitHub issue watch — opus-5 · 2026-10-28T11:16-04:00
+
+> **Queue prompt:** Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+
+No new issues since the last check. Open on `btakita/agent-doc`:
+- **#379** (Run Agent Doc still fails "editor route requires the exact visible layout before dispatch"): already tracked by Todo `#gh379-remotedev-proof`.
+- **#40** and **#45**: excluded.
+
+Nothing was added to the backlog or queue.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.~~
-- ~~I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?~~
-- ~~game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~status:sync is out of sync~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
 - 🚧 [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->

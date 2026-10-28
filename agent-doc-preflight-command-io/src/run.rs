@@ -586,6 +586,28 @@ fn run_with_options_to_writer_in_pass(
         }
         Err(err) => return Err(err.context("invalid agent:status sync contract")),
     };
+    // `#statussyncrevert`: an editor change (an IDE undo, a hand edit) that
+    // moved the managed block off its latest synced value is reported so this
+    // cycle re-syncs it; the operator's change to derived state does not stick.
+    let status_sync_revert = status_sync.as_ref().and_then(|_| {
+        let synced = agent_doc_snapshot_io::load_status_sync_synced_payload(file)
+            .ok()
+            .flatten();
+        agent_doc_document::status_projection::status_sync_revert(&content, synced.as_deref())
+    });
+    if let Some(revert) = &status_sync_revert
+        && !options.probe
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "status_sync_operator_revert_detected file={} source=preflight document_payload_hash={} synced_payload_hash={} action=demand_resync (#statussyncrevert)",
+                file.display(),
+                revert.document_payload_hash,
+                revert.synced_payload_hash,
+            ),
+        );
+    }
     // Phase 1 lossless-tree shadow projection (#lzlosstree): build the lossless
     // tree from the authoritative current text, render it, and log whether it
     // round-trips. Pure and non-blocking — the flat CRDT stays the authority and
@@ -2863,6 +2885,10 @@ fn run_with_options_to_writer_in_pass(
         gate_verify: gate_verify_results,
         todo_signals: pending_report.todo_signals.clone(),
         status_sync,
+        status_sync_revert_guidance: status_sync_revert
+            .as_ref()
+            .map(agent_doc_document::status_projection::render_status_sync_revert),
+        status_sync_revert,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
@@ -10295,6 +10321,44 @@ mod tests {
         );
         assert_eq!(contract["status_sync"]["mode"], "additive");
         assert_eq!(contract["status_sync"]["interval_ms"], 300_000);
+        assert!(contract.get("status_sync_revert").is_none(), "{contract}");
+    }
+
+    /// `#statussyncrevert`: an editor change (2026-10-28 12:27Z, an IntelliJ
+    /// Ctrl+Z) that moved the managed block off its latest synced value is
+    /// reported in the preflight contract so the cycle re-syncs it.
+    #[test]
+    fn preflight_reports_a_status_sync_payload_reverted_off_its_synced_value() {
+        let dir = setup_project();
+        let doc = dir.path().join("status-sync-revert.md");
+        let synced = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:status patch=replace sync=\"Keep the published release current\" -->\n",
+            "<!-- status:sync -->\nLatest release: v0.35.559\n<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, synced.replace("v0.35.559", "v0.35.558")).unwrap();
+        agent_doc_snapshot_io::record_status_sync_synced_payload(&doc, synced).unwrap();
+
+        let mut output = Vec::new();
+        run_with_options_to_writer(
+            &doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .unwrap();
+        let contract: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            contract["status_sync_revert"]["synced_payload"],
+            "Latest release: v0.35.559"
+        );
+        let guidance = contract["status_sync_revert_guidance"].as_str().unwrap();
+        assert!(guidance.contains("does not stick"), "{guidance}");
     }
 
     #[test]

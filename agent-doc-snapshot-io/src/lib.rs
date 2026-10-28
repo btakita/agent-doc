@@ -8,6 +8,9 @@ use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
 use agent_doc_git_io::revision::HeadWorktreeFallback;
 
+pub mod status_sync_synced;
+pub use status_sync_synced::{load_status_sync_synced_payload, record_status_sync_synced_payload};
+
 /// Load the content-bearing merge baseline from the durable state ledger.
 pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
     Ok(load_document_state_projection(doc)?

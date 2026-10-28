@@ -36,6 +36,7 @@ agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.559" }
 agent-doc-repair-command-io = { path = "../agent-doc-repair-command-io", version = "0.35.559" }
 agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.35.559" }
 agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.559" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.559" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.559" }
 agent-doc-template = { path = "../agent-doc-template", version = "0.35.559" }
 agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.559" }
@@ -50,6 +51,5 @@ serde_json = "1"
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.559" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.559" }
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.559" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.559" }
 agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.559" }
 tempfile = "3"

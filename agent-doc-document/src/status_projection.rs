@@ -625,6 +625,114 @@ pub fn render_status_sync_checkpoint_evidence(content: &str) -> Option<String> {
     Some(rendered)
 }
 
+/// The `status:sync` payload of a sync-managed `agent:status`: `Some` only when
+/// the status opening marker carries a `sync` instruction and its body holds a
+/// managed block. This is the derived state a status writer records as the
+/// latest synced value (`#statussyncrevert`).
+pub fn status_sync_managed_payload(content: &str) -> Option<String> {
+    let components = element::parse(content).ok()?;
+    let status = components
+        .iter()
+        .find(|component| component.name == "status")?;
+    status_sync_directive_attrs(content, status).ok()??;
+    crate::status_sync_tree::split_status_sync_body(status.content(content))
+        .ok()?
+        .1
+}
+
+/// `#statussyncrevert`: the document's `status:sync` payload no longer matches
+/// the latest value a status writer synced into it.
+///
+/// On 2026-10-28 12:27Z (tasks/agent-doc/agent-doc-bugs.md) the operator
+/// pressed Ctrl+Z in IntelliJ to undo a typo; the IDE's undo stack holds every
+/// agent edit as an undoable command, so the next Ctrl+Z reverted the agent's
+/// 07:41Z `status set` (v0.35.559 back to v0.35.558). The editor reported it as
+/// operator text, which it is, and nothing re-synced it. The operator decided
+/// that a sync-managed block is derived state owned by its `sync` instruction:
+/// an editor edit to it (an undo, a hand edit) never sticks, and the next sync
+/// checkpoint rewrites it from the instruction's authoritative source.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatusSyncRevert {
+    /// The latest payload a status writer landed, verbatim.
+    pub synced_payload: String,
+    /// First 12 hex digits of the synced payload's SHA-256.
+    pub synced_payload_hash: String,
+    /// First 12 hex digits of the document's current payload's SHA-256 (the
+    /// empty payload when the block is gone).
+    pub document_payload_hash: String,
+}
+
+/// Compare the document's managed payload against the latest synced payload.
+///
+/// `None` when the status is not sync-managed, when nothing was ever synced,
+/// or when the payloads match modulo surrounding whitespace. A removed block
+/// counts as a revert.
+pub fn status_sync_revert(content: &str, synced_payload: Option<&str>) -> Option<StatusSyncRevert> {
+    let synced = synced_payload?.trim();
+    if synced.is_empty() {
+        return None;
+    }
+    let components = element::parse(content).ok()?;
+    let status = components
+        .iter()
+        .find(|component| component.name == "status")?;
+    status_sync_directive_attrs(content, status).ok()??;
+    let current = crate::status_sync_tree::split_status_sync_body(status.content(content))
+        .ok()?
+        .1
+        .unwrap_or_default();
+    if current.trim() == synced {
+        return None;
+    }
+    let short = |text: &str| {
+        agent_doc_hash::content_hash(text)
+            .chars()
+            .take(12)
+            .collect()
+    };
+    Some(StatusSyncRevert {
+        synced_payload: synced.to_string(),
+        synced_payload_hash: short(synced),
+        document_payload_hash: short(current.trim()),
+    })
+}
+
+/// Checkpoint text for a [`StatusSyncRevert`]: the block was changed outside a
+/// status writer, the change does not stick, and this checkpoint must write.
+pub fn render_status_sync_revert(revert: &StatusSyncRevert) -> String {
+    let quoted = revert
+        .synced_payload
+        .lines()
+        .map(|line| format!("> {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "The `status:sync` payload was changed outside agent-doc's status writers (for example \
+         an editor undo or a hand edit): the document holds sha256 {}, but the latest synced \
+         value is sha256 {}. The block is derived state owned by the `sync` instruction, so \
+         that change does not stick. Re-derive the answer from the instruction's \
+         authoritative source and write it with `agent-doc status set` even if it equals the \
+         latest synced value below; do not keep the document's text because an operator \
+         edited it. Text outside the block is not affected.\n\
+         Latest synced value:\n{quoted}",
+        revert.document_payload_hash, revert.synced_payload_hash,
+    )
+}
+
+/// [`render_status_sync_checkpoint_evidence`] plus, when the document's payload
+/// diverged from `synced_payload`, the [`render_status_sync_revert`] demand.
+pub fn render_status_sync_checkpoint_evidence_with_synced(
+    content: &str,
+    synced_payload: Option<&str>,
+) -> Option<String> {
+    let mut rendered = render_status_sync_checkpoint_evidence(content)?;
+    if let Some(revert) = status_sync_revert(content, synced_payload) {
+        rendered.push('\n');
+        rendered.push_str(&render_status_sync_revert(&revert));
+    }
+    Some(rendered)
+}
+
 /// Apply `write --status` semantics while honoring an optional status sync
 /// directive. Documents without `sync` retain the legacy destructive replace.
 pub fn update_status_content(content: &str, text: &str) -> Result<String> {
@@ -1290,6 +1398,75 @@ mod tests {
                 "unexpected error for {marker}: {err:#}"
             );
         }
+    }
+
+    /// `#statussyncrevert`: a sync-managed payload that no longer matches the
+    /// latest synced value (2026-10-28 12:27Z: an IntelliJ Ctrl+Z put the
+    /// v0.35.558 text back over the agent's v0.35.559 sync) is a revert the
+    /// checkpoint must re-sync over; matching or never-synced payloads are not.
+    #[test]
+    fn status_sync_revert_detects_an_editor_change_to_the_synced_payload() {
+        let doc = |payload: &str| {
+            format!(
+                "<!-- agent:status sync=\"##sync-release\" -->\nprose\n\n<!-- status:sync -->\n{payload}\n<!-- /status:sync -->\n<!-- /agent:status -->\n"
+            )
+        };
+        let synced = "Latest release: v0.35.559";
+        let current = doc(synced);
+        assert_eq!(
+            status_sync_managed_payload(&current)
+                .as_deref()
+                .map(str::trim),
+            Some(synced)
+        );
+        assert_eq!(status_sync_revert(&current, Some(synced)), None);
+        // Surrounding whitespace is not a revert.
+        assert_eq!(
+            status_sync_revert(&current, Some("\n  Latest release: v0.35.559\n")),
+            None
+        );
+        // Nothing synced yet: nothing to demand.
+        assert_eq!(status_sync_revert(&current, None), None);
+        assert_eq!(status_sync_revert(&current, Some("  ")), None);
+
+        let reverted = doc("Latest release: v0.35.558");
+        let revert = status_sync_revert(&reverted, Some(synced)).unwrap();
+        assert_eq!(revert.synced_payload, synced);
+        assert_eq!(
+            revert.synced_payload_hash,
+            agent_doc_hash::content_hash(synced)[..12]
+        );
+        assert_eq!(
+            revert.document_payload_hash,
+            agent_doc_hash::content_hash("Latest release: v0.35.558")[..12]
+        );
+        let rendered =
+            render_status_sync_checkpoint_evidence_with_synced(&reverted, Some(synced)).unwrap();
+        assert!(
+            rendered.contains("> Latest release: v0.35.558"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("> Latest release: v0.35.559"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("does not stick"), "{rendered}");
+        assert!(rendered.contains("even if it equals"), "{rendered}");
+        // Without a revert the rendering is the plain evidence.
+        assert_eq!(
+            render_status_sync_checkpoint_evidence_with_synced(&current, Some(synced)),
+            render_status_sync_checkpoint_evidence(&current)
+        );
+
+        // A removed block is a revert too.
+        let removed =
+            "<!-- agent:status sync=\"##sync-release\" -->\nprose\n<!-- /agent:status -->\n";
+        assert!(status_sync_revert(removed, Some(synced)).is_some());
+
+        // A status without `sync` is not sync-managed: never a revert.
+        let unmanaged = "<!-- agent:status -->\n<!-- status:sync -->\nold\n<!-- /status:sync -->\n<!-- /agent:status -->\n";
+        assert_eq!(status_sync_managed_payload(unmanaged), None);
+        assert_eq!(status_sync_revert(unmanaged, Some(synced)), None);
     }
 
     /// `#statuspatchdrop` (c): the checkpoint quotes what the document holds,

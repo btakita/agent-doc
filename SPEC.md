@@ -73,6 +73,15 @@
   memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
   and [Document Format](specs/02-document-format.md).
 
+- A sync-managed `status:sync` payload is derived state owned by the `sync`
+  instruction (`#statussyncrevert`): every status writer records the payload
+  it landed, and preflight plus the mid-turn and final checkpoints demand a
+  re-sync (`status set`, even with an unchanged answer) when the document's
+  payload no longer matches it, as when an IDE undo walked back past the
+  operator's own typo into the agent's status edit (2026-10-28 12:27Z). Undo
+  stays available; operator text outside the block is untouched. See
+  [Document Format](specs/02-document-format.md).
+
 - `agent-doc serve`'s `POST /save` is a whole-document write with no base
   (`#servesavebypass`). It is refused with `409 Conflict` while an editor
   replica holds the document, and writes nothing and commits nothing then;

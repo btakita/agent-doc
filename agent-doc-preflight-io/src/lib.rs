@@ -1181,6 +1181,16 @@ pub struct PreflightOutput {
     /// `sync-mode` determines additive managed-block vs protected replace behavior.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_sync: Option<agent_doc_document::status_projection::StatusSyncDirective>,
+    /// `#statussyncrevert`: the managed `status:sync` payload no longer holds
+    /// the latest value a status writer synced (an editor undo or hand edit put
+    /// other text there). The block is derived state owned by `sync`, so this
+    /// cycle must re-derive it and write it with `agent-doc status set` even if
+    /// the answer equals `synced_payload`; the operator's change does not stick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_sync_revert: Option<agent_doc_document::status_projection::StatusSyncRevert>,
+    /// Plain-language instruction for [`Self::status_sync_revert`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_sync_revert_guidance: Option<String>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

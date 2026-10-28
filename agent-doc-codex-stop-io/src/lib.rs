@@ -634,10 +634,15 @@ fn final_status_sync_continuation(file: &Path, stop_hook_active: bool) -> Result
         file.display(),
         // `#statuspatchdrop` (c): quote the current payload so "did the answer
         // change" is decided against the document, not the agent's memory of a
-        // status write that may not have landed.
-        agent_doc_document::status_projection::render_status_sync_checkpoint_evidence(&content)
-            .map(|evidence| format!("\n{evidence}"))
-            .unwrap_or_default(),
+        // status write that may not have landed. `#statussyncrevert`: when an
+        // editor change (an IDE undo) moved the block off the latest synced
+        // value, demand the re-sync instead of accepting it as operator text.
+        agent_doc_document::status_projection::render_status_sync_checkpoint_evidence_with_synced(
+            &content,
+            status_sync_synced_payload_for_checkpoint(file, &content, "stop_hook").as_deref(),
+        )
+        .map(|evidence| format!("\n{evidence}"))
+        .unwrap_or_default(),
     )))
 }
 
@@ -790,6 +795,33 @@ fn claude_reported_writeback_continuation(
     Some(ClaudeStopContinuation {
         reason: claude_reported_writeback_reason(&file.display().to_string(), &debts),
     })
+}
+
+/// `#statussyncrevert`: the latest synced `status:sync` payload for a
+/// checkpoint, logging `status_sync_operator_revert_detected` when the document
+/// no longer holds it. An unreadable record reads as absent (no demand).
+fn status_sync_synced_payload_for_checkpoint(
+    file: &Path,
+    content: &str,
+    source: &str,
+) -> Option<String> {
+    let synced = agent_doc_snapshot_io::load_status_sync_synced_payload(file)
+        .ok()
+        .flatten()?;
+    if let Some(revert) =
+        agent_doc_document::status_projection::status_sync_revert(content, Some(&synced))
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "status_sync_operator_revert_detected file={} source={source} document_payload_hash={} synced_payload_hash={} action=demand_resync (#statussyncrevert)",
+                file.display(),
+                revert.document_payload_hash,
+                revert.synced_payload_hash,
+            ),
+        );
+    }
+    Some(synced)
 }
 
 /// [`apply_claude_stop`] with the supervisor drain-readiness probe injected.
@@ -4579,6 +4611,49 @@ mod tests {
         );
         // The recursion bit still passes the following Stop through.
         assert_eq!(final_status_sync_continuation(&doc, true).unwrap(), None);
+    }
+
+    /// `#statussyncrevert`: on 2026-10-28 12:27Z an IntelliJ Ctrl+Z reverted the
+    /// agent's synced v0.35.559 payload to v0.35.558 as operator text. The final
+    /// checkpoint compares the document against the recorded synced value and
+    /// demands a re-sync instead of accepting the revert.
+    #[test]
+    fn final_status_sync_checkpoint_demands_a_resync_over_an_editor_revert() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        let synced = concat!(
+            "<!-- agent:status sync=\"Keep the release current\" -->\n",
+            "<!-- status:sync -->\nLatest release: v0.35.559\n<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n",
+        );
+        // A document still holding its synced value is not asked to re-sync.
+        let current = dir.path().join("current.md");
+        fs::write(&current, synced).unwrap();
+        agent_doc_snapshot_io::record_status_sync_synced_payload(&current, synced).unwrap();
+        let reason = final_status_sync_continuation(&current, false)
+            .unwrap()
+            .unwrap();
+        assert!(!reason.contains("does not stick"), "{reason}");
+
+        // The synced value landed, then the editor undo put the older text back.
+        fs::write(&doc, synced.replace("v0.35.559", "v0.35.558")).unwrap();
+        agent_doc_snapshot_io::record_status_sync_synced_payload(&doc, synced).unwrap();
+        let reason = final_status_sync_continuation(&doc, false)
+            .unwrap()
+            .unwrap();
+        assert!(reason.contains("> Latest release: v0.35.558"), "{reason}");
+        assert!(reason.contains("does not stick"), "{reason}");
+        assert!(
+            reason.contains("Latest synced value:\n> Latest release: v0.35.559"),
+            "{reason}"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("status_sync_operator_revert_detected")
+                && ops.contains("source=stop_hook"),
+            "{ops}"
+        );
     }
 
     #[test]

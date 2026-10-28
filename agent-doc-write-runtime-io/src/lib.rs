@@ -251,6 +251,54 @@ use agent_doc_write_command_io::{CommandOptions, CommitMode, TemplateApplyOption
 
 thread_local! {
     static RESPONSE_STDIN_OVERRIDE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// `#statussyncrevert`: the `status:sync` payload of the response's
+    /// `patch:status`, noted when the response is read and recorded as the
+    /// latest synced value once the write lands (or is retained).
+    static RESPONSE_STATUS_SYNC_PAYLOAD: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// `#statussyncrevert`: the managed payload a response's `patch:status` writes,
+/// `None` when the response has no status patch or the patch carries no block.
+fn response_status_sync_payload(response: &str) -> Option<String> {
+    let (patches, _) = template::parse_patches(response).ok()?;
+    let status = patches
+        .into_iter()
+        .rev()
+        .find(|patch| patch.name == "status")?;
+    let (_, payload) =
+        agent_doc_document::status_sync_tree::split_status_sync_body(&status.content).ok()?;
+    payload
+        .map(|payload| payload.trim().to_string())
+        .filter(|payload| !payload.is_empty())
+}
+
+/// Record the payload the response's `patch:status` landed (`#statussyncrevert`).
+/// Only a sync-managed document is compared against it, so recording it for a
+/// document without `sync` is inert. Failure is logged, never fatal.
+fn record_response_status_sync_payload(file: &Path) {
+    let Some(payload) = RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    match agent_doc_snapshot_io::status_sync_synced::record_status_sync_synced_payload_text(
+        file, &payload,
+    ) {
+        Ok(Some(hash)) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "status_sync_synced_payload_recorded file={} payload_hash={hash} source=patch_status (#statussyncrevert)",
+                file.display()
+            ),
+        ),
+        Ok(None) => {}
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "status_sync_synced_payload_recorded file={} source=patch_status outcome=error error={} (#statussyncrevert)",
+                file.display(),
+                format!("{err:#}").replace('\n', " | ")
+            ),
+        ),
+    }
 }
 
 fn resolve_current_document(
@@ -1017,6 +1065,13 @@ fn configured_stdin_timeout_secs() -> u64 {
 }
 
 fn read_response_input() -> Result<String> {
+    let response = read_response_input_raw()?;
+    let payload = response_status_sync_payload(&response);
+    RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| *slot.borrow_mut() = payload);
+    Ok(response)
+}
+
+fn read_response_input_raw() -> Result<String> {
     if let Some(response) = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.borrow_mut().take()) {
         return Ok(response);
     }
@@ -3662,6 +3717,10 @@ fn run_command_inner_within_pass(
             .as_ref()
             .is_some_and(|mode| mode.is_crdt());
 
+    // `#statussyncrevert`: only this write's response may name the payload the
+    // write records; a read by an earlier command in this thread must not.
+    // A response already peeked is re-read (and re-noted) by the write below.
+    RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| slot.borrow_mut().take());
     let write_result = if options.is_ipc {
         run_ipc(file, baseline.as_deref(), write_flags)
     } else if options.is_stream || template_flag_on_crdt_doc {
@@ -3714,6 +3773,11 @@ fn run_command_inner_within_pass(
 
     let response_write_retained =
         write_result.is_err() && write_outcome_retains_closeout_mutations(&write_result);
+    if write_result.is_ok() || response_write_retained {
+        record_response_status_sync_payload(file);
+    } else {
+        RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| slot.borrow_mut().take());
+    }
 
     let pending_mutation_outcome = if write_outcome_retains_closeout_mutations(&write_result) {
         match apply_pending_and_status_mutations(
@@ -5261,6 +5325,58 @@ mod gh131_pending_only_tests;
 // editor replica.
 #[cfg(test)]
 mod binary_owned_cli_write_tests;
+
+#[cfg(test)]
+mod response_status_sync_payload_tests {
+    //! `#statussyncrevert`: a response's `patch:status` is a status writer, so
+    //! its managed payload becomes the latest synced value the checkpoints
+    //! compare the document against.
+    use super::*;
+
+    #[test]
+    fn patch_status_payload_is_the_managed_block_body() {
+        let response = concat!(
+            "<!-- patch:exchange -->\nanswer\n<!-- /patch:exchange -->\n",
+            "<!-- patch:status -->\nprose\n\n<!-- status:sync -->\nLatest release: v0.35.559\n<!-- /status:sync -->\n<!-- /patch:status -->\n",
+        );
+        assert_eq!(
+            response_status_sync_payload(response).as_deref(),
+            Some("Latest release: v0.35.559")
+        );
+        assert_eq!(
+            response_status_sync_payload(
+                "<!-- patch:status -->\nplain status, no block\n<!-- /patch:status -->\n"
+            ),
+            None
+        );
+        assert_eq!(
+            response_status_sync_payload("<!-- patch:exchange -->\nx\n<!-- /patch:exchange -->\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_landed_patch_status_payload_is_recorded_once() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("task.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:status sync=\"x\" -->\n<!-- /agent:status -->\n",
+        )
+        .unwrap();
+        RESPONSE_STATUS_SYNC_PAYLOAD
+            .with(|slot| *slot.borrow_mut() = Some("Latest release: v0.35.559".to_string()));
+        record_response_status_sync_payload(&doc);
+        assert_eq!(
+            agent_doc_snapshot_io::load_status_sync_synced_payload(&doc)
+                .unwrap()
+                .as_deref(),
+            Some("Latest release: v0.35.559")
+        );
+        assert!(RESPONSE_STATUS_SYNC_PAYLOAD.with(|slot| slot.borrow().is_none()));
+    }
+}
 
 #[cfg(test)]
 mod held_back_status_tests {

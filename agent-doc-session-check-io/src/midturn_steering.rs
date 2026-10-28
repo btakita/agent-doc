@@ -1686,16 +1686,38 @@ fn render_status_sync_checkpoint(
          above.{}",
         directive.instruction,
         file.display(),
-        status_sync_evidence_suffix(content),
+        status_sync_evidence_suffix(file, content),
     )
 }
 
 /// `#statuspatchdrop` (c): the current managed payload, so the checkpoint is
 /// answered by comparing against the document, never from memory.
-fn status_sync_evidence_suffix(content: &str) -> String {
-    agent_doc_document::status_projection::render_status_sync_checkpoint_evidence(content)
-        .map(|evidence| format!("\n{evidence}"))
-        .unwrap_or_default()
+///
+/// `#statussyncrevert`: when the block no longer holds the latest synced value
+/// (an editor undo or hand edit), the suffix also demands the re-sync.
+fn status_sync_evidence_suffix(file: &Path, content: &str) -> String {
+    let synced = agent_doc_snapshot_io::load_status_sync_synced_payload(file)
+        .ok()
+        .flatten();
+    if let Some(revert) =
+        agent_doc_document::status_projection::status_sync_revert(content, synced.as_deref())
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "status_sync_operator_revert_detected file={} source=midturn_checkpoint document_payload_hash={} synced_payload_hash={} action=demand_resync (#statussyncrevert)",
+                file.display(),
+                revert.document_payload_hash,
+                revert.synced_payload_hash,
+            ),
+        );
+    }
+    agent_doc_document::status_projection::render_status_sync_checkpoint_evidence_with_synced(
+        content,
+        synced.as_deref(),
+    )
+    .map(|evidence| format!("\n{evidence}"))
+    .unwrap_or_default()
 }
 
 /// Return the periodic status-sync reminder for an open owner turn.

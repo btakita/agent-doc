@@ -26,6 +26,12 @@ pub trait StatusWriteEffects {
 
     fn attribute_agent_write_to_baseline(&self, file: &Path, before: &str, after: &str);
 
+    /// `#statussyncrevert`: record the landed `status:sync` payload as the
+    /// latest synced value, so a later editor change to the block (an IDE
+    /// undo, a hand edit) is recognized as a revert the next checkpoint must
+    /// re-sync over.
+    fn record_status_sync_synced(&self, file: &Path, landed: &str);
+
     fn log_op(&self, file: &Path, message: &str);
 }
 
@@ -80,6 +86,29 @@ impl StatusWriteEffects for RuntimeStatusWriteEffects {
                     format!("{err:#}").replace('\n', " | ")
                 ),
             );
+        }
+    }
+
+    fn record_status_sync_synced(&self, file: &Path, landed: &str) {
+        // Bookkeeping after a landed write: a failure only means the next
+        // checkpoint cannot detect a revert, never that the status write failed.
+        match agent_doc_snapshot_io::record_status_sync_synced_payload(file, landed) {
+            Ok(Some(hash)) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "status_sync_synced_payload_recorded file={} payload_hash={hash} (#statussyncrevert)",
+                    file.display()
+                ),
+            ),
+            Ok(None) => {}
+            Err(err) => agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "status_sync_synced_payload_recorded file={} outcome=error error={} (#statussyncrevert)",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " | ")
+                ),
+            ),
         }
     }
 
@@ -222,12 +251,14 @@ fn land_status_projection<E: StatusWriteEffects + ?Sized>(
         if attribute_baseline {
             effects.attribute_agent_write_to_baseline(file, full_content, new_doc);
         }
+        effects.record_status_sync_synced(file, new_doc);
         return Ok(());
     }
     effects.converge_or_disk_write(file, full_content, new_doc, op)?;
     if attribute_baseline {
         effects.attribute_agent_write_to_baseline(file, full_content, new_doc);
     }
+    effects.record_status_sync_synced(file, new_doc);
     Ok(())
 }
 
@@ -339,6 +370,7 @@ mod tests {
         attributed_before: RefCell<Option<String>>,
         attributed_after: RefCell<Option<String>>,
         logs: RefCell<Vec<String>>,
+        synced_recorded: RefCell<Option<String>>,
     }
 
     impl TestEffects {
@@ -356,6 +388,7 @@ mod tests {
                 attributed_before: RefCell::new(None),
                 attributed_after: RefCell::new(None),
                 logs: RefCell::new(Vec::new()),
+                synced_recorded: RefCell::new(None),
             }
         }
 
@@ -409,6 +442,10 @@ mod tests {
             self.attributions.set(self.attributions.get() + 1);
             *self.attributed_before.borrow_mut() = Some(before.to_string());
             *self.attributed_after.borrow_mut() = Some(after.to_string());
+        }
+
+        fn record_status_sync_synced(&self, _file: &Path, landed: &str) {
+            *self.synced_recorded.borrow_mut() = Some(landed.to_string());
         }
 
         fn log_op(&self, _file: &Path, message: &str) {
@@ -570,6 +607,12 @@ mod tests {
             "<!-- agent:status patch=replace sync=\"Keep release current\" custom=kept -->"
         ));
 
+        assert_eq!(
+            effects.synced_recorded.borrow().as_deref(),
+            Some(updated.as_str()),
+            "a landed sync write records its payload as the latest synced value"
+        );
+
         set(&effects, &doc, "Published: v1.2.3").unwrap();
 
         let reapplied = effects.updated.borrow().clone().unwrap();
@@ -591,6 +634,89 @@ mod tests {
                 .any(|line| line.contains("lossless_write_parity op=status_set result=mismatch")),
             "{logs:?}"
         );
+    }
+
+    /// `#statussyncrevert` regression, replaying 2026-10-28 12:27Z on
+    /// tasks/agent-doc/agent-doc-bugs.md: `status set` synced v0.35.559 at
+    /// 07:41Z; five hours later the operator's Ctrl+Z walked IntelliJ's undo
+    /// stack past their own typo into that agent edit and put the v0.35.558
+    /// payload back, reported as operator text. The revert must be detected
+    /// against the recorded synced value, and the re-sync must rewrite only the
+    /// managed block, keeping the operator's other status prose and typing.
+    #[test]
+    fn an_editor_undo_of_a_synced_payload_is_detected_and_resynced_without_touching_operator_text()
+    {
+        use agent_doc_document::status_projection::{
+            render_status_sync_checkpoint_evidence_with_synced, status_sync_revert,
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("bugs.md");
+        let before = concat!(
+            "## Status <!-- agent:status patch=replace sync=\"##sync-release\" -->\n\n",
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n\n",
+            "<!-- status:sync -->\n",
+            "Latest release: agent-doc v0.35.558 (release commit `00caa013ac`). v0.35.559 is being prepared.\n",
+            "<!-- /status:sync -->\n",
+            "<!-- /agent:status -->\n\n",
+            "## Loop <!-- agent:loop interval=\"1h\" -->\n- watch issues\n<!-- /agent:loop -->\n",
+        );
+        std::fs::write(&doc, before).unwrap();
+        let effects = TestEffects::new();
+        let synced_text =
+            "Released and published agent-doc v0.35.559 from release commit `5870713c02`.";
+
+        // 07:41:30Z: the agent's status set lands and is recorded.
+        set(&effects, &doc, synced_text).unwrap();
+        let synced_doc = effects.updated.borrow().clone().unwrap();
+        let recorded = effects.synced_recorded.borrow().clone().unwrap();
+        let recorded_payload =
+            agent_doc_document::status_projection::status_sync_managed_payload(&recorded).unwrap();
+        assert_eq!(recorded_payload.trim(), synced_text);
+        assert_eq!(
+            status_sync_revert(&synced_doc, Some(&recorded_payload)),
+            None
+        );
+
+        // 12:27:36Z: the IDE undo restores the 07:41:15Z text exactly, and the
+        // operator keeps typing elsewhere (here: a note in the loop body).
+        let reverted = before.replace("- watch issues", "- watch issues\n- operator note");
+        std::fs::write(&doc, &reverted).unwrap();
+        let revert = status_sync_revert(&reverted, Some(&recorded_payload))
+            .expect("the undone payload differs from the latest synced value");
+        assert_eq!(revert.synced_payload, synced_text);
+        let checkpoint =
+            render_status_sync_checkpoint_evidence_with_synced(&reverted, Some(&recorded_payload))
+                .unwrap();
+        assert!(checkpoint.contains("does not stick"), "{checkpoint}");
+        assert!(
+            checkpoint.contains(&format!("> {synced_text}")),
+            "{checkpoint}"
+        );
+        assert!(
+            checkpoint.contains("> Latest release: agent-doc v0.35.558"),
+            "{checkpoint}"
+        );
+
+        // The checkpoint's re-sync writes the freshly derived value.
+        let fresh = "Released and published agent-doc v0.35.559; main is at `67413e99fd`.";
+        set(&effects, &doc, fresh).unwrap();
+        let resynced = effects.updated.borrow().clone().unwrap();
+        assert!(resynced.contains(fresh), "{resynced}");
+        assert!(!resynced.contains("v0.35.558"), "{resynced}");
+        assert!(
+            resynced.contains("- operator note"),
+            "operator text outside the block survives"
+        );
+        assert!(
+            resynced.contains("📤 Queue handoff: 1 reported item"),
+            "{resynced}"
+        );
+        let recorded_after = effects.synced_recorded.borrow().clone().unwrap();
+        let recorded_after =
+            agent_doc_document::status_projection::status_sync_managed_payload(&recorded_after)
+                .unwrap();
+        assert_eq!(recorded_after.trim(), fresh);
+        assert_eq!(status_sync_revert(&resynced, Some(&recorded_after)), None);
     }
 
     const NESTED_SYNC_DOC: &str = concat!(

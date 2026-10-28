@@ -1,9 +1,9 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 1e5af625-094d-4a1a-a550-dc47b70b064a
+  claude: f08cd727-ebd1-4b95-8305-635688e2d56c
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
-agent: claude
+agent: grok
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -42,10 +41,22 @@ Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · �
 Compacted content:
 - Archived 68 response topic(s): do [#clearqueuedciflake], do [#startcwdfallback], [#krwr] decision; [#ddj8] Is `~` as an agent-doc project safe?; Subagent completed: `subagent:krwr` returned work for queue item “[#krwr]: deleting a claimed queue row while adding ...; 65 more
 - Prior summary/context: prior compacted content: Archived 38 response topic(s): session resumed after /clear; do [#decisionbacklogstrike]; id...
-<!-- agent:boundary:069c4082:agent-doc-bugs -->
+> **Queue prompt:** Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.
+
+**Deferred:** dispatched to `subagent:agentrules` generation 1, worker `01a183a4-8f9b-7bb2-8cce-ae26ac1f190e`, running on `feat/agent-rules` in `/home/brian/worktrees/agent-doc-agentrules` (base `dc7efbcbf6`). Integration, the single `make install`, and closing this row wait for that worker's report.
+
+### Re: agent:rules dispatch — grok-4.7 · 2026-10-28T13:55-04:00
+
+The `agent:rules` row is claimed and running. The worker owns the spec, tests, build, commit, and push of `feat/agent-rules`. This cycle does not implement the tag inline.
+
+The Grok skill was behind the binary (`0.35.557` vs `0.35.559`). `agent-doc skill install --harness grok` updated `.grok/skills/agent-doc` to `0.35.559`. Those skill files are dirty in the agent-loop checkout and are outside this queue item.
+
+No new backlog item. The row is the work, and it stays queued under the running claim.
+<!-- agent:boundary:2e0fc005 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 [#subagent:agentrules#1] Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -707,7 +707,31 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 **Dispatched:**
 - **The duplicated Todo line under `#pmsyncstillopen`:** the half-typed copy first appears in commit `28cda030f4`, my retried closeout, which landed while you were typing. The ops log shows a retained write scoped to the Todo landing at 03:16:42Z. A worker is tracing why that write carried your partial line, and fixing it so a retried write never puts an old snapshot of your typing back. You can delete the partial line yourself; I won't touch it.
 - **`sdk-demo.md` ignoring `subagents`:** a worker is checking why its `agent:run priority subagents go` rows run inline, and fixing it so every path honors `subagents` or says loudly that it can't.
-<!-- agent:boundary:8d2af49d -->
+> **Chat prompt (#chatprompt:af080dce2a98):** Can you see the tmux layout when I open game-sessions.md?
+
+### Re: tmux layout with game-sessions.md open — opus-5 · 2026-10-28T00:08-04:00
+
+**Yes.** I read the live tmux server without changing anything. At about 04:05Z:
+
+| Window | Panes |
+|---|---|
+| `0:0` agent-doc (visible) | `%6` agent-doc-bugs.md, 60 columns · `%16` game-sessions.md, 179 columns (active) |
+| `0:1` stash | `%1` zsh, `%10` api.md, **`%17` sdk-demo.md (`sh`)**, **`%3` sdk-demo.md (`sh`)**, `%8` triage.md, `%11` sdk-design.md, `%2` lazily.md, `%4` frontend.md, `%12` sdk-pr.md, `%13` docs.md, `%7` infra.md |
+| `2:0` grok | `%14` claude · `%15` grok |
+
+Right now the visible window has two panes, but the split is 60 | 179 rather than an even editor split.
+
+**Two panes in the stash window are titled `sdk-demo.md`, and both run `sh` instead of `agent-doc`.** That's my leading guess for your third pane.
+
+haiven-dev's ops log also shows a layout sync failing around 03:59Z:
+- it first saw a pane-count mismatch (2 columns wanted, 0 panes observed);
+- then it kept retrying with `missing_tmux_session`;
+- `sync_tmux_layout` exited with code 1 (`tmux_effect_retry_pending`).
+
+**Dispatched:** your extraction report (all `project.md` presets copied into `game-sessions.md`, 3 tmux panes when you open it, and `sdk-demo.md` at half width in the agent-doc-bugs.md | sdk-demo.md split) went to a worker, along with this layout snapshot and the log lines. It may only read your tmux server, so any pane cleanup will come back to you as instructions rather than being done for you.
+
+Still running: the duplicate-Todo-line fix and the `sdk-demo.md` `subagents` fix.
+<!-- agent:boundary:72822783 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -717,10 +741,11 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 - 🚧 [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
 - 🚧 [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
 - 📥 do [#queue-blocked-marker]
-- 🟡 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
+- 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
   - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
   - When I open game-sessions.md in the editor, there are 3 tmux panes.
   - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewpord is half width.
+- 📥 tmux sync failure: Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

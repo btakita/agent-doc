@@ -233,7 +233,14 @@ The release worker's report is persisted. Release is blocked. No version bump, t
 `#subagent:nestvector` is on origin/main at `8862b2f9b5`. `#subagent:nestedproject` is not on origin/main. The published release is still agent-doc v0.35.560 at `bd971e9b87`.
 
 The same row also listed `#subagent:nestedlineage`. That work is still running on `fix/nested-run-lineage`, and `#subagent:nestedproject` still has uncommitted edits on `fix/nested-project-md`. A release that includes both waits until those two are on main.
-<!-- agent:boundary:22ffb2cb:agent-doc-bugs -->
+> **Queue prompt:** release + publish
+>   - Include #subagent:nestvector + #subagent:nestedproject
+>   - Include #subagent:nestedlineage
+
+### Re: release worker report is closed — grok-4.7 · 2026-10-28T18:57-04:00
+
+The release worker reported this row blocked. No version bump, tag, `make release`, `make install`, or release commit was made. `#subagent:nestvector` is on origin/main at `8862b2f9b5`. `#subagent:nestedproject` is not on origin/main. `#subagent:nestedlineage` is running on `fix/nested-run-lineage`. The published release is agent-doc v0.35.560 at `bd971e9b87`.
+<!-- agent:boundary:6230f32b:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -245,9 +252,9 @@ The same row also listed `#subagent:nestedlineage`. That work is still running o
 - 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
 - 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
   - Use the AST to guide the agent.
-- ☑️ [#subagent:release#5] release + publish
-  - Include #subagent:nestvector + #subagent:nestedproject
-  - Include #subagent:nestedlineage
+- ~~release + publish~~
+  - ~~Include #subagent:nestvector + #subagent:nestedproject~~
+  - ~~Include #subagent:nestedlineage~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -841,9 +841,14 @@ fails closeout.
 `[#subagent-operator-request-<unique-id>]` packet in a closeout response is a pending
 operator decision, so the binary records it instead of advising. The packet is
 parsed structurally: a request-specific marker line (outside fenced code, not
-blockquoted, at most three leading spaces) followed without a blank line by
-canonical list fields `- *kind:* question|permission`, `- *blocking:* true`,
-and a concrete `- *request:*` line. Historical plain fields and emphasized or
+blockquoted, at most three leading spaces; canonically the top-level
+`- [#subagent-operator-request-<id>] subagent operator request` bullet)
+followed without a blank line by field bullets nested beneath it,
+`- *kind:* question|permission`, `- *blocking:* true`, and a concrete
+`- *request:*` line. Context and choices nest one level deeper, and a line
+nested beneath a field belongs to that field, never to the packet's fields
+([§7](07-orchestration-commands.md)). The historical flat
+layout (bare marker line, top-level fields), plain fields, and emphasized or
 bold key variants remain readable; the protocol's `<...>` placeholders never
 count. Marker ids use the reserved
 `subagent-operator-request-` prefix plus a request-specific alphanumeric/hyphen
@@ -868,7 +873,7 @@ and gates, so a todo layered on an item this closeout gated names
 `(source: agent:review [#<id>])`.
 
 The current packet protocol also carries
-`- *queue_item:* <origin-queue-item>` verbatim. Its derived todo owns
+`  - *queue_item:* <origin-queue-item>` verbatim. Its derived todo owns
 `[#<packet-id>]`; an explicit todo suppresses
 derivation only when it owns that same id. While the todo is open, the matching
 live queue row carries identity-neutral `🙋` immediately beside any worker

@@ -3001,8 +3001,31 @@ fn write_heading_or_already_recorded_ask_emits_no_operator_todo_advisory() {
 }
 
 /// `#packettodo`: the 3ad3e23c closeout response — a blocking
-/// `[#subagent-operator-request-<unique-id>]` packet beside a review gate.
+/// `[#subagent-operator-request-<unique-id>]` packet beside a review gate, in
+/// the canonical nested-list layout.
 const BLOCKING_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
+`#apipendingorphans` is gated on review of #733 and on your decision below.\n\
+\n\
+- [#subagent-operator-request-pending-rows] subagent operator request\n\
+\x20\x20- *queue_item:* do [#apipendingorphans]\n\
+\x20\x20- *kind:* question\n\
+\x20\x20- *blocking:* true\n\
+\x20\x20- *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?\n\
+\x20\x20- *context:*\n\
+\x20\x20\x20\x20- PR #733 stops new stuck rows for refused sends and edits.\n\
+\x20\x20\x20\x20- The rows from the 2026-10-20 incident are still `pending`.\n\
+\x20\x20- *choices:*\n\
+\x20\x20\x20\x20- **withdraw**: soft-delete the stuck sends.\n\
+\x20\x20\x20\x20- **resubmit**: send each stuck row to FPE again.\n\
+\x20\x20\x20\x20- **release**: set the stuck rows to `allowed` without screening.\n\
+\x20\x20\x20\x20- **leave**: change nothing.\n\
+\n\
+**Recommendation:** withdraw, after STG gets migration `0022`.\n\
+<!-- /patch:exchange -->\n";
+
+/// The same closeout in the historical flat packet layout that documents
+/// written before the nested list still carry.
+const LEGACY_FLAT_PACKET_RESPONSE: &str = "<!-- patch:exchange -->\n\
 `#apipendingorphans` is gated on review of #733 and on your decision below.\n\
 \n\
 [#subagent-operator-request-pending-rows] subagent operator request\n\
@@ -3038,11 +3061,17 @@ fn write_packet_closeout(doc: &std::path::Path, extra: &[&str], response: &str) 
 /// records the operator decision in `agent:todo` under the packet's own id.
 #[test]
 fn write_blocking_operator_request_packet_records_layered_todo_without_todo_add() {
+    for response in [BLOCKING_PACKET_RESPONSE, LEGACY_FLAT_PACKET_RESPONSE] {
+        assert_layered_packet_todo(response);
+    }
+}
+
+fn assert_layered_packet_todo(response: &str) {
     let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
     let stderr = write_packet_closeout(
         &doc,
         &["--pending-gate", "apipendingorphans"],
-        BLOCKING_PACKET_RESPONSE,
+        response,
     );
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -3065,7 +3094,7 @@ fn write_blocking_operator_request_packet_records_layered_todo_without_todo_add(
 
     // Replay of the same packet (no new gate; the response still cites the
     // item) folds into the open layered todo instead of duplicating it.
-    write_packet_closeout(&doc, &[], BLOCKING_PACKET_RESPONSE);
+    write_packet_closeout(&doc, &[], response);
     let content = fs::read_to_string(&doc).unwrap();
     assert_eq!(
         component_body(&content, "todo")
@@ -3167,13 +3196,14 @@ fn write_nonblocking_or_quoted_operator_request_packet_records_no_todo() {
     let nonblocking = BLOCKING_PACKET_RESPONSE.replace("*blocking:* true", "*blocking:* false");
     let fenced = BLOCKING_PACKET_RESPONSE
         .replace(
-            "[#subagent-operator-request-pending-rows] subagent operator request\n",
-            "```text\n[#subagent-operator-request-pending-rows] subagent operator request\n",
+            "- [#subagent-operator-request-pending-rows] subagent operator request\n",
+            "```text\n- [#subagent-operator-request-pending-rows] subagent operator request\n",
         )
         .replace(
-            "  - **leave**: change nothing.\n",
-            "  - **leave**: change nothing.\n```\n",
+            "    - **leave**: change nothing.\n",
+            "    - **leave**: change nothing.\n```\n",
         );
+    assert!(fenced.contains("```text\n") && fenced.contains("nothing.\n```\n"));
     let quoted = BLOCKING_PACKET_RESPONSE
         .lines()
         .map(|line| {

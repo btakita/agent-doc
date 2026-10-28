@@ -894,14 +894,18 @@ but MUST first honor any task authorization already resolved above. Before
 stopping, it sends or returns this packet without paraphrase:
 
 ```text
-[#subagent-operator-request-<unique-id>] subagent operator request
-- *queue_item:* <origin-queue-item>
-- *kind:* question | permission
-- *blocking:* true
-- *request:* <exact question or exact tool/action requiring permission>
-- *context:* <why it is needed, current state, target/scope, and risk or effect>
-- *choices:*
-  - **<label>**: <effect>
+- [#subagent-operator-request-<unique-id>] subagent operator request
+  - *queue_item:* <origin-queue-item>
+  - *kind:* question | permission
+  - *blocking:* true
+  - *request:* <exact question or exact tool/action requiring permission>
+  - *context:*
+    - <why it is needed>
+    - <current state>
+    - <target/scope>
+    - <risk or effect>
+  - *choices:*
+    - **<label>**: <effect>
 ```
 
 The worker MUST replace `<unique-id>` with a short request-specific lowercase
@@ -912,14 +916,30 @@ historical packets, but workers MUST NOT emit or reuse it. A closeout that
 presents two blocking packets with the same marker id fails before response
 capture and names the duplicate id.
 
-The packet MUST render its fields as list items and emphasize each key with its
-colon (`- *key:* value`) so the ask is easy to scan while retaining one stable
-key/value field per line. Choices are nested below `- *choices:*`. Historical
-plain `key: value` fields and the common colon-outside-emphasis or bold-key
-spellings remain read-compatible, but workers emit the canonical list form.
-The packet MUST include every offered choice with its effect, and MUST render
-each choice title in Markdown bold while leaving the effect as ordinary prose.
-`- *choices:* []` is valid only when the harness supplied no choices. The
+The packet MUST render as one nested Markdown list so the ask is easy to scan.
+The marker is the top-level bullet. Each field is one
+bullet indented two spaces beneath it, with its key emphasized together with
+its colon (`- *key:* value`), so every stable field keeps one line. The request
+stays one question or action on its `- *request:*` line. The context MUST NOT
+be one run-on line: it is an empty `- *context:*` bullet with short nested
+bullets beneath it, one fact each (why it is needed, current state,
+target/scope, risk or effect). Choices are nested the same way below
+`- *choices:*`. The packet MUST include every offered choice with its effect as
+its own bullet, and MUST render each choice title in Markdown bold while
+leaving the effect as ordinary prose. `- *choices:* []` is valid only when the
+harness supplied no choices.
+
+Parsing is indentation-aware. The first field line sets the field level; a line
+indented deeper belongs to the field above it, so context prose can never be
+read as a field, the shallowest bullets under `choices` are the choices (deeper
+bullets are choice detail), and nested lines under an otherwise empty
+`request` continue it. A line shallower than the field level, a blank line, or
+another marker ends the packet. Historical packets remain read-compatible: the
+flat layout (a bare marker line followed by top-level `- *key:* value` fields
+with choices nested under `- *choices:*`), plain `key: value` fields with
+choice bullets flush under `choices:`, and the common colon-outside-emphasis
+or bold-key spellings all parse to the same request. Workers emit only the
+nested layout. The
 coordinator MUST copy the
 complete packet verbatim into `agent:exchange`, present the same request from
 the main harness session, and send the operator's answer verbatim to the same

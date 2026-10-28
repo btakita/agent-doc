@@ -819,7 +819,20 @@ const OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS: usize = 40;
 ///
 /// A packet is a request-specific marker line (at most three leading spaces,
 /// so an indented code block never counts) followed, without a blank line, by
-/// canonical `- *key:* value` field lines (legacy `key: value` remains readable).
+/// its field lines. The canonical packet is a nested list: the marker is the
+/// top-level bullet (`- [#subagent-operator-request-<id>] subagent operator
+/// request`), each field is one `- *key:* value` bullet nested beneath it, and
+/// context lines and choices are nested one level deeper. The historical flat
+/// packet (a bare marker line followed by top-level `- *key:* value` or plain
+/// `key: value` fields, choices nested beneath `choices`) remains readable.
+///
+/// The indentation of the first field line is the field level. A line
+/// indented deeper belongs to the field above it: under `choices` the
+/// shallowest such bullets are the choices (deeper lines are choice detail),
+/// under `request` they continue an otherwise empty request, and under any
+/// other field (such as `context`) they are prose that can never be read as a
+/// field. A line indented shallower than the field level ends the packet.
+///
 /// It counts only when it carries `kind: question` or `kind: permission`,
 /// `blocking: true`, and a concrete `request:` (not the `<...>` protocol
 /// placeholder). Lines inside fenced code blocks and blockquoted (`>`) lines
@@ -852,44 +865,70 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
         };
         let mut kind = None;
         let mut blocking = None;
-        let mut request = None;
+        let mut request: Option<String> = None;
         let mut queue_item = None;
         let mut choice_labels = Vec::new();
-        let mut in_choices = false;
+        let mut field_indent: Option<usize> = None;
+        let mut current_key = String::new();
+        let mut choice_indent: Option<usize> = None;
         while index < lines.len() {
-            let field = lines[index].trim();
+            let raw = lines[index];
+            let field = raw.trim();
             if field.is_empty()
                 || agent_doc_queue::subagent_brief::subagent_operator_request_id(field).is_some()
             {
                 break;
             }
+            let line_indent = raw.len() - raw.trim_start().len();
+            let level = *field_indent.get_or_insert(line_indent);
+            if line_indent < level {
+                break;
+            }
             index += 1;
-            if in_choices && let Some(choice) = field.strip_prefix("- ") {
-                let label = choice
-                    .split_once(':')
-                    .map_or(choice, |(label, _)| label)
-                    .trim();
-                let label = label
-                    .strip_prefix("**")
-                    .and_then(|label| label.strip_suffix("**"))
-                    .unwrap_or(label)
-                    .trim();
-                if !label.is_empty() {
-                    choice_labels.push(label.to_string());
+            if line_indent > level || (current_key == "choices" && is_legacy_choice_line(field)) {
+                // Nested beneath the field above (or, for a historical flat
+                // packet, a choice bullet written at the field level).
+                match current_key.as_str() {
+                    "choices" => {
+                        let shallowest = *choice_indent.get_or_insert(line_indent);
+                        if line_indent <= shallowest
+                            && let Some(label) = operator_request_choice_label(field)
+                        {
+                            choice_labels.push(label.to_string());
+                        }
+                    }
+                    "request" => {
+                        if let Some(request) = request.as_mut() {
+                            let text = field.strip_prefix("- ").unwrap_or(field).trim();
+                            if !text.is_empty() {
+                                if !request.is_empty() {
+                                    request.push(' ');
+                                }
+                                request.push_str(text);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 continue;
             }
-            in_choices = false;
+            current_key.clear();
+            choice_indent = None;
             let Some((key, value)) = operator_request_field(field) else {
                 continue;
             };
-            match key.to_ascii_lowercase().as_str() {
+            let key = key.to_ascii_lowercase();
+            match key.as_str() {
                 "kind" => kind = Some(value.to_ascii_lowercase()),
                 "blocking" => blocking = Some(value.eq_ignore_ascii_case("true")),
                 "request" => request = Some(value.to_string()),
                 "queue_item" => queue_item = (!value.is_empty()).then(|| value.to_string()),
-                "choices" => in_choices = value.is_empty(),
                 _ => {}
+            }
+            // Only an empty field opens nested lines (`- *choices:* []` has none),
+            // so detail nested under an inline request never rewrites it.
+            if value.is_empty() {
+                current_key = key;
             }
         }
         let (Some(kind), Some(true), Some(request)) = (kind, blocking, request) else {
@@ -910,6 +949,35 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
         });
     }
     packets
+}
+
+/// A historical flat packet wrote its choices as bullets at the field level
+/// directly after a plain `choices:` line. A bullet that parses as a known
+/// packet field is a field, never a choice.
+fn is_legacy_choice_line(field: &str) -> bool {
+    field.starts_with("- ")
+        && !operator_request_field(field).is_some_and(|(key, _)| {
+            matches!(
+                key.to_ascii_lowercase().as_str(),
+                "queue_item" | "kind" | "blocking" | "request" | "context" | "choices"
+            )
+        })
+}
+
+/// The plain-text label of a `- **<label>**: <effect>` choice bullet. Legacy
+/// unbolded labels remain readable.
+fn operator_request_choice_label(field: &str) -> Option<&str> {
+    let choice = field.strip_prefix("- ")?;
+    let label = choice
+        .split_once(':')
+        .map_or(choice, |(label, _)| label)
+        .trim();
+    let label = label
+        .strip_prefix("**")
+        .and_then(|label| label.strip_suffix("**"))
+        .unwrap_or(label)
+        .trim();
+    (!label.is_empty()).then_some(label)
 }
 
 /// Parse a request field after removing the canonical list marker and emphasis.
@@ -1802,8 +1870,33 @@ mod tests {
         assert_eq!(truncate_imperative_trigger("ééé", 3), "é...");
     }
 
-    /// The 3ad3e23c closeout shape: a blocking question packet with five choices.
+    /// The 3ad3e23c closeout shape in the canonical nested-list packet layout:
+    /// the marker is the top-level bullet, every field nests beneath it, and
+    /// context and choices nest one level deeper.
     const BLOCKING_PACKET_RESPONSE: &str = "\
+`#apipendingorphans` is gated on review of #733 and on your decision below.
+
+- [#subagent-operator-request-pending-rows] subagent operator request
+  - *queue_item:* sdk-demo.md queue annotation fix
+  - *kind:* question
+  - *blocking:* true
+  - *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
+  - *context:*
+    - PR #733 stops new stuck rows.
+    - The rows from the 2026-10-20 incident are still `pending`.
+  - *choices:*
+    - **withdraw**: soft-delete the stuck sends.
+    - **resubmit**: send each stuck row to FPE again.
+    - **release**: set the stuck rows to `allowed`.
+    - **leave**: change nothing.
+
+**Recommendation:** withdraw.
+";
+
+    /// The same packet in the historical flat layout every document written
+    /// before the nested list carries: a bare marker line, top-level fields,
+    /// and one run-on context line.
+    const LEGACY_FLAT_PACKET_RESPONSE: &str = "\
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
 [#subagent-operator-request-pending-rows] subagent operator request
@@ -1837,7 +1930,13 @@ mod tests {
             vec!["withdraw", "resubmit", "release", "leave"]
         );
 
-        let legacy_choices = BLOCKING_PACKET_RESPONSE
+        assert_eq!(
+            blocking_operator_request_packets(LEGACY_FLAT_PACKET_RESPONSE),
+            packets,
+            "historical flat packets parse to the same request as the nested list"
+        );
+
+        let legacy_choices = LEGACY_FLAT_PACKET_RESPONSE
             .replace("**withdraw**", "withdraw")
             .replace("**resubmit**", "resubmit")
             .replace("**release**", "release")
@@ -1848,7 +1947,7 @@ mod tests {
             "historical unbolded packets remain readable"
         );
 
-        let legacy_fields = BLOCKING_PACKET_RESPONSE
+        let legacy_fields = LEGACY_FLAT_PACKET_RESPONSE
             .replace("- *queue_item:*", "queue_item:")
             .replace("- *kind:*", "kind:")
             .replace("- *blocking:*", "blocking:")
@@ -1861,17 +1960,65 @@ mod tests {
             "historical unlisted, unemphasized fields remain readable"
         );
 
-        let colon_outside_emphasis = BLOCKING_PACKET_RESPONSE
-            .replace("*queue_item:*", "*queue_item*:")
-            .replace("*kind:*", "*kind*:")
-            .replace("*blocking:*", "*blocking*:")
-            .replace("*request:*", "*request*:")
-            .replace("*context:*", "*context*:")
-            .replace("*choices:*", "*choices*:");
+        let flush_choices = legacy_fields.replace("\n  - ", "\n- ");
         assert_eq!(
-            blocking_operator_request_packets(&colon_outside_emphasis),
+            blocking_operator_request_packets(&flush_choices),
             packets,
-            "the alternate emphasized-key spelling remains readable"
+            "historical plain packets with choice bullets flush under `choices:` remain readable"
+        );
+
+        for response in [BLOCKING_PACKET_RESPONSE, LEGACY_FLAT_PACKET_RESPONSE] {
+            let colon_outside_emphasis = response
+                .replace("*queue_item:*", "*queue_item*:")
+                .replace("*kind:*", "*kind*:")
+                .replace("*blocking:*", "*blocking*:")
+                .replace("*request:*", "*request*:")
+                .replace("*context:*", "*context*:")
+                .replace("*choices:*", "*choices*:");
+            assert_eq!(
+                blocking_operator_request_packets(&colon_outside_emphasis),
+                packets,
+                "the alternate emphasized-key spelling remains readable"
+            );
+        }
+    }
+
+    #[test]
+    fn packettodo_nested_lines_belong_to_the_field_above_them() {
+        // Context prose that looks like a field, and detail nested beneath a
+        // choice, never rewrite the packet or add a choice.
+        let response = BLOCKING_PACKET_RESPONSE
+            .replace(
+                "    - PR #733 stops new stuck rows.\n",
+                "    - PR #733 stops new stuck rows.\n    - kind: permission\n    - *request:* not the request\n",
+            )
+            .replace(
+                "    - **withdraw**: soft-delete the stuck sends.\n",
+                "    - **withdraw**: soft-delete the stuck sends.\n      - **detail**: keeps an audit row.\n",
+            );
+        assert_eq!(
+            blocking_operator_request_packets(&response),
+            blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)
+        );
+
+        // A request too long for one line may nest beneath an empty `request:`.
+        let nested_request = BLOCKING_PACKET_RESPONSE.replace(
+            "  - *request:* What should happen",
+            "  - *request:*\n    - What should happen",
+        );
+        assert_eq!(
+            blocking_operator_request_packets(&nested_request),
+            blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)
+        );
+
+        // A line back at the marker's level ends the packet.
+        let trailing = BLOCKING_PACKET_RESPONSE.replace(
+            "    - **leave**: change nothing.\n",
+            "    - **leave**: change nothing.\n- **also**: not a choice\n",
+        );
+        assert_eq!(
+            blocking_operator_request_packets(&trailing)[0].choice_labels,
+            vec!["withdraw", "resubmit", "release", "leave"]
         );
     }
 
@@ -1939,11 +2086,17 @@ mod tests {
         let prose = "The worker would send `[#subagent-operator-request] subagent operator request` with blocking: true.";
         assert!(blocking_operator_request_packets(prose).is_empty());
 
-        let gap = BLOCKING_PACKET_RESPONSE.replace(
-            "subagent operator request\n- *queue_item:*",
-            "subagent operator request\n\n- *queue_item:*",
-        );
-        assert!(blocking_operator_request_packets(&gap).is_empty());
+        for (response, fields) in [
+            (BLOCKING_PACKET_RESPONSE, "  - *queue_item:*"),
+            (LEGACY_FLAT_PACKET_RESPONSE, "- *queue_item:*"),
+        ] {
+            let gap = response.replace(
+                &format!("subagent operator request\n{fields}"),
+                &format!("subagent operator request\n\n{fields}"),
+            );
+            assert_ne!(gap, response);
+            assert!(blocking_operator_request_packets(&gap).is_empty());
+        }
     }
 
     #[test]

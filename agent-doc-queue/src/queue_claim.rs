@@ -374,6 +374,48 @@ pub fn struck_row_reopened_by_claim(claim: Option<&QueueClaim>) -> bool {
     claim.is_some_and(|claim| claim.state.reopens_struck_row())
 }
 
+/// The work identities carried by the live (unstruck) rows of one queue body.
+///
+/// Feed it to [`struck_row_reopened_in_queue`]; struck rows are excluded, so a
+/// struck row never vouches for itself.
+pub fn live_row_identities(
+    entries: &[crate::document_queue::QueueEntry],
+) -> HashSet<QueueItemIdentity> {
+    entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::document_queue::QueueEntry::Prompt(prompt) => Some(claim_identity(&prompt.text)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `#strikeisterminal`, per queue: [`struck_row_reopened_by_claim`] scoped to the queue body
+/// that holds the struck row. Every projection that can reopen a struck row
+/// calls this one.
+///
+/// A live attempt reopens a struck row only when that queue holds no live row
+/// of the same identity. When it does, the claim belongs to that live row
+/// (`queue claim` counts only unstruck rows as occurrences), and the struck
+/// row is an earlier attempt's terminal record.
+///
+/// Reopening it anyway duplicated the row. Observed live 2026-10-28 on
+/// `haiven-dev/tasks/sdk/game-sessions.md`: at 06:01Z `--ack-id` struck four
+/// reported heads, and at 06:02Z `backlog requeue` appended fresh live rows
+/// for the same ids. At 06:05Z each new `Claimed` attempt then painted `🟡`
+/// on the live row AND reopened the struck row as `❔`, a `+84`-byte successor
+/// with `markers` rising by two per claim. The retry pass turned `❔` into
+/// `🟡`. From then on both rows carried the same owner and generation, and
+/// every later projection kept both (`☑️` at 06:10Z, first committed at
+/// 06:11:38Z).
+pub fn struck_row_reopened_in_queue(
+    claim: Option<&QueueClaim>,
+    identity: &QueueItemIdentity,
+    live_rows: &HashSet<QueueItemIdentity>,
+) -> bool {
+    !live_rows.contains(identity) && struck_row_reopened_by_claim(claim)
+}
+
 impl QueueClaimState {
     pub fn blocks_dispatch(self) -> bool {
         matches!(self, Self::Claimed | Self::Running | Self::Reported)
@@ -3081,6 +3123,43 @@ mod tests {
         assert_eq!(ledger.claims.len(), 1);
         assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
         assert_eq!(ledger.claims[0].item_text, "do [#a]");
+    }
+
+    /// `#strikeisterminal`, per queue: a live attempt reopens a struck row only when no live row
+    /// in the same queue carries its identity. The struck row's marker and
+    /// order do not matter; only live rows count as the claim's row.
+    #[test]
+    fn struck_row_reopens_only_without_a_live_row_of_its_identity() {
+        use crate::document_queue::{QueueEntry, parse};
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#a]", "subagent:a", 100, 3600);
+        let claim = ledger.claims[0].clone();
+        let identity = claim_identity("do [#a]");
+
+        let lone: Vec<QueueEntry> = parse("- ~~do [#a]~~\n- other\n").unwrap();
+        let lone_live = live_row_identities(&lone);
+        assert!(!lone_live.contains(&identity), "a struck row is not live");
+        assert!(struck_row_reopened_in_queue(
+            Some(&claim),
+            &identity,
+            &lone_live
+        ));
+
+        // Order and the live row's lifecycle marker are irrelevant.
+        for body in [
+            "- ~~do [#a]~~\n- 📥 do [#a]\n",
+            "- 🟡 [#subagent:a#1] do [#a]\n- ~~do [#a]~~\n",
+            "- ~~🚧 do [#a]~~\n- do [#a]\n",
+        ] {
+            let live = live_row_identities(&parse(body).unwrap());
+            assert!(live.contains(&identity), "{body:?}");
+            assert!(
+                !struck_row_reopened_in_queue(Some(&claim), &identity, &live),
+                "{body:?}"
+            );
+        }
+        // No live attempt never reopens, live row or not.
+        assert!(!struck_row_reopened_in_queue(None, &identity, &lone_live));
     }
 
     /// `#strikeretires`: a strike ends the struck row's finished attempt

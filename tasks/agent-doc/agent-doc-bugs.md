@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -182,15 +183,40 @@ A nested `agent:run` leaf is echoed as its nest vector, `root parent: parent: it
 CI for `8862b2f9b5` is in progress: https://github.com/btakita/agent-doc/actions/runs/40781176636. Book and Pages for that commit succeeded.
 
 The release row stays open until `#subagent:nestedproject` is on main. That claim is still running, and its worktree has no commit yet.
-<!-- agent:boundary:daa0c129 -->
+
+### Re: Subagent completed: `subagent:release` returned work for queue item “release + publish - Include #subagent:nestvector + #subagent:nestedproject” — agent-doc
+<!-- agent-doc-subagent-response sha256=832bb29bb9420f2b50047ebd80f6a1d19b729a2c9e9bc75dc28d645e758eee65 -->
+> **Subagent response:**
+>
+> Release is blocked. No version bump, tag, make release, make install, or release commit was made.
+>
+> #subagent:nestvector is on origin/main at 8862b2f9b5a0a864a8a932a027aac1286dbfd33c, subject fix(queue): echo a nested agent:run leaf as its nest vector. Installed binary is agent-doc 0.35.560. No tag points at 8862b2f9b5.
+>
+> #subagent:nestedproject is not on origin/main. Worktree /home/brian/worktrees/agent-doc-nestedproject is clean on fix/nested-project-md at 5291b1f93c with no unique commits. Commits after v0.35.560 are 343fe163c2, 519352f34d, 5291b1f93c, and 8862b2f9b5.
+>
+> This worker stayed on fix/release-readiness-561 at 8862b2f9b5, clean, no new SHA. Do not cut a partial release until a nested project.md fix is on origin/main.
+<!-- agent-doc-subagent-completion key=62faec71d1667704882edf7a79bdfb681b1d4b42c3964caeccfd3c188c1e099a -->
+
+> **Queue prompt:** do [#apikeepsrefusing]
+
+**Deferred:** dispatched to `subagent:apikeepsrefusing` generation 1, worker `01a184ae-2b63-76b0-a028-c568b9888f6f`, on `fix/api-keeps-refusing` in `/home/brian/worktrees/agent-doc-apikeepsrefusing` at `8862b2f9b5`.
+
+### Re: api.md push refusal is with its worker — grok-4.7 · 2026-10-28T18:42-04:00
+
+`#apikeepsrefusing` is claimed and running. The backlog text is that `src/haiven-dev/tasks/api.md` keeps refusing to push, rebase, and publish. The worker will find that refusal, update the spec and tests when the refusal is an agent-doc bug, and push `fix/api-keeps-refusing`. It will not install or cut a release.
+
+The nested `project.md` claim is still running and has no commit on main. The release row stays open until that fix lands. No new version has been published. Tag `v0.35.560` remains `bd971e9b87`.
+<!-- agent:boundary:bfcd60ea:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:apikeepsrefusing#1] do [#apikeepsrefusing]
+- ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~
 - 📥 [#vscodecodersmoke]
-  - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~ — auto-struck: answered this cycle (#ftstrike)
+  - ~~Where does this file live? My Coder agent is asking.~~
+- ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~
 - 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
+- When submitting a nested run item, include the parent lineage 
 - ☑️ [#subagent:release#5] release + publish
   - Include #subagent:nestvector + #subagent:nestedproject
 <!-- /agent:run -->
@@ -222,6 +248,7 @@ The release row stays open until `#subagent:nestedproject` is on main. That clai
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#apikeepsrefusing] api.md keeps on refusing to push #rebase and publish #review. How can we make this work?
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

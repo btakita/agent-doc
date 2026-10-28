@@ -604,6 +604,13 @@ internal fun replicaRegistrationAttemptDueUtil(
     nowMs: Long,
 ): Boolean = projection == null || nowMs >= projection.retryAfterMs
 
+/**
+ * The surfaced-hold dedup key. A hold logged beside a live replica and a
+ * hold with no attached replica are different operator facts, so the second still notifies.
+ */
+internal fun surfacedAttachFailureKeyUtil(reason: String, liveReplicaAttached: Boolean): String =
+    if (liveReplicaAttached) "live_replica_attached:$reason" else reason
+
 internal fun shouldSurfaceRegisterFailureUtil(
     failureCount: Int,
     needsOperatorSurface: Boolean,
@@ -4604,20 +4611,28 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         // src/haiven-dev documents every 30s under its retired identity after the
         // 2026-09-29 18:12:38 reload. Only the live generation retries.
         if (PluginGeneration.retired) return false
+        // Check the live replica first. A refused
+        // replacement registration leaves the cached forwarder attached and syncing
+        // (agent-doc-bugs.md, 2026-10-28 12:57:53, `live_editors=1`); telling the
+        // operator to close the tab and run `agent-doc repair` would detach it.
+        val liveReplicaAttached = forwarders[filePath]?.attached == true
         // GH #326 phase 5b: what the reason means (surface the hold, republish liveness,
         // the ops-log token, the notification) is the native `attach_failure_diagnosis`
         // derivation. Every caller records a failure off the EDT, so it is asked here.
-        val diagnosis = AttachFailureDiagnosis.diagnose(reason, File(filePath).name)
+        val diagnosis = AttachFailureDiagnosis.diagnose(reason, File(filePath).name, liveReplicaAttached)
+        // A hold logged beside a live replica must not consume the notification a
+        // later hold with no attached replica owes the operator.
+        val surfaceKey = surfacedAttachFailureKeyUtil(reason, liveReplicaAttached)
         var shouldSurface = false
         surfacedAttachFailureReasons.compute(filePath) { _, surfacedReason ->
             if (shouldSurfaceRegisterFailureUtil(
                     failureCount = projection.failureCount,
                     needsOperatorSurface = diagnosis.needsOperatorSurface,
                     surfacedReason = surfacedReason,
-                    reason = reason,
+                    reason = surfaceKey,
                 )) {
                 shouldSurface = true
-                reason
+                surfaceKey
             } else {
                 surfacedReason
             }
@@ -4723,6 +4738,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         // A diagnosis asked with a file name always carries its message.
         val message = diagnosis.holdMessage ?: AttachFailureDiagnosis.frozenHoldMessage(File(filePath).name, reason)
+        if (diagnosis.holdNotification == AttachFailureDiagnosis.HoldNotification.LogOnly) {
+            // Only a replacement attach was refused; the
+            // attached replica keeps syncing, so there is nothing for the operator to do.
+            log.info("[crdt-replica] replacement attach hold logged without notification: $message")
+            return
+        }
         GenerationWork.invokeLater {
             if (!project.isDisposed) TerminalUtil.notifyError(project, message)
         }

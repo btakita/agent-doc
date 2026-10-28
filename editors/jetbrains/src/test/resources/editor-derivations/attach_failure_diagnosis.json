@@ -1,6 +1,6 @@
 {
   "derivation": "attach_failure_diagnosis",
-  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason and, for the operator notification, the document's file name. The answer also owns whether another attach is automatic or must await operator evidence. An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose. A case whose native answer diverged on purpose keeps the frozen floor's answer in `frozen_expected`.",
+  "about": "GH #326 phase 5b parity cases. The Rust `attach_failure_diagnosis` derivation (agent-doc-editor-surface-io) and the plugin's frozen Kotlin floor (AttachFailureDiagnosisTest) both answer every case. `input` is exactly what the plugin sends: the recorded failure reason, for the operator notification the document's file name, and `live_replica_attached: true` when the document still has an attached, syncing editor replica (the failure then refused only a replacement registration). The answer also owns whether another attach is automatic or must await operator evidence, and whether a surfaced hold is an operator error notification or is only logged (`hold_notification`). An absent field is omitted. A native rule change updates this file and may diverge from the frozen floor only on purpose. A case whose native answer diverged on purpose keeps the frozen floor's answer in `frozen_expected`.",
   "cases": [
     {
       "name": "an IDE running a plugin generation older than the install names a restart",
@@ -13,7 +13,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -27,7 +28,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -41,7 +43,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -56,7 +59,8 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -71,7 +75,8 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       },
       "frozen_expected": {
         "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
@@ -79,7 +84,102 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
+      }
+    },
+    {
+      "name": "a refused replacement attach beside a live replica is logged without the repair remedy",
+      "input": {
+        "reason": "ambiguous-retained-projection",
+        "file_name": "agent-doc-bugs.md",
+        "live_replica_attached": true
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "ambiguous-retained-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc kept the attached editor replica for agent-doc-bugs.md; a replacement attach was refused. Cause: ambiguous-retained-projection. The attached replica is still syncing, so no action is needed. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      },
+      "frozen_expected": {
+        "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
+        "status_token": "ambiguous-retained-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      }
+    },
+    {
+      "name": "a refused replacement re-register beside a live replica is logged without the repair remedy",
+      "input": {
+        "reason": "ambiguous-reregister-projection: buffer typed after the settled shadow",
+        "file_name": "session.md",
+        "live_replica_attached": true
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "ambiguous-reregister-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc kept the attached editor replica for session.md; a replacement attach was refused. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The attached replica is still syncing, so no action is needed. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      },
+      "frozen_expected": {
+        "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
+        "status_token": "ambiguous-reregister-projection",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      }
+    },
+    {
+      "name": "a reseed hold beside a live replica is logged without the repair remedy",
+      "input": {
+        "reason": "retained-reseed-missing-settled-shadow",
+        "file_name": "plan.md",
+        "live_replica_attached": true
+      },
+      "expected": {
+        "remedy": null,
+        "status_token": "retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc kept the attached editor replica for plan.md; a replacement attach was refused. Cause: retained-reseed-missing-settled-shadow. The attached replica is still syncing, so no action is needed. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      },
+      "frozen_expected": {
+        "remedy": "The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor.",
+        "status_token": "retained-reseed-missing-settled-shadow",
+        "needs_operator_surface": true,
+        "needs_liveness_republish": false,
+        "retry_disposition": "await_operator_evidence",
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged.",
+        "hold_notification": "log_only"
+      }
+    },
+    {
+      "name": "a non-hold failure beside a live replica keeps its remedy and is never notified",
+      "input": {
+        "reason": "controller-register",
+        "live_replica_attached": true
+      },
+      "expected": {
+        "remedy": "Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas.",
+        "status_token": "controller-register",
+        "needs_operator_surface": false,
+        "needs_liveness_republish": false,
+        "retry_disposition": "automatic",
+        "hold_message": null,
+        "hold_notification": "log_only"
       }
     },
     {
@@ -94,7 +194,8 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       },
       "frozen_expected": {
         "remedy": "The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it.",
@@ -102,7 +203,8 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for session.md. Cause: ambiguous-reregister-projection: buffer typed after the settled shadow. The editor buffer and controller canonical have diverged from their last settled ancestor. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -116,7 +218,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -131,7 +234,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-ffi-unavailable. Inspect About Agent Doc or the IDE log for the executable and library that failed to load. Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-ffi-unavailable. Inspect About Agent Doc or the IDE log for the executable and library that failed to load. Fix or remove that incompatible install so PATH resolves to the intended agent-doc; the native loader retries automatically. `agent-doc admin reload-lib` cannot reach this editor until FFI loads. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -145,7 +249,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -159,7 +264,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -173,7 +279,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -187,7 +294,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -201,7 +309,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -215,7 +324,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": true,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -229,7 +339,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -243,7 +354,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -257,7 +369,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -272,7 +385,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-reload-document-unavailable. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: native-reload-document-unavailable. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -286,7 +400,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -300,7 +415,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -315,7 +431,8 @@
         "needs_operator_surface": true,
         "needs_liveness_republish": false,
         "retry_disposition": "await_operator_evidence",
-        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: ambiguous-retained-projection after retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: ambiguous-retained-projection after retained-reseed-missing-settled-shadow. The restarted editor has no settled ancestor from which it can safely seed the retained controller projection. Copy any unsaved text, close this editor tab, run `agent-doc repair <file>` while it is detached, and reopen it; restarting the editor again cannot create that ancestor. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -329,7 +446,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -343,7 +461,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -357,7 +476,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -371,7 +491,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -383,7 +504,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -397,7 +519,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: . The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for plan.md. Cause: . The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     },
     {
@@ -411,7 +534,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -425,7 +549,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -439,7 +564,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -453,7 +579,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": null
+        "hold_message": null,
+        "hold_notification": "error"
       }
     },
     {
@@ -468,7 +595,8 @@
         "needs_operator_surface": false,
         "needs_liveness_republish": false,
         "retry_disposition": "automatic",
-        "hold_message": "Agent Doc could not attach the open editor replica for notes.md. Cause: controller-register\r\nsecond line. Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas. The editor buffer and disk were left unchanged."
+        "hold_message": "Agent Doc could not attach the open editor replica for notes.md. Cause: controller-register\r\nsecond line. Run `agent-doc admin inspect <file> --json` and compare editor_replica.live_editors with live_replicas. The editor buffer and disk were left unchanged.",
+        "hold_notification": "error"
       }
     }
   ]

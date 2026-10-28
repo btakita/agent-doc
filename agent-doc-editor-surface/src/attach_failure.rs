@@ -35,6 +35,12 @@ pub struct AttachFailureEvidence {
     /// answer carries no `hold_message`.
     #[serde(default)]
     pub file_name: Option<String>,
+    /// The document still has an attached editor
+    /// replica that keeps syncing, so this failure refused only a replacement
+    /// registration. Absent is false: an older plugin generation does not
+    /// report it, and its failures keep the operator notification.
+    #[serde(default)]
+    pub live_replica_attached: Option<bool>,
 }
 
 /// The `attach_failure_diagnosis` answer.
@@ -59,6 +65,22 @@ pub struct AttachFailureDiagnosis {
     /// The operator notification for a hold, present exactly when the evidence
     /// carries a file name.
     pub hold_message: Option<String>,
+    /// How the adapter shows [hold_message](Self::hold_message) when it
+    /// surfaces a hold. A refused replacement attach
+    /// beside a still-attached replica is logged, never notified.
+    pub hold_notification: AttachFailureHoldNotification,
+}
+
+/// How an adapter surfaces a hold it persists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachFailureHoldNotification {
+    /// Show the hold message as an operator error notification.
+    Error,
+    /// Record the hold (ops-log event, IDE log) without notifying the
+    /// operator: an attached replica still owns and syncs the document, so
+    /// there is nothing for the operator to do.
+    LogOnly,
 }
 
 /// The next admissible registration trigger after an attach failure.
@@ -75,12 +97,24 @@ pub enum AttachFailureRetryDisposition {
 /// Diagnose one attach failure reason.
 pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailureDiagnosis {
     let reason = evidence.reason.as_deref().unwrap_or("");
-    let remedy = attach_failure_remedy(reason);
+    let live_replica_attached = evidence.live_replica_attached.unwrap_or(false);
     let needs_operator_surface = needs_operator_surface(reason);
-    let hold_message = evidence
-        .file_name
-        .as_deref()
-        .map(|file_name| hold_message(file_name, reason, remedy));
+    // A projection hold refused only the replacement
+    // registration. The attached replica keeps the buffer and the controller in
+    // sync, so the close/repair/reopen remedy would detach a healthy replica.
+    let replacement_only = live_replica_attached && needs_operator_surface;
+    let remedy = if replacement_only {
+        None
+    } else {
+        attach_failure_remedy(reason)
+    };
+    let hold_message = evidence.file_name.as_deref().map(|file_name| {
+        if replacement_only {
+            replacement_hold_message(file_name, reason)
+        } else {
+            hold_message(file_name, reason, remedy)
+        }
+    });
     AttachFailureDiagnosis {
         remedy: remedy.map(str::to_string),
         status_token: status_token(reason),
@@ -92,6 +126,11 @@ pub fn diagnose_attach_failure(evidence: &AttachFailureEvidence) -> AttachFailur
             AttachFailureRetryDisposition::Automatic
         },
         hold_message,
+        hold_notification: if live_replica_attached {
+            AttachFailureHoldNotification::LogOnly
+        } else {
+            AttachFailureHoldNotification::Error
+        },
     }
 }
 
@@ -210,6 +249,17 @@ fn hold_message(file_name: &str, reason: &str, remedy: Option<&str>) -> String {
     message
 }
 
+/// The log line for a projection hold that refused
+/// only a replacement registration. It names no remedy: the attached replica is
+/// healthy and detaching it to run `agent-doc repair` would be the only harm.
+fn replacement_hold_message(file_name: &str, reason: &str) -> String {
+    format!(
+        "Agent Doc kept the attached editor replica for {file_name}; a replacement attach was \
+         refused. Cause: {reason}. The attached replica is still syncing, so no action is needed. \
+         The editor buffer and disk were left unchanged."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +268,7 @@ mod tests {
         diagnose_attach_failure(&AttachFailureEvidence {
             reason: Some(reason.to_string()),
             file_name: None,
+            live_replica_attached: None,
         })
     }
 
@@ -260,6 +311,7 @@ mod tests {
         let answer = diagnose_attach_failure(&AttachFailureEvidence {
             reason: Some("ambiguous-reregister-projection".to_string()),
             file_name: Some("plan.md".to_string()),
+            live_replica_attached: None,
         });
         assert!(answer.needs_operator_surface);
         assert_eq!(
@@ -276,6 +328,60 @@ mod tests {
         assert!(!message.contains("diverged from their last settled ancestor"));
         assert!(message.contains("paste back anything missing"));
         assert!(message.ends_with(" The editor buffer and disk were left unchanged."));
+        assert_eq!(answer.hold_notification, AttachFailureHoldNotification::Error);
+    }
+
+    /// Seen on agent-doc-bugs.md, 2026-10-28 12:57:53. A
+    /// refresh's replacement registration held `ambiguous-retained-projection`
+    /// while the existing replica stayed attached (`live_editors=1`), yet the
+    /// operator was told to close the tab and run `agent-doc repair`.
+    #[test]
+    fn a_hold_beside_a_live_replica_is_logged_without_the_repair_remedy() {
+        for reason in [
+            "ambiguous-retained-projection",
+            "ambiguous-reregister-projection",
+            "retained-reseed-missing-settled-shadow",
+        ] {
+            let answer = diagnose_attach_failure(&AttachFailureEvidence {
+                reason: Some(reason.to_string()),
+                file_name: Some("agent-doc-bugs.md".to_string()),
+                live_replica_attached: Some(true),
+            });
+            // The hold is still recorded and still waits for new evidence, so
+            // the refused replacement cannot become a register/deregister loop.
+            assert!(answer.needs_operator_surface, "{reason}");
+            assert_eq!(
+                answer.retry_disposition,
+                AttachFailureRetryDisposition::AwaitOperatorEvidence,
+                "{reason}"
+            );
+            assert_eq!(answer.status_token, reason);
+            assert_eq!(answer.remedy, None, "{reason}");
+            assert_eq!(
+                answer.hold_notification,
+                AttachFailureHoldNotification::LogOnly,
+                "{reason}"
+            );
+            let message = answer.hold_message.unwrap();
+            assert!(message.contains("kept the attached editor replica for agent-doc-bugs.md"));
+            assert!(message.contains(&format!("Cause: {reason}.")));
+            assert!(!message.contains("agent-doc repair"), "{reason}: {message}");
+            assert!(!message.contains("close this editor tab"), "{reason}: {message}");
+        }
+    }
+
+    #[test]
+    fn without_a_live_replica_the_hold_keeps_the_repair_remedy() {
+        for live in [None, Some(false)] {
+            let answer = diagnose_attach_failure(&AttachFailureEvidence {
+                reason: Some("ambiguous-retained-projection".to_string()),
+                file_name: Some("agent-doc-bugs.md".to_string()),
+                live_replica_attached: live,
+            });
+            assert_eq!(answer.hold_notification, AttachFailureHoldNotification::Error);
+            assert!(answer.remedy.unwrap().contains("agent-doc repair <file>"));
+            assert!(answer.hold_message.unwrap().contains("agent-doc repair <file>"));
+        }
     }
 
     #[test]
@@ -289,5 +395,6 @@ mod tests {
         assert_eq!(json["retry_disposition"], "automatic");
         assert!(json["remedy"].is_null());
         assert!(json["hold_message"].is_null());
+        assert_eq!(json["hold_notification"], "error");
     }
 }

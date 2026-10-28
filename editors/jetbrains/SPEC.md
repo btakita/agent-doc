@@ -923,13 +923,25 @@ change with no new JNA method and no plugin generation. Shipped derivations:
   buffer is still exactly the text the proof covered. A same-line conflict still
   holds. Model: `formal/tla/RegistrationAcknowledgedBase.tla`.
 - `attach_failure_diagnosis` (phase 5b): what a CRDT replica attach failure
-  means for the operator. Evidence is the recorded failure reason and, for the
-  operator notification, the document's file name. Native owns the one-line
+  means for the operator. Evidence is the recorded failure reason, for the
+  operator notification the document's file name, and `live_replica_attached`
+  when `forwarders[filePath]` is still attached (checked before diagnosing;
+  sent only when true). Native owns the one-line
   remedy, the `attach_refused_<token>` ops-log status token, whether the hold is
   persisted and surfaced without waiting for an editor action (the three
   projection-hold reasons), whether the refusal needs a reliable-liveness
   republish (`replica_register_stale_editor_endpoint`), whether retry is automatic
-  or must await operator evidence, and the hold notification text.
+  or must await operator evidence, the hold notification text, and
+  `hold_notification` (`error` or `log_only`). A
+  projection hold beside a live replica refused only a replacement
+  registration, so native answers no remedy, a message that names no repair,
+  and `log_only`; the plugin records the hold event and logs the message
+  without a notification. Without an attached replica the close/repair/reopen
+  remedy and error notification are unchanged. The frozen floor composes only
+  `log_only` from the same fact; an older library that omits the field keeps
+  the floor's value. The surfaced-hold memory keys a live-replica hold apart
+  (`surfacedAttachFailureKeyUtil`), so a later hold with no attached replica
+  still notifies.
   `CrdtReplicaManager.recordRegisterFailure` asks it once per
   failure, after the retired-generation check, and executes the answer in the
   pre-#326 order: the hold event and notification, then the liveness republish,

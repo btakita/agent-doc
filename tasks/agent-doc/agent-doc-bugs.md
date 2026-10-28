@@ -62,11 +62,20 @@ No new backlog item. The row is the work, and it stays queued under the running 
 The running `agent:rules` claim was refreshed through generation 1. It remains the worker bound to `feat/agent-rules`.
 
 `release + publish` is not started this cycle. Publishing now would omit the feature the child line names.
-<!-- agent:boundary:91573855 -->
+> **Queue prompt:** Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.
+
+`agent:rules` is on `main` at `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7` (`feat(rules): compose agent:rules into every admitted turn`). `origin/main` fast-forwarded from `dc7efbcbf6`. `make check` exited 0, then `make install` exited 0. The installed binary is `0.35.559`, built from that commit at 2026-10-28 14:53 -04:00. CI for `2b7ef088ea` is in progress: https://github.com/btakita/agent-doc/actions/runs/40748955632
+
+Every `agent:rules` body in the nearest `.agent-doc/project.md` is composed in file order, then every body in the session document. Session rules add to project rules. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`, with `agent_rules_guidance` when the list is non-empty. A content-only edit does not start a turn.
+
+### Re: agent:rules on main — grok-4.7 · 2026-10-28T14:54-04:00
+
+The worker branch `feat/agent-rules` was verified before the fast-forward. `make test` had already passed with 12107 tests and 0 failures. The diff added no private-name denylist hits. The version was not bumped. The next row is still the release request.
+<!-- agent:boundary:8c15fcde -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:agentrules#1] Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.
+- ~~Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.~~
 - 📥 release + publish
   - include #subagent:agentrules
 <!-- /agent:run -->

@@ -2471,6 +2471,16 @@ is to preserve/copy any operator-only text, detach the editor, repair against di
 authority, and reopen it. Repeating the restart cannot manufacture the missing
 causal ancestor.
 
+That remedy applies only when no editor replica for the document is attached.
+The plugin checks the live replica before it diagnoses a failure: when a hold refused only a *replacement* registration and
+the existing replica is still attached and syncing (`live_editors=1`), the hold
+event is still recorded and the retry still waits for operator evidence, but the
+diagnosis names no remedy and the plugin only logs that the replacement attach
+was refused. Telling the operator to close the tab and run `agent-doc repair`
+then would detach the one healthy replica (agent-doc-bugs.md, 2026-10-28
+12:57:53). A hold logged beside a live replica does not consume the
+notification a later hold with no attached replica owes the operator.
+
 JetBrains document-command failures retain the complete subprocess output in the
 IDE log, but the operator-facing notification must fit the small notification
 surface. A lint-gate failure is rendered as the attempted action, document basename

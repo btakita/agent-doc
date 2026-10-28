@@ -41,6 +41,13 @@ class AttachFailureDiagnosisTest {
                 },
             )
             add("hold_message", diagnosis.holdMessage?.let { gson.toJsonTree(it) } ?: JsonNull.INSTANCE)
+            addProperty(
+                "hold_notification",
+                when (diagnosis.holdNotification) {
+                    AttachFailureDiagnosis.HoldNotification.Error -> "error"
+                    AttachFailureDiagnosis.HoldNotification.LogOnly -> "log_only"
+                },
+            )
         }
 
     @Test
@@ -55,16 +62,23 @@ class AttachFailureDiagnosisTest {
             // The plugin always knows its reason; the fixture's absent reason is the empty one.
             val reason = input.get("reason")?.asString ?: ""
             val fileName = input.get("file_name")?.asString
+            val liveReplicaAttached = input.get("live_replica_attached")?.asBoolean ?: false
             if (input.has("reason")) {
                 assertEquals(
                     name,
                     input,
-                    JsonParser.parseString(gson.toJson(AttachFailureDiagnosis.evidence(reason, fileName))).asJsonObject,
+                    JsonParser.parseString(
+                        gson.toJson(AttachFailureDiagnosis.evidence(reason, fileName, liveReplicaAttached)),
+                    ).asJsonObject,
                 )
             }
             // A native rule that diverged on purpose keeps the frozen answer beside it.
             val frozenExpected = case.getAsJsonObject("frozen_expected") ?: case.getAsJsonObject("expected")
-            assertEquals(name, frozenExpected, wire(AttachFailureDiagnosis.frozen(reason, fileName)))
+            assertEquals(
+                name,
+                frozenExpected,
+                wire(AttachFailureDiagnosis.frozen(reason, fileName, liveReplicaAttached)),
+            )
         }
     }
 
@@ -116,13 +130,100 @@ class AttachFailureDiagnosisTest {
         val reason = "ambiguous-reregister-projection"
         val floor = AttachFailureDiagnosis.frozen(reason, "plan.md")
         assertTrue(floor.needsOperatorSurface)
-        assertEquals(floor, AttachFailureDiagnosis.diagnose(reason, "plan.md", EditorDerivation.Unavailable))
+        assertEquals(
+            floor,
+            AttachFailureDiagnosis.diagnose(reason, "plan.md", derivation = EditorDerivation.Unavailable),
+        )
         assertEquals(floor, AttachFailureDiagnosis.diagnose(reason, "plan.md") { _, _ -> "not json" })
         assertEquals(floor, AttachFailureDiagnosis.diagnose(reason, "plan.md") { _, _ -> "[]" })
         // An older library that answers fewer fields: each missing one comes from the floor.
         assertEquals(floor, AttachFailureDiagnosis.diagnose(reason, "plan.md") { _, _ -> "{}" })
         val partial = AttachFailureDiagnosis.diagnose(reason, "plan.md") { _, _ -> """{"status_token":"held"}""" }
         assertEquals(floor.copy(statusToken = "held"), partial)
+    }
+
+    /**
+     * Seen on agent-doc-bugs.md, 2026-10-28 12:57:53. A replacement registration
+     * held `ambiguous-retained-projection` while the existing replica stayed attached
+     * (`live_editors=1`), and the operator was told to close the tab and run `agent-doc repair`.
+     */
+    @Test
+    fun `a hold beside a live replica sends the fact and executes a log-only answer`() {
+        var sent: String? = null
+        val diagnosis =
+            AttachFailureDiagnosis.diagnose("ambiguous-retained-projection", "plan.md", liveReplicaAttached = true) {
+                _, input ->
+                sent = input
+                """{"remedy":null,"status_token":"ambiguous-retained-projection",""" +
+                    """"needs_operator_surface":true,"needs_liveness_republish":false,""" +
+                    """"retry_disposition":"await_operator_evidence","hold_message":"kept",""" +
+                    """"hold_notification":"log_only"}"""
+            }
+        assertEquals(
+            JsonParser.parseString(
+                """{"reason":"ambiguous-retained-projection","file_name":"plan.md","live_replica_attached":true}""",
+            ),
+            JsonParser.parseString(sent),
+        )
+        assertNull(diagnosis.remedy)
+        assertEquals(AttachFailureDiagnosis.HoldNotification.LogOnly, diagnosis.holdNotification)
+        assertEquals(AttachFailureDiagnosis.RetryDisposition.AwaitOperatorEvidence, diagnosis.retryDisposition)
+
+        // Without an attached replica nothing new is sent, and an older library that does not
+        // answer the field keeps the operator notification.
+        AttachFailureDiagnosis.diagnose("ambiguous-retained-projection", "plan.md") { _, input ->
+            sent = input
+            "{}"
+        }.also { assertEquals(AttachFailureDiagnosis.HoldNotification.Error, it.holdNotification) }
+        assertFalse(sent!!.contains("live_replica_attached"))
+        // A floor answer beside a live replica never notifies, so it cannot prescribe detaching it.
+        assertEquals(
+            AttachFailureDiagnosis.HoldNotification.LogOnly,
+            AttachFailureDiagnosis.diagnose(
+                "ambiguous-retained-projection",
+                "plan.md",
+                liveReplicaAttached = true,
+                derivation = EditorDerivation.Unavailable,
+            ).holdNotification,
+        )
+    }
+
+    @Test
+    fun `recordRegisterFailure checks the live replica before diagnosing and logs a log-only hold`() {
+        val manager = source("CrdtReplicaManager.kt")
+        val failure =
+            manager.substringAfter("    private fun recordRegisterFailure(")
+                .substringBefore("    /**")
+        val live = failure.indexOf("val liveReplicaAttached = forwarders[filePath]?.attached == true")
+        val diagnose = failure.indexOf("AttachFailureDiagnosis.diagnose(reason, File(filePath).name, liveReplicaAttached)")
+        assertTrue(live in 0 until diagnose)
+        assertTrue(failure.contains("surfacedAttachFailureKeyUtil(reason, liveReplicaAttached)"))
+
+        val hold =
+            manager.substringAfter("    private fun recordRetainedProjectionHold(")
+                .substringBefore("    private fun clearRegisterFailure(")
+        val event = hold.indexOf("lib.agent_doc_record_editor_surface_event(")
+        val logOnly = hold.indexOf("AttachFailureDiagnosis.HoldNotification.LogOnly")
+        val notify = hold.indexOf("TerminalUtil.notifyError(project, message)")
+        // The ops-log event is still recorded; only the notification is skipped.
+        assertTrue(event in 0 until logOnly)
+        assertTrue(logOnly < notify)
+        assertTrue(hold.substring(logOnly, notify).contains("return"))
+    }
+
+    @Test
+    fun `a hold logged beside a live replica does not consume the notification owed without one`() {
+        val reason = "ambiguous-retained-projection"
+        val logged = surfacedAttachFailureKeyUtil(reason, liveReplicaAttached = true)
+        assertEquals(reason, surfacedAttachFailureKeyUtil(reason, liveReplicaAttached = false))
+        assertTrue(
+            shouldSurfaceRegisterFailureUtil(
+                failureCount = 1,
+                needsOperatorSurface = true,
+                surfacedReason = logged,
+                reason = surfacedAttachFailureKeyUtil(reason, liveReplicaAttached = false),
+            ),
+        )
     }
 
     @Test
@@ -185,7 +286,7 @@ class AttachFailureDiagnosisTest {
             manager.substringAfter("    private fun recordRegisterFailure(")
                 .substringBefore("    private fun clearRegisterFailure(")
         val retired = failure.indexOf("if (PluginGeneration.retired) return false")
-        val diagnose = failure.indexOf("AttachFailureDiagnosis.diagnose(reason, File(filePath).name)")
+        val diagnose = failure.indexOf("AttachFailureDiagnosis.diagnose(reason, File(filePath).name, liveReplicaAttached)")
         val hold = failure.indexOf("recordRetainedProjectionHold(filePath, reason, diagnosis)")
         val republish = failure.indexOf("ReliableSyncLivenessListener.republishDocument(project, filePath)")
         assertTrue(retired in 0 until diagnose)

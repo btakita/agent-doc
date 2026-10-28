@@ -27,7 +27,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `dffba0edcb`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `dc7efbcbf6`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`); an operator answer row nested under its request id is accepted and row splitting ignores binary markers (`dc7efbcbf6`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1284,14 +1284,18 @@ Closed. The fix is `dffba0edcb`, on `main` and installed (see the 12:50 cell abo
 Commit `dc7efbcbf6` makes splitting ignore those markers. It also reads your answer-row shape like `[#request-id]: <answer>`, and it never dispatches an answer row while a live row still carries the request id. The subagent's `make check` passed: 12091 of 12091 tests. It's merged onto `main` in integration branch `integrate/20261028e`, and the combined `make check` is running. I released its claim. Once this is installed, the next preflight clears the stale 🙋 and I can close the stale-replay row.
 
 **Policy to confirm:** an answer row is held out of dispatch while another live row still carries its request id, so the answer goes to the worker that asked. The canonical own-row `[#req]: answer` form is now held the same way.
+
+### Re: answer-row fix on main and installed — opus-5 · 2026-10-28T14:05-04:00
+
+> **Queue prompt:** An operator answer written as its own run row keyed by the request id (`- [#subagent-operator-request-<id>]` with the answer nested under it) made the queue in-progress marker projection fail with "changed item count (before=3, after=2)". That refused `queue report-complete`, `queue release` and preflight queue maintenance for the 🙋 row it answers, and `--ack-id` refused the answer row as never dispatched. Accept this answer shape (or fold it into the 🙋 row) without breaking the projection.
+
+Fixed on `main` and installed (`dffba0edcb..dc7efbcbf6`). The combined `make check` exited 0: 12091 of 12091 tests passed, with 187 skipped. Row splitting now ignores the markers agent-doc adds. Your answer shape is read like `[#request-id]: <answer>`, and an answer row is never dispatched while the row that asked is still live. The stale-replay row and your answer row are already cleared from the queue.
+
+**Still open:** main CI is red on `5870713c02` in a tmux-ci pane test none of today's changes touch. Restart IDEA to load plugins 0.2.877, 0.2.878 and 0.2.879.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🙋☑️ [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- ☑️ [#subagent:answerrow#1] An operator answer written as its own run row keyed by the request id (`- [#subagent-operator-request-<id>]` with the answer nested under it) made the queue in-progress marker projection fail with "changed item count (before=3, after=2)". That refused `queue report-complete`, `queue release` and preflight queue maintenance for the 🙋 row it answers, and `--ack-id` refused the answer row as never dispatched. Accept this answer shape (or fold it into the 🙋 row) without breaking the projection.
-- ~~[#subagent-operator-request-undo-agent-writes]~~
-  - 📥 I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

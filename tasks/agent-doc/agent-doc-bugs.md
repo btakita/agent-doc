@@ -139,11 +139,25 @@ python3 scripts/vscode-remote-smoke.py --project ~/project --doc tasks/plan.md
 `runbooks/coder-workspace.md` (section "VS Code remote smoke test") and `editors/SPEC.md` section 13 already name that script. The procedure also names `runbooks/coder-workspace.md`. No spec change and no commit. `fix/vscode-coder-file` stayed clean at `343fe163c2`. I re-ran `python3 scripts/vscode-remote-smoke.py --self-test`; it printed `vscode-remote-smoke self-test: ok` and exited 0.
 
 The api.md route suite finished in its own worktree. `make check` with socket `/tmp/adar.7lb83r` exited 0: nextest 12108 passed and 187 skipped, and the full-check receipt was written. `fix/api-md-route-error` is pushed at `5291b1f93c`. That row stays open for integration onto main.
-<!-- agent:boundary:f8ebf5ca -->
+
+> **Queue prompt:** Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+
+> **Queue prompt:** The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.
+
+**Deferred:** dispatched to `subagent:nestvector` generation 1, worker `01a1847a-9095-78f2-85c6-aa4ddfdcbe87`, on `fix/nested-queue-prompt` in `/home/brian/worktrees/agent-doc-nestvector`. That worktree started at `343fe163c2`. Main has since moved to `5291b1f93c`, so the worker rebases onto current `origin/main` before it pushes the feature branch.
+
+### Re: api.md route fix is on main — grok-4.7 · 2026-10-28T17:49-04:00
+
+The route diagnostic was live-owner steering delivery, classed `ok`. The fix is on main at `5291b1f93c` (`fix(route): report live-owner steering as success`, plus the VS Code 0.2.90 package bump). Fast-forward was `343fe163c2..5291b1f93c`. `make check` on that tree exited 0: nextest 12108 passed and 187 skipped. `make install` exited 0. The binary remains `agent-doc 0.35.560`. JetBrains on this commit is 0.2.880, 0.2.881, and 0.2.882. Restart IDEA to load 0.2.882. VS Code 0.2.90 is installed.
+
+CI for `343fe163c2` succeeded: https://github.com/btakita/agent-doc/actions/runs/40766108880. CI for `5291b1f93c` is in progress: https://github.com/btakita/agent-doc/actions/runs/40774734370. Tag `v0.35.560` stays at `bd971e9b87`.
+
+The nested queue-prompt row is claimed and running in its own worktree.
+<!-- agent:boundary:4725b83c -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+- ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestvector#1] The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.

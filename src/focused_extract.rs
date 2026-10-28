@@ -1453,7 +1453,13 @@ fn prepare_with_recovery(
     let target_before = target_content;
     let mut target_after = match target_before.clone() {
         Some(content) => content,
-        None => render_focused_target_scaffold(title, agent, source_fm, source, target)?,
+        None => render_focused_target_scaffold(
+            title,
+            agent,
+            &super::extract::scaffold_inheritance_frontmatter(&source_content)?,
+            source,
+            target,
+        )?,
     };
     let already_marked = target_after.contains(&marker);
     let mut source_after = source_content.clone();
@@ -2636,6 +2642,73 @@ mod tests {
         )
         .unwrap();
         assert!(rerun.preview.already_applied);
+    }
+
+    /// `#extractpresetcopy`: extracting into a new document writes only the
+    /// source's own per-document overrides. The effective source frontmatter
+    /// carries every `.agent-doc/project.md` preset (and project defaults such
+    /// as `model`); copying it materialized the whole project preset map into
+    /// the new document's frontmatter.
+    #[test]
+    fn new_target_inherits_only_document_local_presets_not_project_presets() {
+        let project_md = concat!(
+            "---\n",
+            "model: project-model\n",
+            "presets:\n",
+            "  '#auth': 'I authorize you to do this.'\n",
+            "  '#repo': 'repo'\n",
+            "  '#push': 'commit + push: #auth'\n",
+            "---\n",
+        );
+        let source_content = source_doc().replacen(
+            "---\n",
+            concat!(
+                "---\n",
+                "presets:\n",
+                "  '#pr-aggregate': '#repo: Aggregate PR'\n",
+                "  '#repo': 'haiven-dev/haiven-sdk'\n",
+            ),
+            1,
+        );
+        let mut defaults = frontmatter::FrontmatterDefaults::default();
+        defaults.overlay_document(project_md).unwrap();
+        let (effective, _) = defaults.parse(&source_content).unwrap();
+        assert!(
+            effective.prompt_presets.contains_key("#auth"),
+            "fixture: the effective source frontmatter carries project presets"
+        );
+        let prepared = prepare(
+            Path::new("source.md"),
+            Path::new("legal.md"),
+            source_content,
+            None,
+            &effective,
+            &FocusedExtractRequest {
+                focus: None,
+                rationale: None,
+                ids: vec!["legal1".into()],
+                exchange_node_ids: Vec::new(),
+                archive_locators: Vec::new(),
+                components: Vec::new(),
+            },
+        )
+        .unwrap();
+        let (target_fm, _) = frontmatter::parse(&prepared.target_after).unwrap();
+        assert_eq!(
+            target_fm.prompt_presets.keys().cloned().collect::<Vec<_>>(),
+            ["#pr-aggregate", "#repo"],
+            "only the source document's own presets are per-document overrides"
+        );
+        assert_eq!(
+            target_fm.prompt_presets.get("#repo").map(String::as_str),
+            Some("haiven-dev/haiven-sdk")
+        );
+        assert_eq!(target_fm.model, None, "project model default is not copied");
+        assert!(
+            !prepared
+                .target_after
+                .contains("I authorize you to do this.")
+        );
     }
 
     #[test]

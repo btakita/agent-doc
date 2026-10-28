@@ -291,8 +291,80 @@ pub fn apply_pane_swaps(slots: &[String], plan: &[PaneSwap]) -> Vec<String> {
     slots
 }
 
+/// `#protectedextrasliver`: true when a single-row window leaves some pane a
+/// sliver of its even share.
+///
+/// tmux-router's equalize step sizes a two-column layout by resizing the
+/// FIRST wanted pane to 50% of the window. When a third, protected pane (a
+/// foreign root's column the router must not stash) still sits in the row,
+/// that resize takes every column from the LAST pane: observed live
+/// 2026-10-28 as `[%6 117 | %16 120 | %3 1]` in a 240-column window. A pane
+/// narrower than half its even share (and never wider than 1 column short of
+/// 2) is starved. Stacked layouts (panes at different `top`) are never judged:
+/// an even-horizontal rebalance would flatten their rows.
+pub fn single_row_has_starved_pane(snapshot: &PaneOrderSnapshot) -> bool {
+    let panes = &snapshot.panes;
+    if panes.len() < 2 {
+        return false;
+    }
+    let top = panes[0].top;
+    if panes.iter().any(|pane| pane.top != top) {
+        return false;
+    }
+    let Some(window_width) = snapshot
+        .environment
+        .window_size
+        .split_once('x')
+        .and_then(|(width, _)| width.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    let even_share = window_width / panes.len() as u32;
+    let floor = (even_share / 2).max(2);
+    panes
+        .iter()
+        .any(|pane| pane.width.is_some_and(|width| width < floor))
+}
+
 #[cfg(test)]
 mod tests {
+
+    fn row_snapshot(widths: &[u32], window_width: u32) -> PaneOrderSnapshot {
+        let mut left = 0;
+        let lines: Vec<String> = widths
+            .iter()
+            .enumerate()
+            .map(|(index, width)| {
+                let line = format!("%{index}|{left}|1|{index}|{width}|{window_width}|55|3.8|0|0|0");
+                left += width + 1;
+                line
+            })
+            .collect();
+        parse_pane_order_snapshot(&lines.join("\n"))
+    }
+
+    #[test]
+    fn protected_extra_sliver_is_starved_but_even_rows_are_not() {
+        // The live 2026-10-28 window: agent-loop's protected pane, then the
+        // nested controller's two 50%-equalized columns.
+        assert!(single_row_has_starved_pane(&row_snapshot(
+            &[117, 120, 1],
+            240
+        )));
+        assert!(!single_row_has_starved_pane(&row_snapshot(
+            &[120, 119],
+            240
+        )));
+        assert!(!single_row_has_starved_pane(&row_snapshot(
+            &[79, 79, 80],
+            240
+        )));
+        assert!(!single_row_has_starved_pane(&row_snapshot(&[240], 240)));
+        // A stacked column is never judged by a single-row rule.
+        let mut stacked = row_snapshot(&[120, 1], 240);
+        stacked.panes[1].top = 20;
+        assert!(!single_row_has_starved_pane(&stacked));
+    }
     use super::*;
 
     const PANES: [&str; 5] = ["%1", "%2", "%3", "%4", "%5"];

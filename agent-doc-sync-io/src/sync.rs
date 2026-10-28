@@ -5743,6 +5743,22 @@ fn run_with_options_internal_at_root(
         window,
         pane_order_before,
     );
+    // `#protectedextrasliver`: tmux-router equalizes a two-column layout by
+    // resizing the first wanted pane to 50%, which is right only when the
+    // window holds exactly those columns. A protected foreign pane left in the
+    // row turns that resize into a one-cell sliver for the last column
+    // (observed live 2026-10-28: `[%6 117 | %16 120 | %3 1]`). Spread the row
+    // evenly instead.
+    if let Some(window) = window
+        && !logged_foreign_panes.borrow().is_empty()
+        && let Some((before, after)) =
+            agent_doc_tmux_io::pane_order::rebalance_starved_single_row(tmux, window)
+    {
+        sync_log(&format!(
+            "layout_protected_extra_rebalanced window={window} before={before} after={after} protected={:?} (#protectedextrasliver)",
+            logged_foreign_panes.borrow()
+        ));
+    }
     LAST_SYNC_RUN_REPORT.with(|report| {
         report.borrow_mut().file_panes = result.file_panes.clone();
     });

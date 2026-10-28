@@ -16,6 +16,7 @@
 use agent_doc_tmux::pane_order::{
     PANE_ORDER_FORMAT, PaneOrderSnapshot, PaneOrderVerdict, PaneSwap, active_pane,
     check_pane_order, parse_pane_order_snapshot, plan_pane_order_repair, render_positions,
+    single_row_has_starved_pane,
 };
 
 /// Read one window's pane geometry and host facts. `None` when tmux does not
@@ -193,6 +194,42 @@ pub fn enforce_pane_order(
     pass
 }
 
+/// `#protectedextrasliver`: when a layout pass had to leave a protected pane
+/// in a single-row window and that left some column a sliver, spread the row
+/// evenly with `select-layout even-horizontal`. Returns the before/after
+/// positions when it rebalanced, `None` when nothing was starved.
+pub fn rebalance_starved_single_row(
+    tmux: &tmux_router::Tmux,
+    window: &str,
+) -> Option<(String, String)> {
+    let before = observe_pane_order(tmux, window)?;
+    if !single_row_has_starved_pane(&before) {
+        return None;
+    }
+    tmux.raw_cmd(&["select-layout", "-t", window, "even-horizontal"])
+        .ok()?;
+    crate::observation_cache::observe_external_mutation();
+    let after = observe_pane_order(tmux, window)?;
+    Some((render_widths(&before), render_widths(&after)))
+}
+
+fn render_widths(snapshot: &PaneOrderSnapshot) -> String {
+    let panes: Vec<String> = snapshot
+        .panes
+        .iter()
+        .map(|pane| {
+            format!(
+                "{}@{}w{}",
+                pane.pane_id,
+                pane.left,
+                pane.width
+                    .map_or_else(|| "?".to_string(), |width| width.to_string())
+            )
+        })
+        .collect();
+    format!("[{}]", panes.join(" "))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +330,48 @@ mod tests {
             "{line}"
         );
         assert!(!line.contains("tmux_version=unknown"), "{line}");
+    }
+
+    /// `#protectedextrasliver`, real tmux: the live 2026-10-28 window. A
+    /// protected foreign pane plus a 50%-equalized first column left the last
+    /// column ONE cell wide; the rebalance spreads the row evenly and keeps
+    /// pane order, and an even row is left alone.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn a_protected_extra_sliver_is_rebalanced_to_an_even_row() {
+        let (tmux, window, panes) = window_with_panes("protected-extra-sliver", 3, "0");
+        tmux.raw_cmd(&["resize-window", "-t", &window, "-x", "240", "-y", "55"])
+            .unwrap();
+        let order = physical_order(&observe_pane_order(&tmux, &window).unwrap().panes);
+        tmux.raw_cmd(&["resize-pane", "-t", &order[0], "-x", "117"])
+            .unwrap();
+        tmux.raw_cmd(&["resize-pane", "-t", &order[1], "-x", "120"])
+            .unwrap();
+        let sliver = observe_pane_order(&tmux, &window).unwrap();
+        let widths: Vec<Option<u32>> = sliver.panes.iter().map(|pane| pane.width).collect();
+        assert!(
+            widths.contains(&Some(1)),
+            "fixture reproduces the one-column sliver: {widths:?}"
+        );
+
+        let (before, after) =
+            rebalance_starved_single_row(&tmux, &window).expect("a starved row is rebalanced");
+        assert!(before.contains("w1"), "{before}");
+        let rebalanced = observe_pane_order(&tmux, &window).unwrap();
+        assert!(
+            rebalanced
+                .panes
+                .iter()
+                .all(|pane| pane.width.is_some_and(|width| width >= 78)),
+            "{after}"
+        );
+        assert_eq!(physical_order(&rebalanced.panes), order, "order is kept");
+        assert_eq!(panes.len(), 3);
+        assert_eq!(
+            rebalance_starved_single_row(&tmux, &window),
+            None,
+            "an even row is left alone"
+        );
     }
 
     /// Every start arrangement x every wanted order for 2..=4 columns, under

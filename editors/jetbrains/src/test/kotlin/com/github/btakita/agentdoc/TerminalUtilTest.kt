@@ -838,7 +838,7 @@ class TerminalUtilTest {
     fun `explicit steering delivery is informational and distinct from queued work`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs.md"
         val output = """
-            Error: [route] Sent 1 update to the agent already running for /repo/$relativePath; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+            Error: [route] Sent 1 update to the agent already running for /repo/$relativePath; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
         """.trimIndent()
         val message = TerminalUtil.buildRunAgentDocSteeringDeliveredMessage(relativePath)
 

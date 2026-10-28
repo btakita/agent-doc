@@ -320,9 +320,11 @@ pub fn closeout_wait_route_outcome(
             } else {
                 "updates"
             };
-            let update_pronoun = if explicit_items == 1 { "it" } else { "them" };
+            // Success. "No second trigger was injected" is the ambiguous and
+            // blocked clause, where nothing is working yet. This path is
+            // `ui_outcome_class=ok` and must not use it.
             CloseoutWaitRouteOutcome::SteeringDelivered(format!(
-                "[route] Sent {explicit_items} {update_noun} to the agent already running for {}; it will handle {update_pronoun} in this turn. No second trigger was injected. steering_delivered={explicit_items} sent=explicit {delivered_fields}",
+                "[route] Sent {explicit_items} {update_noun} to the agent already running for {}; no second turn was started. steering_delivered={explicit_items} sent=explicit {delivered_fields}",
                 file.display(),
             ))
         }
@@ -1871,12 +1873,13 @@ mod tests {
             message.contains("Sent 2 updates to the agent already running"),
             "{message}"
         );
+        assert!(message.contains("no second turn was started"), "{message}");
         assert!(
-            message.contains("steering_delivered=2 sent=explicit"),
+            !message.contains("No second trigger was injected"),
             "{message}"
         );
         assert!(
-            message.contains("No second trigger was injected"),
+            message.contains("steering_delivered=2 sent=explicit"),
             "{message}"
         );
         assert!(
@@ -2073,6 +2076,15 @@ mod tests {
             panic!("{outcome:?}");
         };
         assert!(!message.contains("cancel-turn"), "{message}");
+        assert!(
+            message.contains("Sent 1 update to the agent already running"),
+            "{message}"
+        );
+        assert!(message.contains("no second turn was started"), "{message}");
+        assert!(
+            !message.contains("No second trigger was injected"),
+            "{message}"
+        );
     }
 
     #[test]

@@ -603,7 +603,7 @@ object TerminalUtil {
                         finalStage = "route_startup_not_ready"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (failureKind == RunAgentDocRouteFailureKind.STEERING_DELIVERED) {
-                        LOG.warn("[route] steering delivered to active owner for $relativePath: $output")
+                        LOG.info("[route] steering delivered to active owner for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
                         notifyRunAgentDocSteeringDelivered(project, relativePath, output, outcome)
                         StateProjectionBridge.recordRouteDispatchProven(

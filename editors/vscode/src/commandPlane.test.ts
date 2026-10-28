@@ -78,12 +78,23 @@ test('resolveEditorRouteTerminal throws on a rejected terminal', () => {
 });
 
 test('explicit steering delivered behind the owner is presented as concise success', () => {
-    const output = 'Error: [route] verbose legacy wrapper steering_delivered=1 sent=explicit '
+    const output = 'Error: [route] Sent 2 updates to the agent already running for /repo/tasks/sampleapp/notes.md; '
+        + 'No second trigger was injected. steering_delivered=2 sent=explicit '
         + 'ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner '
         + 'ui_outcome_class=ok next_action=owner_turn_handles_steering';
     assert.equal(isEditorRouteSteeringDelivered(output), true);
+    const hint = buildEditorRouteSuccessHint('tasks/sampleapp/notes.md', output);
     assert.equal(
-        buildEditorRouteSuccessHint('tasks/agent-doc/agent-doc-bugs.md', output),
-        'Sent 1 update to the Agent Doc turn already running for tasks/agent-doc/agent-doc-bugs.md; no second turn was started.',
+        hint,
+        'Sent 2 updates to the Agent Doc turn already running for tasks/sampleapp/notes.md; no second turn was started.',
+    );
+    assert.equal(hint.includes('No second trigger was injected'), false);
+    assert.equal(hint.startsWith('Error'), false);
+    assert.equal(
+        buildEditorRouteSuccessHint(
+            'tasks/sampleapp/notes.md',
+            'steering_delivered=1 ui_outcome=steering_delivered_to_owner',
+        ),
+        'Sent 1 update to the Agent Doc turn already running for tasks/sampleapp/notes.md; no second turn was started.',
     );
 });

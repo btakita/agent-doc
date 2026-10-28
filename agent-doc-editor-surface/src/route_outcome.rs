@@ -494,6 +494,34 @@ fn pane_not_visible_notice(lines: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
+/// `steering_delivered=N` as ASCII digits, or `None` when the marker is absent
+/// or has no digits. The classifier already requires the marker.
+fn steering_delivered_count(output: &str) -> Option<usize> {
+    let marker = "steering_delivered=";
+    let start = output.find(marker)? + marker.len();
+    let digits: String = output[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+/// Operator notification for a delivered explicit send. Names the count. Never
+/// the blocked-route clause `No second trigger was injected`.
+fn steering_delivered_summary(relative_path: &str, output: &str) -> String {
+    match steering_delivered_count(output) {
+        Some(1) => format!(
+            "Sent 1 update to the Agent Doc turn already running for {relative_path}.\nThat turn will handle it; no second turn was started."
+        ),
+        Some(n) if n > 1 => format!(
+            "Sent {n} updates to the Agent Doc turn already running for {relative_path}.\nThat turn will handle them; no second turn was started."
+        ),
+        _ => format!(
+            "Sent your update to the Agent Doc turn already running for {relative_path}.\nThat turn will handle it; no second turn was started."
+        ),
+    }
+}
+
 /// Derive what one route output means.
 pub fn derive_route_outcome(evidence: &RouteOutcomeEvidence) -> RouteOutcome {
     let output = evidence.output.as_deref().unwrap_or("");
@@ -518,9 +546,9 @@ pub fn derive_route_outcome(evidence: &RouteOutcomeEvidence) -> RouteOutcome {
         RouteOutcomeKind::QueuedPending => Some(format!(
             "Agent Doc is queued behind the active owner for {relative_path}.\nIt should run when that turn drains."
         )),
-        RouteOutcomeKind::SteeringDelivered => Some(format!(
-            "Sent your update to the Agent Doc turn already running for {relative_path}.\nThat turn will handle it; no second turn was started."
-        )),
+        RouteOutcomeKind::SteeringDelivered => {
+            Some(steering_delivered_summary(relative_path, output))
+        }
         RouteOutcomeKind::QueuePaused => Some(queue_paused_message(
             relative_path,
             &queue_paused.clone().unwrap_or_default(),

@@ -554,7 +554,41 @@
         "pane_not_visible_notice": null,
         "queue_paused": null,
         "snapshot_path": "",
+        "summary": "Sent 1 update to the Agent Doc turn already running for tasks/agent-doc/agent-doc-bugs.md.\nThat turn will handle it; no second turn was started."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "steering_delivered",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
         "summary": "Sent your update to the Agent Doc turn already running for tasks/agent-doc/agent-doc-bugs.md.\nThat turn will handle it; no second turn was started."
+      }
+    },
+    {
+      "name": "explicit steering delivery names a plural count and stays informational",
+      "input": {
+        "output": "Error: [route] Sent 2 updates to the agent already running for /repo/tasks/sampleapp/notes.md; no second turn was started. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering",
+        "relative_path": "tasks/sampleapp/notes.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "steering_delivered",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Sent 2 updates to the Agent Doc turn already running for tasks/sampleapp/notes.md.\nThat turn will handle them; no second turn was started."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "steering_delivered",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Sent your update to the Agent Doc turn already running for tasks/sampleapp/notes.md.\nThat turn will handle it; no second turn was started."
       }
     },
     {

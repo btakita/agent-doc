@@ -27,7 +27,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.557 (release commit `fec25bdee1`; GitHub Latest + PyPI 0.35.557). Main is at `dd9971e80e`, unreleased and installed locally (2026-10-27 17:54 EDT). Since v0.35.557: document-scoped store resolution, retained-projection clobber fix + follow-ups, Restart Agent `--expect-agent`, nested sub-prompts, `serve /save` 409 under an editor, in-flight typing hold, nested `--todo-add`. JetBrains plugins 0.2.865 / 0.2.866 / 0.2.867.
+Released and published agent-doc v0.35.558 from release commit `00caa013ac` (main); tag `v0.35.558` is the stable latest release: GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives plus JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets, PyPI 0.35.558 public, Homebrew formula bumped, `make release` public-publication complete, installed locally.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))

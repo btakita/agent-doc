@@ -3007,6 +3007,114 @@ mod tests {
         );
     }
 
+    /// `#nestedechostrike` (live, agent-doc-bugs.md 2026-10-27): a free-text
+    /// parent with nested sub-prompts is ONE head whose text is the parent plus
+    /// its children. The closeout echoed it verbatim (`> **Queue prompt:**
+    /// <parent>` then one `>   - <child>` line per child), and the per-line
+    /// echo matcher compared each quoted line with the whole multi-line head,
+    /// so the reported row never struck.
+    const NESTED_ECHO_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:run subagents go -->\n",
+        "- ☑️ [#subagent:pmsync#1] Sync PR and Jira state into a document element.\n",
+        "  - So this is the first subtask.\n",
+        "  - This is the second subtask.\n",
+        "- later free-text work stays queued\n",
+        "<!-- /agent:run -->\n",
+    );
+    const NESTED_ECHO_PARENT: &str = concat!(
+        "Sync PR and Jira state into a document element.\n",
+        "  - So this is the first subtask.\n",
+        "  - This is the second subtask.",
+    );
+    const NESTED_ECHO_ANSWER: &str = concat!(
+        "### Re: PM sync — opus\n\n",
+        "> **Queue prompt:** Sync PR and Jira state into a document element.\n",
+        ">   - So this is the first subtask.\n",
+        ">   - This is the second subtask.\n\n",
+        "Part 1 shipped in 1959c54f63; Part 2 is a design doc.\n",
+    );
+
+    #[test]
+    fn nestedechostrike_verbatim_nested_echo_strikes_claimed_parent() {
+        for claimed in [Vec::new(), vec![NESTED_ECHO_PARENT.to_string()]] {
+            let keys = answered_free_text_head_node_keys_with_claims(
+                NESTED_ECHO_DOC,
+                NESTED_ECHO_ANSWER,
+                Some(NESTED_ECHO_DOC),
+                &claimed,
+            )
+            .unwrap();
+            assert_eq!(keys.len(), 1, "claimed={claimed:?}: {keys:?}");
+            let projected = project_answered_free_text_strike_with_claims(
+                NESTED_ECHO_DOC,
+                NESTED_ECHO_ANSWER,
+                Some(NESTED_ECHO_DOC),
+                &claimed,
+            )
+            .unwrap()
+            .expect("the nested echo projects a strike");
+            assert!(
+                projected
+                    .target_content
+                    .contains("~~Sync PR and Jira state into a document element.~~"),
+                "{}",
+                projected.target_content
+            );
+            assert!(
+                projected
+                    .target_content
+                    .contains("- later free-text work stays queued\n"),
+                "{}",
+                projected.target_content
+            );
+        }
+    }
+
+    /// The parent line alone, or one child alone, is not the nested head's
+    /// echo; and a response that quotes the nested head and defers it stays
+    /// queued.
+    #[test]
+    fn nestedechostrike_partial_or_deferred_nested_echo_does_not_strike() {
+        let claimed = vec![NESTED_ECHO_PARENT.to_string()];
+        let keys = |response: &str| {
+            answered_free_text_head_node_keys_with_claims(
+                NESTED_ECHO_DOC,
+                response,
+                Some(NESTED_ECHO_DOC),
+                &claimed,
+            )
+            .unwrap()
+        };
+        let child_only = concat!(
+            "### Re: subtask — opus\n\n",
+            "> **Queue prompt:** So this is the first subtask.\n\n",
+            "Done.\n",
+        );
+        assert!(keys(child_only).is_empty(), "a child echo is not the head");
+        let missing_child = concat!(
+            "### Re: PM sync — opus\n\n",
+            "> **Queue prompt:** Sync PR and Jira state into a document element.\n",
+            ">   - So this is the first subtask.\n\n",
+            "Done.\n",
+        );
+        assert!(
+            keys(missing_child).is_empty(),
+            "an echo missing a child is not the verbatim head"
+        );
+        let deferred = concat!(
+            "### Re: PM sync — opus\n\n",
+            "> **Queue prompt:** Sync PR and Jira state into a document element.\n",
+            ">   - So this is the first subtask.\n",
+            ">   - This is the second subtask.\n\n",
+            "**Deferred:** dispatched to a subagent.\n",
+        );
+        assert!(
+            keys(deferred).is_empty(),
+            "a deferred nested echo stays queued"
+        );
+    }
+
     /// `#ftstrikeclaimedmention` + `#claimstrike`: a claimed head refuses every
     /// weak proof, yet its exact agent-authored `> **Queue prompt:**` echo
     /// still strikes it, unless the response defers it beside that echo.

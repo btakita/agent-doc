@@ -556,9 +556,10 @@ pub fn consume_with_options(
                  classification evidence: queue_active={queue_active:?} active_head={classified_head:?}. \
                  If it represents completed or gated work, reap it through the normal closeout with \
                  `--done <id>` / `--pending-gate <id>` so the backlog item stays in sync. \
-                 If it is only an acknowledgement/correction for still-open work, use \
+                 If it is only an acknowledgement/correction for still-open work, or a reported \
+                 (☑️) dispatch row whose backlog/Todo item must stay open, use \
                  `agent-doc queue consume <FILE> --ack-id <id>` to strike the head without closing \
-                 the backlog item. Otherwise leave it queued.",
+                 the tracked item. Otherwise leave it queued.",
                 file.display()
             );
         }

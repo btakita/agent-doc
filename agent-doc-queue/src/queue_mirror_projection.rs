@@ -117,6 +117,7 @@ mod tests {
                         text: prompt.text.clone(),
                         marker: QueueLifecycleMarker::Running,
                         owner: owner("subagent:layout_liveverify", 2),
+                        blockers: Vec::new(),
                         reopen_completed: false,
                     }),
                     _ => None,
@@ -142,6 +143,7 @@ mod tests {
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Running,
                             owner: owner("subagent:layout_liveverify", 2),
+                            blockers: Vec::new(),
                             reopen_completed: false,
                         }),
                         _ => None,
@@ -169,6 +171,7 @@ mod tests {
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Pending,
                             owner: None,
+                            blockers: Vec::new(),
                             reopen_completed: false,
                         }),
                         _ => None,
@@ -266,6 +269,7 @@ mod tests {
                             text: prompt.text.clone(),
                             marker: QueueLifecycleMarker::Pending,
                             owner: None,
+                            blockers: Vec::new(),
                             reopen_completed: false,
                         })
                     }

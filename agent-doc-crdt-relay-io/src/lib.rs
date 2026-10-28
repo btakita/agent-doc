@@ -1326,6 +1326,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .filter(|receipt| !claim_states.contains_key(&receipt.identity))
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<HashMap<_, _>>();
+    let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
     let completion_evidence =
         agent_doc_document::subagent_completion::completion_evidence(current)
             .into_iter()
@@ -1372,6 +1373,9 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                     } else if completion_evidence.contains(&identity) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
+                    } else if blockers.blocks_row(&prompt.text) {
+                        // `#queueblocked`: outranks a stale `⏭️`/`⏳`.
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if matches!(
                         agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
                         Some(
@@ -1399,6 +1403,16 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
                         text: prompt.text.clone(),
+                        blockers: if marker
+                            == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                        {
+                            blockers
+                                .blockers_for_row(&prompt.text)
+                                .map(<[String]>::to_vec)
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        },
                         marker,
                         owner,
                         reopen_completed: durable_on_struck,

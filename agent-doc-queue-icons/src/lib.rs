@@ -15,6 +15,8 @@ pub struct QueueIconConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claimed: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub running: Option<String>,
@@ -42,6 +44,7 @@ pub struct QueueIconConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueIconSet {
     pub pending: String,
+    pub blocked: String,
     pub claimed: String,
     pub running: String,
     pub reported: String,
@@ -61,6 +64,11 @@ pub struct QueueIconSet {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum QueueLifecycleMarker {
     Pending,
+    /// `#queueblocked`: a live row whose tracked item still waits on open
+    /// prerequisite work (a `(stays open: blocked behind #a, #b)` clause or an
+    /// `after=#id` edge naming an item still open in backlog, todo or review).
+    /// It is held out of drain and dispatch until every blocker closes.
+    Blocked,
     Claimed,
     Running,
     Reported,
@@ -71,8 +79,9 @@ pub enum QueueLifecycleMarker {
     AwaitingOperator,
 }
 
-pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 9] = [
+pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 10] = [
     QueueLifecycleMarker::Pending,
+    QueueLifecycleMarker::Blocked,
     QueueLifecycleMarker::Claimed,
     QueueLifecycleMarker::Running,
     QueueLifecycleMarker::Reported,
@@ -88,6 +97,7 @@ impl QueueLifecycleMarker {
         let icons = queue_icons();
         match self {
             Self::Pending => &icons.pending,
+            Self::Blocked => &icons.blocked,
             Self::Claimed => &icons.claimed,
             Self::Running => &icons.running,
             Self::Reported => &icons.reported,
@@ -102,6 +112,7 @@ impl QueueLifecycleMarker {
     pub const fn default_prefix(self) -> &'static str {
         match self {
             Self::Pending => "📥",
+            Self::Blocked => "⛔",
             Self::Claimed => "🟡",
             Self::Running => "🚧",
             Self::Reported => "☑️",
@@ -118,6 +129,7 @@ impl Default for QueueIconSet {
     fn default() -> Self {
         Self {
             pending: "📥".into(),
+            blocked: "⛔".into(),
             claimed: "🟡".into(),
             running: "🚧".into(),
             reported: "☑️".into(),
@@ -138,6 +150,7 @@ impl QueueIconSet {
         let defaults = Self::default();
         let resolved = Self {
             pending: config.pending.clone().unwrap_or(defaults.pending),
+            blocked: config.blocked.clone().unwrap_or(defaults.blocked),
             claimed: config.claimed.clone().unwrap_or(defaults.claimed),
             running: config.running.clone().unwrap_or(defaults.running),
             reported: config.reported.clone().unwrap_or(defaults.reported),
@@ -167,9 +180,10 @@ impl QueueIconSet {
     /// Validation and the marker legend both read this one list, so a palette
     /// field cannot be validated without also being documented
     /// (`#queuemarkerlegend`).
-    pub fn entries(&self) -> [(&'static str, &str); 12] {
+    pub fn entries(&self) -> [(&'static str, &str); 13] {
         [
             ("pending", self.pending.as_str()),
+            ("blocked", self.blocked.as_str()),
             ("claimed", self.claimed.as_str()),
             ("running", self.running.as_str()),
             ("reported", self.reported.as_str()),
@@ -198,6 +212,7 @@ impl QueueIconSet {
             }
             for (built_in_name, built_in_value) in [
                 ("pending", "📥"),
+                ("blocked", "⛔"),
                 ("claimed", "🟡"),
                 ("running", "🚧"),
                 ("reported", "☑️"),

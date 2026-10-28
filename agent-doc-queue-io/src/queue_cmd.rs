@@ -231,6 +231,9 @@ pub fn derive_claim_runtime_projection_scoped(
         .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
         .collect::<std::collections::HashSet<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
+    // `#queueblocked`: a row whose tracked item waits on open blockers paints
+    // `⛔ ⟦blocked by ...⟧`, outranking a stale `⏭️`/`⏳` it may still carry.
+    let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
     let (skip_queue_id, selected) = match scope {
         ClaimProjectionScope::Document => (
             None,
@@ -312,6 +315,8 @@ pub fn derive_claim_runtime_projection_scoped(
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     } else if selected.claims(&prompt.text) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+                    } else if blockers.blocks_row(&prompt.text) {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if matches!(
                         observed,
                         Some(
@@ -340,6 +345,16 @@ pub fn derive_claim_runtime_projection_scoped(
                         text: agent_doc_document::queue_projection::strip_in_progress_marker(
                             &prompt.text,
                         ),
+                        blockers: if marker
+                            == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                        {
+                            blockers
+                                .blockers_for_row(&prompt.text)
+                                .map(<[String]>::to_vec)
+                                .unwrap_or_default()
+                        } else {
+                            Vec::new()
+                        },
                         marker,
                         owner,
                         reopen_completed: durable_on_struck,
@@ -355,6 +370,7 @@ pub fn derive_claim_runtime_projection_scoped(
                     !matches!(
                         target.marker,
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                            | agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                             | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     )
                 })

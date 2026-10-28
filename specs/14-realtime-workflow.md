@@ -933,6 +933,16 @@ the `🚧` marker, and no inactive/drained head carries it. Cosmetic markers do 
 change selected head identity. The canonical marker vocabulary is:
 
 - `🚧` — active/in-progress HEAD projection (the head being dispatched this cycle).
+- `⛔` — BLOCKED head projection (`#queueblocked`): a live head whose tracked
+  item still waits on open work, written `⛔ ⟦blocked by a, b⟧` with the open
+  blocker ids. The blockers are the ids a `(stays open: blocked behind #a, #b)`
+  clause or an `after=` edge cites that are still open items in this
+  document's backlog, todo, or review. A head blocked by a stays-open clause is
+  deferred in every drain scope and never skipped (an `after=`-only block keeps
+  the auto-DAG gate, so an in-progress head is not preempted); no blocked head
+  is subagent dispatch work. Like `⏭️` it is
+  re-derived every pass, stripped for identity, and returns to `📥` once its
+  last open blocker closes. See `specs/07-orchestration-commands.md`.
 - `⏭️` — SKIPPED head projection (`#queueskip`): a head that was dispatched, came
   back unconsumed, and was passed over so the queue could advance to a
   non-dependent drainable head. It is a re-derived cosmetic projection like `🚧`,

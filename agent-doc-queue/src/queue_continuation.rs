@@ -497,6 +497,13 @@ pub struct DeferredBacklogIds {
     /// Ids whose deferral an operator verdict cannot satisfy: `[focused-cycle]`
     /// asks for a fresh cycle, which no amount of human confirmation supplies.
     pub operator_verdict_immune: HashSet<String>,
+    /// `#queueblocked`: every blocked id (open stays-open blocker or `after=`
+    /// prerequisite). Never `⏳`. Ids blocked by a stays-open clause are also
+    /// in `all` and `operator_verdict_immune`: an inline verdict on the head
+    /// does not close the blocker, so it does not unblock the row. `after=`
+    /// edges keep their own gate (`#dagdraingate`) and auto-DAG ordering, so
+    /// a head already in progress is never preempted by one (GH #162).
+    pub blocked: HashSet<String>,
 }
 
 impl DeferredBacklogIds {
@@ -541,6 +548,15 @@ pub fn deferred_backlog_ids_split(content: &str, scope: DrainScope) -> DeferredB
             deferred.all.insert(key);
         }
     }
+    // `#queueblocked`: a blocked row is undrainable in every scope until its
+    // last open blocker closes. Folding it into the deferral set keeps every
+    // drain gate, drainable count, and selection projection in agreement.
+    let blockers = crate::queue_blocked::queue_blockers(content);
+    for id in blockers.deferred_ids() {
+        deferred.operator_verdict_immune.insert(id.clone());
+        deferred.all.insert(id);
+    }
+    deferred.blocked = blockers.blocked_ids();
     deferred
 }
 
@@ -724,6 +740,10 @@ pub fn awaiting_operator_head_ids(content: &str) -> HashSet<String> {
         .filter(|prompt| !head_carries_operator_verdict(&prompt.text))
         .filter_map(|prompt| extract_head_id(&prompt.text))
         .map(|id| id.to_ascii_lowercase())
+        // `#queueblocked`: a blocked head shows `⛔`, never `⏳`. Its agent
+        // work cannot start until the blockers close, so it is not waiting on
+        // an operator verdict yet.
+        .filter(|id| !operator_verify.blocked.contains(id))
         .filter(|id| operator_verify.all.contains(id) || gated_review.contains(id))
         .collect()
 }

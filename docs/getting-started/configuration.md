@@ -51,7 +51,7 @@ reported = "☑️"
 | `[terminal].command` | External-terminal command template; supports `{tmux_command}` |
 | `[terminal].auto_start_tmux` | Allow creation of a missing tmux session (default `true`) |
 | `[terminal].attach_command` | IDE attach template; supports `{session}` and `{tmux_command}` |
-| `[queue_icons]` | Optional visible queue prefix strings; fields are `pending`, `claimed`, `running`, `reported`, `lost`, `reconciling`, `unknown`, `skipped`, `awaiting_operator`, `operator_action`, `prioritized`, and `agent_prioritized` |
+| `[queue_icons]` | Optional visible queue prefix strings; fields are `pending`, `blocked`, `claimed`, `running`, `reported`, `lost`, `reconciling`, `unknown`, `skipped`, `awaiting_operator`, `operator_action`, `prioritized`, and `agent_prioritized` |
 
 ## Resolution order
 

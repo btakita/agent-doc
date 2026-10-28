@@ -20,6 +20,7 @@ lifecycle.
 | Marker | `[queue_icons]` key | State | Meaning |
 | --- | --- | --- | --- |
 | 📥 | `pending` | pending | Live row with no claim, worker report, or completion evidence; ready to run. |
+| ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review. `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every blocker closes. |
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | reported | The worker reported back (`queue report-complete`); the coordinator still has to integrate, verify, and close the row. |
@@ -35,6 +36,7 @@ lifecycle.
 | Annotation | Meaning |
 | --- | --- |
 | `[#<owner>#<N>]` | Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity. |
+| `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
 | `⟦<owner>#<N>⟧` | Older spelling of the owner annotation; normalized to `[#<owner>#<N>]`. |
@@ -53,7 +55,7 @@ surfaces render it:
   keeps one compact legend line as the last paragraph of `agent:status`:
 
   ```text
-  Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](…/queue-markers.md#queue-markers))
+  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](…/queue-markers.md#queue-markers))
   ```
 
   New documents from the Claim for Tmux Pane template start with it. An
@@ -62,6 +64,55 @@ surfaces render it:
   and it follows your palette. To hide it, set `queue-legend=off` on the status
   marker: `<!-- agent:status patch=replace queue-legend=off -->`.
 - **This page.**
+
+## What `⛔` means
+
+`⛔` (blocked) means the row's tracked item cannot start yet, because other
+work it waits on is still open. agent-doc paints it with the open blocker ids,
+for example:
+
+```text
+- ⛔ ⟦blocked by bossroom-sbx-provision⟧ do [#bossroom-stg-provision]
+```
+
+agent-doc derives the state from the tracked item the row names (`do [#id]`)
+in `agent:backlog`, `agent:todo`, or `agent:review`:
+
+- **A stays-open blocker clause.** The item text carries
+  `(stays open: blocked behind #a, #b)`. Every `#id` inside the clause is a
+  candidate blocker. The clause must say it blocks (`blocked`, `blocker`), so
+  a `(stays open: ...)` note about something else is not read as one.
+- **An `after=#id` edge**, or a nested ordered-list predecessor in the queue.
+
+A candidate blocks only while it names an item that is still open in this
+document's backlog, todo, or review. An id that is done, archived, or not an
+item here does not block: a PR number such as `#749`, or an id that moved to
+another document. So the row returns to `📥` on the first projection after its
+last open blocker closes. A clause whose ids are all closed or absent leaves
+the row runnable, because agent-doc only derives blocked state from ids it can
+watch close.
+
+A blocked row is held out of the queue:
+
+- A row blocked by a stays-open clause is deferred: no drain selects it,
+  inline or supervisor, it is not counted as drainable, and session-check
+  counts it with the deferred heads. A row blocked only by an `after=` edge
+  keeps the dependency gate it already had: it is not counted as drainable
+  while the prerequisite is open in the backlog, the queue orders the
+  prerequisite first, and a head whose turn is already running is not
+  preempted when a dependency is added.
+- `queue_subagent_dispatch`, session-check's "queue awaits subagent dispatch",
+  and the `subagents=N` planner never offer it, so it does not take a slot
+  from runnable work.
+- A row blocked by a stays-open clause is never marked `⏭️`. It was never
+  dispatched, so it cannot have come back unconsumed.
+
+A live attempt still outranks it: a claimed, running, reported, lost, or
+reconciling row keeps that marker. `⛔` outranks `⏳`, `⏭️`, and `📥`.
+agent-doc never edits the row's text or the tracked item: only the marker and
+annotation change. To unblock a row by hand, close the blocker or edit the
+clause in the tracked item. The exact rule is in
+`specs/07-orchestration-commands.md` (`#queueblocked`).
 
 ## What `🔄` means
 

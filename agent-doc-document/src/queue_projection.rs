@@ -39,6 +39,18 @@ pub const IN_PROGRESS_MARKER: &str = "🚧";
 /// report receipt, or operator gate. Pending is explicit so removing a stale
 /// active marker never leaves the operator wondering whether projection ran.
 pub const PENDING_MARKER: &str = "📥";
+/// `#queueblocked`: live queue work whose tracked item still waits on open
+/// prerequisite work. It is followed by a [`BLOCKED_ANNOTATION_OPEN`]
+/// annotation naming the blocking ids, and is held out of drain and dispatch.
+pub const BLOCKED_MARKER: &str = "⛔";
+/// Opening delimiter of the blocker annotation that follows [`BLOCKED_MARKER`]:
+/// `⛔ ⟦blocked by a, b⟧ do [#x]`. The ids carry no `#`, so a scanner that
+/// reads the first `#id` of a raw row never mistakes a blocker for the row's
+/// own id. The annotation is part of the lifecycle token: every parser that
+/// strips the lifecycle marker strips it too, so it is never work identity.
+pub const BLOCKED_ANNOTATION_OPEN: &str = "⟦blocked by ";
+/// Closing delimiter of the blocker annotation.
+pub const BLOCKED_ANNOTATION_CLOSE: &str = "⟧";
 /// Claimed for dispatch, but no positive worker-liveness evidence exists yet.
 /// `⏳` already means "awaiting operator" in existing documents, so claims use
 /// a yellow state marker instead (`#queueclaimstate`).
@@ -114,8 +126,9 @@ pub fn agent_prioritized_marker() -> &'static str {
 /// Every built-in leading lifecycle marker the binary projects onto or accepts
 /// from a queue head. Legacy spellings remain here so they never enter work
 /// identity even when a custom palette is installed.
-pub const LIFECYCLE_MARKERS: [&str; 11] = [
+pub const LIFECYCLE_MARKERS: [&str; 12] = [
     PENDING_MARKER,
+    BLOCKED_MARKER,
     CLAIMED_MARKER,
     RUNNING_MARKER,
     REPORTED_MARKER,
@@ -174,6 +187,94 @@ fn strip_lifecycle_prefix(text: &str) -> Option<&str> {
 }
 
 fn lifecycle_prefix(text: &str) -> Option<(QueueLifecycleMarker, &str, &str)> {
+    // `#queueblocked`: a bare blocker annotation (its `⛔` removed by hand or
+    // written under another palette) still reads as the blocked lifecycle
+    // token, so it never leaks into work identity.
+    if let Some(len) = blocked_annotation_len(text) {
+        return Some((QueueLifecycleMarker::Blocked, &text[..len], &text[len..]));
+    }
+    let (state, prefix, rest) = lifecycle_marker_prefix(text)?;
+    if state == QueueLifecycleMarker::Blocked {
+        let gap = rest.len() - rest.trim_start().len();
+        if let Some(len) = blocked_annotation_len(&rest[gap..]) {
+            let end = prefix.len() + gap + len;
+            return Some((state, &text[..end], &text[end..]));
+        }
+    }
+    Some((state, prefix, rest))
+}
+
+/// Byte length of a leading `⟦blocked by ...⟧` annotation on one line.
+fn blocked_annotation_len(text: &str) -> Option<usize> {
+    let after_open = text.strip_prefix(BLOCKED_ANNOTATION_OPEN)?;
+    let close = after_open.find(BLOCKED_ANNOTATION_CLOSE)?;
+    if after_open[..close].contains(['\n', '\r']) {
+        return None;
+    }
+    Some(BLOCKED_ANNOTATION_OPEN.len() + close + BLOCKED_ANNOTATION_CLOSE.len())
+}
+
+/// The canonical blocker annotation for `blockers` (`⟦blocked by a, b⟧`), or
+/// `None` when there is nothing to name. Ids are normalized (lowercase, no
+/// `#`) and deduplicated; anything outside `[a-z0-9_-]` is dropped so the
+/// annotation can never carry its own delimiter or a newline.
+pub fn format_blocked_annotation(blockers: &[String]) -> Option<String> {
+    let mut ids: Vec<String> = Vec::new();
+    for raw in blockers {
+        let id: String = raw
+            .trim()
+            .trim_start_matches('#')
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
+            .collect();
+        if !id.is_empty() && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    (!ids.is_empty()).then(|| {
+        format!(
+            "{BLOCKED_ANNOTATION_OPEN}{}{BLOCKED_ANNOTATION_CLOSE}",
+            ids.join(", ")
+        )
+    })
+}
+
+/// The blocking ids named by a row's leading `⛔ ⟦blocked by a, b⟧` token, in
+/// annotation order. Empty when the row is not blocked or names no ids.
+pub fn blocked_marker_ids(text: &str) -> Vec<String> {
+    let mut rest = text.trim_start();
+    loop {
+        if let Some((state, token, _)) = lifecycle_prefix(rest) {
+            if state != QueueLifecycleMarker::Blocked {
+                return Vec::new();
+            }
+            let Some(open) = token.find(BLOCKED_ANNOTATION_OPEN) else {
+                return Vec::new();
+            };
+            let payload = &token[open + BLOCKED_ANNOTATION_OPEN.len()..];
+            let payload = payload
+                .strip_suffix(BLOCKED_ANNOTATION_CLOSE)
+                .unwrap_or(payload);
+            return payload
+                .split(',')
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .collect();
+        }
+        if let Some(after) = strip_operator_action_marker_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = priority_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        return Vec::new();
+    }
+}
+
+fn lifecycle_marker_prefix(text: &str) -> Option<(QueueLifecycleMarker, &str, &str)> {
     ALL_LIFECYCLE_STATES
         .into_iter()
         .flat_map(|state| {
@@ -304,6 +405,10 @@ fn is_lifecycle_prefix(prefix: &str) -> bool {
         .any(|state| prefix == state.prefix() || prefix == state.default_prefix())
         || prefix == LEGACY_REPORTED_MARKER
         || prefix == OLDER_REPORTED_MARKER
+        // `#queueblocked`: `⛔ ⟦blocked by a⟧` is one lifecycle token.
+        || lifecycle_prefix(prefix).is_some_and(|(_, token, rest)| {
+            token.len() == prefix.len() && rest.is_empty()
+        })
 }
 
 /// Human-readable identity of the exact durable worker attempt governing a
@@ -766,17 +871,34 @@ pub fn apply_in_progress_marker(text: &str) -> String {
 /// Replace any existing lifecycle prefix with `marker`, preserving pins and
 /// trailing whitespace.
 pub fn apply_lifecycle_marker(text: &str, marker: QueueLifecycleMarker) -> String {
+    apply_lifecycle_marker_with_blockers(text, marker, &[])
+}
+
+/// [`apply_lifecycle_marker`] that also renders the blocker annotation
+/// (`⛔ ⟦blocked by a, b⟧`) when `marker` is
+/// [`QueueLifecycleMarker::Blocked`] and `blockers` names at least one id
+/// (`#queueblocked`). Other markers ignore `blockers`.
+pub fn apply_lifecycle_marker_with_blockers(
+    text: &str,
+    marker: QueueLifecycleMarker,
+    blockers: &[String],
+) -> String {
     let (content, trailing) = split_trailing_whitespace(text);
     let stripped = strip_in_progress_marker(content);
+    let token = match (marker, format_blocked_annotation(blockers)) {
+        (QueueLifecycleMarker::Blocked, Some(annotation)) => {
+            format!("{} {annotation}", marker.prefix())
+        }
+        _ => marker.prefix().to_string(),
+    };
     if let Some(after_operator) = strip_operator_action_marker_prefix(&stripped) {
         format!(
-            "{}{} {}{trailing}",
+            "{}{token} {}{trailing}",
             operator_action_marker(),
-            marker.prefix(),
             after_operator.trim_start()
         )
     } else {
-        format!("{} {stripped}{trailing}", marker.prefix())
+        format!("{token} {stripped}{trailing}")
     }
 }
 
@@ -1421,6 +1543,51 @@ mod tests {
             Some(QueueLifecycleMarker::Reconciling)
         );
         assert_eq!(worker_evidence_marker(None, false, false), None);
+    }
+
+    /// `#queueblocked`: `⛔ ⟦blocked by a, b⟧` is one lifecycle token. It is
+    /// rendered with its ids, replaced (never stacked) on repaint, read back by
+    /// `blocked_marker_ids`, and stripped from work identity by every parser.
+    #[test]
+    fn blocked_marker_names_its_blockers_and_is_cosmetic_for_identity() {
+        let blockers = vec!["#SBX".to_string(), "deploy".to_string(), "sbx".to_string()];
+        let blocked = apply_lifecycle_marker_with_blockers(
+            "⏭\u{fe0f} :round_pushpin: do [#stg]",
+            QueueLifecycleMarker::Blocked,
+            &blockers,
+        );
+        assert_eq!(blocked, "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]");
+        assert_eq!(lifecycle_marker(&blocked), Some(QueueLifecycleMarker::Blocked));
+        assert_eq!(blocked_marker_ids(&blocked), vec!["sbx", "deploy"]);
+        assert_eq!(strip_priority_markers(&blocked), "do [#stg]");
+        assert_eq!(strip_in_progress_marker(&blocked), ":round_pushpin: do [#stg]");
+        // Repaint replaces the token, including a changed blocker list.
+        assert_eq!(
+            apply_lifecycle_marker_with_blockers(
+                &blocked,
+                QueueLifecycleMarker::Blocked,
+                &["sbx".to_string()]
+            ),
+            "⛔ ⟦blocked by sbx⟧ :round_pushpin: do [#stg]"
+        );
+        assert_eq!(
+            apply_lifecycle_marker(&blocked, QueueLifecycleMarker::Pending),
+            "📥 :round_pushpin: do [#stg]",
+            "unblocking drops the annotation with the marker"
+        );
+        // Owner/operator-action projections keep the token whole.
+        assert_eq!(apply_owner_projection(&blocked, None), blocked);
+        assert_eq!(
+            apply_operator_action_ids(&blocked, &["subagent-operator-request-x".to_string()]),
+            "🙋⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg] [#subagent-operator-request-x]"
+        );
+        // A bare annotation left behind by a hand edit is still projection.
+        assert_eq!(strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"), "do [#stg]");
+        // An operator's own prose is never read as the annotation.
+        assert_eq!(
+            strip_priority_markers("⟦blocked by sbx do [#stg]"),
+            "⟦blocked by sbx do [#stg]"
+        );
     }
 
     #[test]

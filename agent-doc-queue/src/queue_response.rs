@@ -325,6 +325,9 @@ pub fn queue_head_answered_by_response_with_claim(
     head_text: &str,
     claimed: bool,
 ) -> bool {
+    if release_include_context_is_open(content, head_text) {
+        return false;
+    }
     if claimed {
         free_text_head_has_explicit_answer_evidence(response_body, head_text)
             || response_explicitly_echoes_nest_vector(content, response_body, head_text)
@@ -358,6 +361,9 @@ pub fn free_text_head_answered_in_document(
     response_body: &str,
     head_text: &str,
 ) -> bool {
+    if release_include_context_is_open(content, head_text) {
+        return false;
+    }
     if response_explicitly_echoes_nest_vector(content, response_body, head_text) {
         return true;
     }
@@ -1039,6 +1045,10 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
     // struck. The echo is matched as a contiguous run of quoted lines inside one
     // labeled echo: the run must start at a line boundary and cover the head
     // exactly, so a quote of the parent alone, or of one child, is not its echo.
+    // A child that begins with `Include #subagent:` is release context, not a
+    // sub-prompt. This matcher still recognizes that verbatim echo;
+    // [`release_include_context_is_open`] refuses it while any named include
+    // is a live queue row.
     let head_lines = head_echo_line_count(&head_clean);
     let mut run: Vec<String> = Vec::new();
     let mut in_queue_prompt_echo = false;
@@ -1105,6 +1115,97 @@ fn echo_run_ends_with_head(run: &[String], head_norm: &str, lines: usize) -> boo
     }
     let joined: Vec<&str> = tail.into_iter().rev().collect();
     joined.join(" ") == head_norm
+}
+
+const RELEASE_INCLUDE_PREFIX: &str = "Include #subagent:";
+const SUBAGENT_LABEL_TOKEN: &str = "#subagent:";
+
+/// Labels named by nested children that begin with `Include #subagent:`.
+///
+/// One child may name several labels (`Include #subagent:a + #subagent:b`).
+/// Any other nested child is a sub-prompt, not release context.
+fn release_include_subagent_labels(head_text: &str) -> Vec<String> {
+    let mut labels = Vec::new();
+    for row in agent_doc_element_queue::subprompts::subprompt_rows(head_text) {
+        let work = include_row_work(&row);
+        if !work.starts_with(RELEASE_INCLUDE_PREFIX) {
+            continue;
+        }
+        for label in include_subagent_labels(work) {
+            if !labels.iter().any(|existing| existing == &label) {
+                labels.push(label);
+            }
+        }
+    }
+    labels
+}
+
+fn include_row_work(content: &str) -> &str {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(content).trim();
+    let work = work.strip_prefix("~~").unwrap_or(work);
+    match work.find("~~") {
+        Some(end) => work[..end].trim(),
+        None => work.trim(),
+    }
+}
+
+fn include_subagent_labels(line: &str) -> Vec<String> {
+    let mut labels = Vec::new();
+    let mut rest = line;
+    while let Some(index) = rest.find(SUBAGENT_LABEL_TOKEN) {
+        let after = &rest[index + SUBAGENT_LABEL_TOKEN.len()..];
+        let end = after
+            .char_indices()
+            .find(|(_, ch)| !ch.is_ascii_alphanumeric() && *ch != '-' && *ch != '_')
+            .map(|(offset, _)| offset)
+            .unwrap_or(after.len());
+        if end == 0 {
+            let skip = after.chars().next().map(char::len_utf8).unwrap_or(0);
+            if skip == 0 {
+                break;
+            }
+            rest = &after[skip..];
+            continue;
+        }
+        let label = &after[..end];
+        if !labels.iter().any(|existing| existing == label) {
+            labels.push(label.to_string());
+        }
+        rest = &after[end..];
+    }
+    labels
+}
+
+/// True when a verbatim parent-plus-include echo must not strike (`#ftstrike`,
+/// `#nestedechostrike`).
+///
+/// A nested child that begins with `Include #subagent:` names other subagent
+/// work the parent must contain. That label is open while a different live
+/// queue row carries the attempt owner `subagent:<label>` (for example
+/// `🚧 [#subagent:nestedlineage#1]`). A struck or absent row is done. When
+/// every named include is done, the echo may strike the parent and its include
+/// lines together. A queue that cannot be read fails closed: the echo is not
+/// an answer.
+pub(crate) fn release_include_context_is_open(content: &str, head_text: &str) -> bool {
+    let labels = release_include_subagent_labels(head_text);
+    if labels.is_empty() {
+        return false;
+    }
+    let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue") else {
+        return true;
+    };
+    labels.iter().any(|label| {
+        let owner = format!("subagent:{label}");
+        nodes.iter().any(|node| {
+            if node.item.struck {
+                return false;
+            }
+            let parent =
+                agent_doc_element_queue::subprompts::head_without_subprompts(node.item.text.trim());
+            agent_doc_document::queue_projection::owner_projection(parent)
+                .is_some_and(|projection| projection.owner == owner)
+        })
+    })
 }
 
 /// True when a contiguous run of an echo block's normalized `entries` joins to

@@ -357,6 +357,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      heading alone leaves the line queued). For a parent with nested
      sub-prompts the echo is the whole head, one quoted line per row:
      `> **Queue prompt:** <parent>` then `>   - <child>` for every child.
+     A child that begins with `Include #subagent:` is release context, not a
+     sub-prompt (`#ftstrike`, `#nestedechostrike`). Echoing the parent with
+     those include lines does not strike the row while any named include is
+     still open (a live queue row owned by `subagent:<label>`). When every
+     named include is done, that same echo strikes the parent and its include
+     lines together.
      When an `#id` row's work is finished but its tracked item must stay open
      (a Todo that waits on an operator check, where `--done` would resolve
      it), close the ☑️ row with
@@ -420,7 +426,10 @@ the vector. The prompt submitted for that leaf is the same vector
 active-queue diff, and a subagent's submitted prompt. An example is
 `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Identity, claims,
 `--item`, and the selected queue prompt stay the leaf, so a quote of either
-the vector or the leaf answers that leaf.
+the vector or the leaf answers that leaf. A nested child that begins with
+`Include #subagent:` is release context for that quote, not a sub-prompt: the
+quote does not strike the row while any named include is still an open queue
+row (`#ftstrike`, `#nestedechostrike`).
 
 **Quoting a free-text head you are NOT finishing this cycle (`#deferstrike`).** The
 quote alone reads as "answered" and strikes the head. To keep it queued, follow the

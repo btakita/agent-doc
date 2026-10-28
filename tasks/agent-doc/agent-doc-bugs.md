@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `7f1bf60b7e`, unreleased: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`, installed locally), PM-sync design decisions (docs).
+Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `a4a550c3a4`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -714,11 +714,6 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~`agent:todo` should always be in sync, like how `agent:backlog` is always in sync.~~
-- ~~automation-api.md~~
-  - ~~Can we use lazily's built-in features for this?~~
-  - ~~Should we extend lazily to provide api endpoints?~~
-  - ~~We have effective made lazily the api with different language bindings. Is this a good route or should we expand to a web-like api server? If yes, does the web server implementation belong in lazily?~~
 - 🚧 [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
 - 🚧 [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
 <!-- /agent:run -->
@@ -770,6 +765,8 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#lazilyspecagentdocfixtures] agent-doc-specific schemas and fixtures still live in lazily-spec (`schemas/agent-doc-state.json`, `conformance/agent-doc/`, the `editor_route` and `sync_tmux_layout` fixtures): move them into agent-doc or make them generic (automation-API proposal section 5).
+- [ ] [#apiversionexempt] `command_plane_submit` refuses any caller whose binary version differs from the controller's; the future public `agent-doc api` command must be exempt or every install breaks automation clients (automation-API proposal, Phase 2).
 - [ ] [#trackededitforward] An operator edit to a backlog item or Todo that a claimed queue row references is never forwarded to that worker (`forward_to_owner`); steering watches only exchange and queue edits (`#steerbacklogsource`). Affects backlog and Todo alike.
 - [ ] [#tododonestrikerow] `--todo-done <id>` does not strike the matching `do [#id]` queue row in the same closeout the way `--done` does; the next preflight closes it (`source=todo_checked`).
 - [ ] [#todopriorityinert] `<!-- agent:todo priority -->` does nothing: no pass sorts the Todo, and Todo `priority=` tokens do not rank `do [#todo]` rows under `agent:run priority`.

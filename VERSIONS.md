@@ -2,6 +2,20 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.560
+
+- **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in the nearest `.agent-doc/project.md` is composed in file order, then every body in the session document. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
+- **Operator answers nest under the request they answer.** An answer row nested under its request id is accepted, and row splitting ignores binary markers.
+- **An editor undo of a `status:sync` block is detected and re-synced.** The managed block is derived state. The next sync checkpoint rewrites it from the instruction's source.
+- **Claude Stop holds once for a reported but unclosed queue row.** A worker report that no closeout has persisted stays in front of the stop hook until the response that records it is committed.
+- **Agent component patches survive a response-only rebase.** A dropped component patch warns instead of disappearing.
+- **A claim never reopens a struck row whose work is still live in the same queue.**
+- **The JetBrains repair remedy shows only when no editor replica is attached.**
+- **A quoted or unrelated deferral phrase no longer holds an exactly echoed queue row.**
+- **Editor registration is proved from the acknowledged replica text.** Frontmatter merges keep the operator's bytes.
+- **Subagent operator requests nest `queue_item`, `request`, and `context`.** The values sit in a list under each key. The whole packet renders as a nested list.
+- **Reported rows close when their work is answered.** Tagged id rows, answered operator requests, and acknowledged open backlog items leave the queue when the closeout records them.
+
 ## 0.35.559
 
 - **A pane squeezed to one column can no longer grow its supervisor until the machine runs out of memory.** The

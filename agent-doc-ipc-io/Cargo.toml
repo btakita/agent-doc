@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ipc-io"
-version = "0.35.559"
+version = "0.35.560"
 edition = "2024"
 description = "Socket and file-signal IPC adapters for agent-doc editor integrations"
 license = "Apache-2.0"
@@ -22,8 +22,8 @@ test-support = []
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.559" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.559" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.560" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.560" }
 anyhow = "1"
 interprocess = { version = "2", default-features = false }
 serde_json = "1"

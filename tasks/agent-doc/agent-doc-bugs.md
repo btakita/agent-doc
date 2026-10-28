@@ -23,10 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `0624a41b9d`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`), retained writes never re-insert a stale snapshot of in-progress operator typing (`91cf5570c2`), an inline answer never closes a `subagents` dispatch row (`0624a41b9d`).
+Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `cf20c4187d`, unreleased; `0624a41b9d` is installed locally (the later commit is PM-sync docs only). Since 558: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`), retained writes never re-insert a stale snapshot of in-progress operator typing (`91cf5570c2`), an inline answer never closes a `subagents` dispatch row (`0624a41b9d`), PM-sync design decisions (docs, `7f1bf60b7e`, `cf20c4187d`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -886,24 +887,215 @@ A regression test replays the exact incident and fails with either layer removed
 - **Trade-off:** once an item leaves the query, its hide is forgotten, so a reopened item comes back visible.
 
 I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remaining confirmations, one per line.
-<!-- agent:boundary:2e15f96a -->
+
+### Re: Subagent completed: `subagent:extractissues` returned work for queue item “I extracted game-sessions.md from sdk-demo.md. There were some issues. - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added. - When I open game-sessions.md in the editor, there are 3 tmux panes. - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewpord is half width.” — agent-doc
+<!-- agent-doc-subagent-response sha256=8c893f122bac825cded6d67de98023f43be153e639445c976cec32a329216f48 -->
+> **Subagent response:**
+>
+> Branch fix/extractissues, commit 861f4c0c24 on a4a550c3a4 (pushed); make check exit 0, 12013 passed (187 skipped); make tmux-ci exit 0, 208 passed.
+> (1) Presets: extract (src/focused_extract.rs) and transfer (src/extract.rs) wrote the source EFFECTIVE frontmatter, which merges every .agent-doc/project.md up the tree; now the new document inherits only the source document own frontmatter. Of the 11 presets, 10 were materialized copies of agent-loop project presets; #pr-aggregate and #repo (haiven-dev/haiven-sdk) were real sdk-demo.md overrides and are now lost from game-sessions.md.
+> (2) 3 panes: the haiven-dev controller resolved its window claim only from tmux_session config (unset), skipped the claim, while layout and survey still acted on window @3; agent-loop older claim stayed, %6 was protected as a foreign column and the survey called 3 panes converged. Fix: the claim resolves the window from the controller own panes, like the survey.
+> (3) Half width: tmux-router resized the first of 2 wanted columns to 50% with the protected %6 still in the row ([117|120|1]); a sync that kept a foreign pane now rebalances a starved single row (layout_protected_extra_rebalanced). tmux_effect_retry_pending / layout_effect_refused follow from sdk-demo.md having no live pane after the OOM kills (route_repeated_session_loss_fail_closed).
+> Files: src/extract.rs, src/focused_extract.rs, agent-doc-controller-io/src/project_controller/rpc.rs, agent-doc-sync-io/src/sync.rs, agent-doc-tmux/src/pane_order.rs, agent-doc-tmux-io/src/pane_order.rs, specs/07-focused-extract.md, specs/08-session-routing.md, SPEC.md.
+> Follow-ups: controller ping-pong of the editor surface on every left-tab switch; convergence ignores pane width; confirm the resize watcher re-arms after supervisor re-exec; document cross-project extract preset behaviour.
+<!-- agent-doc-subagent-completion key=1237a16118d0ec3d47ee93c59d0c7977375ac868843d381c145af0ea43716337 -->
+### Re: Subagent completed: `subagent:extractissues-tmuxsync` returned work for queue item “tmux sync failure - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted” — agent-doc
+<!-- agent-doc-subagent-response sha256=6e68f78e4b31068fd408cdb9ad80fdb0e407acaa7345a45bf23766bcecebeff9 -->
+> **Subagent response:**
+>
+> Handled by the extraction worker in the same branch: fix/extractissues 861f4c0c24. tmux_effect_retry_pending and layout_effect_refused followed from sdk-demo.md having no live pane after the OOM kills (route_repeated_session_loss_fail_closed) plus the two controllers re-arranging the shared window on every left-tab switch, which the window-claim fix removes. See the extraction report.
+<!-- agent-doc-subagent-completion key=7c9f10eb4c06be805bd9d542a9c8f9177e05c244e51cf785cd0336d4024ba5c2 -->
+
+### Re: Subagent completed: `subagent:dsmismatch` returned work for queue item “do [#deletedstruckmismatch]” — agent-doc
+<!-- agent-doc-subagent-response sha256=a7818e86590d323a5de9f3646e5338d74419ca7ddd5f8323c52428cac3b9400a -->
+> **Subagent response:**
+>
+> Branch fix/dsmismatch, commit 3216d73e6d (pushed); make check exit 0, 12020 passed (186 skipped). Root cause: the leftover owner was the stale completion cell subagent:todosync in agent:exchange (no claim, cancellation or receipt remains); the retried closeout queue_consume write timed out at the editor barrier (queue_write_retained_delivery_awaited landed=false 03:19:12) yet settled as committed (28cda030f4) with the strike but without the cell removal; steering treated the bare cell as ownership, and re-reported because the struck-row check compares against a cycle baseline that never advances with no delivered-once record. Fix (session-check-io and document-realtime midturn_steering.rs): a completion cell alone is not ownership (a pruned struck row whose claim closed is cleanup); new watermark field surfaced_struck_removals reports each real mismatch once per attempt per consumer. Specs: SPEC.md, specs/02, specs/07. Tests: 2 new, both fail with the fix reverted. Optional cleanup: agent-doc queue repair-stale-completion FILE (dry run lists 24 stale cells) then --apply. Follow-ups: queue brief ignores icebox ids; a closeout whose queue_consume write never lands can settle the strike without retiring its completion cell; the struck-row check reads receipts unfiltered.
+<!-- agent-doc-subagent-completion key=5a53ed5169832cbe1e812c57a3250fa15ea64aabf71bb7ec7823d6172ee0f0fa -->
+
+### Re: Subagent completed: `subagent:paneoom` returned work for queue item “do [#paneoomrunaway]” — agent-doc
+<!-- agent-doc-subagent-response sha256=7a2967a3029196b0d2cc631937285cc40d2b05050412ca3ad555e8b5e23a44f8 -->
+> **Subagent response:**
+>
+> Branch fix/paneoom, commit a0a504592b (pushed); make check exit 0, 12032 passed (186 skipped). Culprit: the route-owned agent-doc supervisor in the sdk-demo.md pane. Trigger: all six kills followed by ~2 min a layout step that gave the pane a 1-column slot (tmux_pane_order after=[%6@0 %16@118 %X@239] in 240 cols; %22 at 04:29:20Z, oomd 04:31:35Z). On resize the supervisor resizes its internal alacritty_terminal screen model; at 1 column alacritty_terminal 0.26 Grid::shrink_columns cannot place a 2-cell glyph and adds rows forever (reproduced under a cap: >3 GB in <2 s; gdb: OwnedPtyScreen::resize -> Term::resize -> shrink_columns). The loop held the screen lock before the child PTY was resized, so the harness never saw the 119-col resize (the 60-col TUI). Second bug: Term::input panics printing a 2-cell char at 1 column. Fix: screen model clamped to 2-1024 cols / 1-512 rows (child keeps the real size); child PTY resized before the screen model; new supervisor memory guard (logs at each doubling from 512 MiB, aborts loudly at 4 GiB, AGENT_DOC_SUPERVISOR_RSS_LIMIT_MB, 0 disables). Files: agent-doc-supervisor-process/src/{screen.rs, memory_guard.rs (new), lib.rs}, agent-doc-start-runtime-io/src/run.rs, specs/supervisor.md, SPEC.md. Tests: capped 1-column resize test aborts at 2.25 s with the clamp reverted. Follow-ups: the 1-column slot trigger (fix/extractissues); report both alacritty_terminal bugs upstream; optional memory guard for other long-lived pane processes.
+<!-- agent-doc-subagent-completion key=4e53ee087f5216507e91e3a63a8f2e406758b8778784e65f668cbf188792f176 -->
+### Re: Subagent completed: `subagent:qblocked` returned work for queue item “do [#queue-blocked-marker]” — agent-doc
+<!-- agent-doc-subagent-response sha256=670590461ddda3ae071a879574886adf045117167f8a788979d87dd430d22b1c -->
+> **Subagent response:**
+>
+> Branch feat/qblocked, commit 70274397f2 (pushed); make check exit 0, 12026 passed (186 skipped). Marker ⛔ ([queue_icons] key blocked), rendered "⛔ ⟦blocked by <ids>⟧ <row>" (ids without #; the annotation is projection-only and never part of row identity). New agent-doc-queue/src/queue_blocked.rs derives blockers from a "(stays open: ... block ...)" clause and after= prerequisites, counting only ids still open in this document backlog/todo/review; the row returns to 📥 when its last open blocker closes. Live claim/running/reported/lost/reconcile markers win; otherwise ⛔ beats ⏳/⏭️/📥. Stays-open-blocked rows are deferred in both drains, never selected, never counted drainable, never ⏭️ (fixes the wrong ⏭️); queue_subagent_dispatch, session-check dispatch nag and the subagents=N planner drop blocked rows before assigning slots. Deviation: after=-only rows show ⛔ and stay out of dispatch but keep the existing #dagdraingate drain rule (full deferral broke GH #162 test). Docs: queue-markers.md, README, configuration, specs 06/07/14. Follow-ups: prose-only blocker clauses stay runnable; blockers count only within this document.
+<!-- agent-doc-subagent-completion key=db3297e533e431b82b58d9f2404b39d3e58ad82cc27955c0f2de9395b32781fc -->
+
+### Re: Subagent completed: `subagent:restartedt` returned work for queue item “Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok` ``` java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169) at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.access$callOnWorker(NativeLib.kt:1041) at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration$Companion.load$lambda$0(NativeLib.kt:1236) at jdk.proxy14/jdk.proxy14.$Proxy103.agent_doc_frontmatter_agent(Unknown Source) at com.github.btakita.agentdoc.NativePatching.frontmatterAgent(NativeLib.kt:2636) at com.github.btakita.agentdoc.TerminalUtil.editorVisibleFrontmatterAgent(TerminalUtil.kt:1839) at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand(TerminalUtil.kt:1401) at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand$default(TerminalUtil.kt:1388) at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession(TerminalUtil.kt:1051) at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession$default(TerminalUtil.kt:1050) at com.github.btakita.agentdoc.RestartAgentAction.actionPerformed(RestartAgentAction.kt:22) at com.github.btakita.agentdoc.shell.ShellActionForwarder.actionPerformed(ShellActionForwarders.kt:39) at com.intellij.openapi.actionSystem.ex.ActionUtil.doPerformActionOrShowPopup(ActionUtil.kt:514) at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction$lambda$0(ActionUtil.kt:477) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1$0(ActionManagerImpl.kt:632) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1(ActionManagerImpl.kt:821) at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:307) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks(ActionManagerImpl.kt:629) at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction(ActionUtil.kt:476) at com.intellij.ui.popup.ActionPopupStep.performActionItem(ActionPopupStep.java:305) at com.intellij.ui.popup.ActionPopupStep.lambda$onChosen$1(ActionPopupStep.java:290) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.ui.popup.AbstractPopup.lambda$dispose$0(AbstractPopup.java:2267) at com.intellij.openapi.wm.impl.FocusManagerImpl.lambda$doWhenFocusSettlesDown$0(FocusManagerImpl.java:197) at com.intellij.util.ui.EdtInvocationManager.invokeLaterIfNeeded(EdtInvocationManager.java:32) at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:193) at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:185) at com.intellij.ui.popup.AbstractPopup.dispose(AbstractPopup.java:2265) at com.intellij.ui.popup.WizardPopup.dispose(WizardPopup.java:204) at com.intellij.ui.popup.list.ListPopupImpl.dispose(ListPopupImpl.java:457) at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.dispose(PopupFactoryImpl.java:371) at com.intellij.openapi.util.ObjectTree.disposeStrandedList(ObjectTree.java:178) at com.intellij.openapi.util.ObjectTree.runWithTrace(ObjectTree.java:229) at com.intellij.openapi.util.ObjectTree.executeAll(ObjectTree.java:264) at com.intellij.openapi.util.Disposer.dispose(Disposer.java:222) at com.intellij.openapi.util.Disposer.dispose(Disposer.java:210) at com.intellij.ui.popup.WizardPopup.disposeAllParents(WizardPopup.java:369) at com.intellij.ui.popup.list.ListPopupImpl.disposePopup(ListPopupImpl.java:594) at com.intellij.ui.popup.list.ListPopupImpl.handleNextStep(ListPopupImpl.java:618) at com.intellij.ui.popup.list.ListPopupImpl._handleSelect(ListPopupImpl.java:579) at com.intellij.ui.popup.list.ListPopupImpl.handleSelect(ListPopupImpl.java:499) at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.handleSelect(PopupFactoryImpl.java:388) at com.intellij.ui.popup.list.ListPopupImpl$1.actionPerformed(ListPopupImpl.java:340) at com.intellij.ui.popup.WizardPopup.lambda$proceedKeyEvent$0(WizardPopup.java:506) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.ui.popup.WizardPopup.proceedKeyEvent(WizardPopup.java:505) at com.intellij.ui.popup.WizardPopup.dispatch(WizardPopup.java:477) at com.intellij.ui.popup.PopupDispatcher.dispatchKeyEvent(PopupDispatcher.java:130) at com.intellij.ui.popup.PopupDispatcher.dispatch(PopupDispatcher.java:171) at com.intellij.ide.IdePopupManager.dispatch(IdePopupManager.java:88) at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:555) at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:405) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:404) at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:404) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399) at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136) at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:114) at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136) at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399) at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440) at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207) at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128) at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117) at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113) at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105) at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92) ```” — agent-doc
+<!-- agent-doc-subagent-response sha256=82cfe671ec7a7cc30d9a0a3909f6fe7af817aae3e40fb13b4beb265cd0a9cb3d -->
+> **Subagent response:**
+>
+> Branch fix/restartedt, commit d2a4ac2694 on cf20c4187d (pushed); make check exit 0 (Rust 12020 passed, JetBrains builds + tests); JetBrains re-check after the final bump exit 0, 1037 tests. Root cause: f111fc6288 put NativePatching.frontmatterAgent inside runRestartCommand, which runs on the EDT (RestartAgentAction and the Interrupt-and-Restart dialog); callOnWorker throws there, so every Restart Agent on plugin 0.2.866 failed. lazily.md worked because those restarts ran plugin 0.2.864 (idea.log), before the call existed; sdk-dev.md at 00:53:51 was the first Restart Agent on 0.2.866. Fix: runRestartCommand reads only the buffer text on the EDT; new launchRestartCommandOffEdt does the native read, builds args and launches on a pooled thread (GenerationWork.executeOnPooledThread), falling back to no --expect-agent on any failure. Audit: no other new EDT native calls in 0.35.558. Tests: TerminalUtilTest EDT-guard tests (2 fail with the fix reverted) + source pin; ShellRegistrationOwnershipTest pooled-thread count 20 -> 21. Versions: classic 0.2.871, 262 0.2.872, 263 0.2.873. Needs an IDE restart to load.
+<!-- agent-doc-subagent-completion key=2a1e455877dd72b030528252d693fa4bd1a08c4e8e409870336e1cef6f8114fa -->
+
+### Re: Subagent completed: `subagent:grokreopen` returned work for queue item “Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry” — agent-doc
+<!-- agent-doc-subagent-response sha256=3615beffd385555525b312428ac9beca59fe4163d56f32ba22528e68a61e587d -->
+> **Subagent response:**
+>
+> Branch fix/grokreopen, commit a371fe9446 on cf20c4187d (pushed); make check exit 0, 12020 passed (186 skipped); make tmux-ci: step 1 timed out on queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec (45s under load; passes alone in 8.5s; unrelated code), remaining steps 179 passed with the Makefile isolation env. What happened: not a false busy but a double dispatch: at 04:54:54-55 the supervisor injected the same agent-doc tasks/sdk/sdk-dev.md trigger (busy caller=dispatch reason=auto_trigger_inject, auto_trigger_sent) about a second before the operator click reached the route; route coalesces duplicates only against an open document cycle, which the auto-triggered turn had not opened yet, and the Grok active-turn blocker fell through to the generic "restore an idle prompt" error. Fix: a prompt-less route whose pane shows an active turn and whose actor is busy on that pane with last transition auto_trigger_inject exits 0 "already running" (already_running=document_trigger, ui_outcome=queued_behind_owner); prompt-bearing routes never coalesce; any other active turn refuses plainly with busy-since time and wait/stop guidance; native route_outcome recognises the Grok cue. Files: agent-doc-controller/src/dispatch.rs, agent-doc-route-io/src/dispatch_only.rs, agent-doc-editor-surface/src/route_outcome.rs, route_outcome.json parity cases, specs/08-session-routing.md, Makefile. Follow-ups: a narrower capture-before-trigger race can still type a second trigger; a Grok restart sent its auto-trigger after the first launch exited 1; idle_watch_active_queue_head log noise (~2/s); the timing-dependent tmux-ci test above; Kotlin fallback message still says Codex pane.
+<!-- agent-doc-subagent-completion key=eb6b7bf8ea9e56efe7c6b24b8d493aea212776046fe0a89ed453f56c3334458b -->
+
+### Re: Subagent completed: `subagent:extractlayout` returned work for queue item “The extracted game-sessions.md had the wrong layout - The h2 headers for each open element tag should be prefixed on the same line as the open element tag. - `## Todo` should be on the same line before the `agent:todo` open tag. - `## Queue` should be `## Run`” — agent-doc
+<!-- agent-doc-subagent-response sha256=fd9624c4ddb61a0dee13516d975c46e2024fecda943b5f7d3571d4b17992fed3 -->
+> **Subagent response:**
+>
+> Branch fix/extractlayout, commit e910e16724 on 30c17f1e8b (pushed); make check exit 0, 12026 passed (187 skipped). Root cause: render_target_scaffold in src/extract.rs kept its own copy of the new-document template with each heading on its own line above the opener and agent:run headed ## Queue (game-sessions.md first commit f301b62a shows exactly that); the claim/sync template had already moved to "## Run <!-- agent:run ... -->". ensure_component in src/focused_extract.rs had the same layout. Fix: one shared renderer writes "## <Heading> <!-- agent:<tag> <attrs> -->" with canonical names (Status, Exchange, Run, Todo, Backlog, Review, Icebox, Done, Notes); a source heading on the opener line is kept verbatim; operator headings never renamed; focused extract now matches run/queue/loop correctly and writes agent:run with ## Run. Spec: #extractlayout in specs/07-focused-extract.md + specs/02. Tests: 6 fail with the old layout. Follow-ups: init and convert still write ## Exchange on its own line; merge the extract and claim/sync templates.
+<!-- agent-doc-subagent-completion key=941755f4ac73edd7c50f470e2cf37a0bd49bf8247278b36e1fefe07da7058fdb -->
+> **Queue prompt:** I extracted game-sessions.md from sdk-demo.md. There were some issues.
+>   - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
+>   - When I open game-sessions.md in the editor, there are 3 tmux panes.
+>   - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewport is half width.
+>     - The right-side width viewport occurs when I navigate from the left editor side from agent-doc-bugs.md (2 tmux panes) to game-sessions.md (3 tmux panes) back to agent-doc-bugs.md.
+
+> **Queue prompt:** tmux sync failure
+>   - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
+>   - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
+>   - do a screenshot
+
+### Re: memory runaway, extract/tmux layout, blocked marker, mismatch warning — installed — opus-5 · 2026-10-28T02:20-04:00
+
+**Four fixes are on agent-doc `main` and installed** (`cf20c4187d..efb6029b84`). Combined `make check` passed 12044 of 12044 tests, and `make tmux-ci` passed too. No editor was quarantined before the install. No IDE restart is needed.
+
+**The 138 GB pane kills (`#paneoomrunaway`, `8203772b57`).**
+- **What grew:** agent-doc's own supervisor in the `sdk-demo.md` pane. Each of the six kills came about 2 minutes after a layout step gave that pane a **1-column** slot (`[%6@0 %16@118 %X@239]` in a 240-column window).
+- **Why:** the supervisor keeps a copy of the screen for prompt detection. At 1 column, the terminal library it uses (`alacritty_terminal` 0.26) can't place a 2-cell character such as an emoji, so it adds rows forever, about 1.5 GB/s.
+- **Why the 60-column screen:** that loop held a lock before the harness's own terminal was resized, so Claude never saw the 119-column resize.
+- **Fix:** the screen copy is kept to at least 2 columns, the harness is resized first, and a memory guard aborts the supervisor loudly at 4 GB instead of letting it eat the machine.
+
+**`game-sessions.md` extraction and the tmux layout (`30c17f1e8b`).**
+- **Presets:** extraction copied the *merged* frontmatter, including every `project.md` preset. It now copies only the source document's own. Two of the presets you deleted were real `sdk-demo.md` overrides, `#pr-aggregate` and `#repo: haiven-dev/haiven-sdk`; re-add them to `game-sessions.md` if you want them.
+- **3 panes:** the haiven-dev controller never claimed the shared tmux window (its project has no `tmux_session` set), so agent-loop's old claim kept `agent-doc-bugs.md` in the window as a "protected" pane, and the layout counted 3 panes as converged. The window claim now finds the window from the controller's own panes.
+- **Half width / 1 column:** with that protected pane still in the row, tmux gave the last pane a sliver. A starved row is now spread evenly. That 1-column slot is the trigger the memory fix guards against.
+- **Sync failures:** `tmux_effect_retry_pending` and `layout_effect_refused` followed from `sdk-demo.md` having no live pane after the kills.
+
+**Blocked rows (`#queue-blocked-marker`, `efb6029b84`).**
+- A row whose backlog item is waiting on an open item now shows `⛔ ⟦blocked by <ids>⟧`.
+- Blocked rows are never dispatched, never counted as runnable and never shown ⏭️, and they go back to 📥 when the blocker closes.
+- Rows blocked only by `after=` show ⛔ and stay out of dispatch, but keep the existing `after=` drain order.
+
+**The repeating `todosync` mismatch warning (`#deletedstruckmismatch`, `a7e60e9f50`).** A leftover completion cell was being read as ownership, and the same deletion was re-reported on every call. A cell alone no longer counts as ownership, and each real mismatch is reported once. The warning should stop now.
+
+**Next:** the Grok double-dispatch fix, the Restart Agent crash fix (plugins 0.2.871 / 0.2.872 / 0.2.873) and the extract-layout fix are stacked on top with no conflicts. Once the Ctrl+C re-run worker reports, I'll run one combined check and cut **v0.35.559** for your `release + publish` row. **After that install, restart IDEA** to load the fixed Restart Agent. After both are in, `sdk-demo.md` is safe to restart.
+<!-- agent:boundary:6fccd6a0 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:paneoom#1] do [#paneoomrunaway]
-- ~~sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.~~
-- 🚧 [#subagent:qblocked#1] do [#queue-blocked-marker]
-- 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
-  - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
-  - When I open game-sessions.md in the editor, there are 3 tmux panes.
-  - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewport is half width.
-    - The right-side width viewport occurs when I navigate from the left editor side from agent-doc-bugs.md (2 tmux panes) to game-sessions.md (3 tmux panes) back to agent-doc-bugs.md.
-- 🚧 [#subagent:extractissues-tmuxsync#1] tmux sync failure
-  - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
-  - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
-  - do a screenshot
-- ☑️ [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
-- 🚧 [#subagent:dsmismatch#1] do [#deletedstruckmismatch]
+- ~~do [#paneoomrunaway]~~
+- ~~do [#queue-blocked-marker]~~
+- ~~I extracted game-sessions.md from sdk-demo.md. There were some issues.~~
+  - ~~All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.~~
+  - ~~When I open game-sessions.md in the editor, there are 3 tmux panes.~~
+  - ~~With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewport is half width.~~
+    - ~~The right-side width viewport occurs when I navigate from the left editor side from agent-doc-bugs.md (2 tmux panes) to game-sessions.md (3 tmux panes) back to agent-doc-bugs.md.~~
+- ~~tmux sync failure~~
+  - ~~Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src~~
+  - ~~editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted~~
+  - ~~do a screenshot~~
+- ~~do [#deletedstruckmismatch]~~
+---
+☑️ [#subagent:restartedt#1] Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok`
+```
+java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread
+	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169)
+	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.access$callOnWorker(NativeLib.kt:1041)
+	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration$Companion.load$lambda$0(NativeLib.kt:1236)
+	at jdk.proxy14/jdk.proxy14.$Proxy103.agent_doc_frontmatter_agent(Unknown Source)
+	at com.github.btakita.agentdoc.NativePatching.frontmatterAgent(NativeLib.kt:2636)
+	at com.github.btakita.agentdoc.TerminalUtil.editorVisibleFrontmatterAgent(TerminalUtil.kt:1839)
+	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand(TerminalUtil.kt:1401)
+	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand$default(TerminalUtil.kt:1388)
+	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession(TerminalUtil.kt:1051)
+	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession$default(TerminalUtil.kt:1050)
+	at com.github.btakita.agentdoc.RestartAgentAction.actionPerformed(RestartAgentAction.kt:22)
+	at com.github.btakita.agentdoc.shell.ShellActionForwarder.actionPerformed(ShellActionForwarders.kt:39)
+	at com.intellij.openapi.actionSystem.ex.ActionUtil.doPerformActionOrShowPopup(ActionUtil.kt:514)
+	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction$lambda$0(ActionUtil.kt:477)
+	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1$0(ActionManagerImpl.kt:632)
+	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1(ActionManagerImpl.kt:821)
+	at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:307)
+	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks(ActionManagerImpl.kt:629)
+	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction(ActionUtil.kt:476)
+	at com.intellij.ui.popup.ActionPopupStep.performActionItem(ActionPopupStep.java:305)
+	at com.intellij.ui.popup.ActionPopupStep.lambda$onChosen$1(ActionPopupStep.java:290)
+	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+	at com.intellij.ui.popup.AbstractPopup.lambda$dispose$0(AbstractPopup.java:2267)
+	at com.intellij.openapi.wm.impl.FocusManagerImpl.lambda$doWhenFocusSettlesDown$0(FocusManagerImpl.java:197)
+	at com.intellij.util.ui.EdtInvocationManager.invokeLaterIfNeeded(EdtInvocationManager.java:32)
+	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:193)
+	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:185)
+	at com.intellij.ui.popup.AbstractPopup.dispose(AbstractPopup.java:2265)
+	at com.intellij.ui.popup.WizardPopup.dispose(WizardPopup.java:204)
+	at com.intellij.ui.popup.list.ListPopupImpl.dispose(ListPopupImpl.java:457)
+	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.dispose(PopupFactoryImpl.java:371)
+	at com.intellij.openapi.util.ObjectTree.disposeStrandedList(ObjectTree.java:178)
+	at com.intellij.openapi.util.ObjectTree.runWithTrace(ObjectTree.java:229)
+	at com.intellij.openapi.util.ObjectTree.executeAll(ObjectTree.java:264)
+	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:222)
+	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:210)
+	at com.intellij.ui.popup.WizardPopup.disposeAllParents(WizardPopup.java:369)
+	at com.intellij.ui.popup.list.ListPopupImpl.disposePopup(ListPopupImpl.java:594)
+	at com.intellij.ui.popup.list.ListPopupImpl.handleNextStep(ListPopupImpl.java:618)
+	at com.intellij.ui.popup.list.ListPopupImpl._handleSelect(ListPopupImpl.java:579)
+	at com.intellij.ui.popup.list.ListPopupImpl.handleSelect(ListPopupImpl.java:499)
+	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.handleSelect(PopupFactoryImpl.java:388)
+	at com.intellij.ui.popup.list.ListPopupImpl$1.actionPerformed(ListPopupImpl.java:340)
+	at com.intellij.ui.popup.WizardPopup.lambda$proceedKeyEvent$0(WizardPopup.java:506)
+	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+	at com.intellij.ui.popup.WizardPopup.proceedKeyEvent(WizardPopup.java:505)
+	at com.intellij.ui.popup.WizardPopup.dispatch(WizardPopup.java:477)
+	at com.intellij.ui.popup.PopupDispatcher.dispatchKeyEvent(PopupDispatcher.java:130)
+	at com.intellij.ui.popup.PopupDispatcher.dispatch(PopupDispatcher.java:171)
+	at com.intellij.ide.IdePopupManager.dispatch(IdePopupManager.java:88)
+	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:555)
+	at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143)
+	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:405)
+	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:404)
+	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963)
+	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:404)
+	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399)
+	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136)
+	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:114)
+	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136)
+	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399)
+	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440)
+	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
+	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
+	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
+	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
+```
+---
+- ☑️ [#subagent:grokreopen#1] Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry
+- 🚧 [#subagent:ctrlcrerun#1] game-sessions.md
+  - Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again
+    - [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+- ☑️ [#subagent:extractlayout#1] The extracted game-sessions.md had the wrong layout
+  - The h2 headers for each open element tag should be prefixed on the same line as the open element tag.
+    - `## Todo` should be on the same line before the `agent:todo` open tag.
+  - `## Queue` should be `## Run`
+- 📥 release + publish: include all active queue items
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -926,7 +1118,7 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
   - Should API calls launch a controller, and should event subscribers keep it from retiring?
   - What stability promise for v1, and how long a deprecation window?
   - One endpoint per project, or a user-level gateway across projects?
-- [ ] [#pmsyncstillopen] Decide the PM-sync points still open (specs/proposals/pm-sync-integrations.md, "Still open")
+- [x] [#pmsyncstillopen] Decide the PM-sync points still open (specs/proposals/pm-sync-integrations.md, "Still open")
   - Should the GitHub default also merge a second `review-requested:@me` query, since `involves:@me` misses review requests?
     - Yes
   - OK for a component `auth=` attribute to rank above frontmatter?
@@ -941,11 +1133,13 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
     - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.
   - Until provider idempotency keys are confirmed, is a local sent-command record plus a provider re-read before any retry acceptable?
     - yes
+- [ ] [#pmsyncconfirm] Confirm the PM-sync research defaults (specs/proposals/pm-sync-integrations.md, decision 12 and "Still open")
+  - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
+  - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?
+  - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#paneoomrunaway] Navigating the editor from game-sessions.md back to sdk-demo.md (haiven-dev) respawns the sdk-demo.md tmux pane, and that pane scope grows to 135-142 GB memory (up to 129 GB swap) within 2-5 minutes until systemd-oomd SIGKILLs it ("Pane is dead (signal 9)"): six kills 2026-10-27 23:53 to 2026-10-28 00:31 (tmux-spawn-*.scope, 31-298 processes each). Pane %22 started 04:26:54Z (controller_session_start generation=31, route_owned_start_policy keep_alive) and died 04:31:35Z. The resumed transcript is only 1.7 MB; the growth rate (about 1 GB/s) points at a native process in the pane (agent-doc supervisor/route path) rather than the harness. Before dying, the pane also showed the harness TUI drawn at about 60 columns inside a 119-column pane.
-- [ ] [#queue-blocked-marker] Give agent:run rows a distinct blocked marker (e.g. ⛔ blocked) and keep blocked rows out of subagent dispatch. Observed in tasks/sdk/sdk-demo.md on 2026-10-27: backlog items whose text carries '(stays open: blocked behind #a, #b)' (#template-api-create, #template-cli-create, #template-frontend-create, #bossroom-sbx-provision, #bossroom-stg-provision) render as 📥 pending, the same as runnable work, while one equally blocked item (#template-cli-catalog-digest) renders ⏭️ skipped, whose legend meaning ('dispatched and came back unconsumed') is wrong for it. preflight's queue_subagent_dispatch and session-check's 'queue awaits subagent dispatch' also offer those blocked heads every cycle, so the coordinator has to re-judge blockers by hand and the operator reads a queue of 📥 rows as idle capacity ('why is only 1 item being worked on with many inboxes?'). Expected: the binary derives blocked state from the stays-open blocker clause (and after= / unmerged prerequisite ids still open in backlog/review), renders a dedicated marker with the blocking ids, excludes those rows from queue_subagent_dispatch and drainable counts, and lists the legend entry in agent-doc queue legend and the status line.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->
@@ -956,7 +1150,6 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 
 ## Icebox <!-- agent:icebox -->
 - [ ] [#qresiduewedgeveto] The `#qresiduewedge` committed-heading replay strike path does not apply `#subagentinlineveto` yet, so it could still close a `subagents` dispatch row that was answered inline (rare).
-- [ ] [#deletedstruckmismatch] After the closeout that struck the `agent:todo` sync row ended its claim and agent-doc pruned the struck row, mid-turn steering reports `dispatch=degraded_claim_mismatch owner=subagent:todosync` on nearly every tool call ("durable claim, report, or completion-outbox evidence still owns that exact work"), although `queue claims` lists no todosync claim. Some leftover record (completion outbox or lineage) outlives the closed claim, and the prune is read as an operator deletion.
 - [ ] [#lazilyspecagentdocfixtures] agent-doc-specific schemas and fixtures still live in lazily-spec (`schemas/agent-doc-state.json`, `conformance/agent-doc/`, the `editor_route` and `sync_tmux_layout` fixtures): move them into agent-doc or make them generic (automation-API proposal section 5).
 - [ ] [#apiversionexempt] `command_plane_submit` refuses any caller whose binary version differs from the controller's; the future public `agent-doc api` command must be exempt or every install breaks automation clients (automation-API proposal, Phase 2).
 - [ ] [#trackededitforward] An operator edit to a backlog item or Todo that a claimed queue row references is never forwarded to that worker (`forward_to_owner`); steering watches only exchange and queue edits (`#steerbacklogsource`). Affects backlog and Todo alike.

@@ -756,6 +756,7 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#queue-blocked-marker] Give agent:run rows a distinct blocked marker (e.g. ⛔ blocked) and keep blocked rows out of subagent dispatch. Observed in tasks/sdk/sdk-demo.md on 2026-10-27: backlog items whose text carries '(stays open: blocked behind #a, #b)' (#template-api-create, #template-cli-create, #template-frontend-create, #bossroom-sbx-provision, #bossroom-stg-provision) render as 📥 pending, the same as runnable work, while one equally blocked item (#template-cli-catalog-digest) renders ⏭️ skipped, whose legend meaning ('dispatched and came back unconsumed') is wrong for it. preflight's queue_subagent_dispatch and session-check's 'queue awaits subagent dispatch' also offer those blocked heads every cycle, so the coordinator has to re-judge blockers by hand and the operator reads a queue of 📥 rows as idle capacity ('why is only 1 item being worked on with many inboxes?'). Expected: the binary derives blocked state from the stays-open blocker clause (and after= / unmerged prerequisite ids still open in backlog/review), renders a dedicated marker with the blocking ids, excludes those rows from queue_subagent_dispatch and drainable counts, and lists the legend entry in agent-doc queue legend and the status line.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

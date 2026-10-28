@@ -466,7 +466,39 @@ I filed six follow-ups from this batch in the Icebox, and the Status sync block 
 - `#echosteermisread`, `#claimmarkersteer`: false steering. This cycle's "edited" report on the pmsync row was only the claim marker, so I did not forward anything to its finished worker.
 - `#servegetdisk`, `#holdroundtrip`: follow-ups to `#servesavebypass` and `#inflighttypinghold`.
 - `#nestedtodograndchildren`: `--todo-add` takes one level of nesting.
-<!-- agent:boundary:f9b5eee1 -->
+> **Queue prompt:** release + publish
+
+> **Queue prompt:** [#ena0]: grok running
+
+> **Chat prompt (#chatprompt:769519b380a6):** Is 558 installable by Coder?
+
+### Re: v0.35.558 released and published; Restart Agent confirmed — opus-5 · 2026-10-27T20:08-04:00
+
+**v0.35.558 is released and published** from release commit `00caa013ac` (on `main`). `make release` passed every phase:
+- the tag handoff;
+- the local `install-full`;
+- public publication.
+
+Release run 40602109793 succeeded in every job: all six builds, plugins, the GitHub release, PyPI and the Homebrew formula. Before the release, `make check` passed 11987 of 11987 tests, and I confirmed no editor was quarantined before the install.
+
+**What's in it** (11 commits since v0.35.557; full notes in `VERSIONS.md`):
+- A retained captured write rolls forward onto your text instead of replacing it (`#retainedprojectionclobber`, `#clobberfollowups`).
+- Writes wait for in-flight editor typing, and commits refuse while an editor is quarantined (`#inflighttypinghold`).
+- Restart Agent `--expect-agent`: it refuses, naming both agent values, when the controller's copy lags the editor.
+- Nested sub-prompts in queues, and nested `--todo-add` sub-items.
+- `serve` `POST /save` returns 409 while an editor holds the document (`#servesavebypass`).
+- `compact` commits only the compacted cell; the remaining document reads resolve their store from the document; the 2026.3 module-jar plugin probe.
+- Plugins: JetBrains classic 0.2.865, 262 0.2.867 and 263 0.2.866. VS Code is unchanged at 0.2.89.
+
+**`#ena0` closed:** you confirmed `lazily.md` now starts Grok Build after Restart Agent.
+
+**Is 558 installable by Coder? Yes.** v0.35.558 is GitHub's Latest release:
+- PyPI has `agent_doc-0.35.558-py3-none-any.whl`.
+- The release has Linux `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-gnu` archives with `.sha256` files.
+- The JetBrains Gateway backend plugin zips and the VS Code 0.2.89 VSIX are attached.
+
+A workspace image that installs the latest agent-doc gets 558. One that pins a version needs the pin moved to 0.35.558. GH #380's harness-path fallback (0.35.557) is included, so a workspace without `~/.local/bin` on PATH still finds `claude`, `codex` or `grok`. I haven't run an install inside a live Coder workspace.
+<!-- agent:boundary:dbf949d5 -->
 <!-- /agent:exchange -->
 
 <!--
@@ -480,6 +512,7 @@ I filed six follow-ups from this batch in the Icebox, and the Status sync block 
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
 - 📥 release + publish
+- 📥 [#ena0]: grok running
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -494,8 +527,7 @@ I filed six follow-ups from this batch in the Icebox, and the Status sync block 
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
-- [x] [#v829] Recover your lost tasks/software/lazily.md edits from JetBrains Local History: restore the version from before 13:09 EDT (2026-10-27), which has 'agent: grok', 'queue: go' and your queue edits. agent-doc wrote a stale copy over it at 13:10:19 EDT (see #retainedprojectionclobber); no copy survives in agent-doc's stores. (source: agent:backlog [#retainedprojectionclobber])
-- [ ] [#ena0] Retry Restart Agent on tasks/software/lazily.md (agent: grok) after restarting the 2026.3 IDE onto plugin 0.2.866: it should start Grok Build, or refuse and name both agent values if the controller copy still lags (#retainedprojectionclobber + the --expect-agent check are installed).
+- [x] [#ena0] Retry Restart Agent on tasks/software/lazily.md (agent: grok) after restarting the 2026.3 IDE onto plugin 0.2.866: it should start Grok Build, or refuse and name both agent values if the controller copy still lags (#retainedprojectionclobber + the --expect-agent check are installed).
 - [ ] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
   - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
   - Do credential profiles live in project config or user-global config?

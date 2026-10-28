@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -926,13 +925,6 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 > Branch feat/qblocked, commit 70274397f2 (pushed); make check exit 0, 12026 passed (186 skipped). Marker ⛔ ([queue_icons] key blocked), rendered "⛔ ⟦blocked by <ids>⟧ <row>" (ids without #; the annotation is projection-only and never part of row identity). New agent-doc-queue/src/queue_blocked.rs derives blockers from a "(stays open: ... block ...)" clause and after= prerequisites, counting only ids still open in this document backlog/todo/review; the row returns to 📥 when its last open blocker closes. Live claim/running/reported/lost/reconcile markers win; otherwise ⛔ beats ⏳/⏭️/📥. Stays-open-blocked rows are deferred in both drains, never selected, never counted drainable, never ⏭️ (fixes the wrong ⏭️); queue_subagent_dispatch, session-check dispatch nag and the subagents=N planner drop blocked rows before assigning slots. Deviation: after=-only rows show ⛔ and stay out of dispatch but keep the existing #dagdraingate drain rule (full deferral broke GH #162 test). Docs: queue-markers.md, README, configuration, specs 06/07/14. Follow-ups: prose-only blocker clauses stay runnable; blockers count only within this document.
 <!-- agent-doc-subagent-completion key=db3297e533e431b82b58d9f2404b39d3e58ad82cc27955c0f2de9395b32781fc -->
 
-### Re: Subagent completed: `subagent:grokreopen` returned work for queue item “Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry” — agent-doc
-<!-- agent-doc-subagent-response sha256=3615beffd385555525b312428ac9beca59fe4163d56f32ba22528e68a61e587d -->
-> **Subagent response:**
->
-> Branch fix/grokreopen, commit a371fe9446 on cf20c4187d (pushed); make check exit 0, 12020 passed (186 skipped); make tmux-ci: step 1 timed out on queue_auto_clear_carries_its_baseline_across_a_preserved_child_reexec (45s under load; passes alone in 8.5s; unrelated code), remaining steps 179 passed with the Makefile isolation env. What happened: not a false busy but a double dispatch: at 04:54:54-55 the supervisor injected the same agent-doc tasks/sdk/sdk-dev.md trigger (busy caller=dispatch reason=auto_trigger_inject, auto_trigger_sent) about a second before the operator click reached the route; route coalesces duplicates only against an open document cycle, which the auto-triggered turn had not opened yet, and the Grok active-turn blocker fell through to the generic "restore an idle prompt" error. Fix: a prompt-less route whose pane shows an active turn and whose actor is busy on that pane with last transition auto_trigger_inject exits 0 "already running" (already_running=document_trigger, ui_outcome=queued_behind_owner); prompt-bearing routes never coalesce; any other active turn refuses plainly with busy-since time and wait/stop guidance; native route_outcome recognises the Grok cue. Files: agent-doc-controller/src/dispatch.rs, agent-doc-route-io/src/dispatch_only.rs, agent-doc-editor-surface/src/route_outcome.rs, route_outcome.json parity cases, specs/08-session-routing.md, Makefile. Follow-ups: a narrower capture-before-trigger race can still type a second trigger; a Grok restart sent its auto-trigger after the first launch exited 1; idle_watch_active_queue_head log noise (~2/s); the timing-dependent tmux-ci test above; Kotlin fallback message still says Codex pane.
-<!-- agent-doc-subagent-completion key=eb6b7bf8ea9e56efe7c6b24b8d493aea212776046fe0a89ed453f56c3334458b -->
-
 ### Re: Subagent completed: `subagent:extractlayout` returned work for queue item “The extracted game-sessions.md had the wrong layout - The h2 headers for each open element tag should be prefixed on the same line as the open element tag. - `## Todo` should be on the same line before the `agent:todo` open tag. - `## Queue` should be `## Run`” — agent-doc
 <!-- agent-doc-subagent-response sha256=fd9624c4ddb61a0dee13516d975c46e2024fecda943b5f7d3571d4b17992fed3 -->
 > **Subagent response:**
@@ -1225,14 +1217,14 @@ java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDE
 	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
 ```
 ~~~
-- ☑️ [#subagent:grokreopen#1] Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry
-- ☑️ [#subagent:ctrlcrerun#1] game-sessions.md
-  - Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again
-    - [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
-- ☑️ [#subagent:extractlayout#1] The extracted game-sessions.md had the wrong layout
-  - The h2 headers for each open element tag should be prefixed on the same line as the open element tag.
-    - `## Todo` should be on the same line before the `agent:todo` open tag.
-  - `## Queue` should be `## Run`
+- ~~Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~game-sessions.md~~
+  - ~~Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again~~
+    - ~~[route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~
+- ~~The extracted game-sessions.md had the wrong layout~~
+  - ~~The h2 headers for each open element tag should be prefixed on the same line as the open element tag.~~
+    - ~~`## Todo` should be on the same line before the `agent:todo` open tag.~~
+  - ~~`## Queue` should be `## Run`~~
 - 📥 release + publish: include all active queue items
 <!-- /agent:run -->
 

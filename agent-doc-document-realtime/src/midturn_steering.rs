@@ -3291,6 +3291,46 @@ mod tests {
         );
     }
 
+    /// `#struckparentkids`: a row the operator writes under a closed
+    /// (struck) parent is new work, not an inert edit of a completed entry:
+    /// steering surfaces the reopened block once, verbatim with its parent,
+    /// and it is subagent dispatch work under a `subagents` queue.
+    #[test]
+    fn a_row_added_under_a_struck_parent_surfaces_as_new_work() {
+        let owned = BTreeSet::new();
+        let closed =
+            "- current task\n- ~~#req-integration-id~~\n  - ~~Why do we need a SBX/STG id?~~\n";
+        let reopened = format!("{closed}  - We moved onto project templates.\n");
+        let baseline = doc(closed, EX);
+        let current = doc(&reopened, EX);
+        let wm = seeded(&baseline, Some("current task"));
+        let obs = observe(&wm, &current, &quiet_ctx(&owned));
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        let item = &obs.ready[0];
+        assert_eq!(item.source, SteeringSource::Queue);
+        assert_eq!(item.change, SteeringChange::Added);
+        assert_eq!(item.dispatch, SteeringDispatch::DrainAfterCurrent);
+        assert_eq!(
+            item.verbatim,
+            "~~#req-integration-id~~\n  - ~~Why do we need a SBX/STG id?~~\n  - We moved onto project templates."
+        );
+        let scoped = current.replace(
+            "<!-- agent:queue -->",
+            "<!-- agent:queue preset=\"#subagents\" -->",
+        );
+        let reference = vec!["current task".to_string()];
+        assert_eq!(
+            subagent_dispatch_heads(&scoped, Some(&reference)),
+            vec![item.verbatim.clone()]
+        );
+        // The closed block alone is never work.
+        let closed_scoped = baseline.replace(
+            "<!-- agent:queue -->",
+            "<!-- agent:queue preset=\"#subagents\" -->",
+        );
+        assert!(subagent_dispatch_heads(&closed_scoped, Some(&reference)).is_empty());
+    }
+
     #[test]
     fn subagent_dispatch_heads_are_new_subagent_intent_lines() {
         let content = doc(

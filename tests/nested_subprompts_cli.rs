@@ -357,6 +357,112 @@ fn a_struck_parent_retires_its_children_with_it() {
     );
 }
 
+/// `#struckparentkids` (sdk-demo.md, 2026-10-27): the operator wrote a new
+/// row under a parent the agent had already answered and struck. Before, the
+/// struck block swallowed it as completed work: no queue head, no dispatch,
+/// no idle wake. It is new work for that parent, so preflight lists the
+/// reopened block (verbatim, with the struck parent and answered child as
+/// context) as one dispatchable head, and the parent line claims it.
+#[test]
+fn a_row_added_under_a_struck_parent_is_dispatched_as_new_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = "#subagent-operator-request-handoff-integration-id";
+    let answered = "Describe the choices in more detail. Why do we need a SBX/STG id?";
+    let added = "I don't know if you understand that we moved onto project templates.";
+    let closed = format!("- ~~{parent}~~\n  - ~~{answered}~~\n- separate flat head\n");
+    let doc = committed_session(dir.path(), "run", &closed);
+    let path = doc.to_str().unwrap();
+
+    let state = preflight_json(dir.path(), &doc);
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    assert!(
+        dispatch.iter().all(|item| !item.contains(parent)),
+        "a closed block is never work: {dispatch:#?}"
+    );
+
+    let content = fs::read_to_string(&doc).unwrap();
+    let reopened_rows = format!("- ~~{parent}~~\n  - ~~{answered}~~\n  - {added}\n");
+    fs::write(
+        &doc,
+        content.replace(
+            &format!("- ~~{parent}~~\n  - ~~{answered}~~\n"),
+            &reopened_rows,
+        ),
+    )
+    .unwrap();
+
+    let head = format!("~~{parent}~~\n  - ~~{answered}~~\n  - {added}");
+    let state = preflight_json(dir.path(), &doc);
+    let prompts = string_list(&state, "queue_prompts");
+    assert!(
+        prompts.iter().any(|item| item == &head),
+        "the new row is live work with its parent: {prompts:#?}"
+    );
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    assert!(
+        dispatch.iter().any(|item| item == &head),
+        "the reopened block is dispatchable: {dispatch:#?}"
+    );
+
+    let handle = format!("~~{parent}~~");
+    let brief = run_agent_doc(
+        dir.path(),
+        &["queue", "brief", path, "--item", &handle, "--json"],
+    );
+    assert_ok(&brief, "queue brief on the reopened parent line");
+    let brief: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
+    let item = brief["item"].as_str().unwrap();
+    assert!(item.contains(added), "{item}");
+    assert!(
+        item.contains(answered),
+        "the answered child is context: {item}"
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "claim",
+                path,
+                "--item",
+                &handle,
+                "--owner",
+                "subagent:reopen",
+            ],
+        ),
+        "queue claim on the reopened parent line",
+    );
+    assert!(
+        run_body(&doc, "run").contains(&format!("[#subagent:reopen#1] ~~{parent}~~\n")),
+        "{}",
+        run_body(&doc, "run")
+    );
+}
+
+/// `#struckparentkids`: a whole-block strike that left the answered child
+/// unstruck (a 0.35.558 strike, as sdk-demo.md shows) stays closed, and
+/// preflight makes the document say so by striking the child.
+#[test]
+fn a_struck_parent_over_an_unstruck_child_is_made_to_read_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = format!(
+        "- ~~{PARENT}~~\n  - {}\n- separate flat head\n",
+        CHILDREN[0]
+    );
+    let doc = committed_session(dir.path(), "run", &rows);
+    let state = preflight_json(dir.path(), &doc);
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    assert!(
+        dispatch.iter().all(|item| !item.contains(CHILDREN[0])),
+        "{dispatch:#?}"
+    );
+    assert!(
+        run_body(&doc, "run").starts_with(&format!("- ~~{PARENT}~~\n  - ~~{}~~\n", CHILDREN[0])),
+        "{}",
+        run_body(&doc, "run")
+    );
+}
+
 #[test]
 fn tracked_children_keep_the_group_shape() {
     let dir = tempfile::tempdir().unwrap();

@@ -674,6 +674,50 @@ mod tests {
         );
     }
 
+    /// `#queueblocked` (haiven-dev `tasks/sdk/sdk-demo.md`, 2026-10-27):
+    /// `queue_subagent_dispatch` re-offered every blocked head each cycle. A
+    /// head whose tracked item waits on an open blocker is neither dispatched
+    /// nor allowed to fill a `subagents=N` slot, so the cap goes to runnable
+    /// work; it is offered again once its blocker closes.
+    #[test]
+    fn queue_attr_dispatch_never_offers_a_blocked_head() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = format!(
+            "{}\n<!-- agent:todo -->\n- [ ] [#deploy] pick a deploy path\n<!-- /agent:todo -->\n\n\
+             <!-- agent:backlog -->\n\
+             - [ ] [#sbx] provision (stays open: blocked behind #deploy)\n\
+             - [ ] [#stg] repeat in STG (stays open: blocked behind #sbx)\n\
+             - [ ] [#a] runnable\n\
+             - [ ] [#b] runnable\n\
+             <!-- /agent:backlog -->\n",
+            attr_doc(
+                "subagents=1",
+                &["⏭\u{fe0f} do [#stg]", "📥 do [#sbx]", "do [#a]", "do [#b]"],
+            )
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["do [#a]".to_string()],
+            "the single slot goes to the first runnable head"
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count(&content),
+            2,
+            "blocked heads are not drainable"
+        );
+
+        let unblocked = content.replace("- [ ] [#deploy]", "- [x] [#deploy]");
+        std::fs::write(&file, &unblocked).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &unblocked).unwrap(),
+            vec!["do [#sbx]".to_string()],
+            "#sbx returns once its blocker closes; #stg still waits on #sbx"
+        );
+    }
+
     #[test]
     fn bare_queue_attr_dispatches_all_eligible_heads() {
         let dir = tempfile::tempdir().unwrap();

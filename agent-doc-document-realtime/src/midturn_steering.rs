@@ -1960,12 +1960,16 @@ pub fn queue_attr_subagent_heads_with_presets(
     let items = executable_queue_items(content);
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
+    // `#queueblocked`: a row whose tracked item waits on open blockers is not
+    // dispatchable, so it never fills a subagent slot.
+    let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
     let eligible = items
         .iter()
         .filter(|item| {
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
+        .filter(|item| !blockers.blocks_row(&item.norm))
         .map(|item| item.norm.clone())
         .collect();
     let live = items.into_iter().map(|item| item.norm).collect();
@@ -2010,12 +2014,14 @@ pub fn subagent_dispatch_heads_with_presets(
         });
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
+    let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
     executable_queue_items(content)
         .into_iter()
         .filter(|item| {
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
+        .filter(|item| !blockers.blocks_row(&item.norm))
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())
@@ -3418,6 +3424,30 @@ mod tests {
         let answered = attr.replace("- ⏳ do [#verify]", "- do [#verify]: verified, ship it");
         let (_, eligible, _) = queue_attr_subagent_heads(&answered).unwrap();
         assert_eq!(eligible.len(), 2, "{eligible:?}");
+    }
+
+    /// `#queueblocked`: a head whose tracked item waits on an open blocker is
+    /// never dispatch work through either the item tag or the queue-level
+    /// attribute, and returns once the blocker closes.
+    #[test]
+    fn blocked_heads_are_never_dispatch_heads() {
+        let backlog = "\n<!-- agent:backlog -->\n- [ ] [#pre] prerequisite\n- [ ] [#dep] waits (stays open: blocked behind #pre)\n<!-- /agent:backlog -->\n";
+        let tagged = format!(
+            "{}{backlog}",
+            doc("- #subagents do [#dep]\n- #subagents do [#pre]\n", EX)
+        );
+        assert_eq!(
+            subagent_dispatch_heads(&tagged, None),
+            vec!["#subagents do [#pre]".to_string()]
+        );
+        let attr = format!("{}{backlog}", doc("- ⛔ ⟦blocked by pre⟧ do [#dep]\n- do [#pre]\n", EX))
+            .replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
+        let (_, eligible, live) = queue_attr_subagent_heads(&attr).unwrap();
+        assert_eq!(eligible, vec!["do [#pre]".to_string()]);
+        assert_eq!(live.len(), 2, "{live:?}");
+        let closed = attr.replace("- [ ] [#pre]", "- [x] [#pre]");
+        let (_, eligible, _) = queue_attr_subagent_heads(&closed).unwrap();
+        assert_eq!(eligible, vec!["do [#dep]".to_string(), "do [#pre]".to_string()]);
     }
 
     /// `#claimdispatchidentity` (live 2026-10-03): a tag-only edit of a line

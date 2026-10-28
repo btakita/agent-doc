@@ -356,6 +356,7 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         icons.claimed.as_str(),
         icons.running.as_str(),
         icons.pending.as_str(),
+        icons.blocked.as_str(),
         icons.reported.as_str(),
         icons.lost.as_str(),
         icons.reconciling.as_str(),
@@ -381,6 +382,8 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         "🟡",
         "🚧",
         "📥",
+        // `#queueblocked`: blocked lifecycle projection.
+        "⛔",
         "☑️",
         // Former reported/outbox spellings; accepted for compatibility.
         "📫",
@@ -405,6 +408,14 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         })
         .max_by_key(|(len, _)| *len)
         .map(|(_, rest)| rest)
+        .or_else(|| {
+            // `#queueblocked`: the blocker annotation that follows `⛔`
+            // (`⛔ ⟦blocked by a, b⟧`) is projection, never work identity.
+            let after_open = trimmed.strip_prefix("⟦blocked by ")?;
+            let close = after_open.find('⟧')?;
+            (!after_open[..close].contains(['\n', '\r']))
+                .then(|| &after_open[close + '⟧'.len_utf8()..])
+        })
         .or_else(|| {
             let (payload, after, legacy_delimiters) = if let Some(rest) = trimmed.strip_prefix("[#")
             {
@@ -617,6 +628,26 @@ mod tests {
         assert!(super::DESCRIPTOR.matches_name("queue"));
         assert!(super::DESCRIPTOR.matches_name("run"));
         assert!(super::DESCRIPTOR.matches_name("loop"));
+    }
+
+    /// `#queueblocked`: the blocked marker and its blocker annotation are
+    /// projection, so identity, strike text and the attempt-prefix strip all
+    /// see only the work.
+    #[test]
+    fn blocked_marker_and_annotation_are_projection() {
+        let row = "⛔ ⟦blocked by sbx, deploy⟧ 📍 do [#stg]";
+        assert_eq!(super::strip_priority_markers(row), "do [#stg]");
+        assert_eq!(super::strip_attempt_projection_prefix(row), "do [#stg]");
+        assert_eq!(super::render_struck_row_body(row), "~~do [#stg]~~");
+        assert_eq!(
+            super::queue_head_identity(row),
+            super::queue_head_identity("do [#stg]")
+        );
+        // An unterminated lookalike is the operator's text.
+        assert_eq!(
+            super::strip_priority_markers("⟦blocked by sbx do [#stg]"),
+            "⟦blocked by sbx do [#stg]"
+        );
     }
 
     /// `#claimdispatchidentity`: tags and markers are routing, not work.

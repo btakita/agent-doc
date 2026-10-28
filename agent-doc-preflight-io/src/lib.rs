@@ -6910,9 +6910,19 @@ pub fn run_queue_maintenance_with_coin_gate(
         .difference(&claimed_head_ids)
         .cloned()
         .collect();
+    // `#queueblocked`: a blocked head was never dispatched (no drain scope may
+    // select it), so it can never have "come back unconsumed". Exempting it
+    // keeps `⏭️` off it and lets the stall evidence fall on the head the
+    // cycle could actually have run.
+    let blocked_head_ids: std::collections::HashSet<String> = if activation.active {
+        agent_doc_queue::queue_blocked::queue_blockers(&current_content).deferred_ids()
+    } else {
+        std::collections::HashSet::new()
+    };
     let skip_exempt_ids: std::collections::HashSet<String> = claimed_head_ids
         .union(&awaiting_operator_ids)
         .cloned()
+        .chain(blocked_head_ids.iter().cloned())
         .collect();
     let mut claims_held_after_report = awaiting_operator_all
         .intersection(&claimed_head_ids)
@@ -7234,6 +7244,7 @@ pub fn run_queue_maintenance_with_coin_gate(
             })
             .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
             .collect::<std::collections::HashSet<_>>();
+    let row_blockers = agent_doc_queue::queue_blocked::queue_blockers(&current_content);
     let lifecycle_targets = activation
         .entries_after
         .iter()
@@ -7270,6 +7281,10 @@ pub fn run_queue_maintenance_with_coin_gate(
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
             } else if active_identities.contains(&identity) {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Running
+            } else if row_blockers.blocks_row(&prompt.text) {
+                // `#queueblocked`: held out of drain and dispatch; names the
+                // open ids it waits on.
+                agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
             } else {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };
@@ -7288,6 +7303,16 @@ pub fn run_queue_maintenance_with_coin_gate(
                 });
             Some(agent_doc_queue::document_queue::QueueRowProjection {
                 text: prompt.text.clone(),
+                blockers: if marker
+                    == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                {
+                    row_blockers
+                        .blockers_for_row(&prompt.text)
+                        .map(<[String]>::to_vec)
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                },
                 marker,
                 owner,
                 reopen_completed: durable_on_struck,
@@ -10213,6 +10238,111 @@ mod tests {
         );
     }
 
+    /// `#queueblocked` (haiven-dev `tasks/sdk/sdk-demo.md`, 2026-10-27): rows
+    /// whose tracked items carry `(stays open: blocked behind #a, #b)` rendered
+    /// `📥` like runnable work, and a carried skip painted `⏭️` ("dispatched and
+    /// came back unconsumed") on one that was never dispatched. Now each
+    /// blocked row shows `⛔` naming only the blockers still open here (not the
+    /// PR number `#749` or the id living in another document), is never
+    /// selected or skipped, and selection goes to the runnable row.
+    #[test]
+    fn run_queue_maintenance_marks_blocked_rows_and_never_skips_them() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — test\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- ⏭\u{fe0f} do [#stg]\n",
+            "- 📥 do [#sbx]\n",
+            "- do [#runnable]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#deploy] Pick how haiven-api #749 reaches SBX.\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#sbx] Provision SBX. (stays open: blocked behind #template-api-create and the dev deploy, #deploy)\n",
+            "- [ ] [#stg] Repeat in STG. (stays open: blocked behind #sbx and a release containing #749)\n",
+            "- [ ] [#runnable] a real open task\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        // The live document carried a skip for #stg from an earlier cycle.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::set_skipped_queue_head_ids(&doc, &["stg".to_string()])
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
+            .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            queue_line(&updated, "stg"),
+            "- ⛔ ⟦blocked by sbx⟧ do [#stg]",
+            "{updated}"
+        );
+        assert_eq!(
+            queue_line(&updated, "sbx"),
+            "- ⛔ ⟦blocked by deploy⟧ do [#sbx]",
+            "{updated}"
+        );
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do [#runnable]".to_string()],
+            "{updated}"
+        );
+        let persisted = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert!(
+            persisted.skipped_queue_head_ids.is_empty(),
+            "a blocked head is never skipped: {:?}",
+            persisted.skipped_queue_head_ids
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count(&updated),
+            1,
+            "only the runnable row counts as drainable:\n{updated}"
+        );
+        // The operator's row text and the tracked items are untouched.
+        assert!(updated.contains("(stays open: blocked behind #sbx and a release containing #749)"));
+
+        // Closing the last open blocker unblocks the row on the next pass.
+        let unblocked = updated.replace("- [ ] [#deploy]", "- [x] [#deploy]");
+        std::fs::write(&doc, &unblocked).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &unblocked,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        // #sbx is the first runnable row again, so this pass selects it.
+        assert_eq!(queue_line(&updated, "sbx"), "- 🚧 do [#sbx]", "{updated}");
+        assert_eq!(
+            state.selected_queue_prompts,
+            vec!["do [#sbx]".to_string()],
+            "{updated}"
+        );
+        assert_eq!(
+            queue_line(&updated, "stg"),
+            "- ⛔ ⟦blocked by sbx⟧ do [#stg]",
+            "{updated}"
+        );
+    }
+
     #[test]
     fn run_queue_maintenance_never_mirrors_backlog_ids_into_a_selected_loop() {
         // `#loopnoinsert`: with `agent:run id=main` drained, queue selection
@@ -11384,7 +11514,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "queue fallback must opt into the existing priority/auto-DAG path:\n{updated}"
         );
         assert!(
-            queue.contains("- 🚧 do [#setup]\n- 📥 do [#ship]"),
+            // `#queueblocked`: the dependent waits on its open prerequisite.
+            queue.contains("- 🚧 do [#setup]\n- ⛔ ⟦blocked by setup⟧ do [#ship]"),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -16007,8 +16138,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             updated.contains(
                 "- 🚧 :pushpin: do [#ops]\n\
                  - 📥 :round_pushpin: do [#setup]\n\
-                 - 📥 :pushpin: do [#ship]\n\
-                 - 📥 :pushpin: do [#notify]"
+                 - ⛔ ⟦blocked by setup⟧ :pushpin: do [#ship]\n\
+                 - ⛔ ⟦blocked by ship⟧ :pushpin: do [#notify]"
             ),
             "auto-dag must let dependency blockers intersperse a pinned batch:\n{updated}"
         );

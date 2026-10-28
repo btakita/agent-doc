@@ -1543,6 +1543,7 @@ pub fn set_prompt_lifecycle_markers(
             text: text.clone(),
             marker: *marker,
             owner: None,
+            blockers: Vec::new(),
             reopen_completed: false,
         })
         .collect::<Vec<_>>();
@@ -1556,6 +1557,12 @@ pub struct QueueRowProjection {
     pub text: String,
     pub marker: agent_doc_document::queue_projection::QueueLifecycleMarker,
     pub owner: Option<agent_doc_document::queue_projection::QueueOwnerProjection>,
+    /// `#queueblocked`: the open ids a [`QueueLifecycleMarker::Blocked`] row
+    /// waits on, rendered as `⛔ ⟦blocked by a, b⟧`. Empty for every other
+    /// marker.
+    ///
+    /// [`QueueLifecycleMarker::Blocked`]: agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+    pub blockers: Vec<String>,
     /// Set only when durable live evidence contradicts a struck presentation.
     /// A target for a later live duplicate must not reopen an earlier terminal
     /// row that happens to have the same work identity.
@@ -1614,9 +1621,10 @@ pub fn set_prompt_runtime_projections(
                 let has_target = target.is_some();
                 if let Some(target) = target {
                     if !crate::queue_command::is_slash_command(&next.text) {
-                        let marked = agent_doc_document::queue_projection::apply_lifecycle_marker(
+                        let marked = agent_doc_document::queue_projection::apply_lifecycle_marker_with_blockers(
                             &next.text,
                             target.marker,
+                            &target.blockers,
                         );
                         let marked_text =
                             agent_doc_document::queue_projection::apply_owner_projection(
@@ -1938,12 +1946,15 @@ pub fn in_progress_marker_only_targets(
         QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
             agent_doc_document::queue_projection::has_skip_marker(&prompt.text)
                 || agent_doc_document::queue_projection::has_awaiting_operator_marker(&prompt.text)
+                || agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                    == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked)
         }
         _ => false,
     });
-    // The skip (`⏭️`) and awaiting-operator (`⏳`) projections have their own
-    // id-backed target sets. Do not reinterpret a mixed update as an
-    // in-progress-only projection during rebase.
+    // The skip (`⏭️`), awaiting-operator (`⏳`) and blocked (`⛔`,
+    // `#queueblocked`) projections have their own id-backed target sets. Do
+    // not reinterpret a mixed update as an in-progress-only projection during
+    // rebase.
     if before.len() != after.len()
         || carries_skip_marker
         || before
@@ -2007,7 +2018,8 @@ pub fn set_prompts_lifecycle_markers(
                 if !matches!(
                     qp::lifecycle_marker(&prompt.text),
                     Some(
-                        qp::QueueLifecycleMarker::Claimed
+                        qp::QueueLifecycleMarker::Blocked
+                            | qp::QueueLifecycleMarker::Claimed
                             | qp::QueueLifecycleMarker::Running
                             | qp::QueueLifecycleMarker::Reported
                             | qp::QueueLifecycleMarker::Lost
@@ -4827,6 +4839,7 @@ mod tests {
                 owner: "subagent:sdk".to_string(),
                 generation: 4,
             }),
+            blockers: Vec::new(),
             reopen_completed: true,
         }];
         let (projected, entries) = project_prompt_runtime_projections(body, &targets)
@@ -4849,6 +4862,7 @@ mod tests {
                 owner: "subagent:worker".to_string(),
                 generation: 1,
             }),
+            blockers: Vec::new(),
             reopen_completed: false,
         }];
         let projected = project_prompt_runtime_projections("- dispatched worker work\n", &targets)
@@ -4890,6 +4904,7 @@ mod tests {
                 owner: "subagent:grok".to_string(),
                 generation: 1,
             }),
+            blockers: Vec::new(),
             reopen_completed: false,
         }];
 
@@ -8286,6 +8301,7 @@ mod tests {
                 text: head,
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
+                blockers: Vec::new(),
                 reopen_completed: false,
             }],
         )
@@ -9600,6 +9616,7 @@ mod tests {
                     owner: "subagent:publish-ci-pr166".to_string(),
                     generation: 1,
                 }),
+                blockers: Vec::new(),
                 reopen_completed: false,
             }],
         )
@@ -9627,6 +9644,7 @@ mod tests {
                     owner: "subagent:queue-state-fix".to_string(),
                     generation: 3,
                 }),
+                blockers: Vec::new(),
                 reopen_completed: false,
             }],
         )

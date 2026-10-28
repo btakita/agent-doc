@@ -23,6 +23,7 @@ ambiguous.
 ```toml
 [queue_icons]
 pending = "📥"
+blocked = "⛔"
 claimed = "🟡"
 running = "🚧"
 reported = "☑️"

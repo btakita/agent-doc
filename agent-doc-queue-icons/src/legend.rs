@@ -38,8 +38,9 @@ pub enum QueueMarker {
 }
 
 /// Legend order. Matches [`QueueIconSet::entries`] one-to-one.
-pub const ALL_QUEUE_MARKERS: [QueueMarker; 12] = [
+pub const ALL_QUEUE_MARKERS: [QueueMarker; 13] = [
     QueueMarker::Lifecycle(QueueLifecycleMarker::Pending),
+    QueueMarker::Lifecycle(QueueLifecycleMarker::Blocked),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Claimed),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Running),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Reported),
@@ -59,6 +60,7 @@ impl QueueMarker {
         match self {
             Self::Lifecycle(state) => match state {
                 QueueLifecycleMarker::Pending => "pending",
+                QueueLifecycleMarker::Blocked => "blocked",
                 QueueLifecycleMarker::Claimed => "claimed",
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "reported",
@@ -89,6 +91,7 @@ impl QueueMarker {
         match self {
             Self::Lifecycle(state) => match state {
                 QueueLifecycleMarker::Pending => "pending",
+                QueueLifecycleMarker::Blocked => "blocked",
                 QueueLifecycleMarker::Claimed => "claimed",
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "reported",
@@ -110,6 +113,9 @@ impl QueueMarker {
             Self::Lifecycle(state) => match state {
                 QueueLifecycleMarker::Pending => {
                     "Live row with no claim, worker report, or completion evidence; ready to run."
+                }
+                QueueLifecycleMarker::Blocked => {
+                    "Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review. `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every blocker closes."
                 }
                 QueueLifecycleMarker::Claimed => {
                     "Reserved for a worker by `queue claim`; no spawned worker is bound yet."
@@ -158,10 +164,14 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 4] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 5] = [
     QueueMarkerAnnotation {
         token: "[#<owner>#<N>]",
         meaning: "Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity.",
+    },
+    QueueMarkerAnnotation {
+        token: "⟦blocked by <id>, <id>⟧",
+        meaning: "Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity.",
     },
     QueueMarkerAnnotation {
         token: "⟦effect:N⟧",
@@ -279,6 +289,7 @@ mod tests {
     fn every_palette_field_has_a_legend_entry() {
         let QueueIconSet {
             pending,
+            blocked,
             claimed,
             running,
             reported,
@@ -293,6 +304,7 @@ mod tests {
         } = QueueIconSet::default();
         let fields = [
             pending,
+            blocked,
             claimed,
             running,
             reported,
@@ -331,6 +343,7 @@ mod tests {
     fn every_lifecycle_state_is_listed_and_documented() {
         for state in [
             QueueLifecycleMarker::Pending,
+            QueueLifecycleMarker::Blocked,
             QueueLifecycleMarker::Claimed,
             QueueLifecycleMarker::Running,
             QueueLifecycleMarker::Reported,
@@ -342,6 +355,7 @@ mod tests {
         ] {
             match state {
                 QueueLifecycleMarker::Pending
+                | QueueLifecycleMarker::Blocked
                 | QueueLifecycleMarker::Claimed
                 | QueueLifecycleMarker::Running
                 | QueueLifecycleMarker::Reported
@@ -362,7 +376,7 @@ mod tests {
                 state.default_prefix()
             );
         }
-        assert_eq!(ALL_LIFECYCLE_STATES.len(), 9);
+        assert_eq!(ALL_LIFECYCLE_STATES.len(), 10);
     }
 
     #[test]
@@ -388,6 +402,8 @@ mod tests {
             assert!(table.contains(annotation.token));
         }
         assert!(help.contains("🔄  needs reconcile"));
+        assert!(help.contains("⛔  blocked"));
+        assert!(line.contains("⛔ blocked"));
     }
 
     #[test]

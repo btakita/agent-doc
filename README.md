@@ -162,6 +162,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | Marker | Meaning |
 |--------|---------|
 | `📥` | pending, ready to run |
+| `⛔` | blocked: its tracked item waits on open work, named after the marker (`⛔ ⟦blocked by a, b⟧`); it is not drained or dispatched until that work closes |
 | `🟡` | claimed for a worker that has not started yet |
 | `🚧` | a worker is running it |
 | `☑️` | the worker reported back; the coordinator still has to integrate and close it |
@@ -177,7 +178,7 @@ A session document with an `agent:run` section keeps this legend on one line
 at the end of its `agent:status` section (hide it with `queue-legend=off` on
 the status marker), and `agent-doc queue --help` prints it. See
 [Queue Markers](docs/guide/queue-markers.md#queue-markers) for the full legend,
-including the `[#owner#N]` and `⟦effect:N⟧` annotations.
+including the `[#owner#N]`, `⟦blocked by …⟧` and `⟦effect:N⟧` annotations.
 
 ## Learn more
 

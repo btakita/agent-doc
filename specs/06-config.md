@@ -120,11 +120,14 @@ metadata inherit together.
 A missing `project.md` means there are no project defaults. A read failure or
 malformed project frontmatter is an actionable preset-resolution error; a
 preset-aware admission must not silently continue with a stale or partial map.
-`agent:rules` is not part of that frontmatter overlay: only the nearest
-project file contributes rules, session rules add to them, and a rules body
-that does not parse contributes nothing instead of failing the preset map.
-Nested repositories therefore inherit a workspace parent's presets while their
-own `project.md` remains the overlay. The similarly named
+`agent:rules` is not part of that frontmatter overlay. Rules use the same
+ancestor walk: farthest project file first, then each nearer project file,
+then the session. A nested repository's `.git` does not hide an ancestor
+project file. A missing project file is skipped. A rules body that does not
+parse contributes nothing instead of failing the preset map.
+
+Nested repositories therefore inherit a workspace parent's presets and rules
+while their own `project.md` remains the nearer overlay. The similarly named
 `.agent-doc/config.toml` remains runtime configuration, not a prompt
 preset source, and `.agent-doc/project.yaml` is not an alternative spelling.
 

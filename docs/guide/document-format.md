@@ -83,13 +83,15 @@ them. A session-local preset with the same exact name overrides the project
 value; an unfinished or null local declaration also masks the inherited value
 while it is being edited. Presets and `agent:rules` are inherited. Other
 frontmatter fields stay document-local. Preset inheritance walks every ancestor
-project file and overlays nearer names. Rules are different: preflight reads
-every `agent:rules` body in the nearest `.agent-doc/project.md`, in file order,
-then every `agent:rules` body in the session document, in file order. Session
-rules add to those project rules. They do not replace them, and an ancestor
-project file does not contribute rules. A markdown list is one rule per item.
+project file and overlays nearer names. Rules use that same walk: preflight
+reads every `agent:rules` body in each existing `.agent-doc/project.md`,
+farthest ancestor first and in file order within a file, then every
+`agent:rules` body in the session document, in file order. A nested `.git`
+does not hide an ancestor project file. Session rules add to those project
+rules. They do not replace them. A markdown list is one rule per item.
 Free text is included as written. Multiple `agent:rules` elements are allowed
-in either file. The rest of the project file's body is not inherited.
+in a project file or the session document. The rest of a project file's body
+is not inherited.
 
 ## Interaction modes
 

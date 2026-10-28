@@ -35,11 +35,12 @@ use crate::element::{self, Component};
 
 /// How to apply a non-empty `agent_rules` list on the cycle contract.
 pub const AGENT_RULES_GUIDANCE: &str = "\
-Apply every agent_rules entry this turn, in order. Rules from the nearest \
-.agent-doc/project.md come first; session agent:rules entries add to them and \
-do not replace them. A markdown list item is one rule. Free text is one rule \
-as written. Content-only edits of agent:rules do not start a turn; a real \
-exchange or queue turn still carries the current rules.";
+Apply every agent_rules entry this turn, in order. Rules from every \
+.agent-doc/project.md, farthest ancestor first and the nearest project last, \
+come first; session agent:rules entries add to them and do not replace them. \
+A markdown list item is one rule. Free text is one rule as written. \
+Content-only edits of agent:rules do not start a turn; a real exchange or \
+queue turn still carries the current rules.";
 
 /// Guidance for `rules`, present only when the composed list is non-empty.
 pub fn agent_rules_guidance(rules: &[String]) -> Option<String> {

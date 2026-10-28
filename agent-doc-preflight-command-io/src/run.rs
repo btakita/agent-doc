@@ -2933,13 +2933,16 @@ fn run_with_options_to_writer_in_pass(
     Ok(())
 }
 
-/// Nearest `.agent-doc/project.md` rules, then rules in `session_content`.
+/// Every ancestor `.agent-doc/project.md` rule, farthest first, then rules in
+/// `session_content`.
 ///
-/// Ancestor project files are not consulted. When `file` is that nearest
-/// `project.md`, the session content is the only copy. A missing project file
-/// contributes nothing. A project file that cannot be read, or whose component
-/// markers do not parse, contributes nothing and does not fail preflight:
-/// preset resolution still fail-closes on its own read of the same file.
+/// The walk matches project frontmatter defaults: from the nearest project
+/// root through ceiling-bounded ancestors. A nested `.git` does not stop the
+/// walk. When `file` is one of those project files, the session content is the
+/// only copy of that file. A missing project file contributes nothing. A
+/// project file that cannot be read, or whose component markers do not parse,
+/// contributes nothing and does not fail preflight: preset resolution still
+/// fail-closes on its own read of the same file.
 fn composed_agent_rules(file: &Path, session_content: &str) -> Vec<String> {
     let session_rules = agent_doc_element::rules::rules_from_document(session_content);
     let project_rules = project_agent_rules(file);
@@ -2947,26 +2950,29 @@ fn composed_agent_rules(file: &Path, session_content: &str) -> Vec<String> {
 }
 
 fn project_agent_rules(file: &Path) -> Vec<String> {
-    let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
+    let Some(nearest_root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Vec::new();
     };
-    let project_md = root.join(".agent-doc").join("project.md");
-    if same_file(file, &project_md) {
-        return Vec::new();
-    }
-    if !project_md.exists() {
-        return Vec::new();
-    }
-    match std::fs::read_to_string(&project_md) {
-        Ok(text) => agent_doc_element::rules::rules_from_document(&text),
-        Err(error) => {
-            eprintln!(
-                "[preflight] agent:rules: could not read {}: {error}",
-                project_md.display()
-            );
-            Vec::new()
+    let mut rules = Vec::new();
+    for root in agent_doc_fs::ancestors_within_root_ceiling(&nearest_root)
+        .into_iter()
+        .rev()
+    {
+        let project_md = root.join(".agent-doc").join("project.md");
+        if same_file(file, &project_md) || !project_md.is_file() {
+            continue;
+        }
+        match std::fs::read_to_string(&project_md) {
+            Ok(text) => rules.extend(agent_doc_element::rules::rules_from_document(&text)),
+            Err(error) => {
+                eprintln!(
+                    "[preflight] agent:rules: could not read {}: {error}",
+                    project_md.display()
+                );
+            }
         }
     }
+    rules
 }
 
 fn same_file(left: &Path, right: &Path) -> bool {
@@ -10354,13 +10360,13 @@ mod tests {
     }
 
     #[test]
-    fn preflight_composes_nearest_project_rules_then_session_rules() {
+    fn preflight_composes_ancestor_project_rules_then_nearest_then_session_rules() {
         let dir = setup_project();
         std::fs::write(
             dir.path().join(".agent-doc/project.md"),
             concat!(
                 "<!-- agent:rules -->\n",
-                "- Ancestor rule must stay out of the contract.\n",
+                "- Ancestor workspace rule.\n",
                 "<!-- /agent:rules -->\n",
             ),
         )
@@ -10415,17 +10421,13 @@ mod tests {
         assert_eq!(
             contract["agent_rules"],
             serde_json::json!([
+                "Ancestor workspace rule.",
                 "Nearest list rule.",
                 "Nearest second list rule.",
                 "Nearest free text.\n\nIt stays one rule.",
                 "Session list rule.",
                 "Session free text.",
             ]),
-            "{contract:#}"
-        );
-        let joined = contract["agent_rules"].to_string();
-        assert!(
-            !joined.contains("Ancestor rule must stay out of the contract."),
             "{contract:#}"
         );
         assert_eq!(
@@ -10440,20 +10442,17 @@ mod tests {
         );
         assert!(!diff.contains("Nearest list rule."), "{diff}");
         assert!(!diff.contains("Session free text."), "{diff}");
-        assert!(
-            !diff.contains("Ancestor rule must stay out of the contract."),
-            "{diff}"
-        );
+        assert!(!diff.contains("Ancestor workspace rule."), "{diff}");
     }
 
     #[test]
-    fn preflight_ignores_ancestor_rules_when_the_nearest_project_has_no_project_file() {
+    fn preflight_includes_ancestor_project_rules_when_the_nearest_project_has_no_project_file() {
         let dir = setup_project();
         std::fs::write(
             dir.path().join(".agent-doc/project.md"),
             concat!(
                 "<!-- agent:rules -->\n",
-                "- Ancestor rule must stay out of the contract.\n",
+                "- Ancestor workspace rule.\n",
                 "<!-- /agent:rules -->\n",
             ),
         )
@@ -10477,7 +10476,132 @@ mod tests {
         let contract = probe_contract(&doc);
         assert_eq!(
             contract["agent_rules"],
-            serde_json::json!(["Session free text only."]),
+            serde_json::json!(["Ancestor workspace rule.", "Session free text only."]),
+            "{contract:#}"
+        );
+    }
+
+    /// A nested project with its own `.git` still reads that project's
+    /// `project.md` and the ancestor workspace `project.md`. Discovery does
+    /// not stop at the nested gitdir.
+    #[test]
+    fn preflight_reads_nested_and_ancestor_project_files_across_a_gitdir() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#ancestor-only': Ancestor preset body.\n",
+                "  '#shared': Ancestor shared body.\n",
+                "---\n\n",
+                "<!-- agent:rules -->\n",
+                "- Ancestor workspace rule.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let nested = dir.path().join("src/nested-app");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(nested.join("tasks")).unwrap();
+        std::fs::write(
+            nested.join(".git"),
+            "gitdir: ../../.git/modules/src/nested-app\n",
+        )
+        .unwrap();
+        std::fs::write(
+            nested.join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#nested-only': Nested preset body.\n",
+                "  '#shared': Nested shared body.\n",
+                "---\n\n",
+                "<!-- agent:rules -->\n",
+                "- Nested project rule.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let doc = nested.join("tasks/session.md");
+        let session = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:rules -->\n",
+            "- Session list rule.\n",
+            "<!-- /agent:rules -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\n",
+            "Please honor both project files.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, session).unwrap();
+
+        let presets = agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(
+            session, &doc,
+        )
+        .unwrap();
+        assert_eq!(
+            presets.get("#ancestor-only").map(String::as_str),
+            Some("Ancestor preset body.")
+        );
+        assert_eq!(
+            presets.get("#nested-only").map(String::as_str),
+            Some("Nested preset body.")
+        );
+        assert_eq!(
+            presets.get("#shared").map(String::as_str),
+            Some("Nested shared body.")
+        );
+
+        let contract = probe_contract(&doc);
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!([
+                "Ancestor workspace rule.",
+                "Nested project rule.",
+                "Session list rule.",
+            ]),
+            "{contract:#}"
+        );
+    }
+
+    #[test]
+    fn preflight_reads_ancestor_project_rules_once_when_the_session_is_nested_project_md() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- Ancestor workspace rule.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let nested = dir.path().join("src/nested-app");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::write(
+            nested.join(".git"),
+            "gitdir: ../../.git/modules/src/nested-app\n",
+        )
+        .unwrap();
+        let doc = nested.join(".agent-doc/project.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:rules -->\n",
+                "- Nested project rule.\n",
+                "<!-- /agent:rules -->\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "## User\n\n",
+                "Please run the focused test for nested-app.\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+
+        let contract = probe_contract(&doc);
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["Ancestor workspace rule.", "Nested project rule."]),
             "{contract:#}"
         );
     }

@@ -4,7 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.560
 
-- **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in the nearest `.agent-doc/project.md` is composed in file order, then every body in the session document. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
+- **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in every `.agent-doc/project.md`, farthest ancestor first, is composed in file order, then every body in the session document. A nested `.git` does not hide an ancestor project file. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
 - **Operator answers nest under the request they answer.** An answer row nested under its request id is accepted, and row splitting ignores binary markers.
 - **An editor undo of a `status:sync` block is detected and re-synced.** The managed block is derived state. The next sync checkpoint rewrites it from the instruction's source.
 - **Claude Stop holds once for a reported but unclosed queue row.** A worker report that no closeout has persisted stays in front of the stop hook until the response that records it is committed.

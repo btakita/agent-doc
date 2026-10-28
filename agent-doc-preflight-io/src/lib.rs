@@ -1193,11 +1193,11 @@ pub struct PreflightOutput {
     pub status_sync_revert_guidance: Option<String>,
     /// Composed `agent:rules` for this turn, in order.
     ///
-    /// Every body in the nearest `.agent-doc/project.md` comes first, in file
-    /// order, then every body in the session document, in file order. Session
-    /// rules add to project rules. A list item is one entry. Free text that
-    /// contains blank lines stays one entry. Ancestor project files do not
-    /// contribute rules.
+    /// Every body in each existing `.agent-doc/project.md` comes first, farthest
+    /// ancestor first and in file order within that file, then every body in
+    /// the session document, in file order. A nested `.git` does not hide an
+    /// ancestor project file. Session rules add to project rules. A list item
+    /// is one entry. Free text that contains blank lines stays one entry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agent_rules: Vec<String>,
     /// How to apply [`Self::agent_rules`]. Present only when that list is non-empty.

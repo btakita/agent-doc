@@ -271,10 +271,12 @@ loaded only when the preset is invoked.
 See [Document Format](../guide/document-format.md#prompt-presets) for the full
 inheritance and masking rules.
 
-The nearest `.agent-doc/project.md` may also contain `agent:rules` blocks.
-Those rules are turn context, not presets: preflight adds every project rule,
-then every session `agent:rules` entry, and puts that list on the cycle
-contract. See [Tags and attributes](../reference/tags-and-attributes.md).
+Every `.agent-doc/project.md` from the nearest project through its ancestors
+may also contain `agent:rules` blocks. Those rules are turn context, not
+presets: preflight adds every project rule, farthest ancestor first, then
+every session `agent:rules` entry, and puts that list on the cycle contract.
+A nested `.git` does not hide an ancestor project file. See
+[Tags and attributes](../reference/tags-and-attributes.md).
 
 To publish each newly created closeout commit to the current branch's configured
 upstream, opt in explicitly:

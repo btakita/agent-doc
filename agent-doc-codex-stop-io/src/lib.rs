@@ -641,6 +641,157 @@ fn final_status_sync_continuation(file: &Path, stop_hook_active: bool) -> Result
     )))
 }
 
+/// Header of the Claude Stop reminder for an unpersisted reported worker result.
+pub const REPORTED_WRITEBACK_MARKER: &str =
+    "[agent-doc] a subagent reported, but its queue row is not closed";
+
+/// One queue row whose worker reported while its result is not yet persisted
+/// by a closeout that strikes the row (`#reportedwritebackdebt`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReportedWritebackDebt {
+    item_text: String,
+    owner: String,
+    /// `Some(N)` while the `Reported` claim is still held; `None` once
+    /// `queue release` turned it into a release receipt (`#reportedrelease`).
+    held_generation: Option<u64>,
+}
+
+/// Every live queue row whose worker reported but whose row is still open:
+/// active `Reported` claims first, then rows whose reported claim was released
+/// (`#reportedrelease`) but never struck.
+fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWritebackDebt>> {
+    use agent_doc_queue::queue_claim::{QueueClaimState, claim_identity};
+
+    let mut debts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for claim in agent_doc_queue_io::queue_claim::claim_states_for_content(file, content)? {
+        if claim.state == QueueClaimState::Reported && seen.insert(claim.identity.clone()) {
+            debts.push(ReportedWritebackDebt {
+                item_text: claim.item_text,
+                owner: claim.owner,
+                held_generation: Some(claim.generation),
+            });
+        }
+    }
+    let owners =
+        agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content);
+    for head in
+        agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(file, content)
+    {
+        let identity = claim_identity(&head);
+        if !seen.insert(identity.clone()) {
+            continue;
+        }
+        debts.push(ReportedWritebackDebt {
+            owner: owners
+                .get(&identity)
+                .cloned()
+                .unwrap_or_else(|| "the worker".to_string()),
+            item_text: head,
+            held_generation: None,
+        });
+    }
+    Ok(debts)
+}
+
+/// The Claude Stop reminder for [`ReportedWritebackDebt`] rows.
+fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWritebackDebt]) -> String {
+    let rows = debts
+        .iter()
+        .map(|debt| {
+            let closeout =
+                agent_doc_queue::claim_release_receipt::queue_line_closeout(file_display, &debt.item_text);
+            match debt.held_generation {
+                Some(generation) => format!(
+                    "- `{}` reported for `{}` (claim generation {generation}; its `### Re: Subagent completed` cell sits in `agent:exchange`, uncommitted). Close it: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
+                    debt.owner,
+                    debt.item_text.trim(),
+                    agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
+                ),
+                None => format!(
+                    "- {}",
+                    agent_doc_queue::claim_release_receipt::persist_reported_instruction(
+                        file_display,
+                        &debt.item_text,
+                        &debt.owner,
+                    )
+                ),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{REPORTED_WRITEBACK_MARKER}\n\
+         {count} queue row(s) in {file_display} have a worker result that no closeout has persisted. \
+         The result is only in your context and the uncommitted completion cell; the row stays open \
+         and is served again until a closeout strikes it. Persist it in THIS turn before the final \
+         answer (`#reportedwritebackdebt`):\n{rows}\n\
+         Do NOT dispatch a new subagent for these rows and do NOT re-claim them. If a concrete \
+         blocker prevents persisting now, name each row and the blocker in your final answer; this \
+         reminder is shown once per stop.",
+        count = debts.len(),
+    )
+}
+
+/// `#reportedwritebackdebt` for Claude: hold the final answer once when a
+/// worker has reported and its row is still open.
+///
+/// The Codex Stop hook already treats an active `Reported` head as prompt debt
+/// (`active_session_prompt_or_queue_head`). The Claude Stop hook only reached
+/// claims through [`claimed_heads_stop_continuation`], which runs only after a
+/// continuation marker proves a drainable queue, so a `subagents` run queue
+/// with no marker let the coordinator end its turn with a `☑️` row and its
+/// uncommitted `### Re: Subagent completed` cell (2026-10-28,
+/// tasks/agent-doc/agent-doc-bugs.md, `subagent:statussync`).
+///
+/// Bounded by `stop_hook_active` (one reminder per stop). It does not yield to
+/// a ready supervisor: the reported row is the coordinator's own integration
+/// work, and the reminder costs one turn at most. An observation failure allows
+/// the final answer, so this gate adds no new way for the hook to fail closed.
+fn claude_reported_writeback_continuation(
+    input: &ClaudeStopInput,
+    file: &Path,
+) -> Option<ClaudeStopContinuation> {
+    if input.stop_hook_active {
+        return None;
+    }
+    let debts = match current_document_content(file, "claude_stop_reported_writeback")
+        .and_then(|content| reported_writeback_debts(file, &content))
+    {
+        Ok(debts) => debts,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "claude_stop_reported_writeback_observation_failed error={err:#} action=allow_final_answer (#reportedwritebackdebt)"
+                ),
+            );
+            return None;
+        }
+    };
+    if debts.is_empty() {
+        return None;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "claude_stop_reported_writeback_unpersisted rows={} held={} released={} action=hold_once (#reportedwritebackdebt)",
+            debts.len(),
+            debts
+                .iter()
+                .filter(|debt| debt.held_generation.is_some())
+                .count(),
+            debts
+                .iter()
+                .filter(|debt| debt.held_generation.is_none())
+                .count(),
+        ),
+    );
+    Some(ClaudeStopContinuation {
+        reason: claude_reported_writeback_reason(&file.display().to_string(), &debts),
+    })
+}
+
 /// [`apply_claude_stop`] with the supervisor drain-readiness probe injected.
 fn apply_claude_stop_with_drain_readiness(
     input: &ClaudeStopInput,
@@ -710,6 +861,9 @@ fn apply_claude_stop_with_drain_readiness(
     if let Some(continuation) =
         claude_steering_continuation(input, &file, run_id.as_deref(), &drain_readiness)?
     {
+        return Ok(Some(continuation));
+    }
+    if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
         return Ok(Some(continuation));
     }
     Ok(
@@ -7940,6 +8094,147 @@ Reviewed the gated items.\n\
                 .unwrap()
                 .is_none(),
             "a worker-bound claim remains a quiet in-flight wait"
+        );
+    }
+
+    /// `#reportedwritebackdebt`: a worker reported on a queue with no
+    /// continuation marker (a `subagents` run queue) after the coordinator's
+    /// cycle committed. The Claude Stop hook used to see only the status-sync
+    /// checkpoint and let the turn end with the `☑️` row and its uncommitted
+    /// completion cell (2026-10-28, `subagent:statussync`). It now holds the
+    /// final answer once and names the closeout that strikes the row.
+    #[test]
+    fn claude_stop_holds_once_for_a_reported_but_unpersisted_worker_result() {
+        let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
+            agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
+        );
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Dispatched `do [#held]`.");
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        let mut input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        let no_supervisor =
+            |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
+
+        // A running worker is in flight, not debt: the turn ends quietly.
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+                .unwrap()
+                .is_none(),
+            "a running worker must not hold the coordinator's final answer"
+        );
+
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
+            .unwrap();
+        let held = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a reported, unpersisted worker result must hold the final answer once");
+        assert!(
+            held.reason.starts_with(REPORTED_WRITEBACK_MARKER),
+            "{}",
+            held.reason
+        );
+        assert!(held.reason.contains("subagent:held"), "{}", held.reason);
+        assert!(held.reason.contains("--done held"), "{}", held.reason);
+        assert!(held.reason.contains("queue release"), "{}", held.reason);
+        assert!(
+            held.reason
+                .contains(&format!("--generation {}", claim.generation)),
+            "{}",
+            held.reason
+        );
+        assert!(held.reason.contains("do NOT re-claim"), "{}", held.reason);
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("claude_stop_reported_writeback_unpersisted rows=1 held=1 released=0"),
+            "{ops}"
+        );
+
+        // Bounded: the recursive stop passes through.
+        input.stop_hook_active = true;
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+                .unwrap()
+                .is_none(),
+            "the reminder is shown once per stop"
+        );
+    }
+
+    /// `#reportedrelease`: `queue release` after a report keeps the row open
+    /// and records a receipt. That is still unpersisted work, so the reminder
+    /// names the released owner and the persist-now closeout.
+    #[test]
+    fn claude_stop_holds_once_for_a_released_reported_row_left_open() {
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Dispatched `do [#held]`.");
+        init_git_repo(dir.path(), &doc);
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#held]", "subagent:held", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:held",
+            "worker:held",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "");
+        complete_run(&doc);
+        agent_doc_queue_io::claim_release_receipt::release(
+            &doc,
+            "do [#held]",
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
+        )
+        .unwrap()
+        .expect("the worker's claim is released");
+
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: false,
+            transcript_path: None,
+        };
+        let held = apply_claude_stop_with_drain_readiness(&input, |_: &Path| {
+            agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor
+        })
+        .unwrap()
+        .expect("a released reported row that is still open must hold the final answer");
+        assert!(
+            held.reason.starts_with(REPORTED_WRITEBACK_MARKER),
+            "{}",
+            held.reason
+        );
+        assert!(
+            held.reason
+                .contains("subagent:held already reported and its claim was released"),
+            "{}",
+            held.reason
+        );
+        assert!(held.reason.contains("--done held"), "{}", held.reason);
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("claude_stop_reported_writeback_unpersisted rows=1 held=0 released=1"),
+            "{ops}"
         );
     }
 

@@ -1270,13 +1270,20 @@ It's merged onto `main` in integration branch `integrate/20261028d`, and the com
 > **Queue prompt:** At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
 
 Fixed on `main` and installed (`939f306bbb..dffba0edcb`). The combined `make check` exited 0: 12086 of 12086 tests passed, with 187 skipped. The 12:27 revert was IntelliJ Undo, not a stale editor replay. Per your decision, undo still works everywhere. If an undo reverts the synced status block, the next preflight or Stop check shows both texts and requires a re-sync. Your answer row and its Todo `[#subagent-operator-request-undo-agent-writes]` are closed by this closeout.
+
+### Re: undo row closed — opus-5 · 2026-10-28T12:58-04:00
+
+> **Queue prompt:** 🙋 At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
+
+Closed. The fix is `dffba0edcb`, on `main` and installed (see the 12:50 cell above). This row needed the leading 🙋 and the trailing request tag in its echo. Even with its Todo already checked, the row's text still contained those two parts. That belongs with the answer-row bug that `subagent:answerrow` is now fixing.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
+- 🙋☑️ [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
+- 🚧 [#subagent:answerrow#1] An operator answer written as its own run row keyed by the request id (`- [#subagent-operator-request-<id>]` with the answer nested under it) made the queue in-progress marker projection fail with "changed item count (before=3, after=2)". That refused `queue report-complete`, `queue release` and preflight queue maintenance for the 🙋 row it answers, and `--ack-id` refused the answer row as never dispatched. Accept this answer shape (or fold it into the 🙋 row) without breaking the projection.
 - ~~[#subagent-operator-request-undo-agent-writes]~~
-  - I want sync to use the latest state...even if the operator reverted.
+  - 📥 I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

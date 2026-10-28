@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -1195,15 +1195,21 @@ Session note: the exchange is 1083 lines. I'm not compacting it while the queue 
 **New run rows:**
 - **The 12:27:36Z status revert** looks like an editor copy that had just been reloaded sending back old text, rather than an IDE undo. I added it as a run row.
 - **The dogfood row about an uncommitted completion cell is fair.** I ended turns with report-complete cells still uncommitted while I waited to batch the integration. A subagent is checking whether the Stop hook should catch that.
+
+### Re: strike-rules row closed — opus-5 · 2026-10-28T11:20-04:00
+
+> **Queue prompt:** I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+
+Closed. Both fixes for this row are on `main` and installed: `0b27368c0e` and `0dd4eeb0be`. The previous cycle's echo didn't strike it because my explanation repeated a deferral phrase in plain quotes inside its first bullet, and the deferral rule still reads plain quoted text as deferral wording.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.~~
-- ☑️ [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+- ~~I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?~~
 - ~~game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~status:sync is out of sync~~ — auto-struck: answered this cycle (#ftstrike)
-- At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
+- 🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
 - 🚧 [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 <!-- /agent:run -->
 

@@ -1210,11 +1210,38 @@ No new issues since the last check. Open on `btakita/agent-doc`:
 - **#40** and **#45**: excluded.
 
 Nothing was added to the backlog or queue.
+
+### Re: the 12:27 status revert was IDE undo — your call — opus-5 · 2026-10-28T11:30-04:00
+
+`subagent:stalereplay` found no stale editor replay. The revert was IntelliJ Undo: Ctrl+Z three times, then one redo. It stepped back exactly through my 07:41:30, 07:41:15 and 07:41:11Z edits. The plugin applies agent edits as ordinary undoable commands (`editors/PLUGIN-SPEC.md` §5 step 7), and it counts undo and redo as operator text. No code was changed. The worker needs your choice:
+
+[#subagent-operator-request-undo-agent-writes] subagent operator request
+- *queue_item:*
+  - At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Should the JetBrains plugin keep letting IDE Undo reach agent-applied edits, and if not, which behaviour do you want?
+- *context:*
+  - The revert was IDE Undo: Ctrl+Z three times, then one redo, stepping exactly through the agent's 07:41:30, 07:41:15 and 07:41:11Z edits.
+  - It was not a stale replica replay. No reload happened before it, and the quarantine came from the operator's typo in `agent:loop`.
+  - `editors/PLUGIN-SPEC.md` §5 step 7 requires agent edits to be applied as an undoable command; the plugin does this in `runUndoableRemoteUpdateCommand`.
+  - Undo and redo changes are counted as operator edits, so the controller accepted the revert as operator text.
+  - Operators have deliberately undone agent responses before, so removing undo outright changes a workflow someone may rely on.
+  - Any plugin change means editing a .kt file, bumping the three JetBrains plugin versions, and amending PLUGIN-SPEC §5.
+  - Nothing is committed yet. Branch `fix/stalereplay` sits at `origin/main` `67413e99fd` in worktree `/home/brian/worktrees/agent-doc-stalereplay-20261028`.
+- *choices:*
+  - **Confirm before undo**: keep agent edits undoable, but mark them so IntelliJ asks "Undo Agent Doc CRDT Remote Update?" before undoing one. Typing-only undo is unaffected.
+  - **Tag undo/redo origin**: keep the behaviour, but have the plugin label undo/redo edits so ops.log and the controller can tell "operator undid an agent edit" apart from typed text. Behaviour stays the same; it only adds diagnosis.
+  - **Not undoable**: apply agent edits outside the IDE undo history so Ctrl+Z only ever reaches operator typing. Undo of agent responses disappears entirely, and IntelliJ may drop older undo history across those edits.
+  - **No change**: undo of agent edits is intended operator power. Close the item as working-as-designed and add a spec note.
+
+To answer, add `: <choice>` after the request id on the queue row, or reply here.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
+- 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
 - 🚧 [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 <!-- /agent:run -->
 
@@ -1242,6 +1269,7 @@ Nothing was added to the backlog or queue.
   - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
   - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
+- [ ] [#subagent-operator-request-undo-agent-writes] Answer the blocking subagent question for queue item ‘At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted…’ in agent:exchange: Should the JetBrains plugin keep letting IDE Undo reach agent-applied edits, and if not, which behaviour do you want? (choices: Confirm before undo, Tag undo/redo origin, Not undoable, No change)
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

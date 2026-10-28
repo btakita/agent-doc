@@ -39,11 +39,15 @@ use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
     AgentAddressedComposerRefusalFacts, AuthoritativeActorDispatchIntent,
     AuthoritativeActorDispatchOrigin, BusyPaneAutoFixOutcome, DirectPaneSubmitPolicy,
-    DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReadyProbeResolutionFacts,
-    DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
+    DispatchOnlyActiveTurnActorFacts, DispatchOnlyActiveTurnProvenance,
+    DispatchOnlyActiveTurnRefusalDecision, DispatchOnlyActiveTurnRefusalMessageFacts,
+    DispatchOnlyAlreadyRunningMessageFacts, DispatchOnlyBlockerRecoveryHintFacts,
+    DispatchOnlyReadyProbeResolutionFacts, DispatchOnlyReopenDelivery, DispatchOnlyRouteCycleStamp,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
     DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
     agent_addressed_composer_refusal_message, classify_direct_pane_submit_policy,
+    classify_dispatch_only_active_turn_provenance, decide_dispatch_only_active_turn_refusal,
+    dispatch_only_active_turn_refusal_message, dispatch_only_already_running_message,
     dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
     dispatch_only_effective_ready_probe_required, dispatch_only_route_cycle_owns_input,
     dispatch_only_route_superseded_by_new_cycle, dispatch_only_should_print_unproven_progress,
@@ -181,6 +185,45 @@ fn resubmit_stranded_dispatch_only_trigger(
         ),
     );
     Ok(())
+}
+
+/// `#grokreopen`: read who made the dispatch pane busy from the authoritative
+/// actor record. A missing or unreadable record attributes nothing.
+fn dispatch_only_active_turn_provenance(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    dispatch_pane: &str,
+    harness: &HarnessConfig,
+) -> DispatchOnlyActiveTurnProvenance {
+    let actor = match load_authoritative_actor_binding(
+        tmux, file, session_id, file_path, harness, false, false,
+    ) {
+        Ok(actor) => actor,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_dispatch_only_active_turn_actor_probe_failed file={} pane={} harness={} error={}",
+                    file.display(),
+                    dispatch_pane,
+                    harness.binary,
+                    agent_doc_secret_redact::redact(&err.to_string())
+                ),
+            );
+            None
+        }
+    };
+    classify_dispatch_only_active_turn_provenance(actor.as_ref().map(|actor| {
+        DispatchOnlyActiveTurnActorFacts {
+            requested_pane: dispatch_pane,
+            actor_pane: &actor.record.pane_id,
+            actor_busy: actor.actor_state() == agent_doc_controller::actor::ActorState::Busy,
+            transition_reason: &actor.record.last_transition.reason,
+            transition_timestamp_secs: actor.record.last_transition.timestamp,
+        }
+    }))
 }
 
 fn dispatch_only_starting_pane_settled_via_authoritative_actor(
@@ -993,6 +1036,74 @@ pub fn dispatch_only_send_reopen(
             }
             DispatchOnlyBlockerAction::Refuse => {
                 let file_display = file.display().to_string();
+                // `#grokreopen`: an active-turn refusal is either a duplicate
+                // of the supervisor's own trigger (already running → success)
+                // or a genuinely busy pane (say so, with the turn's start).
+                match decide_dispatch_only_active_turn_refusal(
+                    &harness.binary,
+                    &reason,
+                    options.queue_prompt_text.is_some(),
+                    || {
+                        dispatch_only_active_turn_provenance(
+                            tmux,
+                            file,
+                            session_id,
+                            file_path,
+                            &dispatch_pane,
+                            harness,
+                        )
+                    },
+                ) {
+                    DispatchOnlyActiveTurnRefusalDecision::NotActiveTurn => {}
+                    DispatchOnlyActiveTurnRefusalDecision::AlreadyRunning { started_at_secs } => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_dispatch_only_document_trigger_already_running file={} pane={} harness={} blocker={} started_at={} outcome=coalesced_already_running (#grokreopen)",
+                                file.display(),
+                                dispatch_pane,
+                                harness.binary,
+                                reason,
+                                started_at_secs,
+                            ),
+                        );
+                        eprintln!(
+                            "{}",
+                            dispatch_only_already_running_message(
+                                DispatchOnlyAlreadyRunningMessageFacts {
+                                    harness_binary: &harness.binary,
+                                    pane: &dispatch_pane,
+                                    file_display: &file_display,
+                                    started_at_secs,
+                                    outcome_fields: &agent_doc_flow::outcome::user_outcome_fields(
+                                        agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner,
+                                    ),
+                                },
+                            )
+                        );
+                        return Ok(dispatch_pane);
+                    }
+                    DispatchOnlyActiveTurnRefusalDecision::RefuseRunningTurn {
+                        busy_since_secs,
+                    } => {
+                        agent_doc_flow_io::log_flow_event(
+                            file,
+                            prompt_ready_barrier_failed_event(
+                                RoutedReopenGuardReason::DispatchOnlyBusyActorNotReady,
+                            ),
+                            agent_doc_ops_log_io::log_op,
+                        );
+                        anyhow::bail!(dispatch_only_active_turn_refusal_message(
+                            DispatchOnlyActiveTurnRefusalMessageFacts {
+                                harness_binary: &harness.binary,
+                                pane: &dispatch_pane,
+                                file_display: &file_display,
+                                reason: &reason,
+                                busy_since_secs,
+                            },
+                        ));
+                    }
+                }
                 let recovery =
                     dispatch_only_blocker_recovery_hint(DispatchOnlyBlockerRecoveryHintFacts {
                         harness_binary: &harness.binary,
@@ -1532,6 +1643,96 @@ pub fn retry_dispatch_only_after_busy_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct ScopedCurrentDir(std::path::PathBuf);
+
+    impl ScopedCurrentDir {
+        fn set(path: &Path) -> Self {
+            let prev = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+            std::env::set_current_dir(path).unwrap();
+            Self(prev)
+        }
+    }
+
+    impl Drop for ScopedCurrentDir {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.0);
+        }
+    }
+
+    /// `#grokreopen`: the route adapter reads the real actor store. The live
+    /// repro's record (Busy, `dispatch`/`auto_trigger_inject` on the pane the
+    /// route targets) attributes the Grok turn to the document's own trigger;
+    /// the same Busy record from any other transition does not.
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn active_turn_provenance_reads_the_supervisor_trigger_inject_from_the_actor_store() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let _cwd_guard = ScopedCurrentDir::set(dir.path());
+        let iso = agent_doc_tmux_io::isolated_test_tmux("route-test-grokreopen-provenance");
+        let pane = iso
+            .new_session(&format!("grokreopen-{}", std::process::id()), dir.path())
+            .unwrap();
+        let doc = dir.path().join("dev.md");
+        std::fs::write(&doc, "---\nagent: grok\n---\n\n# Session\n").unwrap();
+        let file_path = doc.canonicalize().unwrap().to_string_lossy().to_string();
+        let session_id = "route-grokreopen-provenance";
+        agent_doc_session_actor_io::record_session_start_direct(
+            &doc, session_id, &pane, "@grok", 1,
+        )
+        .unwrap();
+        let key = agent_doc_session_actor_io::canonical_document_id_in(dir.path(), &file_path);
+        let harness = HarnessConfig::grok();
+        let transition = |reason: &str| {
+            agent_doc_session_actor_io::transition_state_in(
+                dir.path(),
+                &key,
+                session_id,
+                &pane,
+                Some(1),
+                agent_doc_controller::actor::ActorState::Busy,
+                "dispatch",
+                reason,
+            )
+            .unwrap()
+        };
+
+        let record = transition("auto_trigger_inject");
+        let provenance = dispatch_only_active_turn_provenance(
+            &iso, &doc, session_id, &file_path, &pane, &harness,
+        );
+        assert_eq!(
+            provenance,
+            DispatchOnlyActiveTurnProvenance::DocumentTriggerAlreadyRunning {
+                started_at_secs: record.last_transition.timestamp,
+            }
+        );
+        assert!(record.last_transition.timestamp > 0);
+
+        let record = transition("turn_started");
+        assert_eq!(
+            dispatch_only_active_turn_provenance(
+                &iso, &doc, session_id, &file_path, &pane, &harness,
+            ),
+            DispatchOnlyActiveTurnProvenance::OtherActiveTurn {
+                busy_since_secs: Some(record.last_transition.timestamp),
+            }
+        );
+
+        // The route targets a different pane than the actor owns.
+        transition("auto_trigger_inject");
+        assert_eq!(
+            dispatch_only_active_turn_provenance(
+                &iso, &doc, session_id, &file_path, "%9999", &harness,
+            ),
+            DispatchOnlyActiveTurnProvenance::OtherActiveTurn {
+                busy_since_secs: None
+            }
+        );
+    }
+
 
     #[test]
     fn send_edge_coalesces_an_open_cycle_that_started_after_the_outer_drain() {

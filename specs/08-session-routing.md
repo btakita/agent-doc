@@ -157,6 +157,27 @@ dispatch-start proof, and it sends no additional submit keys. This rule
 supersedes the older busy-actor focus-only/refusal behavior for a plain trigger;
 prompt-aware routes retain their queueing and acceptance-proof requirements.
 
+**Active-turn refusal names the turn (`#grokreopen`):** A harness whose active
+turn does not accept a plain trigger (Grok Build) still reaches the final
+pre-submit capture's refusal. The cycle-ownership check cannot see a turn the
+supervisor's auto-trigger has just typed but whose preflight has not yet opened
+a cycle, so route consults the authoritative actor record at that refusal. When
+the record is `busy` on the dispatch pane and its last transition is the
+supervisor's own `dispatch`/`auto_trigger_inject`, the pane is running this
+document's trigger: a route without its own prompt text coalesces as success
+(`route_dispatch_only_document_trigger_already_running`, user outcome
+`queued_behind_owner`, marker `already_running=document_trigger`) and reports
+that Run Agent Doc is already running, with the turn's start time. Any other
+active turn refuses with a message that names the running turn, its busy-since
+time when the record proves it, and the operator's two real choices: wait for
+the turn to finish, or stop it in the pane (`Ctrl+C` for Grok Build). An
+active-turn refusal never tells the operator to "restore an idle prompt".
+Dialogs, drafts, and shell substates keep their blocker-specific refusals and
+never consult the actor record. The editor's native `route_outcome` derivation
+classifies Grok Build active-turn refusals (both wordings) as still running,
+names the pane's harness, and gives the coalesced route its own "already
+running" summary.
+
 **Automated dispatch never steers (GH #319):** the plain-trigger
 busy pass-through above is operator steering, so it is scoped by dispatch
 origin, not by the `--plain-trigger` flag alone. Every routed dispatch carries a

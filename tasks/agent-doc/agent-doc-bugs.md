@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 4 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -926,13 +926,6 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 > Branch feat/qblocked, commit 70274397f2 (pushed); make check exit 0, 12026 passed (186 skipped). Marker ⛔ ([queue_icons] key blocked), rendered "⛔ ⟦blocked by <ids>⟧ <row>" (ids without #; the annotation is projection-only and never part of row identity). New agent-doc-queue/src/queue_blocked.rs derives blockers from a "(stays open: ... block ...)" clause and after= prerequisites, counting only ids still open in this document backlog/todo/review; the row returns to 📥 when its last open blocker closes. Live claim/running/reported/lost/reconcile markers win; otherwise ⛔ beats ⏳/⏭️/📥. Stays-open-blocked rows are deferred in both drains, never selected, never counted drainable, never ⏭️ (fixes the wrong ⏭️); queue_subagent_dispatch, session-check dispatch nag and the subagents=N planner drop blocked rows before assigning slots. Deviation: after=-only rows show ⛔ and stay out of dispatch but keep the existing #dagdraingate drain rule (full deferral broke GH #162 test). Docs: queue-markers.md, README, configuration, specs 06/07/14. Follow-ups: prose-only blocker clauses stay runnable; blockers count only within this document.
 <!-- agent-doc-subagent-completion key=db3297e533e431b82b58d9f2404b39d3e58ad82cc27955c0f2de9395b32781fc -->
 
-### Re: Subagent completed: `subagent:restartedt` returned work for queue item “Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok` ``` java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169) at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.access$callOnWorker(NativeLib.kt:1041) at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration$Companion.load$lambda$0(NativeLib.kt:1236) at jdk.proxy14/jdk.proxy14.$Proxy103.agent_doc_frontmatter_agent(Unknown Source) at com.github.btakita.agentdoc.NativePatching.frontmatterAgent(NativeLib.kt:2636) at com.github.btakita.agentdoc.TerminalUtil.editorVisibleFrontmatterAgent(TerminalUtil.kt:1839) at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand(TerminalUtil.kt:1401) at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand$default(TerminalUtil.kt:1388) at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession(TerminalUtil.kt:1051) at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession$default(TerminalUtil.kt:1050) at com.github.btakita.agentdoc.RestartAgentAction.actionPerformed(RestartAgentAction.kt:22) at com.github.btakita.agentdoc.shell.ShellActionForwarder.actionPerformed(ShellActionForwarders.kt:39) at com.intellij.openapi.actionSystem.ex.ActionUtil.doPerformActionOrShowPopup(ActionUtil.kt:514) at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction$lambda$0(ActionUtil.kt:477) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1$0(ActionManagerImpl.kt:632) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1(ActionManagerImpl.kt:821) at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:307) at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks(ActionManagerImpl.kt:629) at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction(ActionUtil.kt:476) at com.intellij.ui.popup.ActionPopupStep.performActionItem(ActionPopupStep.java:305) at com.intellij.ui.popup.ActionPopupStep.lambda$onChosen$1(ActionPopupStep.java:290) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.ui.popup.AbstractPopup.lambda$dispose$0(AbstractPopup.java:2267) at com.intellij.openapi.wm.impl.FocusManagerImpl.lambda$doWhenFocusSettlesDown$0(FocusManagerImpl.java:197) at com.intellij.util.ui.EdtInvocationManager.invokeLaterIfNeeded(EdtInvocationManager.java:32) at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:193) at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:185) at com.intellij.ui.popup.AbstractPopup.dispose(AbstractPopup.java:2265) at com.intellij.ui.popup.WizardPopup.dispose(WizardPopup.java:204) at com.intellij.ui.popup.list.ListPopupImpl.dispose(ListPopupImpl.java:457) at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.dispose(PopupFactoryImpl.java:371) at com.intellij.openapi.util.ObjectTree.disposeStrandedList(ObjectTree.java:178) at com.intellij.openapi.util.ObjectTree.runWithTrace(ObjectTree.java:229) at com.intellij.openapi.util.ObjectTree.executeAll(ObjectTree.java:264) at com.intellij.openapi.util.Disposer.dispose(Disposer.java:222) at com.intellij.openapi.util.Disposer.dispose(Disposer.java:210) at com.intellij.ui.popup.WizardPopup.disposeAllParents(WizardPopup.java:369) at com.intellij.ui.popup.list.ListPopupImpl.disposePopup(ListPopupImpl.java:594) at com.intellij.ui.popup.list.ListPopupImpl.handleNextStep(ListPopupImpl.java:618) at com.intellij.ui.popup.list.ListPopupImpl._handleSelect(ListPopupImpl.java:579) at com.intellij.ui.popup.list.ListPopupImpl.handleSelect(ListPopupImpl.java:499) at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.handleSelect(PopupFactoryImpl.java:388) at com.intellij.ui.popup.list.ListPopupImpl$1.actionPerformed(ListPopupImpl.java:340) at com.intellij.ui.popup.WizardPopup.lambda$proceedKeyEvent$0(WizardPopup.java:506) at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24) at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346) at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743) at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228) at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55) at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23) at com.intellij.ui.popup.WizardPopup.proceedKeyEvent(WizardPopup.java:505) at com.intellij.ui.popup.WizardPopup.dispatch(WizardPopup.java:477) at com.intellij.ui.popup.PopupDispatcher.dispatchKeyEvent(PopupDispatcher.java:130) at com.intellij.ui.popup.PopupDispatcher.dispatch(PopupDispatcher.java:171) at com.intellij.ide.IdePopupManager.dispatch(IdePopupManager.java:88) at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:555) at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:405) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:404) at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:404) at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399) at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136) at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:114) at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136) at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399) at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440) at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207) at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128) at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117) at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113) at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105) at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92) ```” — agent-doc
-<!-- agent-doc-subagent-response sha256=82cfe671ec7a7cc30d9a0a3909f6fe7af817aae3e40fb13b4beb265cd0a9cb3d -->
-> **Subagent response:**
->
-> Branch fix/restartedt, commit d2a4ac2694 on cf20c4187d (pushed); make check exit 0 (Rust 12020 passed, JetBrains builds + tests); JetBrains re-check after the final bump exit 0, 1037 tests. Root cause: f111fc6288 put NativePatching.frontmatterAgent inside runRestartCommand, which runs on the EDT (RestartAgentAction and the Interrupt-and-Restart dialog); callOnWorker throws there, so every Restart Agent on plugin 0.2.866 failed. lazily.md worked because those restarts ran plugin 0.2.864 (idea.log), before the call existed; sdk-dev.md at 00:53:51 was the first Restart Agent on 0.2.866. Fix: runRestartCommand reads only the buffer text on the EDT; new launchRestartCommandOffEdt does the native read, builds args and launches on a pooled thread (GenerationWork.executeOnPooledThread), falling back to no --expect-agent on any failure. Audit: no other new EDT native calls in 0.35.558. Tests: TerminalUtilTest EDT-guard tests (2 fail with the fix reverted) + source pin; ShellRegistrationOwnershipTest pooled-thread count 20 -> 21. Versions: classic 0.2.871, 262 0.2.872, 263 0.2.873. Needs an IDE restart to load.
-<!-- agent-doc-subagent-completion key=2a1e455877dd72b030528252d693fa4bd1a08c4e8e409870336e1cef6f8114fa -->
-
 ### Re: Subagent completed: `subagent:grokreopen` returned work for queue item “Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry” — agent-doc
 <!-- agent-doc-subagent-response sha256=3615beffd385555525b312428ac9beca59fe4163d56f32ba22528e68a61e587d -->
 > **Subagent response:**
@@ -981,7 +974,152 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 **The repeating `todosync` mismatch warning (`#deletedstruckmismatch`, `a7e60e9f50`).** A leftover completion cell was being read as ownership, and the same deletion was re-reported on every call. A cell alone no longer counts as ownership, and each real mismatch is reported once. The warning should stop now.
 
 **Next:** the Grok double-dispatch fix, the Restart Agent crash fix (plugins 0.2.871 / 0.2.872 / 0.2.873) and the extract-layout fix are stacked on top with no conflicts. Once the Ctrl+C re-run worker reports, I'll run one combined check and cut **v0.35.559** for your `release + publish` row. **After that install, restart IDEA** to load the fixed Restart Agent. After both are in, `sdk-demo.md` is safe to restart.
-<!-- agent:boundary:6fccd6a0 -->
+
+### Re: Subagent completed: `subagent:ctrlcrerun` returned work for queue item “game-sessions.md - Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again - [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering” — agent-doc
+<!-- agent-doc-subagent-response sha256=63ee70a1b380509509e506abbce022ad1a7a0dfb528e04931097180c675e1567 -->
+> **Subagent response:**
+>
+> Branch fix/ctrlcrerun, commit 59eb99e2a6 on cf20c4187d (pushed); make check exit 0, 12024 passed (186 skipped); make tmux-ci exit 2 on an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supervisor (45s timeout in a controller stale-binary self-recycle loop; no route lines, untouched code). Root cause: the pane was Grok (Restart Agent switched game-sessions.md claude->grok at 05:00:43Z). Grok Ctrl+C logs turn_completed stop_reason=cancelled but runs no stop hook (0 of 15 local cancels did), so the prompt-submit turn lease was never cleared; agent-doc reads Claude/Codex interrupts but not Grok, so every check saw a live turn (harness_turn_ended_not_proven turn_live=true; session-check fresh active-turn lease; route live_owner_turn) and the second Run was delivered as steering into a dead turn (route_explicit_send_delivered_to_owner_turn) although the pane was idle. Fix: (1) agent-doc-turn/src/turn_status.rs: a Grok turn_completed with stop_reason cancelled is an interrupt (later activity supersedes it); after the 3 s settle the lease clears and an interrupt turn-end receipt is written, so the next Run cancels the dead cycle and sends a fresh trigger. (2) agent-doc-route-io/src/authoritative_dispatch.rs: lease says live but the pane is idle on two captures -> route_owner_turn_liveness_ambiguous, a non-zero outcome that names Run again / agent-doc session cancel-turn instead of reporting delivery. Specs 15-turn-lifecycle, 07-closeout-commands. Tests: 6 new, all fail with both fixes reverted.
+<!-- agent-doc-subagent-completion key=222c0e768ccf035626da58a486ab2ae280e132f1dc71f344310b5d02a1c96440 -->
+> **Queue prompt:** Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok`
+> ```
+> java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread
+> 	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169)
+> 	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.access$callOnWorker(NativeLib.kt:1041)
+> 	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration$Companion.load$lambda$0(NativeLib.kt:1236)
+> 	at jdk.proxy14/jdk.proxy14.$Proxy103.agent_doc_frontmatter_agent(Unknown Source)
+> 	at com.github.btakita.agentdoc.NativePatching.frontmatterAgent(NativeLib.kt:2636)
+> 	at com.github.btakita.agentdoc.TerminalUtil.editorVisibleFrontmatterAgent(TerminalUtil.kt:1839)
+> 	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand(TerminalUtil.kt:1401)
+> 	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand$default(TerminalUtil.kt:1388)
+> 	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession(TerminalUtil.kt:1051)
+> 	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession$default(TerminalUtil.kt:1050)
+> 	at com.github.btakita.agentdoc.RestartAgentAction.actionPerformed(RestartAgentAction.kt:22)
+> 	at com.github.btakita.agentdoc.shell.ShellActionForwarder.actionPerformed(ShellActionForwarders.kt:39)
+> 	at com.intellij.openapi.actionSystem.ex.ActionUtil.doPerformActionOrShowPopup(ActionUtil.kt:514)
+> 	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction$lambda$0(ActionUtil.kt:477)
+> 	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1$0(ActionManagerImpl.kt:632)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+> 	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+> 	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+> 	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+> 	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1(ActionManagerImpl.kt:821)
+> 	at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:307)
+> 	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks(ActionManagerImpl.kt:629)
+> 	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction(ActionUtil.kt:476)
+> 	at com.intellij.ui.popup.ActionPopupStep.performActionItem(ActionPopupStep.java:305)
+> 	at com.intellij.ui.popup.ActionPopupStep.lambda$onChosen$1(ActionPopupStep.java:290)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+> 	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+> 	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+> 	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+> 	at com.intellij.ui.popup.AbstractPopup.lambda$dispose$0(AbstractPopup.java:2267)
+> 	at com.intellij.openapi.wm.impl.FocusManagerImpl.lambda$doWhenFocusSettlesDown$0(FocusManagerImpl.java:197)
+> 	at com.intellij.util.ui.EdtInvocationManager.invokeLaterIfNeeded(EdtInvocationManager.java:32)
+> 	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:193)
+> 	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:185)
+> 	at com.intellij.ui.popup.AbstractPopup.dispose(AbstractPopup.java:2265)
+> 	at com.intellij.ui.popup.WizardPopup.dispose(WizardPopup.java:204)
+> 	at com.intellij.ui.popup.list.ListPopupImpl.dispose(ListPopupImpl.java:457)
+> 	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.dispose(PopupFactoryImpl.java:371)
+> 	at com.intellij.openapi.util.ObjectTree.disposeStrandedList(ObjectTree.java:178)
+> 	at com.intellij.openapi.util.ObjectTree.runWithTrace(ObjectTree.java:229)
+> 	at com.intellij.openapi.util.ObjectTree.executeAll(ObjectTree.java:264)
+> 	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:222)
+> 	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:210)
+> 	at com.intellij.ui.popup.WizardPopup.disposeAllParents(WizardPopup.java:369)
+> 	at com.intellij.ui.popup.list.ListPopupImpl.disposePopup(ListPopupImpl.java:594)
+> 	at com.intellij.ui.popup.list.ListPopupImpl.handleNextStep(ListPopupImpl.java:618)
+> 	at com.intellij.ui.popup.list.ListPopupImpl._handleSelect(ListPopupImpl.java:579)
+> 	at com.intellij.ui.popup.list.ListPopupImpl.handleSelect(ListPopupImpl.java:499)
+> 	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.handleSelect(PopupFactoryImpl.java:388)
+> 	at com.intellij.ui.popup.list.ListPopupImpl$1.actionPerformed(ListPopupImpl.java:340)
+> 	at com.intellij.ui.popup.WizardPopup.lambda$proceedKeyEvent$0(WizardPopup.java:506)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
+> 	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
+> 	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
+> 	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
+> 	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
+> 	at com.intellij.ui.popup.WizardPopup.proceedKeyEvent(WizardPopup.java:505)
+> 	at com.intellij.ui.popup.WizardPopup.dispatch(WizardPopup.java:477)
+> 	at com.intellij.ui.popup.PopupDispatcher.dispatchKeyEvent(PopupDispatcher.java:130)
+> 	at com.intellij.ui.popup.PopupDispatcher.dispatch(PopupDispatcher.java:171)
+> 	at com.intellij.ide.IdePopupManager.dispatch(IdePopupManager.java:88)
+> 	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:555)
+> 	at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:405)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:404)
+> 	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:404)
+> 	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399)
+> 	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136)
+> 	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:114)
+> 	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136)
+> 	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399)
+> 	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
+> 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
+> 	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
+> ```
+
+> **Queue prompt:** Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry
+
+> **Queue prompt:** game-sessions.md
+>   - Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again
+>     - [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+
+> **Queue prompt:** The extracted game-sessions.md had the wrong layout
+>   - The h2 headers for each open element tag should be prefixed on the same line as the open element tag.
+>     - `## Todo` should be on the same line before the `agent:todo` open tag.
+>   - `## Queue` should be `## Run`
+
+> **Queue prompt:** release + publish: include all active queue items
+
+### Re: agent-doc v0.35.559 released — opus-5 · 2026-10-28T02:55-04:00
+
+**v0.35.559 is released and published** from release commit `5870713c02` (on agent-doc `main`).
+- **Published:** GitHub Latest with 24 assets, PyPI `agent_doc-0.35.559`, and the Homebrew formula. All three `make release` phases completed: tag handoff, local `install-full` and public publication.
+- **Checks:** `make check` passed 12052 of 12052 tests and `make tmux-ci` passed, with no timeouts.
+- **Installed here:** `agent-doc --version` reports 0.35.559, and no editor was quarantined before the install.
+- **Plugins:** JetBrains classic 0.2.871, 262 0.2.872 and 263 0.2.873. VS Code is unchanged at 0.2.89.
+
+**In this release (15 commits since 0.35.558; full notes in `VERSIONS.md`):**
+- The 138 GB pane kills: the supervisor's screen copy is held to at least 2 columns, and a 4 GiB memory guard stops the supervisor loudly instead of letting it fill memory.
+- Restart Agent works in JetBrains again (it no longer calls the native library on the UI thread).
+- Extract and transfer copy only the source document's own frontmatter, with headings on their tag lines and `## Run`.
+- A nested project's controller claims its tmux window, and a sliver pane is rebalanced.
+- Blocked rows show `⛔ ⟦blocked by …⟧` and are never dispatched.
+- An inline answer can't close a `subagents` row.
+- A Grok Ctrl+C ends the turn. A Run Agent Doc during the supervisor's own trigger reports "already running".
+- The queue and Todo fixes from earlier today, and the duplicate-typing fix.
+
+**Rows closed by this cycle:**
+- **Restart Agent on `sdk-dev.md`:** I introduced this crash in 0.35.558.
+- **Run Agent Doc refused on `sdk-dev.md`:** a double dispatch, not a false busy. Your click arrived a second after the supervisor's own trigger.
+- **`game-sessions.md` Ctrl+C then Run:** Grok's cancel never ended the turn.
+- **Extracted layout.**
+- **This release.**
+
+**What you need to do:**
+1. **Restart IDEA.** Plugin 0.2.873 is installed on disk, but your IDE is still running 0.2.866. The 2026.3 IDE can't swap plugins without a restart, and Restart Agent stays broken until you do.
+2. **Then restart `sdk-demo.md`.** It's safe now; its earlier panes died from the memory runaway.
+3. **Optional:** re-add `#pr-aggregate` and `#repo: haiven-dev/haiven-sdk` to `game-sessions.md`'s frontmatter. They were real `sdk-demo.md` overrides that you deleted along with the copied presets.
+4. **Optional:** `agent-doc queue repair-stale-completion tasks/agent-doc/agent-doc-bugs.md --apply` deletes 24 leftover completion cells from this document. A dry run lists them first, and git history keeps their text.
+
+**Follow-ups the workers reported**, not yet filed:
+- the `alacritty_terminal` bugs to report upstream;
+- two tmux-ci tests (supervisor and controller re-exec) that time out under load;
+- the controllers' editor-surface ping-pong on every left-tab switch;
+- `init`/`convert` still putting `## Exchange` on its own line.
+<!-- agent:boundary:0eb8b335 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -997,8 +1135,8 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
   - ~~editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted~~
   - ~~do a screenshot~~
 - ~~do [#deletedstruckmismatch]~~
----
-☑️ [#subagent:restartedt#1] Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok`
+~~~done
+Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok`
 ```
 java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread
 	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169)
@@ -1086,9 +1224,9 @@ java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDE
 	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
 	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
 ```
----
+~~~
 - ☑️ [#subagent:grokreopen#1] Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry
-- 🚧 [#subagent:ctrlcrerun#1] game-sessions.md
+- ☑️ [#subagent:ctrlcrerun#1] game-sessions.md
   - Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again
     - [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 - ☑️ [#subagent:extractlayout#1] The extracted game-sessions.md had the wrong layout

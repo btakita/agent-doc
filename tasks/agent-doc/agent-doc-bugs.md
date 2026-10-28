@@ -246,11 +246,43 @@ The release worker reported this row blocked. No version bump, tag, `make releas
 A session under a nested project reads every `.agent-doc/project.md`, farthest ancestor first, then the nearest project, then the session. A nested `.git` does not hide the ancestor file. That fix is on main at `ce46068a9f` (`fix(rules): compose ancestor project.md rules`), fast-forwarded `8862b2f9b5..ce46068a9f`.
 
 The worker's `make check` exited 0: nextest 12119 passed and 187 skipped. `make install` exited 0. JetBrains plugin bytes were already current. The published release is agent-doc v0.35.560 at `bd971e9b87`.
-<!-- agent:boundary:8aff0550 -->
+
+### Re: Subagent completed: `subagent:apikeepsrefusing` returned work for queue item “do [#apikeepsrefusing]” — agent-doc
+<!-- agent-doc-subagent-response sha256=aef55fb63860d06dc9091f11a6e72c007601201742ea11d8e1116b878302ef79 -->
+> **Subagent response:**
+>
+> #apikeepsrefusing is an agent-doc authorization bug. Nested push and publish under a claimed #rebase or #review row were not treated as a grant, and a reserved request id was reported as missing backlog text.
+>
+> Cause. #rebase resolves only to "rebase + fix merge conflicts" and does not include #push. #review points at the pr-review skill, which waits until the operator explicitly says to post. The brief named push and not publish, and a later nested line was read as a chat reply or as blocked by that wait. FORWARD_EDITED did not tell the owner the nested line is a grant. After the request todo closed, [#subagent-operator-request-…] on the work row became "ask the coordinator for its text," which stopped the push. This is not a haiven-dev remote, permission, or conflict blocker. No haiven branch was force-pushed.
+>
+> Fix. #nestedoutwardauth: a live nested push or publish is quoted in the brief as authorization now, including when a preset or skill says to wait. A trailing effect marker is ignored. A struck child or a negation (do not push, never publish) grants nothing. publish on a review posts a plain comment unless the line says approve. The owner-forward instruction says the same. A reserved subagent-operator-request- id is not an unresolved tracked id.
+>
+> Branch. fix/api-keeps-refusing
+> Commit. 493731820eaf71ce40c5e52c9e52b1288241f3d7
+> Pushed to origin/fix/api-keeps-refusing. make check ran on 003a468355 (parent 8862b2f9b5). A clean rebase onto origin/main ce46068a9f replayed the same 10-file patch as 493731820e.
+>
+> Files. agent-doc-queue/src/subagent_brief.rs, agent-doc-document-realtime/src/midturn_steering.rs, specs/02-document-format.md, specs/07-orchestration-commands.md, runbooks/respond.md and the five harness copies.
+>
+> Tests. Focused nextest 2 passed (nested_push_and_publish_are_operator_authorization, edited_claimed_head_forwards_to_its_owner). make check exit 0. Nextest 12118 passed, 187 skipped.
+>
+> No follow-up queue heads. No make install.
+<!-- agent-doc-subagent-completion key=6e02fac0f3de45f6b624871bae3c99bd1e724133099934144c68457ec566c296 -->
+> **Chat prompt (#chatprompt):** agent-doc missed the context of the release + publish: fix in subagent: - ~~release + publish~~
+>   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
+>   - ~~Include #subagent:nestedlineage~~
+
+> **Queue prompt:** do [#apikeepsrefusing]
+
+### Re: nested push authorization is on main — grok-4.7 · 2026-10-28T19:20-04:00
+
+`#apikeepsrefusing` is on main at `493731820e`. A live nested `push` or `publish` is authorization in the subagent brief, including when `#rebase` or `#review` would otherwise wait. A struck child or a negation grants nothing. The worker's `make check` exited 0 (nextest 12118 passed, 187 skipped). `make install` exited 0. JetBrains plugin bytes were already current. The published release is agent-doc v0.35.560 at `bd971e9b87`.
+
+The struck `release + publish` row dropped its include lines while `#subagent:nestedlineage` was still open. That closeout is the bug. Worker `01a184ce-c9b1-7af3-a487-d5aac0c6938c` is fixing it on `fix/release-include-context` in `/home/brian/worktrees/agent-doc-releasecontext`, from `ce46068a9f`, and will rebase onto `493731820e` before it pushes.
+<!-- agent:boundary:cb48a94b -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:apikeepsrefusing#1] do [#apikeepsrefusing]
+- ~~do [#apikeepsrefusing]~~
 - ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
@@ -261,6 +293,7 @@ The worker's `make check` exited 0: nextest 12119 passed and 187 skipped. `make 
 - ~~release + publish~~
   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
   - ~~Include #subagent:nestedlineage~~
+- 📥 api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -290,7 +323,6 @@ The worker's `make check` exited 0: nextest 12119 passed and 187 skipped. `make 
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#apikeepsrefusing] api.md keeps on refusing to push #rebase and publish #review. How can we make this work?
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

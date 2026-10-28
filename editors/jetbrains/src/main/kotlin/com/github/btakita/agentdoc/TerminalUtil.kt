@@ -1393,16 +1393,75 @@ object TerminalUtil {
         afterSuccess: (() -> Unit)? = null,
         onComplete: (() -> Unit)? = null,
     ) {
-        val (telemetryCwd, _) = resolveProject(project, file)
-        val telemetryStartLine = restartTelemetryOpsLogLineCount(telemetryCwd)
         // `#restartagentharness`: Restart Agent re-resolves the harness from the
         // controller's document authority, which can lag this buffer. Send the
         // agent the operator can SEE so the binary refuses a stale relaunch.
-        val expectAgent = if (target == RestartTarget.AGENT) editorVisibleFrontmatterAgent(file) else null
+        // This runs on the EDT (the action, and the Interrupt and
+        // Restart dialog). Capture the buffer text here, which is pure Kotlin;
+        // the native frontmatter read and the command launch run on a pooled thread.
+        val editorText = if (target == RestartTarget.AGENT) editorVisibleDocumentText(file) else null
+        launchRestartCommandOffEdt(
+            target = target,
+            force = force,
+            editorText = editorText,
+            readAgent = NativePatching::frontmatterAgent,
+            executeOffEdt = { task -> GenerationWork.executeOnPooledThread(task) },
+        ) { args -> launchRestartSessionCommand(project, file, target, force, args, afterSuccess, onComplete) }
+    }
+
+    /**
+     * `#restartagentharness`: resolve Restart Agent's `--expect-agent` evidence from the editor text the
+     * caller captured, then [launch] the command, all inside [executeOffEdt]. [readAgent] is a
+     * native call, which `AgentDocLib` forbids on the EDT, so it never runs on the caller's thread.
+     * A failed read sends no `--expect-agent`, the behaviour before `#restartagentharness`.
+     */
+    internal fun launchRestartCommandOffEdt(
+        target: RestartTarget,
+        force: Boolean,
+        editorText: String?,
+        readAgent: (String) -> String?,
+        executeOffEdt: (Runnable) -> Unit,
+        launch: (List<String>) -> Unit,
+    ) {
+        val task = Runnable {
+            val expectAgent =
+                if (target == RestartTarget.AGENT && editorText != null) {
+                    try {
+                        readAgent(editorText)
+                    } catch (error: Exception) {
+                        LOG.warn("[restart-agent] editor-visible agent read failed; sending no --expect-agent", error)
+                        null
+                    }
+                } else {
+                    null
+                }
+            launch(restartCommandArgs(target, force, expectAgent))
+        }
+        try {
+            executeOffEdt(task)
+        } catch (error: java.util.concurrent.RejectedExecutionException) {
+            // No worker accepted the task (the generation is unloading). Launch without the
+            // native evidence rather than drop the operator's restart.
+            LOG.warn("[restart-agent] no worker for the editor-visible agent read; sending no --expect-agent", error)
+            launch(restartCommandArgs(target, force, null))
+        }
+    }
+
+    private fun launchRestartSessionCommand(
+        project: Project,
+        file: VirtualFile,
+        target: RestartTarget,
+        force: Boolean,
+        args: List<String>,
+        afterSuccess: (() -> Unit)?,
+        onComplete: (() -> Unit)?,
+    ) {
+        val (telemetryCwd, _) = resolveProject(project, file)
+        val telemetryStartLine = restartTelemetryOpsLogLineCount(telemetryCwd)
         runSessionCommand(
             project = project,
             file = file,
-            args = restartCommandArgs(target, force, expectAgent),
+            args = args,
             startedMessage = "Restarting ${target.noun} for ${file.name}",
             failureAction = "restart the ${target.noun}",
             onSuccess = { relativePath, output ->
@@ -1826,18 +1885,18 @@ object TerminalUtil {
         }
     }
 
-    /** The `agent:` the open editor buffer for [file] declares, or null when unknown. */
-    private fun editorVisibleFrontmatterAgent(file: VirtualFile): String? {
-        val text =
-            try {
-                ReadAction.compute<String?, RuntimeException> {
-                    FileDocumentManager.getInstance().getCachedDocument(file)?.text
-                }
-            } catch (_: RuntimeException) {
-                null
-            } ?: return null
-        return NativePatching.frontmatterAgent(text)
-    }
+    /**
+     * The open editor buffer's text for [file], or null when it has none. Pure Kotlin and safe on
+     * the EDT; the native `agent:` read of this text belongs on a worker ([launchRestartCommandOffEdt]).
+     */
+    private fun editorVisibleDocumentText(file: VirtualFile): String? =
+        try {
+            ReadAction.compute<String?, RuntimeException> {
+                FileDocumentManager.getInstance().getCachedDocument(file)?.text
+            }
+        } catch (_: RuntimeException) {
+            null
+        }
 
     internal fun buildAdminQueueResumeCommand(
         agentDoc: String,

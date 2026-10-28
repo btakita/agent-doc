@@ -240,7 +240,10 @@ Claude Code. The editor therefore sends the `agent:` it shows:
   reads the open buffer's frontmatter through the native
   `agent_doc_frontmatter_agent` export (the binary's own parser) and passes the
   value whenever the buffer names an agent; an older native library, an
-  unparsable frontmatter, or no `agent:` key sends no flag.
+  unparsable frontmatter, or no `agent:` key sends no flag. The action runs on
+  the EDT, where native calls are forbidden, so it captures only the buffer
+  text there and makes the native read and the command launch on a pooled
+  thread (see `editors/jetbrains/SPEC.md` **Threads**).
 - Before requesting any replacement, the CLI compares that value with the
   authority's declared `agent:` through the pure
   `agent_doc_supervisor::harness_authority::restart_agent_frontmatter_agreement`.

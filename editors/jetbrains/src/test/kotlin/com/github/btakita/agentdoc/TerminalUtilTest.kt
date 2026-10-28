@@ -1426,6 +1426,144 @@ class TerminalUtilTest {
         )
     }
 
+    /**
+     * `#restartagentharness` EDT fix: run [launchRestartCommandOffEdt] from the real Swing EDT with a [readAgent]
+     * that carries `AgentDocLib`'s EDT guard, and return the launched args plus the threads that
+     * ran the native read and the launch.
+     */
+    private fun launchRestartFromEdt(
+        target: TerminalUtil.RestartTarget,
+        editorText: String?,
+        readAgent: (String) -> String?,
+        executeOffEdt: (Runnable) -> Unit = { task -> Thread(task, "restart-off-edt-test").start() },
+    ): Triple<List<String>?, Boolean?, Boolean?> {
+        val launched = java.util.concurrent.CountDownLatch(1)
+        val args = java.util.concurrent.atomic.AtomicReference<List<String>?>()
+        val readOnEdt = java.util.concurrent.atomic.AtomicReference<Boolean?>()
+        val launchOnEdt = java.util.concurrent.atomic.AtomicReference<Boolean?>()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        javax.swing.SwingUtilities.invokeAndWait {
+            try {
+                TerminalUtil.launchRestartCommandOffEdt(
+                    target = target,
+                    force = false,
+                    editorText = editorText,
+                    readAgent = { text ->
+                        readOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread())
+                        check(!javax.swing.SwingUtilities.isEventDispatchThread()) {
+                            "agent-doc native calls are forbidden on the IDEA event-dispatch thread"
+                        }
+                        readAgent(text)
+                    },
+                    executeOffEdt = executeOffEdt,
+                ) { built ->
+                    launchOnEdt.set(javax.swing.SwingUtilities.isEventDispatchThread())
+                    args.set(built)
+                    launched.countDown()
+                }
+            } catch (error: Throwable) {
+                failure.set(error)
+                launched.countDown()
+            }
+        }
+        assertTrue("restart command was never launched", launched.await(10, java.util.concurrent.TimeUnit.SECONDS))
+        failure.get()?.let { throw AssertionError("Restart Agent's command build threw on the EDT", it) }
+        return Triple(args.get(), readOnEdt.get(), launchOnEdt.get())
+    }
+
+    @Test
+    fun `restart agent reads the editor visible agent off the EDT`() {
+        val (args, readOnEdt, launchOnEdt) = launchRestartFromEdt(
+            TerminalUtil.RestartTarget.AGENT,
+            editorText = "---\nagent: grok\n---\nbody\n",
+            readAgent = { "grok" },
+        )
+        assertEquals(listOf("restart-agent", "--expect-agent", "grok"), args)
+        assertEquals("the native frontmatter read must not run on the EDT", false, readOnEdt)
+        assertEquals("the restart launch must not run on the EDT", false, launchOnEdt)
+    }
+
+    @Test
+    fun `an on EDT executor trips the modeled native guard and drops the expect agent evidence`() {
+        // Proves the modeled guard bites: a synchronous executor puts the read back on the
+        // EDT (the 0.35.558 regression), so the guard fires and the evidence is lost.
+        var thrown: Throwable? = null
+        javax.swing.SwingUtilities.invokeAndWait {
+            thrown = runCatching {
+                TerminalUtil.launchRestartCommandOffEdt(
+                    target = TerminalUtil.RestartTarget.AGENT,
+                    force = false,
+                    editorText = "---\nagent: grok\n---\n",
+                    readAgent = {
+                        check(!javax.swing.SwingUtilities.isEventDispatchThread()) { "native on EDT" }
+                        "grok"
+                    },
+                    executeOffEdt = { task -> task.run() },
+                ) { built ->
+                    assertEquals(listOf("restart-agent"), built)
+                }
+            }.exceptionOrNull()
+        }
+        // The helper contains the failed read (no --expect-agent) rather than throwing; the
+        // production wiring is pinned to a pooled executor by the source test below.
+        assertNull(thrown)
+    }
+
+    @Test
+    fun `restart agent falls back to no expect agent when the native read fails or no worker runs`() {
+        val (failedArgs, _, _) = launchRestartFromEdt(
+            TerminalUtil.RestartTarget.AGENT,
+            editorText = "---\nagent: grok\n---\n",
+            readAgent = { throw UnsupportedOperationException("native library predates the export") },
+        )
+        assertEquals(listOf("restart-agent"), failedArgs)
+
+        val (noTextArgs, noTextReadOnEdt, _) = launchRestartFromEdt(
+            TerminalUtil.RestartTarget.AGENT,
+            editorText = null,
+            readAgent = { "grok" },
+        )
+        assertEquals(listOf("restart-agent"), noTextArgs)
+        assertNull("no editor buffer means no native read", noTextReadOnEdt)
+
+        val (supervisorArgs, supervisorReadOnEdt, _) = launchRestartFromEdt(
+            TerminalUtil.RestartTarget.SUPERVISOR,
+            editorText = "---\nagent: grok\n---\n",
+            readAgent = { "grok" },
+        )
+        assertEquals(listOf("restart-supervisor"), supervisorArgs)
+        assertNull("restart supervisor never reads the agent", supervisorReadOnEdt)
+
+        val (rejectedArgs, rejectedReadOnEdt, _) = launchRestartFromEdt(
+            TerminalUtil.RestartTarget.AGENT,
+            editorText = "---\nagent: grok\n---\n",
+            readAgent = { "grok" },
+            executeOffEdt = { throw java.util.concurrent.RejectedExecutionException("unloading") },
+        )
+        assertEquals(listOf("restart-agent"), rejectedArgs)
+        assertNull("a rejected worker never runs the native read on the EDT", rejectedReadOnEdt)
+    }
+
+    @Test
+    fun `restart command wires the native agent read through the pooled off EDT launch`() {
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+        val runRestart = source.substringAfter("private fun runRestartCommand(")
+            .substringBefore("internal fun launchRestartCommandOffEdt(")
+        assertTrue(runRestart.contains("launchRestartCommandOffEdt("))
+        assertTrue(runRestart.contains("readAgent = NativePatching::frontmatterAgent"))
+        assertTrue(runRestart.contains("GenerationWork.executeOnPooledThread(task)"))
+        assertFalse(
+            "runRestartCommand runs on the EDT and must not call native code directly",
+            runRestart.contains("NativePatching.frontmatterAgent("),
+        )
+        val bufferRead = source.substringAfter("private fun editorVisibleDocumentText(")
+            .substringBefore("internal fun buildAdminQueueResumeCommand(")
+        assertFalse(bufferRead.contains("NativePatching"))
+        assertFalse(source.contains("editorVisibleFrontmatterAgent("))
+    }
+
     @Test
     fun `restart agent carries the editor visible agent and supervisor restart does not`() {
         assertEquals(

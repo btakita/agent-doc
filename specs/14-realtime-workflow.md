@@ -1701,7 +1701,13 @@ The rules:
   merges through `merge_contents_crdt`: the frontmatter is reconciled
   field-wise (`#fmreset`; the operator owns every key but the agent-managed
   ones), and the per-cell merge 3-way merges an interstitial both sides changed
-  instead of keeping the agent side.
+  instead of keeping the agent side. The field-wise merge keeps bytes
+  (`#fmquotepreserve`): a side whose block is byte-identical to the base yields
+  the other side verbatim, and otherwise every key is emitted from the original
+  block of a side that holds exactly the merged value (operator first), so only
+  a changed key is re-rendered. Re-serialising the whole mapping stripped the
+  operator's quotes from every untouched preset whenever the resume-id capture
+  rebased over live typing (agent-doc-bugs.md, 2026-10-28).
 - `rebase_retained_target_over_editor_cut` then proves it. Every operator-added
   line of the reconciled cut must survive: every copy the cut holds, less the
   base copies the agent removed. A line the operator edited also counts as

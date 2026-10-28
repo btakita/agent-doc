@@ -92,12 +92,16 @@ pub struct RegistrationProjectionEvidence {
     /// Canonical and settled shadow are both present and identical.
     #[serde(default)]
     pub canonical_equals_shadow: bool,
-    /// Canonical provably contains every operator edit from the shadow to the
-    /// buffer (`#ambiguousholdforever`; `None`: not computed or unavailable).
+    /// Canonical provably contains every operator edit from a proven common
+    /// ancestor to the buffer (`#ambiguousholdforever`; `None`: not computed or
+    /// unavailable). The ancestor is the settled shadow, or, when that proves
+    /// nothing, the cached replica text whose frontier canonical covers
+    /// (`#ackedreplicabase`).
     #[serde(default)]
     pub canonical_contains_operator_edits: Option<bool>,
-    /// The three-way reconcile (shadow, buffer, canonical) is clean
-    /// (`#editorauth2`; `None`: not computed or unavailable).
+    /// The three-way reconcile (ancestor, buffer, canonical) is clean
+    /// (`#editorauth2`; `None`: not computed or unavailable), from the same
+    /// ancestor as `canonical_contains_operator_edits` (`#ackedreplicabase`).
     #[serde(default)]
     pub clean_merge_available: Option<bool>,
 }

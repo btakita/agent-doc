@@ -169,6 +169,23 @@ decision when the published shadow, the live buffer, and canonical all differ:
 and must violate `EventuallyRegistered` (the 2026-09-29 `fpe.md` hold);
 `RetainedProjectionHoldReach.cfg` must show the containment edge is taken.
 
+`RegistrationAcknowledgedBase.tla` checks which common ancestor that decision
+proves containment and the clean merge from (`#ackedreplicabase`). An operator
+who keeps typing never settles the shadow, while every burst still reaches
+canonical through the cached replica; the cached replica's text is a proven
+ancestor once canonical covers its frontier:
+
+- registration never destroys operator text canonical has not ingested, nor a
+  controller write;
+- a same-slot conflict (the controller rewriting the row being typed) still
+  holds; and
+- no hold remains that the acknowledged ancestor proves mergeable.
+
+`RegistrationAcknowledgedBaseWedge.cfg` proves from the shadow alone and must
+violate `NoSpuriousHold` (the 2026-10-28 agent-doc-bugs.md hold);
+`RegistrationAcknowledgedBaseReach.cfg` must show the acknowledged-base merge
+edge is taken.
+
 `RetainedTransitionFixedPoint.tla` checks that a retained write whose
 Base -> Target delta is already in the editor's cut settles as that fixed point
 instead of being rebased again: at most one copy of the response, and the
@@ -510,6 +527,7 @@ For the D/Du/R/Rc column (Drop, Duplicate, Reorder, Reconnect): `y` = yes,
 | EditorTransportHealth | one bounded observed outcome per transition; SQLite duplicate persist is a stutter on health state | - / p (`DuplicatePersist`) / - / - | `DegradeThreshold`=2, `UnregisterThreshold`=3 | yes. Received outcomes are assumed authentic |
 | ResponseCheckpoint | `visibleSeq := producedSeq` instantly visible (42-44); `Seal` SV (53-54) | - / p (46-48) / - / - | none | **yes** |
 | RetainedProjectionHold | `ControllerIngest` SV (139-144); `Register` decides over buffer+shadow+canon atomically (120-125, 166-179) | p (lag, forced by WF 191) / p (157-162) / - / p | none | **yes** |
+| RegistrationAcknowledgedBase | `LocalApply` then `Ingest` (durable push, `inflight` gap); `Register` decides over shadow+replica+buffer+canon atomically | p (`inflight` lag) / - / - / - | none | **yes**. The coverage answer is assumed truthful |
 | RetainedTransitionFixedPoint | `Settle` reads the editor cut atomically (97-109) | - / y (the subject) / - / - | none | **yes**. A stale cut read is exactly the duplicate it prevents |
 | StopHookContinuation | local shared state | - / - / - / - | none | n/a |
 | StopHookFailClosed | local | - / - / - / - | none | n/a |

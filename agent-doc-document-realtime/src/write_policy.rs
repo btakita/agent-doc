@@ -596,7 +596,11 @@ fn unscoped_lines(content: &str) -> Option<std::collections::HashSet<String>> {
 /// component that neither the editor cut nor the agent target has there. That
 /// is merge residue (fpe.md, 2026-09-29: response lines and a torn boundary
 /// marker after `<!-- /agent:done -->`), never a write the intent asked for.
-pub fn rebase_introduces_unscoped_text(rebased: &str, editor_cut: &str, agent_target: &str) -> bool {
+pub fn rebase_introduces_unscoped_text(
+    rebased: &str,
+    editor_cut: &str,
+    agent_target: &str,
+) -> bool {
     let (Some(rebased), Some(cut), Some(target)) = (
         unscoped_lines(rebased),
         unscoped_lines(editor_cut),
@@ -3301,6 +3305,30 @@ mod tests {
         "    - If the item is not in the list tree, agent-doc can add the item. If the item \n";
     const TYPINGDUPE_FINISHED: &str = "    - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.\n";
 
+    /// `#fmquotepreserve` (live agent-doc-bugs.md, 2026-10-28 12:57:10): the
+    /// resume-id capture's managed write rebased over a live cut in which the
+    /// operator was typing a queue row. The operator never touched the
+    /// frontmatter, so the rebase must keep its quoted presets byte for byte;
+    /// it used to re-serialise the whole block and strip every quote.
+    #[test]
+    fn a_managed_frontmatter_write_rebased_over_live_typing_keeps_operator_quoting() {
+        let base = concat!(
+            "---\nagent_doc_session: s1\nresume:\n  claude: old-conversation\n",
+            "presets:\n  '#repo': 'https://github.com/btakita/agent-doc'\n",
+            "  '#self': 'agent-doc-bugs.md'\nqueue: go\n---\n\n",
+            "<!-- agent:run -->\n- first row\n<!-- /agent:run -->\n",
+        );
+        let target = base.replace("claude: old-conversation", "claude: new-conversation");
+        let cut = base.replace("- first row\n", "- first row\n- the operator is typing\n");
+
+        let rebased = rebase_agent_candidate_over_editor_cut(base, &target, &cut).unwrap();
+        assert_eq!(
+            rebased,
+            cut.replace("claude: old-conversation", "claude: new-conversation"),
+            "only the managed key moved; the typing and every quote survive:\n{rebased}"
+        );
+    }
+
     #[test]
     fn typingdupe_stale_typing_snapshot_in_a_retained_target_is_not_rebased_beside_the_finished_line()
      {
@@ -5726,10 +5754,16 @@ fn rebase_residue_outside_every_component_is_detected() {
 
     // Text the operator typed outside components is in the cut, so it is kept.
     let operator = format!("{cut}## Notes typed by the operator\n");
-        assert!(!rebase_introduces_unscoped_text(&operator, &operator, target));
+    assert!(!rebase_introduces_unscoped_text(
+        &operator, &operator, target
+    ));
     // Text the agent's own target adds outside components is intended.
     let agent_heading = format!("## Status\n{cut}");
-        assert!(!rebase_introduces_unscoped_text(&agent_heading, cut, &agent_heading));
+    assert!(!rebase_introduces_unscoped_text(
+        &agent_heading,
+        cut,
+        &agent_heading
+    ));
     // Changes inside a component never count.
     let inside = cut.replace("- slow?\n", "- slow?\n- new item\n");
     assert!(!rebase_introduces_unscoped_text(&inside, cut, target));

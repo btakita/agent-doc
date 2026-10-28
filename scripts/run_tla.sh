@@ -230,7 +230,7 @@ work_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-doc-tla.XXXXXX")"
 trap 'rm -rf "${work_dir}"' EXIT
 isolate_run "${work_dir}"
 
-modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle)
+modules=(AgentDocCloseout PassiveTmuxSync JetBrainsFileCache CloseoutChurn CrdtLineageFence ResponseCheckpoint PaneExecutionAuthority SupervisorGenerationTransition ReactiveTopology EditorReplicaStrand TransientRefusalLatch VisibleDeliveryReceipt PlanClosureContract IpcBuildIdentity StopHookContinuation StopHookFailClosed RefusedSaveOperatorAction RecycleSettleDispatch RetainedProjectionHold RegistrationAcknowledgedBase RetainedTransitionFixedPoint RealtimeSteeringStop EditorAuthorityLadder ConflictReconciliation AdmissionSplitMerge AdmissionCutExclusivity StaleColumnRecycle NetChannelRetransmit VisibleDeliveryReceiptNet EditorReplicaStrandNet RecycleSettleDispatchNet AgentDocCloseoutNet PassiveTmuxSyncNet PassiveTmuxSyncRetireNet LifecycleSequence LayoutWidthBound RemoteLayoutNoGuess EditorTransportHealth ControllerLifecycle)
 
 # Library modules: INSTANCE'd by the models above, never checked on their own
 # (no Spec, no .cfg). They only need to sit next to the importing model.
@@ -340,6 +340,11 @@ must_violate=(
     # difference (fpe.md, 2026-09-29); the containment edge must stay reachable.
     RetainedProjectionHold:RetainedProjectionHoldWedge
     RetainedProjectionHold:RetainedProjectionHoldReach
+    # `#ackedreplicabase`: the shadow-only proof holds beside a disjoint controller
+    # write while the operator keeps typing (agent-doc-bugs.md, 2026-10-28); the
+    # acknowledged-base merge edge must stay reachable.
+    RegistrationAcknowledgedBase:RegistrationAcknowledgedBaseWedge
+    RegistrationAcknowledgedBase:RegistrationAcknowledgedBaseReach
     # `#replayafterack`: a retained delta already in the editor cut is its fixed
     # point; rebasing it again duplicated fpe.md's response (2026-09-29).
     RetainedTransitionFixedPoint:RetainedTransitionFixedPointWedge

@@ -772,8 +772,7 @@ fn consume_queue_prompts_with_options_fenced(
     let out_of_loop = crate::subagent_dispatch::out_of_loop_items_for_content(file, &content);
     let released_reported =
         crate::claim_release_receipt::reported_items_for_content(file, &content);
-    let consumed_identity =
-        agent_doc_queue::queue_claim::claim_identity(&plan.consumed_text);
+    let consumed_identity = agent_doc_queue::queue_claim::claim_identity(&plan.consumed_text);
     let actively_reported = crate::queue_claim::claim_states_for_content(file, &content)
         .map(|claims| {
             claims.into_iter().any(|claim| {
@@ -1606,7 +1605,196 @@ pub fn strike_orphan_id_backed_queue_head(
             file.display()
         );
     }
-    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
+    let guard = id_head_dispatch_guard(file, &content, &target_id, &keys, "--id")?;
+    if !converge_id_backed_head_strike(
+        file,
+        effects,
+        &content,
+        &target_id,
+        &keys,
+        "orphan_id_head_strike",
+    )? {
+        return Ok(false);
+    }
+    eprintln!(
+        "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
+        keys.len()
+    );
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "orphan_id_head_strike file={} id={} struck={} base_hash={} claim_outcome={} source_component=queue operation=strike_head proof=orphan_id_no_open_backlog",
+            file.display(),
+            target_id,
+            keys.len(),
+            agent_doc_hash::content_hash(&content),
+            guard.outcome_token(),
+        ),
+    );
+    Ok(true)
+}
+
+/// True when a reported attempt belongs to a different harness session that is
+/// still live: both sessions are recorded, they differ, and nothing the caller
+/// observes says the owner session ended. An unrecorded owner or caller, or an
+/// ended owner session, leaves the report to whichever coordinator closes it.
+pub fn reported_attempt_owned_by_other_live_session(
+    owner_liveness: agent_doc_queue::queue_claim::ClaimOwnerLiveness,
+    caller: Option<&agent_doc_queue::queue_claim::ClaimOwnerSession>,
+    owner: Option<&agent_doc_queue::queue_claim::ClaimOwnerSession>,
+) -> bool {
+    matches!(
+        owner_liveness,
+        agent_doc_queue::queue_claim::ClaimOwnerLiveness::Live
+    ) && matches!(
+        (
+            caller.and_then(|session| session.session_id.as_deref()),
+            owner.and_then(|session| session.session_id.as_deref()),
+        ),
+        (Some(caller), Some(owner)) if caller != owner
+    )
+}
+
+/// What [`id_head_dispatch_guard`] found about the dispatch attempt of the
+/// id-backed rows a guarded strike is about to close (`#nestedechostrike`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdHeadDispatchEvidence {
+    /// Owner and generation of the reported attempt the strike ends.
+    pub reported: Option<(String, u64)>,
+    /// A reported-release receipt (`queue release`) governs the row.
+    pub reported_receipt: bool,
+}
+
+impl IdHeadDispatchEvidence {
+    /// True when the row was dispatched and its worker reported back.
+    pub fn dispatched(&self) -> bool {
+        self.reported.is_some() || self.reported_receipt
+    }
+
+    fn outcome_token(&self) -> String {
+        match (&self.reported, self.reported_receipt) {
+            (Some((owner, generation)), _) => {
+                format!("reported_attempt_closed owner={owner} generation={generation}")
+            }
+            (None, true) => "reported_receipt_closed".to_string(),
+            (None, false) => "undispatched".to_string(),
+        }
+    }
+}
+
+/// Refuse a guarded id-backed strike (`queue consume --id` / `--ack-id`) of a
+/// row whose dispatch attempt is not finished, or is owned by another live
+/// coordinator session (`#nestedechostrike`).
+///
+/// * a 🟡 claimed or 🚧 running attempt is work in flight: closing the row would
+///   orphan its worker, so the refusal names `queue report-complete` and
+///   `queue release --requeue`;
+/// * a ⚠️ lost attempt has no report: the refusal names `queue claims`, whose
+///   `lost_recovery` says how to recover a completed worker's result;
+/// * a ☑️ reported attempt whose owner session is another LIVE harness session
+///   belongs to that coordinator.
+///
+/// Returns the reported-attempt evidence the strike will end.
+pub fn id_head_dispatch_guard(
+    file: &Path,
+    content: &str,
+    target_id: &str,
+    keys: &[String],
+    flag: &str,
+) -> Result<IdHeadDispatchEvidence> {
+    let caller = crate::queue_claim::current_owner_session();
+    id_head_dispatch_guard_for_caller(file, content, target_id, keys, flag, caller.as_ref())
+}
+
+/// [`id_head_dispatch_guard`] judged for an explicit `caller` session.
+pub fn id_head_dispatch_guard_for_caller(
+    file: &Path,
+    content: &str,
+    target_id: &str,
+    keys: &[String],
+    flag: &str,
+    caller: Option<&agent_doc_queue::queue_claim::ClaimOwnerSession>,
+) -> Result<IdHeadDispatchEvidence> {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+    let target = agent_doc_queue::queue_claim::claim_identity(&format!("do [#{target_id}]"));
+    let claims = crate::queue_claim::claim_states_for_content(file, content).unwrap_or_default();
+    let mut evidence = IdHeadDispatchEvidence {
+        reported: None,
+        reported_receipt: false,
+    };
+    let path = file.display();
+    for claim in claims.iter().filter(|claim| claim.identity == target) {
+        let owner = &claim.owner;
+        let generation = claim.generation;
+        match claim.state {
+            QueueClaimState::Claimed | QueueClaimState::Running => anyhow::bail!(
+                "{path}: [#{target_id}] is still dispatched to {owner} (generation \
+                 {generation}, state {:?}); `queue consume {flag}` never closes work in \
+                 flight. When the worker reports, run `agent-doc queue report-complete \
+                 {path} --item '#{target_id}' --generation {generation}` first; if the work \
+                 was abandoned, run `agent-doc queue release {path} --item '#{target_id}' \
+                 --requeue --generation {generation}`.",
+                claim.state,
+            ),
+            QueueClaimState::Lost => anyhow::bail!(
+                "{path}: [#{target_id}]'s attempt by {owner} (generation {generation}) is \
+                 lost, not reported; `queue consume {flag}` closes only a reported row. See \
+                 `agent-doc queue claims {path}` (`lost_recovery`) to recover the worker's \
+                 result or reclaim the row."
+            ),
+            QueueClaimState::Reported => {
+                if reported_attempt_owned_by_other_live_session(
+                    crate::queue_claim::claim_owner_liveness(file, claim),
+                    caller,
+                    claim.owner_session.as_ref(),
+                ) {
+                    anyhow::bail!(
+                        "{path}: [#{target_id}]'s reported attempt by {owner} (generation \
+                         {generation}) belongs to another live coordinator session; close it \
+                         from that session."
+                    );
+                }
+                evidence.reported = Some((owner.clone(), generation));
+            }
+        }
+    }
+    if evidence.reported.is_none() {
+        let heads: Vec<String> = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+            .map(|nodes| {
+                nodes
+                    .into_iter()
+                    .filter(|node| keys.contains(&node.node_key))
+                    .map(|node| node.item.text.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let attested =
+            crate::claim_release_receipt::attested_reported_head_texts_for_content(file, content);
+        evidence.reported_receipt = attested.iter().any(|head| {
+            agent_doc_queue::queue_claim::claim_identity(
+                agent_doc_element_queue::strip_attempt_projection_prefix(head),
+            ) == target
+                || heads.contains(head)
+        });
+    }
+    Ok(evidence)
+}
+
+/// Strike the exact id-backed rows `keys` of `content` and end their finished
+/// work (`#strikeretires`): the terminal marker-free tombstone, the retired
+/// completion cells, the ended reported claims and their release receipts, in
+/// the document and the recovery snapshot. Shared by `queue consume --id` and
+/// `--ack-id`. Returns `false` when the strike changes nothing.
+fn converge_id_backed_head_strike(
+    file: &Path,
+    effects: &dyn QueueConsumeWriteEffects,
+    content: &str,
+    target_id: &str,
+    keys: &[String],
+    source: &str,
+) -> Result<bool> {
+    let content = content.to_string();
+    let new_document = consume_queue_nodes_by_key(&content, keys)?;
     if new_document == content {
         return Ok(false);
     }
@@ -1620,7 +1808,7 @@ pub fn strike_orphan_id_backed_queue_head(
     // keys so required closeouts prove both sides converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "orphan id head snapshot sync") {
         Some(snap) => match (|| -> Result<Option<String>> {
-            let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
+            let snap_keys = id_backed_head_node_keys(&snap, target_id)?;
             if snap_keys.is_empty() {
                 Ok(None)
             } else {
@@ -1641,7 +1829,6 @@ pub fn strike_orphan_id_backed_queue_head(
         },
         None => None,
     };
-    let base_hash = agent_doc_hash::content_hash(&content);
     // A lifecycle projection is derived, not terminal content. A bare
     // structural `consume` would wrap the visible marker inside the strike
     // (`~~📥 ...~~`) even though the full-text target correctly removes it.
@@ -1649,7 +1836,7 @@ pub fn strike_orphan_id_backed_queue_head(
     // detached writers converge on the same marker-free tombstone.
     let mut strike_ops = node_replace_ops_from_diff(&content, &new_document, "queue")?;
     if strike_ops.is_empty() {
-        strike_ops = queue_consume_node_ops(&keys);
+        strike_ops = queue_consume_node_ops(keys);
     }
     let (target, mut retired_completion_keys) =
         agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
@@ -1663,7 +1850,7 @@ pub fn strike_orphan_id_backed_queue_head(
     );
     if target == new_document && retired_completion_keys.is_empty() {
         effects
-            .converge_structural_ops(file, &strike_ops, &content, "orphan_id_head_strike")
+            .converge_structural_ops(file, &strike_ops, &content, source)
             .context("orphan strike: failed to write document")?;
     } else {
         // The cell lives in `agent:exchange`, outside the queue node ops, so
@@ -1675,46 +1862,38 @@ pub fn strike_orphan_id_backed_queue_head(
             file,
             &target,
             &retired_completion_keys,
-            "orphan_id_head_strike",
-            || effects.converge_document_or_disk(file, &target, &content, "orphan_id_head_strike"),
+            source,
+            || effects.converge_document_or_disk(file, &target, &content, source),
         )
         .context("orphan strike: failed to write document")?;
     }
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "orphan id head snapshot sync");
     }
-    crate::claim_release_receipt::retire_struck_or_warn(
-        file,
-        &struck_heads,
-        &target,
-        "orphan_id_head_strike",
-    );
-    eprintln!(
-        "[queue] struck orphaned id-backed head [#{target_id}] ({} node(s); #orphanqhead)",
-        keys.len()
-    );
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "orphan_id_head_strike file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=orphan_id_no_open_backlog",
-            file.display(),
-            target_id,
-            keys.len(),
-            base_hash
-        ),
-    );
+    crate::claim_release_receipt::retire_struck_or_warn(file, &struck_heads, &target, source);
     Ok(true)
 }
 
-/// Acknowledge an exact id-backed queue head whose id still names open backlog
-/// work, without marking that backlog item done or gated (#freshqueueauth).
+/// Acknowledge an exact id-backed queue head whose id still names open tracked
+/// work, without marking that item done or gated (#freshqueueauth).
 ///
 /// This is intentionally separate from [`strike_orphan_id_backed_queue_head`]:
 /// `--id` proves the head is an orphan, while `--ack-id` proves the operator is
-/// acknowledging a correction/reminder head and wants the underlying backlog work
-/// to remain open. The command still refuses prose that merely mentions `#id`;
+/// acknowledging a correction/reminder head and wants the underlying work to
+/// remain open. The command still refuses prose that merely mentions `#id`;
 /// those are free-text heads and should be answered + consumed through the
 /// normal free-text path.
+///
+/// `#nestedechostrike`: it is also how a coordinator closes a ☑️ reported
+/// dispatch row (`do [#id]`) whose worker finished while the tracked item stays
+/// open, for example a Todo that waits on an operator check, where `--done`
+/// would resolve the Todo. The open item may be a backlog item or an
+/// `agent:todo` item. A Todo-backed row must carry dispatch evidence (a reported
+/// attempt or reported-release receipt): `--ack-id` never strikes an operator's
+/// undispatched Todo row. Every row is refused while its attempt is claimed,
+/// running or lost, or when another live coordinator session owns its report
+/// ([`id_head_dispatch_guard`]). The strike ends the reported attempt and
+/// retires its completion cell and release receipt (`#strikeretires`).
 pub fn acknowledge_open_id_backed_queue_head(
     file: &Path,
     id: &str,
@@ -1729,7 +1908,9 @@ pub fn acknowledge_open_id_backed_queue_head(
     if target_id.is_empty() {
         anyhow::bail!("open-id ack: empty id");
     }
-    if !head_id_names_open_backlog_item(&content, &target_id) {
+    let open_backlog = head_id_names_open_backlog_item(&content, &target_id);
+    let open_todo = agent_doc_element::todo::open_todo_ids(&content).contains(&target_id);
+    if !open_backlog && !open_todo {
         if queue_head_is_free_text_prompt(&content)? {
             anyhow::bail!(
                 "{}: the active queue head is free-text, not an open id-backed [#{target_id}] \
@@ -1740,7 +1921,7 @@ pub fn acknowledge_open_id_backed_queue_head(
             );
         }
         anyhow::bail!(
-            "{}: [#{target_id}] does not name an OPEN backlog item. Use \
+            "{}: [#{target_id}] does not name an OPEN backlog or Todo item. Use \
             `agent-doc queue consume {} --id {target_id}` for orphan id-backed heads, \
             or leave the head queued.",
             file.display(),
@@ -1766,47 +1947,41 @@ pub fn acknowledge_open_id_backed_queue_head(
             file.display()
         );
     }
-    let new_document = consume_queue_nodes_by_key(&content, &keys)?;
-    if new_document == content {
+    let evidence = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
+    if !open_backlog && !evidence.dispatched() {
+        anyhow::bail!(
+            "{}: [#{target_id}] names an open Todo and its queue row was never dispatched \
+             (no reported attempt or release receipt). `--ack-id` closes a Todo-backed row \
+             only after its worker reported; leave the row queued, or resolve the Todo with \
+             `--done {target_id}` when its work is finished.",
+            file.display()
+        );
+    }
+    if !converge_id_backed_head_strike(
+        file,
+        effects,
+        &content,
+        &target_id,
+        &keys,
+        "open_id_head_ack",
+    )? {
         return Ok(false);
     }
-    let new_snapshot = match load_snapshot_recovery_only(file, "open id ack snapshot sync") {
-        Some(snap) => match (|| -> Result<Option<String>> {
-            let snap_keys = id_backed_head_node_keys(&snap, &target_id)?;
-            if snap_keys.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(consume_queue_nodes_by_key(&snap, &snap_keys)?))
-            }
-        })() {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                log_snapshot_recovery_warning(file, "open id ack snapshot sync", err);
-                None
-            }
-        },
-        None => None,
-    };
-    let base_hash = agent_doc_hash::content_hash(&content);
-    let ack_ops = queue_consume_node_ops(&keys);
-    effects
-        .converge_structural_ops(file, &ack_ops, &content, "open_id_head_ack")
-        .context("open-id ack: failed to write document")?;
-    if let Some(snap) = new_snapshot {
-        save_snapshot_recovery_only(file, &snap, "open id ack snapshot sync");
-    }
+    let preserved = if open_backlog { "backlog" } else { "todo" };
     eprintln!(
-        "[queue] acknowledged id-backed correction head [#{target_id}] ({} node(s); backlog left open; #freshqueueauth)",
-        keys.len()
+        "[queue] acknowledged id-backed head [#{target_id}] ({} node(s); {preserved} item left open; {}; #freshqueueauth)",
+        keys.len(),
+        evidence.outcome_token(),
     );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "open_id_head_ack file={} id={} struck={} base_hash={} source_component=queue operation=strike_head proof=operator_acknowledged_correction_preserve_open_backlog",
+            "open_id_head_ack file={} id={} struck={} base_hash={} preserved={preserved} claim_outcome={} source_component=queue operation=strike_head proof=operator_acknowledged_correction_preserve_open_backlog",
             file.display(),
             target_id,
             keys.len(),
-            base_hash
+            agent_doc_hash::content_hash(&content),
+            evidence.outcome_token(),
         ),
     );
     Ok(true)
@@ -3432,11 +3607,7 @@ mod core_tests {
             &retired
         ));
 
-        let cell = agent_doc_document::subagent_completion::cell(
-            "subagent:a",
-            "a",
-            "retired-key",
-        );
+        let cell = agent_doc_document::subagent_completion::cell("subagent:a", "a", "retired-key");
         let stale_feedback = target.replace(
             "<!-- agent:queue -->",
             &format!("{cell}\n\n<!-- agent:queue -->"),
@@ -6643,10 +6814,12 @@ mod core_tests {
             .unwrap();
         }
 
-        let _clock = crate::queue_claim::pin_claim_clock_for_current_thread(
-            STARTED_AT + 3 * 60 * 60 + 1,
+        let _clock =
+            crate::queue_claim::pin_claim_clock_for_current_thread(STARTED_AT + 3 * 60 * 60 + 1);
+        assert_eq!(
+            crate::queue_claim::prune_closed_claims(&doc, &current).unwrap(),
+            1
         );
-        assert_eq!(crate::queue_claim::prune_closed_claims(&doc, &current).unwrap(), 1);
         assert!(
             crate::queue_claim::claimed_live_head_texts_for_content(&doc, &current).is_empty(),
             "the expired attempt must not retain dispatch ownership"
@@ -7215,6 +7388,174 @@ Old.
         );
     }
 
+    /// `#nestedechostrike` live shape (agent-doc-bugs.md 2026-10-27): a
+    /// `do [#ahfe]` run row dispatched to a subagent that reported back, while
+    /// `#ahfe` is an open Todo waiting on an operator check.
+    fn reported_todo_row_doc(root: &Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("bugs.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents priority go -->\n",
+            "- do [#ahfe]\n",
+            "- later operator work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo priority -->\n",
+            "- [ ] [#ahfe] Live-check GH #267 on the 263 IDE\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
+    fn running_claim(doc: &Path, item: &str, owner: &str) -> u64 {
+        let (_, claimed) = crate::queue_claim::claim(doc, item, owner, 600).unwrap();
+        crate::queue_claim::start_attempt(
+            doc,
+            item,
+            owner,
+            &format!("worker:{owner}"),
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        claimed.generation
+    }
+
+    #[test]
+    fn nestedechostrike_ack_id_closes_reported_todo_row_and_keeps_todo_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = reported_todo_row_doc(dir.path());
+        let generation = running_claim(&doc, "#ahfe", "subagent:ahfe");
+        crate::queue_claim::report_attempt(&doc, "#ahfe", Some(generation)).unwrap();
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "ahfe").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("- ~~do [#ahfe]~~"), "{result}");
+        assert!(
+            !result.contains("☑️"),
+            "the struck row carries no lifecycle marker:\n{result}"
+        );
+        assert!(
+            result.contains("- [ ] [#ahfe] Live-check GH #267 on the 263 IDE"),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(result.contains("- later operator work\n"), "{result}");
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:ahfe"),
+            "the reported attempt ended: {ledger:?}"
+        );
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("open_id_head_ack")
+                && ops_log.contains("preserved=todo")
+                && ops_log.contains(
+                    "claim_outcome=reported_attempt_closed owner=subagent:ahfe generation=1"
+                ),
+            "{ops_log}"
+        );
+    }
+
+    #[test]
+    fn nestedechostrike_ack_id_refuses_undispatched_todo_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = reported_todo_row_doc(dir.path());
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let err = acknowledge_open_id_backed_queue_head(&doc, "ahfe")
+            .expect_err("an undispatched Todo row is operator work");
+        let message = err.to_string();
+        assert!(
+            message.contains("never dispatched") && message.contains("--done ahfe"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    #[test]
+    fn nestedechostrike_guarded_id_strikes_refuse_work_in_flight() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = reported_todo_row_doc(dir.path());
+        let generation = running_claim(&doc, "#ahfe", "subagent:ahfe");
+        let before = std::fs::read_to_string(&doc).unwrap();
+        for (flag, err) in [
+            (
+                "--ack-id",
+                acknowledge_open_id_backed_queue_head(&doc, "ahfe").unwrap_err(),
+            ),
+            (
+                "--id",
+                strike_orphan_id_backed_queue_head(&doc, "ahfe").unwrap_err(),
+            ),
+        ] {
+            let message = err.to_string();
+            assert!(
+                message.contains("still dispatched to subagent:ahfe")
+                    && message.contains(&format!("queue consume {flag}"))
+                    && message.contains("queue report-complete")
+                    && message.contains(&format!("--requeue --generation {generation}")),
+                "{flag}: {message}"
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    #[test]
+    fn nestedechostrike_report_owned_by_another_live_session_is_refused() {
+        use agent_doc_queue::queue_claim::{ClaimOwnerLiveness, ClaimOwnerSession};
+        let session = |id: Option<&str>| ClaimOwnerSession {
+            harness: Some("claude".to_string()),
+            session_id: id.map(str::to_string),
+            pane: Some("%1".to_string()),
+            pid: Some(1),
+        };
+        let owner = session(Some("owner"));
+        let other = session(Some("other"));
+        let unrecorded = session(None);
+        let live = || ClaimOwnerLiveness::Live;
+        assert!(reported_attempt_owned_by_other_live_session(
+            live(),
+            Some(&other),
+            Some(&owner)
+        ));
+        assert!(!reported_attempt_owned_by_other_live_session(
+            live(),
+            Some(&owner),
+            Some(&owner)
+        ));
+        assert!(!reported_attempt_owned_by_other_live_session(
+            ClaimOwnerLiveness::Unrecorded,
+            Some(&other),
+            Some(&owner)
+        ));
+        assert!(!reported_attempt_owned_by_other_live_session(
+            live(),
+            Some(&unrecorded),
+            Some(&owner)
+        ));
+        assert!(!reported_attempt_owned_by_other_live_session(
+            live(),
+            None,
+            Some(&owner)
+        ));
+        assert!(!reported_attempt_owned_by_other_live_session(
+            live(),
+            Some(&other),
+            None
+        ));
+    }
+
     #[test]
     fn acknowledge_open_id_head_refuses_prose_that_mentions_open_id() {
         let dir = tempfile::tempdir().unwrap();
@@ -7448,8 +7789,7 @@ Old.
         )
         .unwrap();
         let (_, claimed) =
-            crate::queue_claim::claim(&doc, "Run queued thing", "subagent:worker", 3600)
-                .unwrap();
+            crate::queue_claim::claim(&doc, "Run queued thing", "subagent:worker", 3600).unwrap();
         let running = crate::queue_claim::start_attempt(
             &doc,
             "Run queued thing",
@@ -7459,12 +7799,8 @@ Old.
             claimed.generation,
         )
         .unwrap();
-        crate::queue_claim::report_attempt(
-            &doc,
-            "Run queued thing",
-            Some(claimed.generation),
-        )
-        .unwrap();
+        crate::queue_claim::report_attempt(&doc, "Run queued thing", Some(claimed.generation))
+            .unwrap();
         let completion = agent_doc_document::subagent_completion::cell(
             &running.owner,
             &running.item_text,

@@ -709,12 +709,23 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
         return false;
     }
 
+    // `#nestedechostrike`: a head with nested sub-prompts (`#nestedsubprompts`)
+    // is one head whose text is the parent row plus its child rows, and its
+    // verbatim echo spans one quoted line per row (`> **Queue prompt:** <parent>`
+    // then `>   - <child>`). Matching each quoted line alone against the whole
+    // multi-line head could never succeed, so a claimed nested head never
+    // struck. The echo is matched as a contiguous run of quoted lines inside one
+    // labeled echo: the run must start at a line boundary and cover the head
+    // exactly, so a quote of the parent alone, or of one child, is not its echo.
+    let head_lines = head_echo_line_count(&head_clean);
+    let mut run: Vec<String> = Vec::new();
     let mut in_queue_prompt_echo = false;
     for line in response_body.lines() {
         let trimmed = line.trim_start();
         if !trimmed.starts_with('>') {
             if !trimmed.trim().is_empty() {
                 in_queue_prompt_echo = false;
+                run.clear();
             }
             continue;
         }
@@ -725,6 +736,7 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
             .or_else(|| quoted.strip_prefix("**Queue prompts:**"))
         {
             in_queue_prompt_echo = true;
+            run.clear();
             rest.trim_start()
         } else if in_queue_prompt_echo {
             quoted
@@ -736,11 +748,47 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
         if candidate.is_empty() {
             continue;
         }
-        if normalize_for_answer_match(&candidate) == head_norm {
+        run.push(normalize_for_answer_match(&candidate));
+        if echo_run_ends_with_head(&run, &head_norm, head_lines) {
             return true;
         }
     }
     false
+}
+
+/// Number of non-empty normalized lines in a head's match prose: how many
+/// quoted echo lines its verbatim echo spans (`#nestedechostrike`).
+fn head_echo_line_count(head_clean: &str) -> usize {
+    free_text_head_match_prose(head_clean)
+        .lines()
+        .filter(|line| !normalize_for_answer_match(line).is_empty())
+        .count()
+        .max(1)
+}
+
+/// True when the last `lines` non-empty entries of `run` (normalized quoted
+/// echo lines, in order) join to exactly `head_norm` (`#nestedechostrike`).
+/// A one-line head is the one-element suffix, so the single-line echo rule is
+/// unchanged; a multi-line head needs one quoted line per head line.
+fn echo_run_ends_with_head(run: &[String], head_norm: &str, lines: usize) -> bool {
+    let tail: Vec<&str> = run
+        .iter()
+        .rev()
+        .filter(|line| !line.is_empty())
+        .take(lines)
+        .map(String::as_str)
+        .collect();
+    if tail.len() != lines {
+        return false;
+    }
+    let joined: Vec<&str> = tail.into_iter().rev().collect();
+    joined.join(" ") == head_norm
+}
+
+/// True when a contiguous run of an echo block's normalized `entries` joins to
+/// exactly `head_norm` (the multi-line head form of `entries.contains`).
+fn echo_entries_contain_head(entries: &[String], head_norm: &str, lines: usize) -> bool {
+    (1..=entries.len()).any(|end| echo_run_ends_with_head(&entries[..end], head_norm, lines))
 }
 
 /// One `> **Queue prompt:**` / `> **Queue prompts:**` echo block in a response.
@@ -875,7 +923,13 @@ fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &st
         true
     };
     let matching: Vec<usize> = (0..blocks.len())
-        .filter(|&index| blocks[index].entries.contains(&head_norm))
+        .filter(|&index| {
+            echo_entries_contain_head(
+                &blocks[index].entries,
+                &head_norm,
+                head_echo_line_count(head_clean),
+            )
+        })
         .collect();
     !matching.is_empty() && matching.into_iter().all(listed_only)
 }

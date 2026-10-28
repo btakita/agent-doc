@@ -4851,9 +4851,13 @@ enum QueueAction {
         #[arg(long, conflicts_with = "count", conflicts_with = "ack_text")]
         id: Option<String>,
         /// Explicit acknowledgement (#freshqueueauth): strike an exact id-backed
-        /// correction head while preserving the still-open backlog item. Do not
-        /// use for runnable work; leave live `do [#id]` heads queued until done,
-        /// gated, or intentionally acknowledged as a correction.
+        /// correction head while preserving the still-open backlog or Todo item.
+        /// Also closes a reported (☑️) `do [#id]` dispatch row whose worker
+        /// finished while its tracked item stays open, ending the reported
+        /// attempt (#nestedechostrike); a Todo-backed row needs that dispatch
+        /// evidence. Refuses a claimed, running or lost attempt. Do not use for
+        /// runnable work; leave live `do [#id]` heads queued until done, gated,
+        /// or intentionally acknowledged as a correction.
         #[arg(
             long,
             conflicts_with = "count",

@@ -403,3 +403,209 @@ fn a_tracked_item_brief_carries_its_nested_rows() {
         }
     }
 }
+
+/// A committed, baselined session holding only an exchange, an `agent:run`
+/// list with `run_rows`, and an `agent:todo` with `todo_rows`: the closeout
+/// shape of the live `agent-doc-bugs.md` run queue (`#nestedechostrike`).
+fn closeout_session(dir: &std::path::Path, run_rows: &str, todo_rows: &str) -> std::path::PathBuf {
+    fs::create_dir_all(dir.join(".agent-doc/locks")).unwrap();
+    let doc = dir.join("session.md");
+    let content = format!(
+        concat!(
+            "---\nagent_doc_session: nested-echo-strike\nagent_doc_format: template\n",
+            "prompt_presets:\n  \"#auth\": \"I authorize you to do this.\"\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append subagents -->\n",
+            "### Re: dispatch — gpt-5 · 2026-10-27T08:00-04:00\n\nReady.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents preset=\"#auth\" go -->\n",
+            "{run_rows}",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo -->\n",
+            "{todo_rows}",
+            "<!-- /agent:todo -->\n",
+        ),
+        run_rows = run_rows,
+        todo_rows = todo_rows,
+    );
+    fs::write(&doc, &content).unwrap();
+    git(dir, &["init", "-q"]);
+    git(dir, &["config", "user.email", "test@example.com"]);
+    git(dir, &["config", "user.name", "Test User"]);
+    git(dir, &["add", "session.md"]);
+    git(dir, &["commit", "-q", "--no-verify", "-m", "initial"]);
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    doc
+}
+
+fn run_agent_doc_stdin(dir: &std::path::Path, args: &[&str], stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env("AGENT_DOC_ROOT_CEILING_DIRECTORIES", dir.parent().unwrap())
+        .env("AGENT_DOC_SESSION_CHECK_SETTLE_SECS", "1")
+        .current_dir(dir)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+/// Claim, start and report one item the way a coordinator dispatches it.
+fn dispatch_and_report(dir: &std::path::Path, path: &str, item: &str, owner: &str) {
+    assert_ok(
+        &run_agent_doc(
+            dir,
+            &["queue", "claim", path, "--item", item, "--owner", owner],
+        ),
+        "queue claim",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir,
+            &[
+                "queue",
+                "start",
+                path,
+                "--item",
+                item,
+                "--owner",
+                owner,
+                "--generation",
+                "1",
+                "--worker-id",
+                "w1",
+            ],
+        ),
+        "queue start",
+    );
+    assert_ok(
+        &run_agent_doc(
+            dir,
+            &[
+                "queue",
+                "report-complete",
+                path,
+                "--item",
+                item,
+                "--generation",
+                "1",
+                "--response",
+                "Part 1 shipped; Part 2 is a design doc.",
+            ],
+        ),
+        "queue report-complete",
+    );
+}
+
+fn claim_owners(dir: &std::path::Path, path: &str) -> Vec<String> {
+    let claims = run_agent_doc(dir, &["queue", "claims", path]);
+    assert_ok(&claims, "queue claims");
+    let claims: serde_json::Value = serde_json::from_slice(&claims.stdout).unwrap();
+    claims
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|claim| claim["owner"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// `#nestedechostrike` (live, agent-doc-bugs.md 2026-10-27): the coordinator
+/// closed the reported pmsync row with the verbatim nested echo
+/// (`> **Queue prompt:** <parent>` plus one `>   - <child>` line per child).
+/// Each quoted line was compared with the whole multi-line head, so nothing
+/// struck and the row stayed ☑️ with its reported claim.
+#[test]
+fn a_verbatim_nested_echo_closes_a_reported_parent_and_ends_its_claim() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = format!(
+        "- {PARENT}\n  - {}\n  - {}\n  - {}\n  - {}\n- separate flat head\n",
+        CHILDREN[0], CHILDREN[1], CHILDREN[2], CHILDREN[3]
+    );
+    let doc = closeout_session(dir.path(), &rows, "- [ ] call the vendor\n");
+    let path = doc.to_str().unwrap();
+    dispatch_and_report(dir.path(), path, PARENT, "subagent:pmsync");
+    assert!(
+        run_body(&doc, "run").starts_with(&format!("- ☑️ [#subagent:pmsync#1] {PARENT}\n")),
+        "{}",
+        run_body(&doc, "run")
+    );
+    assert_eq!(claim_owners(dir.path(), path), vec!["subagent:pmsync"]);
+
+    preflight_json(dir.path(), &doc);
+    let echo: String = CHILDREN
+        .iter()
+        .map(|child| format!(">   - {child}\n"))
+        .collect();
+    let response = format!(
+        "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n"
+    );
+    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
+    assert_ok(&output, "respond");
+
+    let body = run_body(&doc, "run");
+    assert!(
+        body.starts_with(&format!("- ~~{PARENT}~~")),
+        "the nested echo strikes the parent:\n{body}"
+    );
+    assert!(!body.contains("☑️"), "{body}");
+    assert!(body.contains("separate flat head\n"), "{body}");
+    assert!(
+        claim_owners(dir.path(), path).is_empty(),
+        "the reported attempt ended with the strike"
+    );
+}
+
+/// `#nestedechostrike` (the ahfe row): a reported `do [#id]` dispatch row whose
+/// id is an open Todo awaiting an operator check closes with
+/// `queue consume --ack-id`, which leaves the Todo open; `--done` would
+/// resolve it. The same command refuses while the attempt is still running.
+#[test]
+fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = closeout_session(
+        dir.path(),
+        "- do [#ahfe]\n- separate flat head\n",
+        "- [ ] [#ahfe] live-check the IDE\n",
+    );
+    let path = doc.to_str().unwrap();
+
+    let refused = run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-id", "ahfe"]);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("never dispatched"),
+        "an undispatched Todo row is refused: {}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+
+    dispatch_and_report(dir.path(), path, "#ahfe", "subagent:ahfe");
+    let closed = run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-id", "ahfe"]);
+    assert_ok(&closed, "queue consume --ack-id on the reported row");
+    let after = fs::read_to_string(&doc).unwrap();
+    let body = run_body(&doc, "run");
+    assert!(body.starts_with("- ~~do [#ahfe]~~"), "{body}");
+    assert!(body.contains("separate flat head\n"), "{body}");
+    assert!(
+        after.contains("- [ ] [#ahfe] live-check the IDE\n"),
+        "{after}"
+    );
+    assert!(claim_owners(dir.path(), path).is_empty());
+}

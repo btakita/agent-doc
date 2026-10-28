@@ -340,7 +340,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      THIS turn with the closeout that strikes the item: `--done <id>` for an
      `#id` head, or open the response with the verbatim
      `> **Queue prompt:** <line>` echo for a free-text head (a `### Re:`
-     heading alone leaves the line queued). That closeout also ends the claim,
+     heading alone leaves the line queued). For a parent with nested
+     sub-prompts the echo is the whole head, one quoted line per row:
+     `> **Queue prompt:** <parent>` then `>   - <child>` for every child.
+     When an `#id` row's work is finished but its tracked item must stay open
+     (a Todo that waits on an operator check, where `--done` would resolve
+     it), close the ☑️ row with
+     `agent-doc queue consume <FILE> --ack-id <id>` instead; it ends the
+     reported attempt, keeps the item open, and refuses a claimed, running or
+     lost attempt (`#nestedechostrike`). That closeout also ends the claim,
      and the same queue-strike successor retires the matching binary completion
      cell; unmatched worker reports remain visible. Thus the integrated response
      replaces its temporary “awaiting integration” notice instead of leaving a

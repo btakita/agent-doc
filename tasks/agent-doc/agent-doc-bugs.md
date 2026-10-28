@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -530,24 +529,90 @@ Both fixes are on agent-doc `main` (`00caa013ac..dd65b2dfa9`, fast-forward) and 
 **Follow-ups from the workers:**
 - If you strike a parent by hand and add a child before the next preflight runs, that child is still read as closed.
 - The owner-session check on `--ack-id` can be bypassed by a plain shell that has no session env.
-<!-- agent:boundary:cb642efd -->
+### Re: Subagent completed: `subagent:reportedrowclose` returned work for queue item “There are remaining ☑️ items in this queue.” — agent-doc
+<!-- agent-doc-subagent-response sha256=7b05a46736bba0ae7f1e6d6c2e322e8d8542053625b4b64a1773299fca8d23c0 -->
+> **Subagent response:**
+>
+> Branch fix/reportedrowclose, commit ddf12430c5 on 00caa013ac (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11995 passed (186 skipped).
+> Root causes: (a) the strict echo matcher (agent-doc-queue/src/queue_response.rs) compared each quoted line alone against a multi-line nested head, so a nested parent echo never matched; (b) queue consume --ack-id accepted only open agent:backlog ids (ahfe is an agent:todo item), never ended the claim, and neither --ack-id nor --id checked the claim state.
+> Fix: a contiguous run of quoted lines in one Queue prompt echo matches a nested head (one quoted line per head line); --ack-id accepts an open backlog or Todo id, requires dispatch proof for a Todo-backed row, refuses claimed/running/lost/other-owner claims naming the working command, and on success strikes the row, retires the completion cell and ends the reported claim.
+> Files: agent-doc-queue/src/{queue_response.rs, queue_consume.rs}, agent-doc-queue-io/src/{queue_consume.rs, queue_cmd.rs}, src/main.rs, specs/07-orchestration-commands.md, runbooks/respond.md (+5 projected copies), tests/nested_subprompts_cli.rs.
+> Tests: 8 new (2 queue, 4 queue-io, 2 CLI); reverting the fix fails all but the standalone owner-session helper test.
+> Close commands: agent-doc queue consume FILE --ack-id ahfe; full nested echo in the respond closeout for the pmsync row.
+<!-- agent-doc-subagent-completion key=09c7295348dd75b0c0b3b268ed30389f066e215307327de73c7214993d2d3869 -->
+> **Queue prompt:** I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.
+>   - So this is the first subtask.
+>   - This is the second subtask.
+>   - Subtasks should be editable and steerable.
+>   - Make sure these subtasks are being deterministically associated with the parent task.
+
+> **Queue prompt:** sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.
+
+> **Queue prompt:** There are remaining ☑️ items in this queue.
+
+> **Queue prompt:** [#automationapiquestions]: give me the full path to specs/proposals/automation-api.md if it's in a worktree
+
+### Re: Subagent completed: `subagent:pmsyncdecisions` returned work for queue item “do [#pmsyncquestions]” — agent-doc
+<!-- agent-doc-subagent-response sha256=48311a4967ca66a44d8d20237a57e6f5fcd1e6c0470b351246ccad2180a6b939 -->
+> **Subagent response:**
+>
+> Branch feat/pmsyncdecisions, commit 7f1bf60b7e on dd65b2dfa9 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 12004 passed (186 skipped). Docs only: specs/proposals/pm-sync-integrations.md. All 8 questions recorded as Decisions from the operator answers; Recommendation sections for refresh cadence (5m default, 1m floor, conditional requests + updated-since cursors + periodic full re-fetch + row digest, refresh only while the document is in use) and status updates (provider is the source of truth; commands carry a captured version and are refused as stale when state moved); Still open list of 7.
+<!-- agent-doc-subagent-completion key=6f62e8e62cd0af55c721b2f64a3f99f63ee6904a94f72b98f54a9e9d6f3b36e0 -->
+> **Queue prompt:** do [#pmsyncquestions]
+
+### Re: PM-sync decisions recorded — opus-5 · 2026-10-27T23:20-04:00
+
+**Your answers are now the design's decisions** in `specs/proposals/pm-sync-integrations.md` (`7f1bf60b7e`, on agent-doc `main`; docs only, `make check` 12004/12004). Nothing is built yet.
+
+**Decisions:**
+- **One component per provider:** `agent:github`, `agent:gitlab` and `agent:jira`. They share one network crate and one row shape.
+- **Credential profiles:** the document names a profile only. Precedence is frontmatter > project config > global config. Frontmatter may set non-secret values (a Jira site, a GitLab host) and is refused for anything that looks like a token. Secrets still come from `passage`/`gh` at call time.
+- **Refresh interval:** configurable (component `interval=` > frontmatter > project > global > default).
+- **Commits:** only when the rendered rows change, in a commit of their own, never inside an agent turn's commit. Rows never show relative or clock times, so an unchanged poll stays byte-identical.
+- **A row edit is a diffable command.** agent-doc compares your edit with the row it last rendered:
+  - appended text becomes a command;
+  - a changed field becomes the matching verb (a status edit becomes `transition:`, a title edit becomes `rename:`);
+  - a deleted row hides the item; it never closes it.
+
+  The command is saved as a nested sub-item tagged `(from row edit)`, so your intent is explicit to the agent, and the row re-renders from the provider. Nested sub-items stay the recommended way to add commands.
+- **Commands follow queue rules:** a list, drained by `go`/`start`/`stop`, with the same per-line tags and with `subagents`/`subagents=N` supported. Destructive verbs need no extra per-row confirmation, but every command gets the stale-state check below.
+- **Feeds:** `feed-run="<filter>"` and `feed-todo="<filter>"` send rows into `agent:run` and `agent:todo`, at most once per item per reason. When the provider shows the condition cleared, the fed Todo is checked off and an unstarted fed head is struck; a claimed head is left alone.
+- **"Related to me" = `involves:@me`.** On GitHub that means author, assignee, mentioned or commenter. It doesn't include a review request on its own; see the first open point below.
+
+**Your question: "what refresh rule do you recommend, given deterministic change detection?"**
+- **Default:** `interval=5m`, with a 1-minute floor. A slower poll hint from the provider (GitHub's `X-Poll-Interval`) wins.
+- **Each tick runs these checks in order,** going on only if the previous one reports a possible change:
+  1. a conditional request (ETag). An authorized GitHub REST 304 doesn't count against the rate limit;
+  2. an "updated since" cursor (Jira's has minute resolution, so each check overlaps the last by a minute and removes duplicates);
+  3. a full re-fetch, whenever a change is reported and on every 6th tick. That is the only way to see items that dropped out of the query, such as a merged PR or a reassigned ticket;
+  4. a digest of the rendered rows. If it's unchanged, nothing is written or committed.
+- **Pause rule:** refresh only while the document is in use, meaning an editor has it open, a queue or loop is active, a subagent holds a claim, or a session owns the document. Otherwise it stops fetching. When the document comes back into use, one catch-up refresh runs, and preflight reports how old each component's rows are.
+- GitHub's 304 and 5,000 requests/hour facts are verified. GitLab, Jira and GitHub search-ETag details are marked unverified in the doc.
+
+**Your question: "what happens when a status is updated?"** The document only ever shows status the provider returned.
+- **Status changes upstream:** the next refresh re-renders the row in one commit. Commands under the row are kept, and feeds re-evaluate.
+- **Your command changes the status:** nothing changes as you type. Once the command is sent, the row re-renders from the provider's reply. If the provider rejects it, the command shows ⚠️ with the provider's reason, and the status stays as the provider has it.
+- **Conflicts:** each command records the item's version when you wrote it, and agent-doc reads the item again just before sending:
+  - if the item was closed or merged upstream, every unsent command on it is refused as stale;
+  - state verbs (`transition:`, `close`, `reopen`) are refused if the state moved since you wrote them;
+  - additive verbs (`comment:`, `label:`, `assign:`, `request-review:`) still send while the item is open;
+  - a refused command stays in the list until you re-arm it with `go` or delete it.
+
+I checked off `#pmsyncquestions` and added the six points the doc still has open as Todo `#pmsyncstillopen`, one per line.
+<!-- agent:boundary:fe2be4a2 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#ahfe]~~
-- ~~I would like an agent-doc centric workflow to see all PR states + JIRA ticket states related to me or some other query synced in a document or element in an agent-doc. Note we need integrations with github + gitlab + Jira. Perhaps we can start with a dedicated tag to each integration? `agent:github` + `agent:gitlab` + `agent:jira`. Ideally it will be bidirectional. We can start with read-only syncing. But I would also like a way to send diff commands for each ticket. Perhaps we can have a nested list to send independent commands to avoid appending to a long line of text? This append subprompt behavior should apply to all lists such as `agent:run` + `agent:loop` + `agent:queue` + `agent:backlog` + `agent:todo` + `agent:review` + `agent:icebox`. `agent-exchange` lists would remain open to interpretation by the agent.~~
-  - ~~So this is the first subtask.~~
-  - ~~This is the second subtask.~~
-  - ~~Subtasks should be editable and steerable.~~
-  - ~~Make sure these subtasks are being deterministically associated with the parent task.~~
-- ~~sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~There are remaining ☑️ items in this queue.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [#subagent:pmsyncdecisions#1] do [#pmsyncquestions]
-- ~~[#automationapiquestions]: give me the full path to specs/proposals/automation-api.md if it's in a worktree~~ — auto-struck: answered this cycle (#ftstrike)
+- ☑️ [#subagent:pmsyncdecisions#1] do [#pmsyncquestions]
 - 🚧 [#subagent:todosync#1] `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
+- 📥 [#lazily-stale-cell-repair]: done
+- 📥 automation-api.md
+  - Can we use lazily's built-in features for this?
+  - Should we extend lazily to provide api endpoints?
+  - We have effective made lazily the api with different language bindings. Is this a good route or should we expand to a web-like api server? If yes, does the web server implementation belong in lazily?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -562,7 +627,6 @@ Both fixes are on agent-doc `main` (`00caa013ac..dd65b2dfa9`, fast-forward) and 
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
-- [x] [#ena0] Retry Restart Agent on tasks/software/lazily.md (agent: grok) after restarting the 2026.3 IDE onto plugin 0.2.866: it should start Grok Build, or refuse and name both agent values if the controller copy still lags (#retainedprojectionclobber + the --expect-agent check are installed).
 - [ ] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
   - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
     - One per provider.

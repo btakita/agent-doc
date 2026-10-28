@@ -855,7 +855,38 @@ A regression test replays the exact incident and fails with either layer removed
 - Filed `#qresiduewedgeveto`, the one remaining strike path without this check.
 
 **Should you restart IDEA? No.** Every install today printed "No JetBrains restart is required; no installed plugin bytes changed", and the native library hot-reloaded each time.
-<!-- agent:boundary:e0bc73cc -->
+
+### Re: Subagent completed: `subagent:pmsyncopen` returned work for queue item “do [#pmsyncstillopen]” — agent-doc
+<!-- agent-doc-subagent-response sha256=9fd1c923e23332e5ee902570ace107183dd47d649d8691d009c343eaca5759b2 -->
+> **Subagent response:**
+>
+> Branch feat/pmsyncopen, commit 9aab6c3a1e (pushed), cherry-picked onto main as cf20c4187d; docs only (specs/proposals/pm-sync-integrations.md); make check exit 0, 12016 passed (186 skipped). Decisions 9-14: GitHub default = involves:@me + review-requested:@me (one advanced-search OR query when accepted, else two merged by key); auth= > frontmatter > project > global; feed names kept; GitLab/Jira involvement research with recommended defaults and named gaps; hidden rows = a foldable Hidden list item matched by a full tree walk, hides stored only in the document; sent-command record + provider re-read before retry. Still open: confirm GitLab/Jira defaults and unverified points; provider idempotency keys; unverified provider facts.
+<!-- agent-doc-subagent-completion key=7ab45583719afccb1caa245925cc476da346c2c4e05cfde7e0a188dc75e00011 -->
+> **Queue prompt:** do [#pmsyncstillopen]
+
+### Re: remaining PM-sync points decided, with GitLab/Jira research — opus-5 · 2026-10-28T01:15-04:00
+
+**Your answers are recorded as decisions 9–14** in `specs/proposals/pm-sync-integrations.md` (`cf20c4187d` on agent-doc `main`; docs only; `make check` 12016/12016). Nothing is built yet.
+
+- **Review requests:** with no `query=`, GitHub shows `involves:@me` **plus** `review-requested:@me`, with duplicates removed. In read-only `gh` tests, GitHub's advanced search does OR PR queries together, though GitHub documents that only for issues. So agent-doc sends one OR query when GitHub accepts it, and two queries merged by key otherwise. A team review request counts.
+- **`auth=`:** the order is component `auth=`, then frontmatter, then project config, then global config.
+- **Feeds:** the `feed-run=` / `feed-todo=` names and the filter list stay as proposed.
+- **Retries:** every sent command is recorded locally. After a timeout, agent-doc reads the item back and retries only if the write didn't land.
+
+**Research: "related to me" on GitLab and Jira.**
+- **GitLab has no single "involves" filter:** its filters combine with AND, and nothing filters by commenter or participant. Recommended default: open MRs you created, are assigned or are asked to review, open issues you created or are assigned, plus the open item behind each pending `mentioned` / `directly_addressed` to-do. It misses items you only commented on, and mentions whose to-do is done.
+- **Jira can't search by comment author in JQL** (Atlassian's suggestion JRACLOUD-81842 is still "Gathering Interest"). Recommended default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through Jira's auto-watch setting, and mentions aren't matched.
+- Sources and unverified points are listed in the doc.
+
+**Hidden rows (your design):**
+- **Storage:** the document only. One ordinary list item, titled `Hidden` (rename it with `hidden="…"`), holds each hidden item as a sub-item for you to fold. agent-doc adds that item when a hide needs it and removes it when it's empty.
+- **Matching:** every refresh walks the whole list tree. A row anywhere under the `Hidden` item is hidden, a row anywhere else is visible, and the sub-items of a row are its commands.
+- **Moving rows:** moving a row under `Hidden` hides it, moving it out un-hides it, and deleting a hidden entry also un-hides it, so nothing is lost. A row moved back out is re-rendered from the provider, and the move never turns into a command.
+- **Quiet while hidden:** hidden entries stay as `- [key] title`, so status changes on a hidden item cause no write and no commit.
+- **Trade-off:** once an item leaves the query, its hide is forgotten, so a reopened item comes back visible.
+
+I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remaining confirmations, one per line.
+<!-- agent:boundary:2e15f96a -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -871,7 +902,7 @@ A regression test replays the exact incident and fails with either layer removed
   - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
   - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
   - do a screenshot
-- 🚧 [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
+- ☑️ [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
 - 🚧 [#subagent:dsmismatch#1] do [#deletedstruckmismatch]
 <!-- /agent:run -->
 

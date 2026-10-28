@@ -819,17 +819,16 @@ const OPERATOR_REQUEST_TODO_CHOICE_MAX_CHARS: usize = 40;
 ///
 /// A packet is a request-specific marker line (at most three leading spaces,
 /// so an indented code block never counts) followed, without a blank line, by
-/// its field lines. The canonical packet is a nested list: the marker is the
-/// top-level bullet (`- [#subagent-operator-request-<id>] subagent operator
-/// request`), each field is one `- *key:* value` bullet nested beneath it, and
-/// context lines and choices are nested one level deeper. The historical flat
-/// packet (a bare marker line followed by top-level `- *key:* value` or plain
-/// `key: value` fields, choices nested beneath `choices`) remains readable.
+/// its field lines. Canonical fields are `- *key:* value` bullets; the
+/// free-text values of `queue_item`, `request`, and `context` are nested
+/// beneath an otherwise empty key bullet, and choices are nested beneath
+/// `- *choices:*`. Historical packets with the value on the key line (or plain
+/// `key: value` fields) remain readable.
 ///
 /// The indentation of the first field line is the field level. A line
 /// indented deeper belongs to the field above it: under `choices` the
 /// shallowest such bullets are the choices (deeper lines are choice detail),
-/// under `request` they continue an otherwise empty request, and under any
+/// under an empty `queue_item` or `request` they are its value, and under any
 /// other field (such as `context`) they are prose that can never be read as a
 /// field. A line indented shallower than the field level ends the packet.
 ///
@@ -897,16 +896,9 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
                             choice_labels.push(label.to_string());
                         }
                     }
-                    "request" => {
-                        if let Some(request) = request.as_mut() {
-                            let text = field.strip_prefix("- ").unwrap_or(field).trim();
-                            if !text.is_empty() {
-                                if !request.is_empty() {
-                                    request.push(' ');
-                                }
-                                request.push_str(text);
-                            }
-                        }
+                    "request" => append_nested_value(request.as_mut(), field),
+                    "queue_item" => {
+                        append_nested_value(Some(queue_item.get_or_insert_with(String::new)), field)
                     }
                     _ => {}
                 }
@@ -944,11 +936,27 @@ pub fn blocking_operator_request_packets(response: &str) -> Vec<BlockingOperator
             id: packet_id.to_string(),
             kind,
             request,
-            queue_item,
+            queue_item: queue_item.filter(|item| !item.is_empty()),
             choice_labels,
         });
     }
     packets
+}
+
+/// Append one nested value line (its list marker removed) to a field whose
+/// key line carried no inline value.
+fn append_nested_value(value: Option<&mut String>, field: &str) {
+    let Some(value) = value else {
+        return;
+    };
+    let text = field.strip_prefix("- ").unwrap_or(field).trim();
+    if text.is_empty() {
+        return;
+    }
+    if !value.is_empty() {
+        value.push(' ');
+    }
+    value.push_str(text);
 }
 
 /// A historical flat packet wrote its choices as bullets at the field level
@@ -1870,32 +1878,33 @@ mod tests {
         assert_eq!(truncate_imperative_trigger("ééé", 3), "é...");
     }
 
-    /// The 3ad3e23c closeout shape in the canonical nested-list packet layout:
-    /// the marker is the top-level bullet, every field nests beneath it, and
-    /// context and choices nest one level deeper.
+    /// The 3ad3e23c closeout shape in the canonical packet layout: the
+    /// `queue_item`, `request`, and `context` values nest beneath their key
+    /// bullet, and choices nest beneath `- *choices:*`.
     const BLOCKING_PACKET_RESPONSE: &str = "\
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
-- [#subagent-operator-request-pending-rows] subagent operator request
-  - *queue_item:* sdk-demo.md queue annotation fix
-  - *kind:* question
-  - *blocking:* true
-  - *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
-  - *context:*
-    - PR #733 stops new stuck rows.
-    - The rows from the 2026-10-20 incident are still `pending`.
-  - *choices:*
-    - **withdraw**: soft-delete the stuck sends.
-    - **resubmit**: send each stuck row to FPE again.
-    - **release**: set the stuck rows to `allowed`.
-    - **leave**: change nothing.
+[#subagent-operator-request-pending-rows] subagent operator request
+- *queue_item:*
+  - sdk-demo.md queue annotation fix
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
+- *context:*
+  - PR #733 stops new stuck rows.
+  - The rows from the 2026-10-20 incident are still `pending`.
+- *choices:*
+  - **withdraw**: soft-delete the stuck sends.
+  - **resubmit**: send each stuck row to FPE again.
+  - **release**: set the stuck rows to `allowed`.
+  - **leave**: change nothing.
 
 **Recommendation:** withdraw.
 ";
 
-    /// The same packet in the historical flat layout every document written
-    /// before the nested list carries: a bare marker line, top-level fields,
-    /// and one run-on context line.
+    /// The same packet in the historical layout every document written before
+    /// nested values carries: each value on its key line, one run-on context.
     const LEGACY_FLAT_PACKET_RESPONSE: &str = "\
 `#apipendingorphans` is gated on review of #733 and on your decision below.
 
@@ -1933,7 +1942,7 @@ mod tests {
         assert_eq!(
             blocking_operator_request_packets(LEGACY_FLAT_PACKET_RESPONSE),
             packets,
-            "historical flat packets parse to the same request as the nested list"
+            "historical inline-value packets parse to the same request as nested values"
         );
 
         let legacy_choices = LEGACY_FLAT_PACKET_RESPONSE
@@ -1985,36 +1994,41 @@ mod tests {
 
     #[test]
     fn packettodo_nested_lines_belong_to_the_field_above_them() {
+        let canonical = blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE);
+
         // Context prose that looks like a field, and detail nested beneath a
         // choice, never rewrite the packet or add a choice.
         let response = BLOCKING_PACKET_RESPONSE
             .replace(
-                "    - PR #733 stops new stuck rows.\n",
-                "    - PR #733 stops new stuck rows.\n    - kind: permission\n    - *request:* not the request\n",
+                "  - PR #733 stops new stuck rows.\n",
+                "  - PR #733 stops new stuck rows.\n  - kind: permission\n  - *request:* not the request\n  - *queue_item:* not the row\n",
             )
             .replace(
-                "    - **withdraw**: soft-delete the stuck sends.\n",
-                "    - **withdraw**: soft-delete the stuck sends.\n      - **detail**: keeps an audit row.\n",
+                "  - **withdraw**: soft-delete the stuck sends.\n",
+                "  - **withdraw**: soft-delete the stuck sends.\n    - **detail**: keeps an audit row.\n",
             );
+        assert_eq!(blocking_operator_request_packets(&response), canonical);
+
+        // A nested value split over several bullets joins with spaces.
+        let split_request = BLOCKING_PACKET_RESPONSE.replace(
+            "incident)? And should a reaper be added?",
+            "incident)?\n  - And should a reaper be added?",
+        );
+        assert_eq!(blocking_operator_request_packets(&split_request), canonical);
+
+        // An empty key bullet with no nested value carries no queue item.
+        let no_item =
+            BLOCKING_PACKET_RESPONSE.replace("  - sdk-demo.md queue annotation fix\n", "");
         assert_eq!(
-            blocking_operator_request_packets(&response),
-            blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)
+            blocking_operator_request_packets(&no_item)[0].queue_item,
+            None
         );
 
-        // A request too long for one line may nest beneath an empty `request:`.
-        let nested_request = BLOCKING_PACKET_RESPONSE.replace(
-            "  - *request:* What should happen",
-            "  - *request:*\n    - What should happen",
-        );
-        assert_eq!(
-            blocking_operator_request_packets(&nested_request),
-            blocking_operator_request_packets(BLOCKING_PACKET_RESPONSE)
-        );
-
-        // A line back at the marker's level ends the packet.
+        // A field-level line after the choices that is not a bullet is not a
+        // choice (a field-level `- ` bullet there stays one: the historical form).
         let trailing = BLOCKING_PACKET_RESPONSE.replace(
-            "    - **leave**: change nothing.\n",
-            "    - **leave**: change nothing.\n- **also**: not a choice\n",
+            "  - **leave**: change nothing.\n",
+            "  - **leave**: change nothing.\n**also**: not a choice\n",
         );
         assert_eq!(
             blocking_operator_request_packets(&trailing)[0].choice_labels,
@@ -2087,8 +2101,8 @@ mod tests {
         assert!(blocking_operator_request_packets(prose).is_empty());
 
         for (response, fields) in [
-            (BLOCKING_PACKET_RESPONSE, "  - *queue_item:*"),
-            (LEGACY_FLAT_PACKET_RESPONSE, "- *queue_item:*"),
+            (BLOCKING_PACKET_RESPONSE, "- *queue_item:*\n"),
+            (LEGACY_FLAT_PACKET_RESPONSE, "- *queue_item:* "),
         ] {
             let gap = response.replace(
                 &format!("subagent operator request\n{fields}"),

@@ -57,22 +57,25 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         .stdout(predicate::str::contains("treat prior authorization as the answer").not())
         .stdout(predicate::str::contains("Never run `make install`"))
         .stdout(predicate::str::contains(
-            "\n- [#subagent-operator-request-<unique-id>] subagent operator request\n  - *queue_item:* ",
+            "\n[#subagent-operator-request-<unique-id>] subagent operator request\n- *queue_item:*\n  - ",
         ))
         .stdout(predicate::str::contains(
             "Use a different marker id for every request packet in the session document",
         ))
         .stdout(predicate::str::contains("[agent-doc] subagent operator request").not())
         .stdout(predicate::str::contains("(#waypostrequest)").not())
-        .stdout(predicate::str::contains("\n  - *kind:* question | permission\n"))
+        .stdout(predicate::str::contains("\n- *kind:* question | permission\n"))
         .stdout(predicate::str::contains(
-            "\n  - *context:*\n    - <why it is needed>\n    - <current state>\n    - <target/scope>\n    - <risk or effect>\n",
+            "\n- *request:*\n  - <exact question or exact tool/action requiring permission>\n",
         ))
         .stdout(predicate::str::contains(
-            "\n  - *choices:*\n    - **<label>**: <effect>\n",
+            "\n- *context:*\n  - <why it is needed>\n  - <current state>\n  - <target/scope>\n  - <risk or effect>\n",
         ))
-        .stdout(predicate::str::contains("- *choices:*\n    - <label>: <effect>").not())
-        .stdout(predicate::str::contains("\n- *queue_item:*").not())
+        .stdout(predicate::str::contains(
+            "\n- *choices:*\n  - **<label>**: <effect>\n",
+        ))
+        .stdout(predicate::str::contains("- *choices:*\n  - <label>: <effect>").not())
+        .stdout(predicate::str::contains("- *context:* <").not())
         .stdout(predicate::str::contains(
             "A chat reply is context, not a tool permission grant",
         ))

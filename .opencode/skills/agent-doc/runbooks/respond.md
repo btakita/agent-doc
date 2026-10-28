@@ -719,11 +719,11 @@ packet owes a same-id todo (`#wayposttodo`). The binary derives it from the
 packet's `request:` and choices unless `--todo-add` already supplies
 `id=<request-id>`, and links its `queue_item` with `🙋 [#request-id]`
 (`[todo] blocking operator request packet (#packettodo)`).
-Preserve the canonical nested-list shape when copying the packet into
-exchange: the `- [#request-id] subagent operator request` marker bullet, each
-`- *key:* value` field indented two spaces beneath it, and the context and
-choices as short bullets indented four spaces. The parser
-keeps historical flat and plain-key packets readable.
+Preserve the canonical shape when copying the packet into exchange: the bare
+marker line, emphasized-key list fields, the `queue_item`, `request`, and
+`context` values as a nested list beneath their key bullet (the context as
+short one-fact bullets), and choices nested below `- *choices:*`. The parser
+keeps historical inline-value and plain-key packets readable.
 Every operator ask in the response needs its own todo: an explicit request
 (`Say \`post\``, `needs your ok`), an unpublished draft path, and each item of
 a bolded residual-work list (`**Still stale:**`, `**Also stale:**`,

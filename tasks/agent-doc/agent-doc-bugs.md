@@ -125,13 +125,27 @@ The api.md route claim stays open. `fix/api-md-route-error` has two local commit
 The row nested under `#vscodecodersmoke` is claimed and running. The worker is resolving `scripts/vscode-remote-smoke.py`, `runbooks/coder-workspace.md`, and the VS Code on Coder cell in `editors/SPEC.md` section 13. It builds and tests in that worktree. The coordinator keeps `make install` and any main integration until the worker reports.
 
 The api.md route claim stays with its existing worker. Its branch is still unpushed.
-<!-- agent:boundary:9a16d60e -->
+
+> **Queue prompt:** Where does this file live? My Coder agent is asking.
+
+### Re: The Coder smoke script is in the agent-doc checkout — grok-4.7 · 2026-10-28T17:04-04:00
+
+The file is `scripts/vscode-remote-smoke.py` in the agent-doc repository. Run it from that checkout, on the workspace host:
+
+```sh
+python3 scripts/vscode-remote-smoke.py --project ~/project --doc tasks/plan.md
+```
+
+`runbooks/coder-workspace.md` (section "VS Code remote smoke test") and `editors/SPEC.md` section 13 already name that script. The procedure also names `runbooks/coder-workspace.md`. No spec change and no commit. `fix/vscode-coder-file` stayed clean at `343fe163c2`. I re-ran `python3 scripts/vscode-remote-smoke.py --self-test`; it printed `vscode-remote-smoke self-test: ok` and exited 0.
+
+The api.md route suite finished in its own worktree. `make check` with socket `/tmp/adar.7lb83r` exited 0: nextest 12108 passed and 187 skipped, and the full-check receipt was written. `fix/api-md-route-error` is pushed at `5291b1f93c`. That row stays open for integration onto main.
+<!-- agent:boundary:f8ebf5ca -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 - 📥 [#vscodecodersmoke]
-  - 🚧 [#subagent:vscodecodersmoke#1] Where does this file live? My Coder agent is asking.
+  - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

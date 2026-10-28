@@ -1668,6 +1668,7 @@ pub fn post_tool_use_output(context: &str) -> serde_json::Value {
 
 fn render_status_sync_checkpoint(
     file: &Path,
+    content: &str,
     directive: &agent_doc_document::status_projection::StatusSyncDirective,
 ) -> String {
     let mode = match directive.mode {
@@ -1682,10 +1683,19 @@ fn render_status_sync_checkpoint(
          the `<!-- status:sync -->` markers. That focused command does not capture, \
          seal, or commit the active response cycle. If the answer did not change, \
          continue without writing. This reminder is additive to any steering context \
-         above.",
+         above.{}",
         directive.instruction,
         file.display(),
+        status_sync_evidence_suffix(content),
     )
+}
+
+/// `#statuspatchdrop` (c): the current managed payload, so the checkpoint is
+/// answered by comparing against the document, never from memory.
+fn status_sync_evidence_suffix(content: &str) -> String {
+    agent_doc_document::status_projection::render_status_sync_checkpoint_evidence(content)
+        .map(|evidence| format!("\n{evidence}"))
+        .unwrap_or_default()
 }
 
 /// Return the periodic status-sync reminder for an open owner turn.
@@ -1751,7 +1761,9 @@ fn status_sync_checkpoint_with(
             interval_ms,
         ),
     );
-    Ok(Some(render_status_sync_checkpoint(file, &directive)))
+    Ok(Some(render_status_sync_checkpoint(
+        file, &content, &directive,
+    )))
 }
 
 fn status_sync_checkpoint(file: &Path, observed_at_ms: u64) -> Result<Option<String>> {
@@ -3091,6 +3103,16 @@ mod tests {
         assert!(first_context.contains("Keep the published release current"));
         assert!(first_context.contains("agent-doc status set"));
         assert!(first_context.contains("does not capture, seal, or commit"));
+        // `#statuspatchdrop` (c): the reminder quotes the document's current
+        // status state instead of leaving the agent to answer from memory.
+        assert!(
+            first_context.contains("has no `status:sync` payload yet"),
+            "{first_context}"
+        );
+        assert!(
+            first_context.contains("1 line(s) of ordinary prose"),
+            "{first_context}"
+        );
 
         // Multiple tool calls within one full interval produce one reminder.
         assert_eq!(

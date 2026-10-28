@@ -628,10 +628,16 @@ fn final_status_sync_continuation(file: &Path, stop_hook_active: bool) -> Result
          \"<current result>\"`, then `agent-doc commit '{}'` so the focused status update is \
          durable. Pass only the result: agent-doc owns the `<!-- status:sync -->` markers. \
          If the answer did not change, make no write. This is a bounded final checkpoint; do \
-         not repeat completed work or start unrelated work, then send the final answer.",
+         not repeat completed work or start unrelated work, then send the final answer.{}",
         directive.instruction,
         file.display(),
         file.display(),
+        // `#statuspatchdrop` (c): quote the current payload so "did the answer
+        // change" is decided against the document, not the agent's memory of a
+        // status write that may not have landed.
+        agent_doc_document::status_projection::render_status_sync_checkpoint_evidence(&content)
+            .map(|evidence| format!("\n{evidence}"))
+            .unwrap_or_default(),
     )))
 }
 
@@ -4388,6 +4394,37 @@ mod tests {
             "<system-reminder>\nStop hook feedback"
         ));
         assert!(!is_stop_hook_feedback("please fix the parser"));
+    }
+
+    /// `#statuspatchdrop` (c): on 2026-10-28 the final checkpoint was answered
+    /// "no change" from the agent's memory of a `patch:status` the write path
+    /// had dropped. The checkpoint now quotes the document's current payload.
+    #[test]
+    fn final_status_sync_checkpoint_quotes_the_current_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("session.md");
+        fs::write(
+            &doc,
+            concat!(
+                "<!-- agent:status sync=\"Keep the release current\" -->\n",
+                "<!-- status:sync -->\nLatest release: v0.35.558\n<!-- /status:sync -->\n",
+                "<!-- /agent:status -->\n",
+            ),
+        )
+        .unwrap();
+
+        let reason = final_status_sync_continuation(&doc, false)
+            .unwrap()
+            .expect("a sync directive surfaces the final checkpoint");
+        assert!(reason.contains(FINAL_STATUS_SYNC_MARKER), "{reason}");
+        assert!(reason.contains("> Latest release: v0.35.558"), "{reason}");
+        assert!(
+            reason.contains("not against what you remember writing"),
+            "{reason}"
+        );
+        // The recursion bit still passes the following Stop through.
+        assert_eq!(final_status_sync_continuation(&doc, true).unwrap(), None);
     }
 
     #[test]

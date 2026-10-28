@@ -524,8 +524,11 @@ pub fn free_text_queue_head_provenance_decision_with_claims(
         if queue_heads::committed_queue_extends_free_text_head(content, &head) {
             continue;
         }
-        if queue_response::free_text_head_answered_by_response(current_cycle_response, &head)
-            || response_head_plausibly_answers(current_cycle_response, &head)
+        if queue_response::free_text_head_answered_in_document(
+            content,
+            current_cycle_response,
+            &head,
+        ) || response_head_plausibly_answers(current_cycle_response, &head)
         {
             response_proven_removed.push(head);
             continue;

@@ -327,6 +327,7 @@ pub fn queue_head_answered_by_response_with_claim(
 ) -> bool {
     if claimed {
         free_text_head_has_explicit_answer_evidence(response_body, head_text)
+            || response_explicitly_echoes_nest_vector(content, response_body, head_text)
     } else {
         queue_head_answered_by_response(content, response_body, head_text)
     }
@@ -343,8 +344,27 @@ pub fn queue_head_answered_by_response(
     response_body: &str,
     head_text: &str,
 ) -> bool {
-    free_text_head_answered_by_response(response_body, head_text)
+    free_text_head_answered_in_document(content, response_body, head_text)
         || prompt_preset_head_answered_by_response(content, response_body, head_text)
+}
+
+/// Free-text answer proof with the document's nest vector (`#nestvector`).
+///
+/// A quote of a descendant's vector answers that descendant. It does not answer
+/// an ancestor whose prose the vector merely starts with. Preset expansions are
+/// not proof here.
+pub fn free_text_head_answered_in_document(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    if response_explicitly_echoes_nest_vector(content, response_body, head_text) {
+        return true;
+    }
+    if descendant_nest_vector_blocks_ancestor(content, response_body, head_text) {
+        return false;
+    }
+    free_text_head_answered_by_response(response_body, head_text)
 }
 
 /// True when the active queue head is exactly the registered prompt preset id.
@@ -644,10 +664,213 @@ pub fn locate_response_heading_offset(
     found
 }
 
+/// Queue bodies to search for a nest vector: the selected queue, then every
+/// other `queue` component. A parse failure in one body skips that body.
+fn queue_bodies_for_nest(content: &str) -> Vec<&str> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return Vec::new();
+    };
+    let mut bodies = Vec::new();
+    if let Ok(Some(selected)) = crate::queue_set::selected_component(content, &components) {
+        bodies.push(selected.content(content));
+    }
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = component.content(content);
+        if !bodies.contains(&body) {
+            bodies.push(body);
+        }
+    }
+    bodies
+}
+
+/// The first queue that contains `prompt_text`, with that row's index.
+fn located_prompt(
+    content: &str,
+    prompt_text: &str,
+) -> Option<(Vec<crate::document_queue::QueueEntry>, usize)> {
+    for body in queue_bodies_for_nest(content) {
+        let Ok(entries) = crate::document_queue::parse(body) else {
+            continue;
+        };
+        if let Some(index) = crate::document_queue::prompt_index_for_text(&entries, prompt_text) {
+            return Some((entries, index));
+        }
+    }
+    None
+}
+
+/// Display nest vector of `prompt_text` (`#nestvector`), or `None` when the row
+/// is top-level, folded into its parent (`#nestedsubprompts`), or absent.
+pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<String> {
+    let (entries, index) = located_prompt(content, prompt_text)?;
+    crate::document_queue::nest_vector_at(&entries, index, prompt_text)
+}
+
+/// True when the response carries an explicit `> **Queue prompt:**` echo of
+/// this head's document-proven nest vector.
+pub fn response_explicitly_echoes_nest_vector(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    nest_vector_in_document(content, head_text)
+        .is_some_and(|vector| free_text_head_has_explicit_answer_evidence(response_body, &vector))
+}
+
+/// A descendant's nest-vector quote is that descendant's echo. It starts with
+/// a long free-text ancestor, so the weak blockquote match would answer the
+/// ancestor too. An exact echo of the ancestor itself still answers it.
+fn descendant_nest_vector_blocks_ancestor(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    if response_explicit_queue_prompt_echoes_head(response_body, head_text) {
+        return false;
+    }
+    let Some((entries, index)) = located_prompt(content, head_text) else {
+        return false;
+    };
+    entries.iter().enumerate().any(|(leaf_idx, entry)| {
+        if leaf_idx == index
+            || !crate::document_queue::entry_is_ancestor_of(&entries, index, leaf_idx)
+        {
+            return false;
+        }
+        let leaf = match entry {
+            crate::document_queue::QueueEntry::Prompt(prompt)
+            | crate::document_queue::QueueEntry::Completed(prompt) => prompt,
+            _ => return false,
+        };
+        crate::document_queue::nest_vector_at(&entries, leaf_idx, &leaf.text).is_some_and(
+            |vector| response_explicit_queue_prompt_echoes_head(response_body, &vector),
+        )
+    })
+}
+
+fn echo_texts_for_embed(content: &str, consumed_texts: &[String]) -> Vec<String> {
+    consumed_texts
+        .iter()
+        .map(|text| nest_vector_in_document(content, text).unwrap_or_else(|| text.clone()))
+        .collect()
+}
+
+fn prompt_line_present_in_region(region: &str, prompt: &str) -> bool {
+    let Some(first) = first_nonempty_line(prompt) else {
+        return false;
+    };
+    let needle = normalize_prompt_echo_presence_line(first);
+    !needle.is_empty()
+        && region.lines().any(|line| {
+            normalize_prompt_line(line) == needle
+                || normalize_prompt_echo_presence_line(line) == needle
+        })
+}
+
+fn echo_line_matches_prompt(line: &str, prompt_line: &str) -> bool {
+    let needle = normalize_for_answer_match(&normalize_prompt_echo_presence_line(prompt_line));
+    let got = normalize_for_answer_match(&normalize_prompt_echo_presence_line(line));
+    !needle.is_empty() && got == needle
+}
+
+fn replace_echo_line_body(line: &str, new_body: &str) -> String {
+    for label in ["**Queue prompt:**", "**Queue prompts:**"] {
+        if let Some(idx) = line.find(label) {
+            return format!("{} {}", &line[..idx + label.len()], new_body);
+        }
+    }
+    if let Some(idx) = line.find('>') {
+        return format!("{} {}", &line[..=idx], new_body);
+    }
+    line.to_string()
+}
+
+/// Rewrite a bare leaf echo (`> **Queue prompt:** item`) into its nest vector.
+/// Lines inside fenced code stay untouched. The queue identity is not the echo.
+fn rewrite_bare_nest_echoes(
+    content: &str,
+    consumed_texts: &[String],
+    display_texts: &[String],
+) -> String {
+    let pairs: Vec<(&str, &str)> = consumed_texts
+        .iter()
+        .zip(display_texts.iter())
+        .filter(|(identity, display)| identity.as_str() != display.as_str())
+        .map(|(identity, display)| (identity.as_str(), display.as_str()))
+        .collect();
+    if pairs.is_empty() {
+        return content.to_string();
+    }
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return content.to_string();
+    };
+    let code_ranges = agent_doc_element::element::find_code_ranges(content);
+    let region = &content[exchange.open_end..exchange.close_start];
+    let mut out = String::with_capacity(content.len() + 64);
+    out.push_str(&content[..exchange.open_end]);
+    let mut changed = false;
+    let mut in_echo = false;
+    let mut offset = exchange.open_end;
+    for line in region.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        let in_code = code_ranges
+            .iter()
+            .any(|&(start, end)| line_start >= start && line_start < end);
+        let trimmed = line.trim_start();
+        let body = line.trim_end_matches(['\n', '\r']);
+        if in_code || !trimmed.starts_with('>') {
+            if !in_code && !trimmed.starts_with('>') && !trimmed.trim().is_empty() {
+                in_echo = false;
+            }
+            out.push_str(line);
+            continue;
+        }
+        let quoted = trimmed.trim_start_matches('>').trim_start();
+        let opens_echo =
+            quoted.starts_with("**Queue prompt:**") || quoted.starts_with("**Queue prompts:**");
+        if opens_echo {
+            in_echo = true;
+        } else if !in_echo {
+            out.push_str(line);
+            continue;
+        }
+        let replacement = pairs.iter().find_map(|(identity, display)| {
+            let id_first = first_nonempty_line(identity)?;
+            let display_first = first_nonempty_line(display)?;
+            echo_line_matches_prompt(body, id_first)
+                .then(|| replace_echo_line_body(body, display_first))
+        });
+        if let Some(new_body) = replacement {
+            changed = true;
+            out.push_str(&new_body);
+            if line.ends_with('\n') {
+                out.push('\n');
+            }
+        } else {
+            out.push_str(line);
+        }
+    }
+    out.push_str(&content[exchange.close_start..]);
+    if changed { out } else { content.to_string() }
+}
+
 /// Embed the consumed queue prompt echo immediately after this cycle's response
 /// heading inside the `exchange` component. Returns `content` unchanged (fail-safe)
 /// when the exchange/heading cannot be located, the prompt is empty, or the prompt
 /// already appears in the exchange (e.g. a user typed it in directly).
+///
+/// A nested leaf (`#nestvector`) is echoed as its whole nest vector. A bare leaf
+/// quote already in the exchange is rewritten to that vector and not inserted again.
 pub fn embed_consumed_prompt_in_response(
     content: &str,
     consumed_texts: &[String],
@@ -656,7 +879,9 @@ pub fn embed_consumed_prompt_in_response(
     if consumed_texts.iter().all(|t| t.trim().is_empty()) {
         return content.to_string();
     }
-    let Ok(components) = agent_doc_element::element::parse(content) else {
+    let display_texts = echo_texts_for_embed(content, consumed_texts);
+    let content = rewrite_bare_nest_echoes(content, consumed_texts, &display_texts);
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
         return content.to_string();
     };
     let Some(exchange) = components.iter().find(|c| c.name == "exchange") else {
@@ -668,29 +893,21 @@ pub fn embed_consumed_prompt_in_response(
     // as an exchange line (user typed it, or a prior echo exists), skip injection.
     // #queue-prompt-echo-summary: the opt-in length threshold is read from the
     // document's own frontmatter (default None = verbatim copy).
-    let max_chars = agent_doc_frontmatter::frontmatter::parse(content)
+    let max_chars = agent_doc_frontmatter::frontmatter::parse(&content)
         .ok()
         .and_then(|(fm, _)| fm.queue_prompt_echo_max_chars);
-    let echo = format_consumed_prompt_echo(consumed_texts, max_chars);
+    let echo = format_consumed_prompt_echo(&display_texts, max_chars);
     if region.contains(echo.trim_end()) {
         return content.to_string();
     }
-    let already_present = consumed_texts
+    let already_present = display_texts
         .iter()
-        .filter_map(|t| first_nonempty_line(t))
-        .any(|first| {
-            let needle = normalize_prompt_echo_presence_line(first);
-            !needle.is_empty()
-                && region.lines().any(|line| {
-                    normalize_prompt_line(line) == needle
-                        || normalize_prompt_echo_presence_line(line) == needle
-                })
-        });
+        .any(|text| prompt_line_present_in_region(region, text));
     if already_present {
         return content.to_string();
     }
 
-    let code_ranges = agent_doc_element::element::find_code_ranges(content);
+    let code_ranges = agent_doc_element::element::find_code_ranges(&content);
     let Some(heading_rel) = locate_response_heading_offset(
         region,
         exchange.open_end,
@@ -1196,6 +1413,59 @@ pub fn latest_free_text_head_echo_is_deferral(text: &str, head_text: &str) -> bo
         return false;
     };
     deferral_scope_has_marker(&blocks, index)
+}
+
+/// [`response_defers_free_text_head`] for a nested leaf quoted as its nest vector.
+///
+/// A vector quote is that leaf's echo. Deferral beside it keeps the leaf queued.
+/// The bare leaf line remains a deferral too.
+pub fn response_defers_queue_head(content: &str, response_body: &str, head_text: &str) -> bool {
+    if response_defers_free_text_head(response_body, head_text) {
+        return true;
+    }
+    nest_vector_in_document(content, head_text)
+        .is_some_and(|vector| response_defers_free_text_head(response_body, &vector))
+}
+
+/// [`latest_free_text_head_echo_is_deferral`] across the bare head and its nest vector.
+///
+/// The later of the two echoes is the current statement. An older deferral does
+/// not outrank a later answer, and a later vector deferral keeps the leaf queued.
+pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: &str) -> bool {
+    let text = direct_response_text(text);
+    let mut heads = vec![head_text.to_string()];
+    if let Some(vector) = nest_vector_in_document(content, head_text)
+        && nest_row_work_differs(&vector, head_text)
+    {
+        heads.push(vector);
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let Some(index) = blocks.iter().rposition(|block| {
+        heads
+            .iter()
+            .any(|head| block_quotes_free_text_head(block, head))
+    }) else {
+        return false;
+    };
+    deferral_scope_has_marker(&blocks, index)
+}
+
+fn nest_row_work_differs(vector: &str, head_text: &str) -> bool {
+    vector.trim() != strip_priority_markers(head_text).trim()
+}
+
+fn block_quotes_free_text_head(block: &str, head_text: &str) -> bool {
+    let head_clean = strip_priority_markers(head_text);
+    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    if head_norm.is_empty() {
+        return false;
+    }
+    let weak_quote_allowed = head_norm.split(' ').filter(|word| !word.is_empty()).count() >= 4;
+    response_explicit_queue_prompt_echoes_head(block, &head_clean)
+        || (weak_quote_allowed
+            && response_blockquote_entry_candidates(block)
+                .iter()
+                .any(|entry| entry.starts_with(&head_norm)))
 }
 
 /// The part of `current_exchange` written after `anchor_exchange`
@@ -2423,5 +2693,126 @@ mod tests {
             "legacy one-line queue-prompt echoes must also count as already present"
         );
         assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+    }
+
+    const NEST_PARENT: &str = "Sync the remote coder workspace before the smoke test";
+    const NEST_CHILD: &str = "Where does this file live? My Coder agent is asking.";
+
+    fn nest_document(queue: &str, exchange: &str) -> String {
+        format!(
+            "<!-- agent:exchange patch=append -->\n{exchange}<!-- /agent:exchange -->\n\n<!-- agent:run -->\n{queue}<!-- /agent:run -->\n"
+        )
+    }
+
+    fn nest_queue() -> String {
+        format!("- {NEST_PARENT}\n  - do [#tracked]\n  - {NEST_CHILD}\n")
+    }
+
+    fn vector_line() -> String {
+        format!("{NEST_PARENT}: {NEST_CHILD}")
+    }
+
+    /// `#nestvector`: the vector answers the leaf. A long free-text ancestor
+    /// whose prose the vector starts with stays unanswered.
+    #[test]
+    fn nest_vector_quote_answers_the_leaf_not_its_ancestor() {
+        let doc = nest_document(&nest_queue(), "");
+        let response = format!(
+            "### Re: file\n\n> **Queue prompt:** {}\n\nDone.\n",
+            vector_line()
+        );
+        assert!(queue_head_answered_by_response(&doc, &response, NEST_CHILD));
+        assert!(!queue_head_answered_by_response(
+            &doc,
+            &response,
+            NEST_PARENT
+        ));
+        assert!(free_text_head_answered_by_response(&response, NEST_PARENT));
+        let bare = format!("### Re: file\n\n> **Queue prompt:** {NEST_CHILD}\n\nDone.\n");
+        assert!(queue_head_answered_by_response(&doc, &bare, NEST_CHILD));
+        assert!(!queue_head_answered_by_response(&doc, &bare, NEST_PARENT));
+        let parent_only = format!("### Re: file\n\n> **Queue prompt:** {NEST_PARENT}\n\nDone.\n");
+        assert!(queue_head_answered_by_response(
+            &doc,
+            &parent_only,
+            NEST_PARENT
+        ));
+        assert!(!queue_head_answered_by_response(
+            &doc,
+            &parent_only,
+            NEST_CHILD
+        ));
+    }
+
+    #[test]
+    fn deferred_nest_vector_quote_does_not_count_as_finished() {
+        let doc = nest_document(&nest_queue(), "");
+        let response = format!(
+            "> **Queue prompt:** {}\n\n**Deferred:** the coder workspace is still down.\n",
+            vector_line()
+        );
+        assert!(response_defers_queue_head(&doc, &response, NEST_CHILD));
+        assert!(!response_defers_free_text_head(&response, NEST_CHILD));
+        assert!(latest_queue_head_echo_is_deferral(
+            &doc, &response, NEST_CHILD
+        ));
+        assert!(queue_head_answered_by_response_with_claim(
+            &doc, &response, NEST_CHILD, true
+        ));
+    }
+
+    #[test]
+    fn embed_rewrites_a_bare_leaf_echo_into_the_nest_vector() {
+        let queue = format!("- [#vscodecodersmoke]\n  - ~~{NEST_CHILD}~~\n");
+        let exchange = format!(
+            "### Re: coder file\n\n> **Queue prompt:** {NEST_CHILD}\n\nIt lives in the worktree.\n"
+        );
+        let doc = nest_document(&queue, &exchange);
+        let updated = embed_consumed_prompt_in_response(
+            &doc,
+            &[NEST_CHILD.to_string()],
+            Some("### Re: coder file"),
+        );
+        let vector = format!("#vscodecodersmoke: {NEST_CHILD}");
+        assert!(updated.contains(&format!("> **Queue prompt:** {vector}")));
+        assert!(!updated.contains(&format!("> **Queue prompt:** {NEST_CHILD}")));
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+
+        let already = nest_document(
+            &queue,
+            &format!(
+                "### Re: coder file\n\n> **Queue prompt:** {vector}\n\nIt lives in the worktree.\n"
+            ),
+        );
+        let updated = embed_consumed_prompt_in_response(
+            &already,
+            &[NEST_CHILD.to_string()],
+            Some("### Re: coder file"),
+        );
+        assert_eq!(updated, already);
+
+        let missing = nest_document(&queue, "### Re: coder file\n\nIt lives in the worktree.\n");
+        let updated = embed_consumed_prompt_in_response(
+            &missing,
+            &[NEST_CHILD.to_string()],
+            Some("### Re: coder file"),
+        );
+        assert!(updated.contains(&format!("> {vector}")));
+        assert_eq!(updated.matches("> **Queue prompt:**").count(), 1);
+    }
+
+    #[test]
+    fn embed_leaves_a_fenced_copy_of_the_leaf_and_inserts_the_vector() {
+        let queue = format!("- [#vscodecodersmoke]\n  - {NEST_CHILD}\n");
+        let exchange =
+            format!("### Re: coder file\n\n```\n> **Queue prompt:** {NEST_CHILD}\n```\n\nDone.\n");
+        let doc = nest_document(&queue, &exchange);
+        let updated = embed_consumed_prompt_in_response(
+            &doc,
+            &[NEST_CHILD.to_string()],
+            Some("### Re: coder file"),
+        );
+        assert!(updated.contains(&format!("```\n> **Queue prompt:** {NEST_CHILD}\n```")));
+        assert!(updated.contains(&format!("#vscodecodersmoke: {NEST_CHILD}")));
     }
 }

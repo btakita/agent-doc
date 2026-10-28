@@ -781,7 +781,7 @@ pub fn queue_consumption_allowed_for_response(
     // In particular, the explicit queue-prompt echo below is also the documented
     // way to quote deferred work, so it cannot authorize consumption first.
     if active_head.as_ref().is_some_and(|head_text| {
-        crate::queue_response::response_defers_free_text_head(response_body, head_text)
+        crate::queue_response::response_defers_queue_head(current_content, response_body, head_text)
     }) {
         if head_is_free_text {
             return Ok(false);
@@ -897,7 +897,11 @@ pub fn queue_targeted_completion_id_for_current_head(
     // diff may turn into a completion id. An explicit `--done` naming the head
     // still does.
     if !response_body.trim().is_empty()
-        && crate::queue_response::response_defers_free_text_head(response_body, &queue_head)
+        && crate::queue_response::response_defers_queue_head(
+            current_content,
+            response_body,
+            &queue_head,
+        )
     {
         return Ok(
             crate::queue_heads::queue_head_matches_done_ids(current_content, pending_done)?
@@ -1189,7 +1193,12 @@ pub fn answered_free_text_strike_decision(
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
         let has_explicit_answer_evidence =
-            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text);
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text)
+                || crate::queue_response::response_explicitly_echoes_nest_vector(
+                    content,
+                    response_body,
+                    text,
+                );
         if !crate::queue_response::queue_head_answered_by_response_with_claim(
             content,
             response_body,
@@ -1201,8 +1210,9 @@ pub fn answered_free_text_strike_decision(
         // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
         // that it answered the head, not proof. When the response says next to
         // that quote that the head is still outstanding, believe the sentence
-        // over the echo and leave it queued.
-        if crate::queue_response::response_defers_free_text_head(response_body, text) {
+        // over the echo and leave it queued. A nest-vector quote is that leaf's
+        // echo (`#nestvector`).
+        if crate::queue_response::response_defers_queue_head(content, response_body, text) {
             continue;
         }
         // Formal post-baseline closeout rule:

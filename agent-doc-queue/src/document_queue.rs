@@ -2972,6 +2972,162 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     false
 }
 
+/// Work text of a queue row for nest-vector display and identity compare.
+///
+/// Projection (`📥`, pins, owner annotations) and a `~~strike~~` wrapper are
+/// not part of the row. A `do [#id]` leaf stays `do [#id]`; only an ancestor
+/// collapses to `#id`.
+fn nest_row_work_text(text: &str) -> String {
+    let unstruck = unwrap_nest_strike(text.trim());
+    let projected = agent_doc_element_queue::strip_attempt_projection_prefix(unstruck);
+    strip_priority_markers(unwrap_nest_strike(projected.trim()))
+}
+
+fn unwrap_nest_strike(text: &str) -> &str {
+    let trimmed = text.trim();
+    if let Some(inner) = trimmed
+        .strip_prefix("~~")
+        .and_then(|rest| rest.strip_suffix("~~"))
+    {
+        let inner = inner.trim();
+        if !inner.is_empty() {
+            return inner;
+        }
+    }
+    trimmed
+}
+
+fn same_prompt(left: &str, right: &str) -> bool {
+    let left = nest_row_work_text(left);
+    let right = nest_row_work_text(right);
+    !left.is_empty() && left == right
+}
+
+/// Label of one ancestor row in a nest vector (`#nestvector`).
+///
+/// An id-backed row (`[#vscodecodersmoke]`, `do [#id]`) contributes `#id`.
+/// A free-text row contributes its own first line, not a lowercased key.
+fn ancestor_label(prompt: &QueuePrompt) -> String {
+    let work = nest_row_work_text(&prompt.text);
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
+    let first = head.lines().next().unwrap_or("").trim();
+    match agent_doc_element_queue::queue_head_identity(first) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("#{id}"),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => first.to_string(),
+    }
+}
+
+fn prefix_nest_vector(ancestors: &str, item_text: &str) -> String {
+    let trailing_newline = item_text.ends_with('\n');
+    let body = item_text.trim_end_matches(['\n', '\r']);
+    let mut lines = body.lines();
+    let first = lines.next().unwrap_or("");
+    let mut out = format!("{ancestors}: {first}");
+    for line in lines {
+        out.push('\n');
+        out.push_str(line);
+    }
+    if trailing_newline {
+        out.push('\n');
+    }
+    out
+}
+
+fn prompt_of(entry: &QueueEntry) -> Option<&QueuePrompt> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt),
+        _ => None,
+    }
+}
+
+/// Index of the first prompt or completed row whose work text is `prompt_text`.
+pub fn prompt_index_for_text(entries: &[QueueEntry], prompt_text: &str) -> Option<usize> {
+    entries.iter().position(|entry| {
+        prompt_of(entry).is_some_and(|prompt| same_prompt(&prompt.text, prompt_text))
+    })
+}
+
+/// Nest vector of the row at `index`, or `None` when that row is top-level.
+///
+/// Ancestors are the nearest strictly shallower rows, root first, joined with
+/// `: `. `item_text` is the leaf body (its work text, not an id collapse), so
+/// a struck child still echoes the operator's item. A multi-line leaf keeps
+/// every line after the first unchanged.
+pub fn nest_vector_at(entries: &[QueueEntry], index: usize, item_text: &str) -> Option<String> {
+    let own_indent = entries.get(index).and_then(entry_indent)?;
+    if own_indent == 0 {
+        return None;
+    }
+    let shown = nest_row_work_text(item_text);
+    if shown.trim().is_empty() {
+        return None;
+    }
+    let mut depth = own_indent;
+    let mut labels = Vec::new();
+    for earlier in entries[..index].iter().rev() {
+        let Some(indent) = entry_indent(earlier) else {
+            continue;
+        };
+        if indent < depth {
+            let Some(prompt) = prompt_of(earlier) else {
+                continue;
+            };
+            labels.push(ancestor_label(prompt));
+            depth = indent;
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+    if labels.is_empty() {
+        return None;
+    }
+    labels.reverse();
+    Some(prefix_nest_vector(&labels.join(": "), &shown))
+}
+
+/// Nest vector of the row whose work text is `prompt_text`.
+///
+/// `None` for a top-level row, a `#nestedsubprompts` folded head (one entry at
+/// indent 0), or text that is not in `entries`. Completed rows match too: the
+/// echo is embedded after the leaf is struck.
+pub fn nest_vector_for_prompt_text(entries: &[QueueEntry], prompt_text: &str) -> Option<String> {
+    let index = prompt_index_for_text(entries, prompt_text)?;
+    nest_vector_at(entries, index, prompt_text)
+}
+
+/// `true` when `ancestor_idx` is on the nest chain above `leaf_idx`.
+pub fn entry_is_ancestor_of(entries: &[QueueEntry], ancestor_idx: usize, leaf_idx: usize) -> bool {
+    if ancestor_idx >= leaf_idx {
+        return false;
+    }
+    let Some(ancestor_indent) = entries.get(ancestor_idx).and_then(entry_indent) else {
+        return false;
+    };
+    let Some(leaf_indent) = entries.get(leaf_idx).and_then(entry_indent) else {
+        return false;
+    };
+    if ancestor_indent >= leaf_indent {
+        return false;
+    }
+    let mut depth = leaf_indent;
+    for (idx, entry) in entries[..leaf_idx].iter().enumerate().rev() {
+        let Some(indent) = entry_indent(entry) else {
+            continue;
+        };
+        if indent < depth {
+            if idx == ancestor_idx {
+                return true;
+            }
+            if indent <= ancestor_indent {
+                return false;
+            }
+            depth = indent;
+        }
+    }
+    false
+}
+
 /// Compile nested ordered-list sibling groups into `after=` dependency edges.
 ///
 /// List shape is ingress sugar, not a second scheduling authority: callers
@@ -7961,6 +8117,108 @@ mod tests {
                 ("another top level", 0),
             ]
         );
+    }
+
+    fn nest_row(text: &str, indent: usize) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+            indent,
+            ordered_marker: None,
+        })
+    }
+
+    /// `#nestvector`: ancestors from the root, joined with `: `, then the leaf.
+    #[test]
+    fn nest_vector_joins_root_parent_and_item() {
+        let entries = vec![
+            nest_row("root parent", 0),
+            nest_row("parent", 2),
+            nest_row("item", 4),
+        ];
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "item").as_deref(),
+            Some("root parent: parent: item")
+        );
+        assert_eq!(nest_vector_for_prompt_text(&entries, "root parent"), None);
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "parent").as_deref(),
+            Some("root parent: parent")
+        );
+        assert!(entry_is_ancestor_of(&entries, 0, 2));
+        assert!(entry_is_ancestor_of(&entries, 1, 2));
+        assert!(!entry_is_ancestor_of(&entries, 1, 0));
+    }
+
+    /// An earlier sibling branch is not an ancestor.
+    #[test]
+    fn nest_vector_skips_an_earlier_sibling_branch() {
+        let entries = vec![
+            nest_row("root", 0),
+            nest_row("other", 2),
+            nest_row("buried", 4),
+            nest_row("parent2", 2),
+            nest_row("item", 4),
+        ];
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "item").as_deref(),
+            Some("root: parent2: item")
+        );
+        assert!(!entry_is_ancestor_of(&entries, 1, 4));
+        assert!(!entry_is_ancestor_of(&entries, 2, 4));
+        assert!(entry_is_ancestor_of(&entries, 3, 4));
+    }
+
+    /// A multi-line leaf keeps its continuation lines after the prefixed first line.
+    #[test]
+    fn nest_vector_prefixes_only_the_first_line_of_a_multiline_leaf() {
+        let entries = vec![
+            nest_row("root parent", 0),
+            nest_row("first line of the item\ncontinued", 2),
+        ];
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "first line of the item\ncontinued").as_deref(),
+            Some("root parent: first line of the item\ncontinued")
+        );
+    }
+
+    /// Id ancestors collapse to `#id`. A `do [#id]` leaf stays the item text.
+    #[test]
+    fn nest_vector_keeps_a_do_directive_leaf_and_labels_id_ancestors() {
+        let body = "- parent epic\n  - do [#first]\n";
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "do [#first]").as_deref(),
+            Some("parent epic: do [#first]")
+        );
+
+        let smoked =
+            "- 📥 [#vscodecodersmoke]\n  - Where does this file live? My Coder agent is asking.\n";
+        let entries = parse(smoked).unwrap();
+        let child = "Where does this file live? My Coder agent is asking.";
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, child).as_deref(),
+            Some("#vscodecodersmoke: Where does this file live? My Coder agent is asking.")
+        );
+        let struck =
+            "- [#vscodecodersmoke]\n  - ~~Where does this file live? My Coder agent is asking.~~\n";
+        let entries = parse(struck).unwrap();
+        assert!(matches!(entries[1], QueueEntry::Completed(_)));
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, child).as_deref(),
+            Some("#vscodecodersmoke: Where does this file live? My Coder agent is asking.")
+        );
+    }
+
+    /// A flat head and a `#nestedsubprompts` folded head have no nest vector.
+    #[test]
+    fn nest_vector_is_absent_for_flat_and_folded_heads() {
+        let flat = parse("- ship the fix\n").unwrap();
+        assert_eq!(nest_vector_for_prompt_text(&flat, "ship the fix"), None);
+
+        let folded = parse(SUBPROMPT_BODY).unwrap();
+        let head = prompts(&folded)[0].text.clone();
+        assert_eq!(nest_vector_for_prompt_text(&folded, &head), None);
     }
 
     // ---- Nested sub-prompts (`#nestedsubprompts`) ----

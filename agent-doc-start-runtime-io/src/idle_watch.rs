@@ -748,12 +748,23 @@ fn committed_deferred_queue_cycle(path: &Path, head: &str) -> Option<String> {
         .ok()
         .flatten()?
         .captured_response?;
-    if capture.cycle_id != state.cycle_id
-        || !agent_doc_queue::queue_response::response_defers_free_text_head(
+    if capture.cycle_id != state.cycle_id {
+        return None;
+    }
+    // A nested leaf is deferred by a quote of its nest vector (`#nestvector`).
+    // The document is optional: a missing read keeps the head-only check.
+    let deferred = match std::fs::read_to_string(path) {
+        Ok(content) => agent_doc_queue::queue_response::response_defers_queue_head(
+            &content,
             &capture.response_body,
             head,
-        )
-    {
+        ),
+        Err(_) => agent_doc_queue::queue_response::response_defers_free_text_head(
+            &capture.response_body,
+            head,
+        ),
+    };
+    if !deferred {
         return None;
     }
     Some(state.cycle_id)
@@ -1636,7 +1647,8 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     // `#queueschedule`: a scheduled queue's drainability also depends on its
     // pass window, which lives in `state.db` and opens without any document
     // revision change. Never memoize it by revision.
-    let revision = revision.filter(|_| !agent_doc_queue::queue_schedule::content_is_scheduled(&content));
+    let revision =
+        revision.filter(|_| !agent_doc_queue::queue_schedule::content_is_scheduled(&content));
     memoize_queue_head(&canonical, revision, &observation);
     observation
 }
@@ -8899,9 +8911,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("sdk-demo.md");
         let head = "When I load Boss Room, claim an item, stop Boss Room, start Boss Room, the item is not claimed.";
-        let content = format!(
-            "<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n"
-        );
+        let content = format!("<!-- agent:queue go -->\n- 📥 {head}\n<!-- /agent:queue -->\n");
         std::fs::write(&doc, &content).unwrap();
         let started =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))

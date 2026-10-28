@@ -39,7 +39,7 @@ use agent_doc_queue::{
         queue_entries_are_drained_residue, queue_region_differs_from_snapshot,
         selected_queue_head_unchanged_in_snapshot,
     },
-    queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
+    queue_response::queue_prompt_text_is_free_text,
 };
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
@@ -6092,7 +6092,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // are BARE, multi-line operator-pasted blocks (no `- ` bullet, embedded
     // route-error code fences), which the markdown list-item parser does not
     // surface — only `agent_doc_queue::document_queue::parse` represents them (as a multiline
-    // `Prompt`). The match reuses the SAME `free_text_head_answered_by_response`
+    // `Prompt`). The match reuses the SAME `free_text_head_answered_in_document`
     // predicate the session-check residue guard uses, so the preflight strike set
     // and the session-check INTERRUPT set agree — anything struck here is exactly
     // what would otherwise have INTERRUPTed closeout. A snapshot gate restricts
@@ -6139,16 +6139,28 @@ pub fn run_queue_maintenance_with_coin_gate(
         // `#ftstrikeclaimedmention`: a claimed head is residue only on an exact
         // `> **Queue prompt:**` echo, the same proof session-check and the
         // finalize strike require of it. `#deferstrike`: an echo followed by a
-        // deferral keeps the head queued.
+        // deferral keeps the head queued. `#nestvector`: a nested leaf is also
+        // answered by its nest-vector echo, and that echo does not answer an
+        // ancestor label.
         let answered_residue_in = |exchange: &str, head: &str| -> bool {
             (if claimed.claims(head) {
                 agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
                     exchange, head,
+                ) || agent_doc_queue::queue_response::response_explicitly_echoes_nest_vector(
+                    &current_content,
+                    exchange,
+                    head,
                 )
             } else {
-                free_text_head_answered_by_response(exchange, head)
-            }) && !agent_doc_queue::queue_response::latest_free_text_head_echo_is_deferral(
-                exchange, head,
+                agent_doc_queue::queue_response::free_text_head_answered_in_document(
+                    &current_content,
+                    exchange,
+                    head,
+                )
+            }) && !agent_doc_queue::queue_response::latest_queue_head_echo_is_deferral(
+                &current_content,
+                exchange,
+                head,
             )
         };
         let mut predating_echo_heads = 0usize;

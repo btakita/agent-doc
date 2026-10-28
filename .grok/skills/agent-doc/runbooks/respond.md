@@ -400,6 +400,17 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+**Nested `agent:run` leaves (`#nestvector`).** A nested queue item that is its own
+head — indented under group labels, not a `#nestedsubprompts` child folded into
+its parent — is quoted as the whole nest vector, from the root parent down to
+the item: `> **Queue prompt:** root parent: parent: item`. An id-backed ancestor
+is its `#id` (`[#vscodecodersmoke]` → `#vscodecodersmoke`); a free-text ancestor
+is that row's line; the leaf stays the item text, including a `do [#id]` line.
+A free-text head that owns nested sub-prompts stays the multiline quote
+(`> **Queue prompt:** parent` then `>   - child`), not a colon vector. The vector
+answers the leaf, not its ancestors. Closeout rewrites a bare leaf quote into
+the vector.
+
 **Quoting a free-text head you are NOT finishing this cycle (`#deferstrike`).** The
 quote alone reads as "answered" and strikes the head. To keep it queued, follow the
 `> **Queue prompt:**` quote with a paragraph that opens with the bold lead

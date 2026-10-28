@@ -8,8 +8,8 @@ use agent_doc_document::queue_projection::{strip_in_progress_marker, strip_prior
 use anyhow::{Context, Result};
 
 use crate::queue_response::{
-    display_queue_prompt_text, free_text_head_answered_by_response, normalize_done_id,
-    queue_head_is_free_text_prompt, queue_prompt_done_id, queue_prompt_text_is_free_text,
+    display_queue_prompt_text, normalize_done_id, queue_head_is_free_text_prompt,
+    queue_prompt_done_id, queue_prompt_text_is_free_text,
 };
 
 /// Extract queue prompt head texts from a document's `agent:queue` component.
@@ -201,7 +201,7 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
         return queue_skip_diagnostic_for_content(content);
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
-    if crate::queue_response::response_defers_free_text_head(response, &queue_head) {
+    if crate::queue_response::response_defers_queue_head(content, response, &queue_head) {
         return Ok(format!(
             "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."
         ));
@@ -458,14 +458,20 @@ pub fn free_text_queue_head_is_completed_residue_with_claim(
     }
     let answered = if claimed {
         crate::queue_response::free_text_head_has_explicit_answer_evidence(exchange_text, head)
+            || crate::queue_response::response_explicitly_echoes_nest_vector(
+                content,
+                exchange_text,
+                head,
+            )
     } else {
-        free_text_head_answered_by_response(exchange_text, head)
+        crate::queue_response::free_text_head_answered_in_document(content, exchange_text, head)
     };
     committed_queue_contains_free_text_head(content, head)
         && answered
         // `#deferstrike`: an echo followed by a deferral keeps the head queued
-        // on purpose; it is not completed residue.
-        && !crate::queue_response::latest_free_text_head_echo_is_deferral(exchange_text, head)
+        // on purpose; it is not completed residue. The nest vector is that
+        // leaf's echo (`#nestvector`).
+        && !crate::queue_response::latest_queue_head_echo_is_deferral(content, exchange_text, head)
 }
 
 fn queue_prompt_heads(doc: &str) -> Vec<String> {

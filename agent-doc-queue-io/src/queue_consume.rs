@@ -2746,10 +2746,15 @@ fn plan_queue_prompt_consumption_inner(
         let proven = consumed_texts
             .iter()
             .take_while(|text| {
-                agent_doc_queue::queue_response::free_text_head_answered_by_response(
+                // Nest-vector proof stays on the free-text predicate. Preset
+                // expansions are a different head and must not widen this
+                // captured-response consume (`#fpecapturedresponse`).
+                agent_doc_queue::queue_response::free_text_head_answered_in_document(
+                    content,
                     &response_body,
                     text,
-                ) && !agent_doc_queue::queue_response::response_defers_free_text_head(
+                ) && !agent_doc_queue::queue_response::response_defers_queue_head(
+                    content,
                     &response_body,
                     text,
                 )
@@ -2793,10 +2798,12 @@ fn plan_queue_prompt_consumption_inner(
                 .take_while(|text| {
                     !claimed.claims(text)
                         || response_body.as_deref().is_some_and(|body| {
-                            agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
+                            (agent_doc_queue::queue_response::free_text_head_has_explicit_answer_evidence(
                                 body, text,
-                            ) && !agent_doc_queue::queue_response::response_defers_free_text_head(
-                                body, text,
+                            ) || agent_doc_queue::queue_response::response_explicitly_echoes_nest_vector(
+                                content, body, text,
+                            )) && !agent_doc_queue::queue_response::response_defers_queue_head(
+                                content, body, text,
                             )
                         })
                 })

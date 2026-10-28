@@ -793,7 +793,9 @@ remain unchanged. To maximize visible content in a tmux view pane, each generate
 level-two heading shares its line with its component opening tag (for example,
 `## Run <!-- agent:run priority subagents clear -->`); the runnable-work heading
 is `## Run`, not `## Queue`. Existing document headings and markers are not
-rewritten. The scaffold's `agent:status` body is the one-line queue marker legend
+rewritten. The `transfer`/`extract` target scaffold follows the same layout and
+order, and reuses a heading the source wrote on a component's opener line
+(`#extractlayout`, `specs/07-focused-extract.md`). The scaffold's `agent:status` body is the one-line queue marker legend
 (`Queue markers: 📥 pending · … ([legend](…#queue-markers))`), which every
 later status write keeps as its last paragraph, exactly once; see
 `#queuemarkerlegend` in `07-orchestration-commands.md`. Opt out with

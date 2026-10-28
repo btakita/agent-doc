@@ -77,6 +77,28 @@ without making an agent manually copy managed document regions.
   `Frontmatter::active_resume_harness()` compatibility rule selects Claude.
   Extraction never substitutes the harness running the command or a separate
   hardcoded default.
+- **Target layout (`#extractlayout`):** a newly scaffolded destination, and any
+  component section extraction later appends to a document (including the
+  source's `agent:notes` pointer section), heads each component with a
+  level-two heading on the same line as its opening marker, in the default
+  template order (`## Status <!-- agent:status patch=replace -->`,
+  `## Exchange <!-- agent:exchange patch=append -->`,
+  `## Run <!-- agent:run priority subagents clear -->`,
+  `## Todo <!-- agent:todo priority -->`,
+  `## Backlog <!-- agent:backlog priority queue -->`, `## Review`, `## Icebox`,
+  `## Done`, `## Notes`). The runnable-work component is `agent:run` headed
+  `## Run`, never `## Queue`; a runnable section extraction adds is always the
+  canonical `agent:run`, and an existing `agent:run` satisfies a request for
+  the legacy `queue` component. When the source already heads a component on
+  its opener line (`## Run: Main <!-- agent:run ... -->`,
+  `## Parking Lot <!-- agent:icebox -->`), the generated section reuses that
+  heading text verbatim (the legacy `agent:queue` keys as `agent:run` and
+  `agent:pending` as `agent:backlog`); a heading on its own line above a
+  source opener is prose and never renames anything. Extraction never rewrites
+  a heading that already exists in either document. Through 0.35.558 the
+  transfer/extract scaffold kept its own copy of the template with every
+  heading on its own line above the opener and `agent:run` headed `## Queue`,
+  after the claim/sync scaffold had moved to same-line `## Run` headings.
 - **Allowed edit surfaces:** the focused-extract module, CLI routing, target
   scaffold shared with transfer, this command spec, its runbook, and regression
   tests.

@@ -36479,9 +36479,12 @@ fn test_transfer_exchange_auto_creates_target_with_backlog_and_icebox_scaffold()
     );
 
     let target_after = fs::read_to_string(&target).unwrap();
-    assert!(target_after.contains("## Status"));
-    assert!(target_after.contains("## Queue"));
-    assert!(target_after.contains("<!-- agent:backlog priority queue -->"));
+    // `#extractlayout`: generated headings share their opener's line, and
+    // the runnable-work component is headed `## Run`, never `## Queue`.
+    assert!(target_after.contains("\n## Status <!-- agent:status patch=replace -->\n"));
+    assert!(target_after.contains("\n## Run <!-- agent:run priority subagents clear -->\n"));
+    assert!(!target_after.contains("## Queue"), "{target_after}");
+    assert!(target_after.contains("\n## Backlog <!-- agent:backlog priority queue -->\n"));
     assert!(target_after.contains("<!-- agent:icebox -->"));
     assert!(target_after.contains("Transferred exchange body."));
     assert!(target_after.contains("[#back1]"));

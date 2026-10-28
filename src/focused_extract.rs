@@ -257,11 +257,17 @@ fn render_focused_target_scaffold(
     title: &str,
     agent: &str,
     source_fm: &frontmatter::Frontmatter,
+    source_content: &str,
     source: &Path,
     target: &Path,
 ) -> Result<String> {
-    let scaffold =
-        super::extract::render_target_scaffold(title, agent, uuid::Uuid::new_v4(), source_fm);
+    let scaffold = super::extract::render_target_scaffold(
+        title,
+        agent,
+        uuid::Uuid::new_v4(),
+        source_fm,
+        source_content,
+    );
     let (mut target_fm, body) = frontmatter::parse(&scaffold)?;
     target_fm.links = source_fm
         .links
@@ -499,35 +505,40 @@ fn render_archived_exchange(selection: &ArchivedExchangeSelection) -> String {
 
 fn find_component(doc: &str, name: &str) -> Result<Option<element::Component>> {
     let components = element::parse(doc).context("failed to parse agent components")?;
+    // The parser names every runnable opener (`agent:run`/`queue`/`loop`)
+    // `queue`, so a requested `run` must compare canonically too.
+    let wanted = element::canonical_component_name(name);
     Ok(components.into_iter().find(|component| {
-        component.name == name || (name == "backlog" && component.name == "pending")
+        component.name == wanted || (name == "backlog" && component.name == "pending")
     }))
 }
 
-fn ensure_component(mut doc: String, name: &str) -> Result<String> {
+/// Append a missing component section to `doc` (`#extractlayout`): the
+/// heading shares its line with the opener, and its text is the source
+/// document's own heading for that component when it has one, else the
+/// canonical name (`## Run` for the runnable-work component).
+fn ensure_component(
+    mut doc: String,
+    name: &str,
+    source_headings: &BTreeMap<String, String>,
+) -> Result<String> {
     if find_component(&doc, name)?.is_some() {
         return Ok(doc);
     }
-    let heading = match name {
-        "status" => "Status",
-        "exchange" => "Exchange",
-        "queue" => "Queue",
-        "backlog" => "Backlog",
-        "todo" => "Todo",
-        "review" => "Review",
-        "icebox" => "Icebox",
-        "done" => "Done",
-        "notes" => "Notes",
-        _ => bail!("unsupported focused-extract component '{name}'"),
-    };
     let patch = match name {
         "status" => " patch=replace",
         "exchange" => " patch=append",
         _ => "",
     };
-    doc.push_str(&format!(
-        "\n\n## {heading}\n\n<!-- agent:{name}{patch} -->\n<!-- /agent:{name} -->\n"
-    ));
+    // The runnable-work component a new section adds is `agent:run`, the
+    // canonical spelling of the parser's internal `queue` name.
+    let tag = if name == "queue" { "run" } else { name };
+    let Some(section) = super::extract::render_component_section(tag, patch, source_headings)
+    else {
+        bail!("unsupported focused-extract component '{name}'");
+    };
+    doc.push_str("\n\n");
+    doc.push_str(&section);
     Ok(doc)
 }
 
@@ -1457,10 +1468,14 @@ fn prepare_with_recovery(
             title,
             agent,
             &super::extract::scaffold_inheritance_frontmatter(&source_content)?,
+            &source_content,
             source,
             target,
         )?,
     };
+    // `#extractlayout`: a generated target section keeps the source's own
+    // heading text for that component.
+    let source_headings = super::extract::source_component_headings(&source_content);
     let already_marked = target_after.contains(&marker);
     let mut source_after = source_content.clone();
     let mut transfers = Vec::new();
@@ -1500,7 +1515,7 @@ fn prepare_with_recovery(
         };
 
         if !already_marked {
-            target_after = ensure_component(target_after, component_name)?;
+            target_after = ensure_component(target_after, component_name, &source_headings)?;
             let target_component = find_component(&target_after, component_name)?.unwrap();
             let target_body = target_component.content(&target_after);
             if component_name == "exchange" {
@@ -1558,7 +1573,7 @@ fn prepare_with_recovery(
         if !moved.trim().is_empty() {
             source_after = source_exchange.replace_content(&source_after, &remaining);
             if !already_marked {
-                target_after = ensure_component(target_after, "exchange")?;
+                target_after = ensure_component(target_after, "exchange", &source_headings)?;
                 let target_exchange = find_component(&target_after, "exchange")?.unwrap();
                 let target_ids: HashSet<String> =
                     parse_exchange_nodes(target_exchange.content(&target_after))
@@ -1623,7 +1638,7 @@ fn prepare_with_recovery(
             }
             let rendered = render_archived_exchange(&selection);
             if !already_marked {
-                target_after = ensure_component(target_after, "exchange")?;
+                target_after = ensure_component(target_after, "exchange", &source_headings)?;
                 let target_exchange = find_component(&target_after, "exchange")?.unwrap();
                 let target_ids = parse_exchange_nodes(target_exchange.content(&target_after))
                     .into_iter()
@@ -1685,7 +1700,7 @@ fn prepare_with_recovery(
             },
         );
         if !already_marked {
-            target_after = ensure_component(target_after, component_name)?;
+            target_after = ensure_component(target_after, component_name, &source_headings)?;
             let target_component = find_component(&target_after, component_name)?.unwrap();
             let target_found = if component_name == "done" {
                 let found = found.iter().cloned().collect::<BTreeSet<_>>();
@@ -1815,11 +1830,11 @@ fn prepare_with_recovery(
         bail!("focused-extract selectors matched no movable content");
     }
 
-    target_after = ensure_component(target_after, "notes")?;
+    target_after = ensure_component(target_after, "notes", &source_headings)?;
     if !already_marked {
         target_after = append_to_component(&target_after, "notes", &marker)?;
     }
-    source_after = ensure_component(source_after, "notes")?;
+    source_after = ensure_component(source_after, "notes", &source_headings)?;
     let pointer = source_pointer(&operation_id, &target_identity);
     if !source_after.contains(&pointer) {
         source_after = append_to_component(&source_after, "notes", &pointer)?;
@@ -2351,6 +2366,43 @@ mod tests {
         assert_eq!(request.components, ["notes"]);
     }
 
+    /// `#extractlayout`: a component focused extraction adds to a document
+    /// puts its heading on the opener line, keeps the source's own heading
+    /// text when it has one, and heads `agent:run` `## Run`.
+    #[test]
+    fn ensure_component_appends_a_same_line_heading() {
+        let none = BTreeMap::new();
+        // The parser's internal `queue` name is the runnable-work component:
+        // a new section is the canonical `agent:run`, headed `## Run`.
+        let doc = ensure_component("# T\n".to_string(), "queue", &none).unwrap();
+        assert_eq!(
+            doc,
+            "# T\n\n\n## Run <!-- agent:run -->\n<!-- /agent:run -->\n"
+        );
+        let headings = BTreeMap::from([("backlog".to_string(), "Later".to_string())]);
+        let doc = ensure_component(doc, "backlog", &headings).unwrap();
+        assert!(
+            doc.ends_with("\n\n## Later <!-- agent:backlog -->\n<!-- /agent:backlog -->\n"),
+            "{doc}"
+        );
+        let doc = ensure_component(doc, "exchange", &none).unwrap();
+        assert!(
+            doc.ends_with(
+                "\n\n## Exchange <!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n"
+            ),
+            "{doc}"
+        );
+        for runnable in ["run", "queue"] {
+            assert_eq!(
+                ensure_component(doc.clone(), runnable, &headings).unwrap(),
+                doc,
+                "an existing agent:run satisfies {runnable}"
+            );
+        }
+        assert!(find_component(&doc, "backlog").unwrap().is_some());
+        assert!(ensure_component(doc, "bogus", &none).is_err());
+    }
+
     #[test]
     fn focused_scaffold_inherits_context_and_rebases_relative_links() {
         let source_fm = frontmatter::Frontmatter {
@@ -2369,6 +2421,7 @@ mod tests {
             "SDK Legal",
             "codex",
             &source_fm,
+            "",
             Path::new("tasks/sdk.md"),
             Path::new("tasks/sdk/sdk-legal.md"),
         )
@@ -2397,6 +2450,7 @@ mod tests {
             "codex",
             uuid::Uuid::nil(),
             &frontmatter::Frontmatter::default(),
+            "",
         )
         .replace(
             "<!-- agent:exchange patch=append -->\n",
@@ -2811,6 +2865,7 @@ mod tests {
             "codex",
             uuid::Uuid::from_u128(1),
             &frontmatter::Frontmatter::default(),
+            "",
         )
         .replace(
             "<!-- /agent:exchange -->",
@@ -2905,6 +2960,7 @@ mod tests {
             "codex",
             uuid::Uuid::nil(),
             &frontmatter::Frontmatter::default(),
+            "",
         );
         for component in ["todo", "review", "done", "notes"] {
             assert!(scaffold.contains(&format!("<!-- agent:{component}")));
@@ -2950,6 +3006,7 @@ mod tests {
             "codex",
             uuid::Uuid::nil(),
             &frontmatter::Frontmatter::default(),
+            "",
         )
         .replace(
             "<!-- agent:backlog priority queue -->\n",

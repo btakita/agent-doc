@@ -168,6 +168,66 @@ fn agent_selection_previews_applies_and_reruns_idempotently() {
     assert!(target_after.contains("agent-doc-extract"));
 }
 
+/// `#extractlayout`: the extracted game-sessions.md put every heading on its
+/// own line above the opener and headed `agent:run` `## Queue`. A new target's
+/// headings share their opener's line, `agent:run` is `## Run`, and a heading
+/// the source wrote on an opener line is kept verbatim.
+#[test]
+fn new_target_heads_each_component_on_its_opener_line() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let source = dir.path().join("sdk.md");
+    let target = dir.path().join("sdk").join("sdk-legal.md");
+    let heading_anchored = source_document()
+        .replacen(
+            "## Todo\n\n<!-- agent:todo -->",
+            "## Todo <!-- agent:todo -->",
+            1,
+        )
+        .replacen(
+            "## Icebox\n\n<!-- agent:icebox -->",
+            "## Parking Lot <!-- agent:icebox -->",
+            1,
+        );
+    fs::write(&source, heading_anchored).unwrap();
+    git_fixture(dir.path(), "sdk.md");
+
+    apply_legal_extract(dir.path(), &source, &target).success();
+
+    let target_after = fs::read_to_string(&target).unwrap();
+    for expected in [
+        "\n## Status <!-- agent:status patch=replace -->\n",
+        "\n## Exchange <!-- agent:exchange patch=append -->\n",
+        "\n## Run <!-- agent:run priority subagents clear -->\n",
+        "\n## Todo <!-- agent:todo priority -->\n",
+        "\n## Backlog <!-- agent:backlog priority queue -->\n",
+        "\n## Parking Lot <!-- agent:icebox -->\n",
+        "\n## Notes <!-- agent:notes -->\n",
+    ] {
+        assert!(
+            target_after.contains(expected),
+            "missing {expected:?}:\n{target_after}"
+        );
+    }
+    assert!(
+        !target_after.contains("## Queue <!-- agent:run"),
+        "{target_after}"
+    );
+    let standalone_openers: Vec<&str> = target_after
+        .lines()
+        .filter(|line| line.starts_with("<!-- agent:") && !line.starts_with("<!-- agent:boundary"))
+        .collect();
+    assert!(
+        standalone_openers.is_empty(),
+        "every generated opener shares a heading line: {standalone_openers:?}\n{target_after}"
+    );
+    assert!(
+        !target_after
+            .lines()
+            .any(|line| line.starts_with("## ") && !line.contains("<!-- agent:")),
+        "no generated heading stands alone above its opener:\n{target_after}"
+    );
+}
+
 #[test]
 fn new_target_inherits_the_source_effective_harness_when_agent_is_absent() {
     let dir = tempfile::TempDir::new().unwrap();

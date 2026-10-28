@@ -266,6 +266,7 @@ tmux-ci:
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-tmux-io --lib client_visibility:: -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-sync-io --lib superseded_owner:: -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib dispatch_into_a_client_less_session_reports_the_pane_not_visible -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
+	AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --lib active_turn_provenance_reads_the_supervisor_trigger_inject_from_the_actor_store -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	for test_filter in provision_pane_ manual_layout_provisions_paused_queue_without_dispatch_or_resume layout_owned_provisioning_does_not_focus_intermediate_pane; do \
 		AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) $(CARGO_CMD) test -p agent-doc-route-io --test route "$$test_filter" -- --ignored --test-threads="$(TMUX_TEST_THREADS)"; \
 	done

@@ -95,7 +95,91 @@
         "pane_not_visible_notice": null,
         "queue_paused": null,
         "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/software/tsift.md.\nThe OpenCode pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
         "summary": "Agent Doc is still running for tasks/software/tsift.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      }
+    },
+    {
+      "name": "a grok active turn refusal with its start time is busy",
+      "input": {
+        "output": "Error: dispatch-only grok reopen did not inject into pane %24 for tasks/sampleapp/dev.md because that pane is running an active turn (active Grok Build turn, busy since 2026-10-28T04:54:54Z); wait for the turn to finish, or stop it with `Ctrl+C` in that pane, then rerun Run Agent Doc or `agent-doc route --dispatch-only tasks/sampleapp/dev.md`",
+        "relative_path": "tasks/sampleapp/dev.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/sampleapp/dev.md.\nThe Grok Build pane has an active turn (busy since 2026-10-28T04:54:54Z) and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "the pre-grokreopen grok active turn refusal is busy, not a persistent failure",
+      "input": {
+        "output": "Error: dispatch-only grok reopen refused to inject into pane %24 for tasks/sampleapp/dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry",
+        "relative_path": "tasks/sampleapp/dev.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is still running for tasks/sampleapp/dev.md.\nThe Grok Build pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "persistent",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": null
+      }
+    },
+    {
+      "name": "a run that coalesced into the supervisor's own trigger is already running",
+      "input": {
+        "output": "[route] Run Agent Doc for tasks/sampleapp/dev.md is already running: the supervisor submitted this document's trigger into grok pane %24 at 2026-10-28T04:54:54Z and that turn is still in progress; no duplicate trigger was submitted already_running=document_trigger ui_outcome_contract=ui-outcome-v1 ui_outcome=queued_behind_owner ui_outcome_class=ok next_action=wait_for_owner_turn_to_drain",
+        "relative_path": "tasks/sampleapp/dev.md"
+      },
+      "expected": {
+        "agent_switch_deferred": null,
+        "kind": "queued_pending",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is already running for tasks/sampleapp/dev.md.\nThe supervisor started this document's turn just before your request; no second turn was started."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "queued_pending",
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
+        "summary": "Agent Doc is queued behind the active owner for tasks/sampleapp/dev.md.\nIt should run when that turn drains."
       }
     },
     {

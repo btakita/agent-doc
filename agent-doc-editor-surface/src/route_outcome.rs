@@ -247,13 +247,23 @@ fn is_latest_run_still_booting_shape(lower: &str) -> bool {
 }
 
 fn is_dispatch_only_active_turn_blocked(lower: &str) -> bool {
+    // `#grokreopen`: Grok Build's active turn is the same busy-running outcome
+    // as the other harnesses'; before it was listed here a Grok pane that was
+    // simply mid-turn surfaced as a persistent route failure.
     let has_active_turn_cue = lower.contains("opencode active turn")
         || lower.contains("active codex turn")
-        || lower.contains("active claude turn");
+        || lower.contains("active claude turn")
+        || lower.contains("active grok build turn");
     lower.contains("dispatch-only")
         && has_active_turn_cue
-        && (lower.contains("pane still shows") || lower.contains("pane is busy on an active"))
+        && (lower.contains("pane still shows")
+            || lower.contains("pane is busy on an active")
+            || lower.contains("pane is running an active turn"))
 }
+
+/// `#grokreopen`: the route coalesced into the turn the supervisor had already
+/// started for this document's own trigger.
+const ALREADY_RUNNING_DOCUMENT_TRIGGER_MARKER: &str = "already_running=document_trigger";
 
 fn is_dispatch_only_busy_actor_wait_timeout(lower: &str) -> bool {
     lower.contains("dispatch-only route will not inject a new trigger")
@@ -360,9 +370,34 @@ fn latest_regex_value(lines: &[&str], regex: &Regex) -> String {
     String::new()
 }
 
-fn still_running_message(relative_path: &str) -> String {
+static DISPATCH_ONLY_HARNESS: LazyLock<Regex> =
+    LazyLock::new(|| java_regex(r"\bdispatch-only (\S+) reopen\b"));
+static BUSY_SINCE: LazyLock<Regex> = LazyLock::new(|| java_regex(r"\bbusy since (\S+Z)\b"));
+
+/// The pane's harness as the operator knows it. Outputs that name none keep the
+/// pre-move wording ("Codex").
+fn still_running_harness_label(output: &str) -> &'static str {
+    let harness = DISPATCH_ONLY_HARNESS
+        .captures(output)
+        .and_then(|captures| captures.get(1))
+        .map(|harness| harness.as_str());
+    match harness {
+        Some("grok") => "Grok Build",
+        Some("claude") => "Claude",
+        Some("opencode") => "OpenCode",
+        _ => "Codex",
+    }
+}
+
+fn still_running_message(output: &str, relative_path: &str) -> String {
+    let harness = still_running_harness_label(output);
+    let since = BUSY_SINCE
+        .captures(output)
+        .and_then(|captures| captures.get(1))
+        .map(|since| format!(" (busy since {})", since.as_str()))
+        .unwrap_or_default();
     format!(
-        "Agent Doc is still running for {relative_path}.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+        "Agent Doc is still running for {relative_path}.\nThe {harness} pane has an active turn{since} and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
     )
 }
 
@@ -471,7 +506,14 @@ pub fn derive_route_outcome(evidence: &RouteOutcomeEvidence) -> RouteOutcome {
     let summary = match kind {
         RouteOutcomeKind::Persistent => None,
         RouteOutcomeKind::BusyRunning | RouteOutcomeKind::StartupNotReady => {
-            Some(still_running_message(relative_path))
+            Some(still_running_message(output, relative_path))
+        }
+        RouteOutcomeKind::QueuedPending
+            if lower.contains(ALREADY_RUNNING_DOCUMENT_TRIGGER_MARKER) =>
+        {
+            Some(format!(
+                "Agent Doc is already running for {relative_path}.\nThe supervisor started this document's turn just before your request; no second turn was started."
+            ))
         }
         RouteOutcomeKind::QueuedPending => Some(format!(
             "Agent Doc is queued behind the active owner for {relative_path}.\nIt should run when that turn drains."

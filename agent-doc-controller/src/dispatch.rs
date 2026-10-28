@@ -2829,6 +2829,182 @@ pub fn dispatch_only_blocker_recovery_hint(
     "restore an idle prompt and retry".to_string()
 }
 
+/// Actor-record transition reason the supervisor writes immediately before it
+/// types the document's own trigger into its pane (`auto_trigger_inject`).
+pub const AUTO_TRIGGER_INJECT_TRANSITION_REASON: &str = "auto_trigger_inject";
+
+/// `#grokreopen`: the pane-surface reason a dispatch-only reopen refuses on
+/// names an active harness turn, as opposed to a modal, dialog, draft, or
+/// interactive shell substate the operator must clear by hand.
+pub fn dispatch_only_blocker_is_active_turn(harness_binary: &str, reason: &str) -> bool {
+    matches!(
+        (harness_binary, reason),
+        ("grok", "active Grok Build turn")
+            | ("codex", "active codex turn")
+            | ("opencode", "opencode active turn")
+            | ("claude", "active claude turn")
+    )
+}
+
+/// `#grokreopen`: what the authoritative actor record says about the pane a
+/// dispatch-only reopen found busy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyActiveTurnActorFacts<'a> {
+    pub requested_pane: &'a str,
+    pub actor_pane: &'a str,
+    pub actor_busy: bool,
+    pub transition_reason: &'a str,
+    /// Unix seconds of the actor's last lifecycle transition.
+    pub transition_timestamp_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchOnlyActiveTurnProvenance {
+    /// The supervisor already submitted this document's own trigger into the
+    /// pane and the pane is still running that turn: a Run Agent Doc request is
+    /// already being served, so a second trigger would be a duplicate dispatch.
+    DocumentTriggerAlreadyRunning { started_at_secs: u64 },
+    /// An active turn the actor record cannot attribute to this document's own
+    /// trigger. `busy_since_secs` is set when the record proves when the pane
+    /// went busy.
+    OtherActiveTurn { busy_since_secs: Option<u64> },
+}
+
+/// `#grokreopen`: attribute an active turn on the dispatch pane. Only the
+/// conjunction "actor busy on this pane" + "last transition was the
+/// supervisor's own trigger inject" proves the run is already in progress; the
+/// pane surface alone (spinner / cancel hint) cannot say who started the turn.
+pub fn classify_dispatch_only_active_turn_provenance(
+    facts: Option<DispatchOnlyActiveTurnActorFacts<'_>>,
+) -> DispatchOnlyActiveTurnProvenance {
+    let Some(facts) = facts else {
+        return DispatchOnlyActiveTurnProvenance::OtherActiveTurn {
+            busy_since_secs: None,
+        };
+    };
+    let same_pane_busy = facts.actor_busy && facts.actor_pane == facts.requested_pane;
+    let busy_since_secs = (same_pane_busy && facts.transition_timestamp_secs > 0)
+        .then_some(facts.transition_timestamp_secs);
+    if same_pane_busy && facts.transition_reason == AUTO_TRIGGER_INJECT_TRANSITION_REASON {
+        return DispatchOnlyActiveTurnProvenance::DocumentTriggerAlreadyRunning {
+            started_at_secs: facts.transition_timestamp_secs,
+        };
+    }
+    DispatchOnlyActiveTurnProvenance::OtherActiveTurn { busy_since_secs }
+}
+
+/// `#grokreopen`: what a dispatch-only reopen does when its final pre-submit
+/// capture refuses on a pane-surface blocker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchOnlyActiveTurnRefusalDecision {
+    /// Not an active turn (dialog, modal, draft, shell substate): keep the
+    /// blocker-specific refusal and recovery hint.
+    NotActiveTurn,
+    /// The pane is running the document's own trigger, submitted by the
+    /// supervisor; the route succeeds without a second trigger.
+    AlreadyRunning { started_at_secs: u64 },
+    /// The pane is genuinely busy on a turn this route cannot coalesce into.
+    RefuseRunningTurn { busy_since_secs: Option<u64> },
+}
+
+/// `#grokreopen`: decide an active-turn refusal. The actor lookup runs only
+/// for an active-turn reason. A route that carries its own prompt text never
+/// coalesces into a running turn: that prompt would be lost.
+pub fn decide_dispatch_only_active_turn_refusal(
+    harness_binary: &str,
+    reason: &str,
+    has_queue_prompt: bool,
+    provenance: impl FnOnce() -> DispatchOnlyActiveTurnProvenance,
+) -> DispatchOnlyActiveTurnRefusalDecision {
+    if !dispatch_only_blocker_is_active_turn(harness_binary, reason) {
+        return DispatchOnlyActiveTurnRefusalDecision::NotActiveTurn;
+    }
+    match provenance() {
+        DispatchOnlyActiveTurnProvenance::DocumentTriggerAlreadyRunning { started_at_secs }
+            if !has_queue_prompt =>
+        {
+            DispatchOnlyActiveTurnRefusalDecision::AlreadyRunning { started_at_secs }
+        }
+        DispatchOnlyActiveTurnProvenance::DocumentTriggerAlreadyRunning { started_at_secs } => {
+            DispatchOnlyActiveTurnRefusalDecision::RefuseRunningTurn {
+                busy_since_secs: Some(started_at_secs),
+            }
+        }
+        DispatchOnlyActiveTurnProvenance::OtherActiveTurn { busy_since_secs } => {
+            DispatchOnlyActiveTurnRefusalDecision::RefuseRunningTurn { busy_since_secs }
+        }
+    }
+}
+
+fn dispatch_only_utc_time(secs: u64) -> String {
+    agent_doc_turn::turn_status::format_rfc3339_utc_secs(secs).replace(".000Z", "Z")
+}
+
+fn dispatch_only_active_turn_stop_key(harness_binary: &str) -> &'static str {
+    match harness_binary {
+        "grok" => "`Ctrl+C`",
+        "claude" | "codex" | "opencode" => "`Esc`",
+        _ => "the harness's stop key",
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyAlreadyRunningMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub started_at_secs: u64,
+    pub outcome_fields: &'a str,
+}
+
+/// `#grokreopen`: success report for a Run Agent Doc that raced the
+/// supervisor's own trigger. Nothing is wrong and nothing is asked of the
+/// operator.
+pub fn dispatch_only_already_running_message(
+    facts: DispatchOnlyAlreadyRunningMessageFacts<'_>,
+) -> String {
+    format!(
+        "[route] Run Agent Doc for {} is already running: the supervisor submitted this document's trigger into {} pane {} at {} and that turn is still in progress; no duplicate trigger was submitted already_running=document_trigger {}",
+        facts.file_display,
+        facts.harness_binary,
+        facts.pane,
+        dispatch_only_utc_time(facts.started_at_secs),
+        facts.outcome_fields,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyActiveTurnRefusalMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub reason: &'a str,
+    pub busy_since_secs: Option<u64>,
+}
+
+/// `#grokreopen`: refusal for a pane that is genuinely running a turn this
+/// route cannot attribute to the document's own trigger. The pane will not
+/// "restore" itself on request; it returns to an idle prompt when the turn
+/// ends, so the message names the running turn and the two real choices.
+pub fn dispatch_only_active_turn_refusal_message(
+    facts: DispatchOnlyActiveTurnRefusalMessageFacts<'_>,
+) -> String {
+    let since = facts
+        .busy_since_secs
+        .map(|secs| format!(", busy since {}", dispatch_only_utc_time(secs)))
+        .unwrap_or_default();
+    format!(
+        "dispatch-only {} reopen did not inject into pane {} for {} because that pane is running an active turn ({}{}); wait for the turn to finish, or stop it with {} in that pane, then rerun Run Agent Doc or `agent-doc route --dispatch-only {}`",
+        facts.harness_binary,
+        facts.pane,
+        facts.file_display,
+        facts.reason,
+        since,
+        dispatch_only_active_turn_stop_key(facts.harness_binary),
+        facts.file_display,
+    )
+}
+
 pub fn routed_dispatch_start_timeout(test_mode: bool) -> Duration {
     routed_dispatch_start_timeout_for_binary(None, test_mode)
 }
@@ -6496,6 +6672,171 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             file_display: "tasks/agent-doc/agent-doc-bugs2.md",
         });
         assert_eq!(generic, "restore an idle prompt and retry");
+    }
+
+    /// `#grokreopen`: the live repro. The operator's Run Agent Doc click landed
+    /// one second after the supervisor's post-restart auto-trigger typed
+    /// `agent-doc <file>` into the Grok pane, so the final capture saw Grok's
+    /// active turn. That turn is the run the operator asked for: coalesce it,
+    /// never tell the operator to "restore an idle prompt".
+    #[test]
+    fn grok_active_turn_started_by_the_supervisor_trigger_is_already_running() {
+        let incident = DispatchOnlyActiveTurnActorFacts {
+            requested_pane: "%24",
+            actor_pane: "%24",
+            actor_busy: true,
+            transition_reason: AUTO_TRIGGER_INJECT_TRANSITION_REASON,
+            transition_timestamp_secs: 1_793_163_294,
+        };
+        let decision = decide_dispatch_only_active_turn_refusal(
+            "grok",
+            "active Grok Build turn",
+            false,
+            || classify_dispatch_only_active_turn_provenance(Some(incident)),
+        );
+        assert_eq!(
+            decision,
+            DispatchOnlyActiveTurnRefusalDecision::AlreadyRunning {
+                started_at_secs: 1_793_163_294
+            }
+        );
+
+        // A route that carries its own prompt text must not be swallowed by
+        // the running turn: it refuses instead, naming the turn's start.
+        assert_eq!(
+            decide_dispatch_only_active_turn_refusal(
+                "grok",
+                "active Grok Build turn",
+                true,
+                || classify_dispatch_only_active_turn_provenance(Some(incident)),
+            ),
+            DispatchOnlyActiveTurnRefusalDecision::RefuseRunningTurn {
+                busy_since_secs: Some(1_793_163_294)
+            }
+        );
+
+        let message =
+            dispatch_only_already_running_message(DispatchOnlyAlreadyRunningMessageFacts {
+                harness_binary: "grok",
+                pane: "%24",
+                file_display: "tasks/sampleapp/dev.md",
+                started_at_secs: 1_793_163_294,
+                outcome_fields: "ui_outcome=queued_behind_owner",
+            });
+        assert!(message.contains("is already running"), "{message}");
+        assert!(message.contains("2026-10-28T04:54:54Z"), "{message}");
+        assert!(
+            message.contains("already_running=document_trigger"),
+            "{message}"
+        );
+        assert!(!message.contains("restore an idle prompt"), "{message}");
+    }
+
+    /// `#grokreopen`: only the actor record can attribute a turn. Another
+    /// pane, an idle record, or a turn the supervisor did not start by typing
+    /// this document's trigger is a genuinely busy pane.
+    #[test]
+    fn active_turn_without_trigger_provenance_is_a_plain_busy_refusal() {
+        let facts = |actor_pane, actor_busy, transition_reason| DispatchOnlyActiveTurnActorFacts {
+            requested_pane: "%24",
+            actor_pane,
+            actor_busy,
+            transition_reason,
+            transition_timestamp_secs: 1_793_163_294,
+        };
+        for (case, provenance) in [
+            ("no actor record", None),
+            (
+                "actor on another pane",
+                Some(facts("%7", true, AUTO_TRIGGER_INJECT_TRANSITION_REASON)),
+            ),
+            (
+                "actor not busy",
+                Some(facts("%24", false, AUTO_TRIGGER_INJECT_TRANSITION_REASON)),
+            ),
+            (
+                "restart spawn",
+                Some(facts("%24", true, "restart_continue_spawn")),
+            ),
+            (
+                "operator-started turn",
+                Some(facts("%24", true, "turn_started")),
+            ),
+        ] {
+            let decision = decide_dispatch_only_active_turn_refusal(
+                "grok",
+                "active Grok Build turn",
+                false,
+                || classify_dispatch_only_active_turn_provenance(provenance),
+            );
+            assert!(
+                matches!(
+                    decision,
+                    DispatchOnlyActiveTurnRefusalDecision::RefuseRunningTurn { .. }
+                ),
+                "{case}: {decision:?}"
+            );
+        }
+        assert_eq!(
+            classify_dispatch_only_active_turn_provenance(Some(facts("%24", true, "turn_started"))),
+            DispatchOnlyActiveTurnProvenance::OtherActiveTurn {
+                busy_since_secs: Some(1_793_163_294)
+            }
+        );
+        assert_eq!(
+            classify_dispatch_only_active_turn_provenance(Some(facts("%7", true, "turn_started"))),
+            DispatchOnlyActiveTurnProvenance::OtherActiveTurn {
+                busy_since_secs: None
+            }
+        );
+
+        let refusal =
+            dispatch_only_active_turn_refusal_message(DispatchOnlyActiveTurnRefusalMessageFacts {
+                harness_binary: "grok",
+                pane: "%24",
+                file_display: "tasks/sampleapp/dev.md",
+                reason: "active Grok Build turn",
+                busy_since_secs: Some(1_793_163_294),
+            });
+        assert!(refusal.contains("is running an active turn"), "{refusal}");
+        assert!(
+            refusal.contains("busy since 2026-10-28T04:54:54Z"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("wait for the turn to finish"), "{refusal}");
+        assert!(refusal.contains("`Ctrl+C`"), "{refusal}");
+        assert!(!refusal.contains("restore an idle prompt"), "{refusal}");
+    }
+
+    /// `#grokreopen`: blockers the operator must clear by hand keep their
+    /// specific refusal; the actor is never consulted for them.
+    #[test]
+    fn non_turn_blockers_never_consult_turn_provenance() {
+        for (harness, reason) in [
+            ("codex", "codex hook review prompt"),
+            ("codex", "queued draft in composer"),
+            ("grok", "active permission prompt"),
+            ("claude", "claude artifact picker open"),
+        ] {
+            assert!(!dispatch_only_blocker_is_active_turn(harness, reason));
+            assert_eq!(
+                decide_dispatch_only_active_turn_refusal(harness, reason, false, || {
+                    panic!("{harness}/{reason} must not read the actor record")
+                }),
+                DispatchOnlyActiveTurnRefusalDecision::NotActiveTurn
+            );
+        }
+        for (harness, reason) in [
+            ("grok", "active Grok Build turn"),
+            ("codex", "active codex turn"),
+            ("opencode", "opencode active turn"),
+            ("claude", "active claude turn"),
+        ] {
+            assert!(
+                dispatch_only_blocker_is_active_turn(harness, reason),
+                "{harness}"
+            );
+        }
     }
 
     #[test]

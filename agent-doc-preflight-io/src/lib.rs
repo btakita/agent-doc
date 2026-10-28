@@ -1191,6 +1191,18 @@ pub struct PreflightOutput {
     /// Plain-language instruction for [`Self::status_sync_revert`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_sync_revert_guidance: Option<String>,
+    /// Composed `agent:rules` for this turn, in order.
+    ///
+    /// Every body in the nearest `.agent-doc/project.md` comes first, in file
+    /// order, then every body in the session document, in file order. Session
+    /// rules add to project rules. A list item is one entry. Free text that
+    /// contains blank lines stays one entry. Ancestor project files do not
+    /// contribute rules.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agent_rules: Vec<String>,
+    /// How to apply [`Self::agent_rules`]. Present only when that list is non-empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_rules_guidance: Option<String>,
     /// Canonical serialized list of user-authored changes that should preempt
     /// or guide the current response cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

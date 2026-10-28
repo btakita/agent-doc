@@ -15,6 +15,7 @@ pub mod baseline_attribution;
 pub mod component_scope;
 pub mod element;
 pub mod id;
+pub mod rules;
 #[doc(hidden)]
 pub mod sibling_span_fixture;
 pub mod todo;
@@ -102,7 +103,7 @@ impl ElementTurnRole {
 /// prompt must remain visible rather than being silently treated as metadata.
 pub fn turn_role_for_component_name(name: &str) -> ElementTurnRole {
     match name {
-        "notes" | "todo" => ElementTurnRole::Informational,
+        "notes" | "todo" | "rules" => ElementTurnRole::Informational,
         _ => ElementTurnRole::Trigger,
     }
 }
@@ -265,6 +266,10 @@ mod tests {
         );
         assert_eq!(
             turn_role_for_component_name("todo"),
+            ElementTurnRole::Informational
+        );
+        assert_eq!(
+            turn_role_for_component_name("rules"),
             ElementTurnRole::Informational
         );
         assert_eq!(

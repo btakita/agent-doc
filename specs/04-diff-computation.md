@@ -5,16 +5,18 @@
 Line-level unified diff via `similar` crate. Returns `+`/`-`/` ` prefixed lines, or None if unchanged.
 
 Before comparison, the diff layer strips comments and neutralizes the bodies of
-components whose registry descriptor declares an informational turn role.
-Consequently, a content-only `agent:notes` edit produces no runnable diff and
-cannot start a turn. The full document remains available as context when another
-prompt-bearing change does start a turn, but notes content remains informational:
-it is not a prompt/completion target and is not automatically answered, struck,
-cleared, or otherwise mutated. Only an explicit exchange/queue request to edit
-notes authorizes that mutation. Marker or attribute changes, malformed components,
-and unknown components remain visible (fail open). A mixed notes and exchange or
-queue edit must therefore emit only the prompt-bearing change while omitting
-notes-body churn.
+components whose registry descriptor declares an informational turn role
+(`agent:notes`, `agent:todo`, and `agent:rules`).
+Consequently, a content-only edit of one of those components produces no
+runnable diff and cannot start a turn. The full document remains available as
+context when another prompt-bearing change does start a turn, and preflight
+still injects the current composed `agent:rules` text into that turn's cycle
+contract. Informational content is not a prompt/completion target and is not
+automatically answered, struck, cleared, or otherwise mutated. Only an explicit
+exchange/queue request to edit it authorizes that mutation. Marker or attribute
+changes, malformed components, and unknown components remain visible (fail
+open). A mixed informational and exchange or queue edit must therefore emit
+only the prompt-bearing change while omitting informational-body churn.
 
 Prompt-bearing diff triage is part of the diff contract, not just a prompt-builder convenience. The diff layer must classify ordered user-authored changes oldest-first as:
 

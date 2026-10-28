@@ -69,6 +69,11 @@ only the compact routing table that survives context compaction.
    [planning-dispatch.md](planning-dispatch.md). Run `agent-doc plan <FILE>` and
    execute its `prompt_targets`, `execution_scope`, `repo_actions`,
    `required_commands`, `pending_mutations`, `handoff`, and `blockers` contract.
+- When the cycle contract includes `agent_rules`, apply every entry this turn
+  in order. Entries from the nearest `.agent-doc/project.md` come first;
+  session `agent:rules` entries add to them and do not replace them. Editing
+  `agent:rules` does not by itself start a turn. A real exchange or queue turn
+  still carries the current composed rules.
 
 ## Mid-turn steering and work
 

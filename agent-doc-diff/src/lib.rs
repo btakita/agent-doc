@@ -6,7 +6,8 @@
 //!   range markers (`<!-- agent:* -->`). Comment patterns inside fenced code blocks
 //!   and inline backtick spans are not treated as comment syntax.
 //!   It also neutralizes content inside registry-declared informational components,
-//!   so context-only edits such as `agent:notes` do not start response cycles.
+//!   so context-only edits such as `agent:notes`, `agent:todo`, or `agent:rules`
+//!   do not start response cycles.
 //! - `post_exchange_ordinary_html_comments(content)` returns ordinary HTML comments
 //!   after the last `agent:exchange` close, excluding agent markers, component-owned
 //!   comments, and preserved user-note blocks.
@@ -65,8 +66,8 @@
 //! - `strip_preserves_comment_syntax_in_fenced_code_block`: `<!-- not a comment -->` inside triple-backtick fence → unchanged
 //! - `strip_preserves_comment_syntax_in_inline_backticks`: `` `<!--` `` in inline code → not treated as comment start
 //! - `strip_backtick_comment_before_agent_marker`: `` `<!--` `` text followed by `<!-- /agent:exchange -->` → agent marker not consumed
-//! - `operator_owned_informational_change_is_not_a_turn_trigger`: changing only `agent:notes` or
-//!   `agent:todo` content → no unified diff
+//! - `operator_owned_informational_change_is_not_a_turn_trigger`: changing only `agent:notes`,
+//!   `agent:todo`, or `agent:rules` content → no unified diff
 //! - `notes_change_with_exchange_prompt_still_triggers`: notes plus exchange prompt → prompt remains in unified diff
 //! - `post_exchange_comment_scan_ignores_agent_components_and_user_notes`:
 //!   post-exchange scratch comments are returned, while comments inside agent components
@@ -4097,6 +4098,11 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
                 "- [ ] Publish the draft.",
                 "- [x] Publish the draft.",
             ),
+            (
+                "rules",
+                "- Keep the old sample rule.",
+                "- Keep the new sample rule.",
+            ),
         ] {
             let previous =
                 format!("<!-- agent:{name} -->\n{previous_body}\n<!-- /agent:{name} -->\n");
@@ -4246,6 +4252,50 @@ diff --git a/tests/render_test.rs b/tests/render_test.rs
         assert!(diff.contains("+Please run the focused test."));
         assert!(!diff.contains("Old context."));
         assert!(!diff.contains("New context."));
+    }
+
+    #[test]
+    fn rules_change_with_exchange_prompt_still_triggers() {
+        let previous = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:rules -->\n",
+            "- Old sample rule.\n",
+            "<!-- /agent:rules -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "Please run the focused test for sample-app.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:rules -->\n",
+            "- New sample rule.\n",
+            "<!-- /agent:rules -->\n",
+        );
+
+        let diff = unified_diff_from_contents(previous, current).expect("exchange prompt diff");
+        assert!(diff.contains("+Please run the focused test for sample-app."));
+        assert!(!diff.contains("Old sample rule."));
+        assert!(!diff.contains("New sample rule."));
+    }
+
+    #[test]
+    fn rules_attribute_change_remains_visible() {
+        let previous = concat!(
+            "<!-- agent:rules -->\n",
+            "Keep this rule body.\n",
+            "<!-- /agent:rules -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:rules owner=operator -->\n",
+            "Keep this rule body.\n",
+            "<!-- /agent:rules -->\n",
+        );
+
+        let diff = unified_diff_from_contents(previous, current).expect("marker attribute diff");
+        assert!(diff.contains("owner=operator"), "{diff}");
+        assert!(!diff.contains("Keep this rule body."), "{diff}");
     }
 
     #[test]

@@ -411,6 +411,31 @@ mod tests {
     }
 
     #[test]
+    fn compute_returns_none_when_only_rules_content_changes() {
+        let snapshot = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:rules -->\n",
+            "- Old sample rule.\n",
+            "<!-- /agent:rules -->\n",
+        );
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:rules -->\n",
+            "- New sample rule that must not start a turn.\n",
+            "<!-- /agent:rules -->\n",
+        );
+        let (_dir, doc) = setup_compute_env(document, snapshot);
+
+        let result = compute(&TestBaselineStore, &doc).unwrap();
+
+        assert!(result.is_none(), "rules-only edits must not start a turn");
+    }
+
+    #[test]
     fn compute_neutralizes_only_a_proven_external_done_archive_append() {
         let removed = concat!(
             "- 2026-10-08 [#completed] Completed item.\n",

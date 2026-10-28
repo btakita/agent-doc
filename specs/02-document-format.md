@@ -33,9 +33,11 @@ Delimited by `---\n` at file start and closing `\n---\n`. If absent, all fields 
 
 An optional `.agent-doc/project.md` supplies project-wide prompt preset defaults
 using the same YAML frontmatter syntax as a session document. Only its
-`prompt_presets` map (including the `presets` alias) is inherited. Its body and
-all other frontmatter fields are inert for session documents; project routing,
-session identity, harness choice, and write policy remain document-local.
+`prompt_presets` map (including the `presets` alias) is inherited from
+frontmatter. Other frontmatter fields are inert for session documents; project
+routing, session identity, harness choice, and write policy remain
+document-local. `agent:rules` blocks in the nearest project file are a separate
+inherited body surface, described below.
 
 Project preset resolution is a read-time overlay, not template expansion or
 synchronization:
@@ -60,8 +62,22 @@ synchronization:
    copied into it.
 
 Structured inherited presets retain their project-relative runbook semantics.
-This is intentionally limited to presets; sharing more frontmatter requires a
-separate field-by-field contract rather than implicitly inheriting every key.
+Frontmatter inheritance is intentionally limited to presets; sharing more
+frontmatter requires a separate field-by-field contract rather than implicitly
+inheriting every key.
+
+`agent:rules` in the nearest `.agent-doc/project.md` is a separate inherited
+body surface. Preflight composes every `agent:rules` body in that nearest
+project file, in file order, then every `agent:rules` body in the session
+document, in file order, and injects the result as `agent_rules` on the cycle
+contract (`agent_rules_guidance` accompanies a non-empty list). Session rules
+add to project rules; they do not replace them. Ancestor project files do not
+contribute rules. A markdown list is one rule per item. Free text is one rule
+as written. Several blocks are allowed in either file. A content-only edit
+does not start a turn. A readable project file whose component markers do not
+parse contributes no rules and does not by itself fail admission. Preset
+resolution still fail-closes when that same file cannot be read or its
+frontmatter is malformed.
 
 ## Components
 

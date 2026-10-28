@@ -2830,6 +2830,8 @@ fn run_with_options_to_writer_in_pass(
             claimed_queue_items: &queue_state.claimed_queue_heads,
         })
     });
+    let agent_rules = composed_agent_rules(file, queue_authoritative_content);
+    let agent_rules_guidance = agent_doc_element::rules::agent_rules_guidance(&agent_rules);
     let output = PreflightOutput {
         warnings,
         layout_issues,
@@ -2889,6 +2891,8 @@ fn run_with_options_to_writer_in_pass(
             .as_ref()
             .map(agent_doc_document::status_projection::render_status_sync_revert),
         status_sync_revert,
+        agent_rules,
+        agent_rules_guidance,
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
@@ -2927,6 +2931,49 @@ fn run_with_options_to_writer_in_pass(
     writeln!(writer, "{}", json)?;
 
     Ok(())
+}
+
+/// Nearest `.agent-doc/project.md` rules, then rules in `session_content`.
+///
+/// Ancestor project files are not consulted. When `file` is that nearest
+/// `project.md`, the session content is the only copy. A missing project file
+/// contributes nothing. A project file that cannot be read, or whose component
+/// markers do not parse, contributes nothing and does not fail preflight:
+/// preset resolution still fail-closes on its own read of the same file.
+fn composed_agent_rules(file: &Path, session_content: &str) -> Vec<String> {
+    let session_rules = agent_doc_element::rules::rules_from_document(session_content);
+    let project_rules = project_agent_rules(file);
+    agent_doc_element::rules::compose_rules(&project_rules, &session_rules)
+}
+
+fn project_agent_rules(file: &Path) -> Vec<String> {
+    let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return Vec::new();
+    };
+    let project_md = root.join(".agent-doc").join("project.md");
+    if same_file(file, &project_md) {
+        return Vec::new();
+    }
+    if !project_md.exists() {
+        return Vec::new();
+    }
+    match std::fs::read_to_string(&project_md) {
+        Ok(text) => agent_doc_element::rules::rules_from_document(&text),
+        Err(error) => {
+            eprintln!(
+                "[preflight] agent:rules: could not read {}: {error}",
+                project_md.display()
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn same_file(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 fn recorded_stall_head_is_in_snapshot(
@@ -10284,6 +10331,219 @@ mod tests {
                 .unwrap()
                 .contains("Why did the agent suggest int32 in the ADR?"),
             "the operator's edit stays this turn's prompt"
+        );
+    }
+
+    fn probe_contract(doc: &std::path::Path) -> serde_json::Value {
+        let mut output = Vec::new();
+        run_with_options_to_writer(
+            doc,
+            PreflightOptions {
+                probe: true,
+                ..Default::default()
+            },
+            &mut output,
+        )
+        .unwrap_or_else(|error| panic!("preflight probe failed: {error}"));
+        serde_json::from_slice(&output).unwrap_or_else(|error| {
+            panic!(
+                "preflight probe was not JSON ({error}): {}",
+                String::from_utf8_lossy(&output)
+            )
+        })
+    }
+
+    #[test]
+    fn preflight_composes_nearest_project_rules_then_session_rules() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- Ancestor rule must stay out of the contract.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let nested = dir.path().join("sample-app");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        std::fs::write(
+            nested.join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- Nearest list rule.\n",
+                "- Nearest second list rule.\n",
+                "<!-- /agent:rules -->\n",
+                "<!-- agent:rules -->\n",
+                "Nearest free text.\n",
+                "\n",
+                "It stays one rule.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let doc = nested.join("sampleorders.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:rules -->\n",
+            "- Session list rule.\n",
+            "<!-- /agent:rules -->\n",
+            "<!-- agent:rules -->\n",
+            "Session free text.\n",
+            "<!-- /agent:rules -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "## User\n\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            baseline.replace(
+                "## User\n\n",
+                "## User\n\nPlease run the focused test for sample-app.\n",
+            ),
+        )
+        .unwrap();
+
+        let contract = probe_contract(&doc);
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!([
+                "Nearest list rule.",
+                "Nearest second list rule.",
+                "Nearest free text.\n\nIt stays one rule.",
+                "Session list rule.",
+                "Session free text.",
+            ]),
+            "{contract:#}"
+        );
+        let joined = contract["agent_rules"].to_string();
+        assert!(
+            !joined.contains("Ancestor rule must stay out of the contract."),
+            "{contract:#}"
+        );
+        assert_eq!(
+            contract["agent_rules_guidance"],
+            agent_doc_element::rules::AGENT_RULES_GUIDANCE
+        );
+        assert_eq!(contract["no_changes"], false, "{contract:#}");
+        let diff = contract["diff"].as_str().unwrap_or_default();
+        assert!(
+            diff.contains("Please run the focused test for sample-app."),
+            "{diff}"
+        );
+        assert!(!diff.contains("Nearest list rule."), "{diff}");
+        assert!(!diff.contains("Session free text."), "{diff}");
+        assert!(
+            !diff.contains("Ancestor rule must stay out of the contract."),
+            "{diff}"
+        );
+    }
+
+    #[test]
+    fn preflight_ignores_ancestor_rules_when_the_nearest_project_has_no_project_file() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "<!-- agent:rules -->\n",
+                "- Ancestor rule must stay out of the contract.\n",
+                "<!-- /agent:rules -->\n",
+            ),
+        )
+        .unwrap();
+        let nested = dir.path().join("sample-app");
+        std::fs::create_dir_all(nested.join(".agent-doc")).unwrap();
+        let doc = nested.join("sampleorders.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:rules -->\n",
+                "Session free text only.\n",
+                "<!-- /agent:rules -->\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+
+        let contract = probe_contract(&doc);
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["Session free text only."]),
+            "{contract:#}"
+        );
+    }
+
+    #[test]
+    fn preflight_rules_only_edit_does_not_start_a_turn() {
+        let dir = setup_project();
+        let doc = dir.path().join("sampleorders.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:rules -->\n",
+            "- Old sample rule.\n",
+            "<!-- /agent:rules -->\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(
+            &doc,
+            baseline.replace(
+                "- Old sample rule.",
+                "- New sample rule that must not start a turn.",
+            ),
+        )
+        .unwrap();
+
+        let contract = probe_contract(&doc);
+        assert_eq!(contract["no_changes"], true, "{contract:#}");
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["New sample rule that must not start a turn."]),
+            "{contract:#}"
+        );
+        assert!(contract["diff"].is_null(), "{contract:#}");
+    }
+
+    #[test]
+    fn preflight_does_not_duplicate_rules_when_the_session_is_project_md() {
+        let dir = setup_project();
+        let doc = dir.path().join(".agent-doc/project.md");
+        std::fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:rules -->\n",
+                "- Once only.\n",
+                "<!-- /agent:rules -->\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "## User\n\n",
+                "Please run the focused test for sample-app.\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+        )
+        .unwrap();
+
+        let contract = probe_contract(&doc);
+        assert_eq!(
+            contract["agent_rules"],
+            serde_json::json!(["Once only."]),
+            "{contract:#}"
         );
     }
 

@@ -21,7 +21,9 @@ presets:
 
 # Agent-doc project defaults
 
-This body may explain the project's presets, but is not inherited.
+This body may explain the project's presets. Preset prose in the body is not
+inherited. `agent:rules` blocks in this nearest project file are inherited as
+turn context; see the document-format spec.
 ```
 
 For ordinary fields, precedence is document frontmatter, nearest project.md,

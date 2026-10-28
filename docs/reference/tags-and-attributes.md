@@ -55,10 +55,29 @@ is the legacy alias for `backlog`.
 | `agent:signals` | Realtime signal definitions/readings reconciled by the signal subsystem. |
 | `agent:todo` | Operator-owned informational checklist. It is not runnable work and is never promoted to the queue. |
 | `agent:notes` | Operator-owned informational context. Content-only edits do not start a turn. |
+| `agent:rules` | Operator-owned rules for every admitted turn. A list is one rule per item; free text is included as written. Multiple blocks compose in file order with the nearest `.agent-doc/project.md`, then the session. Content-only edits do not start a turn. |
 
 `agent:model` is a supported preflight control component rather than a
 registry-owned work component. Its trimmed body may be a tier
 (`auto`, `low`, `med`, or `high`) or a model name known to the active harness.
+
+### `agent:rules`
+
+`agent:rules` supplies context for each admitted turn. The body may be a
+markdown list, free text, or both. Each top-level list item (`- `, `* `,
+`+ `, `1. `, `1) `, indented by at most three spaces) is one rule.
+Continuation lines belong to that item only when they are indented deeper
+than the marker; a later column-0 paragraph is a new free-text rule. Free
+text, including its blank lines, is one rule as written. Code fences are not
+split into rules. Item ids are not required and are ordinary text.
+
+Several `agent:rules` blocks may appear in one file. Preflight composes every
+body in the nearest `.agent-doc/project.md`, in file order, then every body
+in the session document, in file order. Session rules add to project rules.
+The composed list is `agent_rules` on the cycle contract, with
+`agent_rules_guidance` when the list is non-empty. A content-only edit does
+not start a turn. A real exchange or queue turn still includes the current
+rules.
 
 Names such as `input`, `output`, `findings`, `log`, and `architecture` are
 conventional generic patch slots. Any syntactically valid unregistered

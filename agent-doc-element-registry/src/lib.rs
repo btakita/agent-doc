@@ -24,6 +24,20 @@ pub const NOTES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+pub const RULES_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "rules",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::SharedOperatorAuthoritative,
+    write_policy: ElementWritePolicy::MergeOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::LocalOnly,
+    realtime: true,
+};
+
 pub const TODO_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     name: "todo",
     aliases: &[],
@@ -50,6 +64,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
     NOTES_DESCRIPTOR,
+    RULES_DESCRIPTOR,
 ];
 
 /// Binary-written components that only ever appear nested inside another
@@ -115,6 +130,7 @@ mod tests {
         assert_eq!(find_built_in("boundary").unwrap().name, "boundary");
         assert_eq!(find_built_in("todo").unwrap().name, "todo");
         assert_eq!(find_built_in("notes").unwrap().name, "notes");
+        assert_eq!(find_built_in("rules").unwrap().name, "rules");
         assert_eq!(find_built_in("unknown"), None);
     }
 
@@ -199,6 +215,24 @@ mod tests {
         );
         assert_eq!(todo.realtime_model, ElementRealtimeModel::None);
         assert_eq!(todo.composition_role, ElementCompositionRole::LocalOnly);
+    }
+
+    #[test]
+    fn rules_are_operator_owned_turn_context() {
+        let rules = find_built_in("rules").unwrap();
+        assert_eq!(
+            rules.authority,
+            ElementAuthority::SharedOperatorAuthoritative
+        );
+        assert_eq!(rules.write_policy, ElementWritePolicy::MergeOnly);
+        assert_eq!(rules.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(rules.turn_role, ElementTurnRole::Informational);
+        assert_eq!(
+            rules.turn_role,
+            agent_doc_element::turn_role_for_component_name("rules")
+        );
+        assert_eq!(rules.realtime_model, ElementRealtimeModel::None);
+        assert_eq!(rules.composition_role, ElementCompositionRole::LocalOnly);
     }
 
     #[test]

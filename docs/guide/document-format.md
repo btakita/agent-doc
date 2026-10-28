@@ -81,8 +81,15 @@ Project presets are live defaults, not a copied project template. Changes to
 `.agent-doc/project.md` apply to existing session documents without rewriting
 them. A session-local preset with the same exact name overrides the project
 value; an unfinished or null local declaration also masks the inherited value
-while it is being edited. Only presets are inherited—the project file's body
-and its other frontmatter fields do not affect session behavior.
+while it is being edited. Presets and `agent:rules` are inherited. Other
+frontmatter fields stay document-local. Preset inheritance walks every ancestor
+project file and overlays nearer names. Rules are different: preflight reads
+every `agent:rules` body in the nearest `.agent-doc/project.md`, in file order,
+then every `agent:rules` body in the session document, in file order. Session
+rules add to those project rules. They do not replace them, and an ancestor
+project file does not contribute rules. A markdown list is one rule per item.
+Free text is included as written. Multiple `agent:rules` elements are allowed
+in either file. The rest of the project file's body is not inherited.
 
 ## Interaction modes
 

@@ -5757,13 +5757,20 @@ fn ensure_deferred_document_write_intent_with_mode(
             // current/committed cut. Preserve the original reconnect base but
             // replace the stale target exactly; merging the old target again
             // would replay an already-materialized response branch.
-            expected_content = pending
-                .expected_content
-                .clone()
-                .filter(|base| {
-                    agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
-                })
-                .unwrap_or_else(|| expected_current.to_string());
+            expected_content = advance_retained_chain_base(
+                file,
+                source,
+                &pending,
+                pending
+                    .expected_content
+                    .clone()
+                    .filter(|base| {
+                        agent_doc_hash::content_hash(base)
+                            .eq_ignore_ascii_case(&pending.expected_hash)
+                    })
+                    .unwrap_or_else(|| expected_current.to_string()),
+                expected_current,
+            );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -5847,7 +5854,13 @@ fn ensure_deferred_document_write_intent_with_mode(
                 })?;
                 target_content =
                     canonicalize_and_validate_agent_rebase(&target_content, content, file, source)?;
-                expected_content = merge_base;
+                expected_content = advance_retained_chain_base(
+                    file,
+                    source,
+                    &pending,
+                    merge_base,
+                    expected_current,
+                );
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -5912,8 +5925,16 @@ fn ensure_deferred_document_write_intent_with_mode(
                 // chain of canonical target refinements (commit boundary moves,
                 // marker cleanup, compaction). Re-basing on the prior target would
                 // make a reconnecting pre-force editor look like it deleted the
-                // response introduced by that target.
-                expected_content = merge_base;
+                // response introduced by that target. `typingdupe`: only for the
+                // components that chain wrote; every other component's base is
+                // the cut this successor was derived over.
+                expected_content = advance_retained_chain_base(
+                    file,
+                    source,
+                    &pending,
+                    merge_base,
+                    expected_current,
+                );
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -5991,6 +6012,53 @@ fn ensure_deferred_document_write_intent_with_mode(
         )?;
     }
     Ok(intent_id)
+}
+
+/// `typingdupe`: the base a successor of `pending` keeps. A chain of retained
+/// writes keeps its original editor cut as the base of every component the
+/// chain wrote, so a reconnecting editor that never received the chain's
+/// response still sees it as agent text. Every other component takes
+/// `current_cut`'s body, the cut the successor was derived over: keeping the
+/// original body there pairs an older snapshot of the operator's typing (base)
+/// with a newer one (target), which the next rebase over the operator's cut
+/// turns into a duplicated line.
+fn advance_retained_chain_base(
+    file: &Path,
+    source: &str,
+    pending: &agent_doc_state_backbone::DocumentWriteIntentProjection,
+    chain_base: String,
+    current_cut: &str,
+) -> String {
+    let Some(advanced) = write_policy::advance_retained_base_over_untouched_components(
+        &chain_base,
+        &pending.target_content,
+        current_cut,
+    ) else {
+        return chain_base;
+    };
+    if advanced == chain_base {
+        return chain_base;
+    }
+    let components =
+        agent_doc_element::component_scope::changed_component_scope(&chain_base, &advanced)
+            .map(|scope| {
+                scope
+                    .to_pairs()
+                    .into_iter()
+                    .map(|(name, occurrence)| format!("{name}:{occurrence}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_else(|| "framing".to_string());
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_deferred_write_base_advanced file={} prior_intent_id={} components=[{components}] reason=chain_untouched_components_take_current_cut (typingdupe)",
+            file.display(),
+            pending.intent_id,
+        ),
+    );
+    advanced
 }
 
 /// A completion cell is a transient projection of a live queue claim. Queue
@@ -15920,6 +15988,141 @@ mod tests {
             )
             .unwrap();
         assert_queue("composed projection", &projected, &edited);
+    }
+
+    /// `typingdupe`: tasks/agent-doc/agent-doc-bugs.md, 2026-10-28T03:18:28Z-
+    /// 03:18:46Z. A retried closeout's `queue consume` retained intent
+    /// `c39133ce…` over the relay cut while the operator was typing a nested
+    /// Todo answer. Its CAS raced, the controller projected it, and the retry
+    /// derived `ce1b12bb…` over the newer relay cut. Composition merged the two
+    /// and kept the FIRST intent's base, so the composed intent `fae93d23…`
+    /// paired an older snapshot of the operator's line (base) with a newer one
+    /// (target): the Todo the agent never touched looked agent-edited. The
+    /// controller then rebased it over the operator's still-newer cut
+    /// (`crdt_cp_write_component_scope components=[exchange:0,todo:0]`) and the
+    /// line-level merge kept both versions: the stale prefix
+    /// `- If the item … If the item ` above the line the operator finished.
+    #[test]
+    fn typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot() {
+        let todo = |answer: &str| {
+            format!(
+                concat!(
+                    "<!-- agent:todo -->\n",
+                    "- [ ] [#automationapiquestions] Answer the automation-API design questions\n",
+                    "  - Where is a hidden (deleted) row stored, and how do you un-hide it?\n",
+                    "    - Let's start with a list item that has sub list items.\n",
+                    "{}",
+                    "  - Until provider idempotency keys are confirmed, is a local record acceptable?\n",
+                    "<!-- /agent:todo -->\n",
+                ),
+                answer,
+            )
+        };
+        let doc = |exchange_tail: &str, queue: &str, answer: &str| {
+            format!(
+                concat!(
+                    "---\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "❯ Keep agent:todo in sync.\n",
+                    "{}",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:queue go -->\n",
+                    "{}",
+                    "<!-- /agent:queue -->\n\n",
+                    "{}",
+                ),
+                exchange_tail,
+                queue,
+                todo(answer),
+            )
+        };
+        let response = concat!(
+            "### Re: agent:todo kept in sync — opus\n\n",
+            "Done.\n",
+            "<!-- agent:boundary:closeout -->\n",
+        );
+        let live_head = "- `agent:todo` should always be in sync.\n";
+        let struck_head = "- ~~`agent:todo` should always be in sync.~~\n";
+        let echo = "> **Queue prompt:** `agent:todo` should always be in sync.\n\n";
+        // Successive cuts of ONE line the operator is typing into the Todo.
+        let mid_rewrite =
+            "    - If the item is not in the list tree, agent-doc can add the item. If \n";
+        let snapshot =
+            "    - If the item is not in the list tree, agent-doc can add the item. If the item \n";
+        let finished = "    - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.\n";
+
+        // First attempt: the relay cut while the operator was mid-rewrite, and
+        // the queue consumption derived from it.
+        let relay1 = doc(response, live_head, mid_rewrite);
+        let target1 = doc(response, struck_head, mid_rewrite);
+        // The CAS raced; the controller projected the first intent over the
+        // operator's newer cut, and the retry derived its own target (one more
+        // agent-only change, the echo cell) over that newer relay cut.
+        let relay2 = doc(response, struck_head, snapshot);
+        let target2 = doc(&format!("{echo}{response}"), struck_head, snapshot);
+        // The operator kept typing before the controller projected the
+        // composed intent.
+        let delivery = doc(response, struck_head, finished);
+
+        let (_dir, file, _canonical) = temp_doc(&relay1);
+        for (expected, target) in [(&relay1, &target1), (&relay2, &target2)] {
+            ensure_deferred_document_write_intent(
+                &file,
+                expected,
+                target,
+                "queue_consume",
+                DocumentWriteDeferredReason::EditorProjectionPending,
+            )
+            .unwrap();
+        }
+        let pending = pending_document_write(&file).expect("composed queue consume retained");
+        let base = pending
+            .expected_content
+            .as_deref()
+            .expect("composed intent keeps a content-bearing base");
+        let projected =
+            agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
+                base,
+                &pending.target_content,
+                &delivery,
+            )
+            .unwrap();
+        let answers: Vec<&str> = projected
+            .lines()
+            .filter(|line| {
+                line.trim_start()
+                    .starts_with("- If the item is not in the list tree")
+            })
+            .collect();
+        assert_eq!(
+            answers,
+            vec![finished.trim_end_matches('\n')],
+            "the operator's finished line must be the only copy:\n{projected}"
+        );
+        assert_eq!(projected.matches(struck_head).count(), 1, "{projected}");
+        assert_eq!(projected.matches(echo).count(), 1, "{projected}");
+        assert_eq!(
+            projected.matches("### Re: agent:todo kept in sync").count(),
+            1
+        );
+        assert_eq!(
+            agent_doc_element::component_scope::changed_component_scope(&delivery, &projected)
+                .map(|scope| scope.contains("todo", 0)),
+            Some(false),
+            "the projection must not write the Todo:\n{projected}"
+        );
+        // The agent never touched the Todo: the retained pair must not claim it.
+        let scope = agent_doc_element::component_scope::changed_component_scope(
+            base,
+            &pending.target_content,
+        )
+        .expect("composed intent is component-scoped");
+        assert!(
+            !scope.contains("todo", 0),
+            "retained intent claims operator Todo text as agent-authored: {:?}\nbase:\n{base}\ntarget:\n{}",
+            scope.to_pairs(),
+            pending.target_content,
+        );
     }
 
     #[test]

@@ -271,6 +271,80 @@ pub fn changed_component_scope(before: &str, after: &str) -> Option<ComponentWri
     Some(ComponentWriteScope::new(changed))
 }
 
+/// One top-level component occurrence and its body range in a document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TopLevelComponentBody {
+    pub component: ScopedComponent,
+    pub body: std::ops::Range<usize>,
+}
+
+/// Every top-level component occurrence of `doc` with its body range, in
+/// document order. Occurrence indexes count nested components too, matching
+/// [`changed_component_scope`] and [`scoped_component_bodies`]. `None` when
+/// `doc` does not parse.
+pub fn top_level_component_bodies(doc: &str) -> Option<Vec<TopLevelComponentBody>> {
+    let components = crate::element::parse(doc).ok()?;
+    let top_level = top_level_flags(&components);
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut bodies = Vec::new();
+    for (component, top_level) in components.iter().zip(top_level) {
+        let next = seen.entry(component.name.as_str()).or_insert(0);
+        let occurrence = *next;
+        *next += 1;
+        if top_level {
+            bodies.push(TopLevelComponentBody {
+                component: ScopedComponent::new(component.name.clone(), occurrence),
+                body: component.open_end..component.close_start,
+            });
+        }
+    }
+    Some(bodies)
+}
+
+/// `dst` with the body of every top-level component occurrence named in
+/// `scope` replaced by that occurrence's body in `src`. Everything else, the
+/// framing between components included, stays `dst`'s.
+///
+/// `None` when either document does not parse, the two do not hold the same
+/// top-level component occurrences in the same order, or `scope` names an
+/// occurrence that is not top-level in both: the two cannot then be spliced
+/// component by component, and callers keep their unspliced value.
+pub fn replace_component_bodies(
+    dst: &str,
+    src: &str,
+    scope: &ComponentWriteScope,
+) -> Option<String> {
+    let dst_bodies = top_level_component_bodies(dst)?;
+    let src_bodies = top_level_component_bodies(src)?;
+    if dst_bodies.len() != src_bodies.len()
+        || dst_bodies
+            .iter()
+            .zip(&src_bodies)
+            .any(|(dst_body, src_body)| dst_body.component != src_body.component)
+    {
+        return None;
+    }
+    if scope.components().iter().any(|scoped| {
+        !dst_bodies
+            .iter()
+            .any(|candidate| &candidate.component == scoped)
+    }) {
+        return None;
+    }
+    let mut spliced = String::with_capacity(dst.len());
+    let mut cursor = 0usize;
+    for (dst_body, src_body) in dst_bodies.iter().zip(&src_bodies) {
+        if !scope.contains(&dst_body.component.name, dst_body.component.occurrence) {
+            continue;
+        }
+        spliced.push_str(&dst[cursor..dst_body.body.start]);
+        spliced.push_str(&src[src_body.body.clone()]);
+        cursor = dst_body.body.end;
+    }
+    spliced.push_str(&dst[cursor..]);
+    Some(spliced)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,6 +709,34 @@ mod tests {
                 assert!(bodies.windows(2).all(|pair| pair[0].end <= pair[1].start));
             }
         }
+    }
+
+    #[test]
+    fn replace_component_bodies_splices_only_the_scoped_occurrences() {
+        let src = DOC
+            .replace("- [ ] [#a] one\n", "- [ ] [#a] one (src)\n")
+            .replace("- do [#a]\n", "- do [#a] (src)\n");
+        let dst = DOC
+            .replace("Prompt.\n", "Prompt, typed.\n")
+            .replace("- do [#a]\n", "- do [#a] (dst)\n");
+        let backlog = ComponentWriteScope::new([ScopedComponent::new("backlog", 0)]);
+        assert_eq!(
+            replace_component_bodies(&dst, &src, &backlog).as_deref(),
+            Some(
+                dst.replace("- [ ] [#a] one\n", "- [ ] [#a] one (src)\n")
+                    .as_str()
+            )
+        );
+        assert_eq!(
+            replace_component_bodies(&dst, &src, &ComponentWriteScope::default()).as_deref(),
+            Some(dst.as_str())
+        );
+        // A scoped occurrence missing from either side cannot be spliced.
+        let missing = ComponentWriteScope::new([ScopedComponent::new("todo", 0)]);
+        assert_eq!(replace_component_bodies(&dst, &src, &missing), None);
+        // Different component layouts cannot be spliced either.
+        let reshaped = format!("{DOC}<!-- agent:todo -->\n- [ ] t\n<!-- /agent:todo -->\n");
+        assert_eq!(replace_component_bodies(&reshaped, &src, &backlog), None);
     }
 
     #[test]

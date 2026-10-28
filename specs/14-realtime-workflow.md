@@ -1816,6 +1816,55 @@ replacement replica.
   as `convergence_pending`. See the closeout-commands rule "A refused commit
   names its reason".
 
+`typingdupe`: a retained pair never claims the operator's typing. Measured on
+`tasks/agent-doc/agent-doc-bugs.md` 2026-10-28T03:18:28Z-03:18:46Z (commit
+`28cda030f4` in the session repo). A retried closeout's `queue consume`
+retained intent `c39133ce…` over the relay cut while the operator was typing a
+nested Todo answer. Its CAS raced (`compare_and_swap_raced`), the controller
+projected it (`components=[exchange:0,queue:0]`), and the retry derived
+`ce1b12bb…` over the newer relay cut. Composition
+(`queue_consume_deferred_write_composed … composed_hash=fae93d23…`) kept the
+first intent's base for the whole document. The composed pair therefore held an
+older cut of the operator's line in its base and a newer one in its target, so
+the Todo, which the agent never touched, read as agent-authored. The
+controller rebased it over the operator's still-newer cut
+(`crdt_cp_write_component_scope components=[exchange:0,todo:0]`). The
+line-level merge saw two replacements of one base line and kept both: the stale
+prefix `- If the item … If the item ` above the line the operator finished.
+The same shape, 14 bytes long, landed at 03:16:42Z (`components=[todo:0]`), and
+the operator deleted it three seconds later.
+
+The rules:
+
+- **A successor's base advances over the components its chain never wrote.**
+  Composition, current-cut refinement and progressive editor-reconnect
+  supersession all keep the chain's original editor cut as the base of every
+  component the chain wrote (`changed_component_scope(chain_base,
+  chain_target)`), so a reconnecting editor that never received the chain's
+  response still reads it as agent text. Every other component takes the body
+  of the cut the successor was derived over (`expected_current`), and so does
+  the framing (`advance_retained_base_over_untouched_components`; ops log
+  `{source}_deferred_write_base_advanced … components=[…]`). When the chain's
+  change is not component-scoped, or the cut has a different component layout,
+  the original base is kept.
+- **A stale typing snapshot is not an agent op.** Before any agent target is
+  rebased over an editor cut (`rebase_agent_candidate_over_editor_cut`, and
+  so the controller's retained transition too), each component the target
+  changed is checked. A component qualifies when the operator changed it as
+  well, every line the target removed from the base the cut removed too, and
+  every line the target added is one the cut added or a strict prefix of one.
+  Its body is reset to the base (`neutralize_stale_operator_typing_snapshots`),
+  so the rebase takes the operator's body unchanged. A component with a real
+  agent edit, such as a checked box or an agent-added line, never qualifies.
+
+The regression
+`typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`
+(`agent-doc-document-realtime-io`) drives the real retained-intent journal
+through the composition and then the controller's rebase. It asserts that the
+composed pair does not scope the Todo, and that the projection holds exactly
+one copy of the operator's finished line. The `write_policy` tests pin each
+rule on its own.
+
 The exhausted state is durable, not just a log line (`#splicesessionack`, GH
 #273 remainder): `session-check` kept reporting "the exact editor delivery
 acknowledgement is pending" — a self-converging wait — for a state only the

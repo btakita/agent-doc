@@ -166,11 +166,171 @@ struct ReconciledRebase {
     editor_reconciled: String,
 }
 
+/// `typingdupe` (1): advance a retained intent's base over every component the
+/// retained chain never wrote.
+///
+/// A retained intent is a (base, target) pair whose difference is the agent's
+/// unapplied op. Composition and refinement keep the chain's ORIGINAL base
+/// while the successor target is derived over a newer cut (`current_cut`). A
+/// component the agent never touched then carries the newer operator text in
+/// the target and an older snapshot of it in the base: the pair claims the
+/// operator's typing as agent-authored, and a later rebase over a still newer
+/// operator cut keeps both versions of the line.
+///
+/// For each top-level component the chain left unchanged (`chain_target` body
+/// equals `chain_base` body) the returned base takes `current_cut`'s body. A
+/// component the chain wrote keeps `chain_base`'s body, so a chain response a
+/// reconnecting editor never received still reads as agent text. The framing
+/// is `current_cut`'s, since the chain did not write it.
+///
+/// `None` when the chain's change is not component-scoped (it changed framing
+/// or the component layout), or `current_cut` holds a different component
+/// layout: the caller then keeps `chain_base`.
+pub fn advance_retained_base_over_untouched_components(
+    chain_base: &str,
+    chain_target: &str,
+    current_cut: &str,
+) -> Option<String> {
+    let footprint =
+        agent_doc_element::component_scope::changed_component_scope(chain_base, chain_target)?;
+    agent_doc_element::component_scope::replace_component_bodies(
+        current_cut,
+        chain_base,
+        &footprint,
+    )
+}
+
+/// `typingdupe` (2): drop, from an agent target, every component whose whole
+/// change over `merge_base` is an older snapshot of what the operator is still
+/// typing in `editor_cut`.
+///
+/// Defense in depth for any retention path that pairs a newer cut of the
+/// operator's text with an older base (see
+/// [`advance_retained_base_over_untouched_components`] for the composition
+/// path). A component qualifies only when the operator changed it too and,
+/// line by line, the target's change is the operator's: every line the target
+/// removed from the base the cut removed as well, and every line the target
+/// added is a line the cut added, or a strict prefix of one (the operator kept
+/// typing it). Such a component carries no agent op, so the rebase must take
+/// the operator's body as is; a line-level 3-way merge would otherwise keep
+/// both the stale prefix and the finished line.
+///
+/// Returns the target with those components reset to `merge_base`'s bodies,
+/// plus the components reset; `None` when nothing qualifies or the three texts
+/// do not share one component layout.
+pub fn neutralize_stale_operator_typing_snapshots(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+) -> Option<(
+    String,
+    agent_doc_element::component_scope::ComponentWriteScope,
+)> {
+    use agent_doc_element::component_scope::{
+        ComponentWriteScope, changed_component_scope, replace_component_bodies,
+        top_level_component_bodies,
+    };
+    fn line_counts(body: &str) -> std::collections::HashMap<&str, usize> {
+        let mut counts = std::collections::HashMap::new();
+        for line in body.lines() {
+            *counts.entry(line).or_insert(0) += 1;
+        }
+        counts
+    }
+    /// Lines of `after` beyond their count in `before`, with multiplicity.
+    fn added<'a>(before: &str, after: &'a str) -> Vec<&'a str> {
+        let mut remaining = line_counts(before);
+        let mut added = Vec::new();
+        for line in after.lines() {
+            match remaining.get_mut(line) {
+                Some(count) if *count > 0 => *count -= 1,
+                _ => added.push(line),
+            }
+        }
+        added
+    }
+
+    let target_scope = changed_component_scope(merge_base, agent_target)?;
+    if target_scope.is_empty() {
+        return None;
+    }
+    let base_bodies = top_level_component_bodies(merge_base)?;
+    let target_bodies = top_level_component_bodies(agent_target)?;
+    let cut_bodies = top_level_component_bodies(editor_cut)?;
+    if cut_bodies.len() != base_bodies.len()
+        || cut_bodies
+            .iter()
+            .zip(&base_bodies)
+            .any(|(cut, base)| cut.component != base.component)
+    {
+        return None;
+    }
+    let mut neutralized = Vec::new();
+    for ((base, target), cut) in base_bodies.iter().zip(&target_bodies).zip(&cut_bodies) {
+        if !target_scope.contains(&base.component.name, base.component.occurrence) {
+            continue;
+        }
+        let base_body = &merge_base[base.body.clone()];
+        let target_body = &agent_target[target.body.clone()];
+        let cut_body = &editor_cut[cut.body.clone()];
+        if cut_body == base_body {
+            // The operator did not change this component: nothing in the
+            // target's change can be attributed to the operator's typing.
+            continue;
+        }
+        let target_added = added(base_body, target_body);
+        let cut_added = added(base_body, cut_body);
+        let target_removed = added(target_body, base_body);
+        let cut_removed = added(cut_body, base_body);
+        let mut cut_removed_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for line in &cut_removed {
+            *cut_removed_counts.entry(line).or_insert(0) += 1;
+        }
+        let removals_are_the_operators = target_removed.iter().all(|line| match cut_removed_counts
+            .get_mut(line)
+        {
+            Some(count) if *count > 0 => {
+                *count -= 1;
+                true
+            }
+            _ => false,
+        });
+        let additions_are_the_operators = !target_added.is_empty()
+            && target_added.iter().all(|line| {
+                let typed = line.trim_end();
+                cut_added.iter().any(|candidate| {
+                    *candidate == *line
+                        || (!typed.trim().is_empty()
+                            && candidate.len() > typed.len()
+                            && candidate.starts_with(typed))
+                })
+            });
+        if removals_are_the_operators && additions_are_the_operators {
+            neutralized.push(base.component.clone());
+        }
+    }
+    if neutralized.is_empty() {
+        return None;
+    }
+    let scope = ComponentWriteScope::new(neutralized);
+    let target = replace_component_bodies(agent_target, merge_base, &scope)?;
+    Some((target, scope))
+}
+
 fn rebase_agent_candidate_over_editor_cut_reconciled(
     merge_base: &str,
     agent_target: &str,
     editor_cut: &str,
 ) -> Result<ReconciledRebase> {
+    // `typingdupe` (2): a component whose only change is an older snapshot of
+    // the operator's still-advancing text is not the agent's op; the operator's
+    // cut owns it.
+    let neutralized =
+        neutralize_stale_operator_typing_snapshots(merge_base, agent_target, editor_cut);
+    let agent_target = neutralized
+        .as_ref()
+        .map_or(agent_target, |(target, _)| target.as_str());
     let editor_reconciled = agent_doc_merge::response_cell::reconcile_superseded_response_targets(
         editor_cut,
         merge_base,
@@ -3112,6 +3272,119 @@ mod tests {
     const CLOBBER_BASE: &str = "---\nagent_doc_session: s1\nagent: claude\nqueue: go\n---\n\n## Notes\n\nnote a\n\n<!-- agent:queue -->\n- do [#first] first request\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
     const CLOBBER_TARGET: &str = "---\nagent_doc_session: s1\nagent: claude\n---\n\n## Notes\n\nnote A\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
     const CLOBBER_CUT: &str = "---\nagent_doc_session: s1\nagent: grok\nqueue: go\n---\n\n## Notes\n\nnote a\nnote b typed by the operator\n\n<!-- agent:queue -->\n- do [#first] first request\n- do [#second] operator queued this after the base\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n### do [#first]\n\nfirst request\n\n### Re: do [#first]\n\nretained response body\n<!-- /agent:exchange -->\n";
+
+    /// `typingdupe` fixture: one Todo line the operator is typing, at three
+    /// successive cuts, beside a queue the agent consumed.
+    fn typingdupe_doc(queue: &str, answer: &str) -> String {
+        format!(
+            concat!(
+                "---\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "❯ Keep agent:todo in sync.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n{}<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#automationapiquestions] Answer the design questions\n",
+                "  - Where is a hidden (deleted) row stored?\n",
+                "{}",
+                "  - Is a local sent-command record acceptable?\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            queue, answer,
+        )
+    }
+    const TYPINGDUPE_LIVE: &str = "- `agent:todo` should always be in sync.\n";
+    const TYPINGDUPE_STRUCK: &str = "- ~~`agent:todo` should always be in sync.~~\n";
+    const TYPINGDUPE_MID: &str =
+        "    - If the item is not in the list tree, agent-doc can add the item. If \n";
+    const TYPINGDUPE_SNAPSHOT: &str =
+        "    - If the item is not in the list tree, agent-doc can add the item. If the item \n";
+    const TYPINGDUPE_FINISHED: &str = "    - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.\n";
+
+    #[test]
+    fn typingdupe_stale_typing_snapshot_in_a_retained_target_is_not_rebased_beside_the_finished_line()
+     {
+        // The retained pair claims the operator's Todo typing: its base holds
+        // an older cut of the line than its target.
+        let base = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_MID);
+        let target = typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_SNAPSHOT);
+        let cut = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_FINISHED);
+
+        let (neutralized, scope) = neutralize_stale_operator_typing_snapshots(&base, &target, &cut)
+            .expect("the Todo change is only a stale typing snapshot");
+        assert_eq!(scope.to_pairs(), vec![("todo".to_string(), 0)]);
+        assert_eq!(
+            neutralized,
+            typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_MID),
+            "the agent's queue strike stays; the Todo resets to the base"
+        );
+
+        let rebased = rebase_retained_target_over_editor_cut(&base, &target, &cut).unwrap();
+        assert_eq!(
+            rebased,
+            typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_FINISHED),
+            "one copy of the finished line, and the agent's strike:\n{rebased}"
+        );
+    }
+
+    #[test]
+    fn typingdupe_a_real_agent_todo_edit_is_never_neutralized() {
+        let base = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_MID);
+        let cut = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_FINISHED);
+        // The agent checks the Todo off: a removal the operator did not make.
+        let checked = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_MID).replace(
+            "- [ ] [#automationapiquestions]",
+            "- [x] [#automationapiquestions]",
+        );
+        assert_eq!(
+            neutralize_stale_operator_typing_snapshots(&base, &checked, &cut),
+            None
+        );
+        // The agent adds its own line: not a prefix of anything the operator typed.
+        let added = typingdupe_doc(
+            TYPINGDUPE_LIVE,
+            &format!("{TYPINGDUPE_MID}    - agent: see #pmsyncstillopen\n"),
+        );
+        assert_eq!(
+            neutralize_stale_operator_typing_snapshots(&base, &added, &cut),
+            None
+        );
+        // The operator did not touch the Todo: nothing is attributable to typing.
+        assert_eq!(
+            neutralize_stale_operator_typing_snapshots(&base, &added, &base),
+            None
+        );
+        let rebased = rebase_retained_target_over_editor_cut(&base, &checked, &cut).unwrap();
+        assert!(
+            rebased.contains("- [x] [#automationapiquestions]"),
+            "{rebased}"
+        );
+        assert_eq!(rebased.matches(TYPINGDUPE_FINISHED).count(), 1, "{rebased}");
+    }
+
+    #[test]
+    fn typingdupe_retained_base_advances_only_over_components_the_chain_never_wrote() {
+        let chain_base = typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_MID);
+        let chain_target = typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_MID);
+        // The successor was derived over a newer cut: the operator typed on,
+        // and a reconnecting editor may still lack the chain's queue strike.
+        let current_cut = typingdupe_doc(TYPINGDUPE_STRUCK, TYPINGDUPE_SNAPSHOT);
+        assert_eq!(
+            advance_retained_base_over_untouched_components(
+                &chain_base,
+                &chain_target,
+                &current_cut
+            ),
+            Some(typingdupe_doc(TYPINGDUPE_LIVE, TYPINGDUPE_SNAPSHOT)),
+            "Todo takes the current cut; the queue the chain wrote keeps the original base"
+        );
+        // A chain that rewrote the framing is not component-scoped: no advance.
+        let reframed = chain_target.replace("agent_doc_format: template", "agent_doc_format: x");
+        assert_eq!(
+            advance_retained_base_over_untouched_components(&chain_base, &reframed, &current_cut),
+            None
+        );
+    }
 
     #[test]
     fn retainedprojectionclobber_retained_rebase_rolls_operator_edits_forward() {

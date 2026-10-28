@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -614,20 +615,57 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 **Dispatched:** your `automation-api.md` questions (use lazily's built-in features? extend lazily with endpoints? keep lazily as the multi-language API, or add a web API server, and if so does it belong in lazily?) went to a worker. It's reading the lazily specs and bindings and how agent-doc already uses lazily, and will answer each question with evidence. It will update `specs/proposals/automation-api.md` on `design/automationapi`, after rebasing it onto `main`; the full path is `/home/brian/work/btakita/agent-doc-wt/automationapi/specs/proposals/automation-api.md`.
 
 `do [#pmsyncquestions]` is closed too. Its echo didn't strike the row, because the row is backed by a Todo, so I used `queue consume --id` after checking the Todo off. That's one more Todo-sync gap for the `agent:todo` worker that's still running.
-<!-- agent:boundary:032537a5 -->
+> **Queue prompt:** `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
+> **Queue prompt:** `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
+
+### Re: Subagent completed: `subagent:todosync` returned work for queue item “`agent:todo` should always be in sync, like how `agent:backlog` is always in sync.” — agent-doc
+<!-- agent-doc-subagent-response sha256=afb90279f7fa0c32df965182f23baf23d300b3c4e01720a39781f95a8d18cbce -->
+> **Subagent response:**
+>
+> Branch feat/todosync, commit a4a550c3a4 on 7f1bf60b7e (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 12011 passed (186 skipped).
+> Gaps found vs backlog-backed rows: (1) queue brief ignored Todo-backed ids ("No backlog/review item ... carries #id"); (2) an operator-checked Todo left its do [#id] row live and dispatchable. Already at parity: --done, queue consume --ack-id, todo_signals.
+> Fix: the brief falls back to the owning agent:todo item (component todo, action plus nested sub-items and replies verbatim; backlog wins on a shared id); queue maintenance strikes a live row once every Todo row owning that id is checked (source=todo_checked), never editing the Todo and skipping open backlog/review/icebox ids, operator-verdict heads and preset names. A drained row never checks its Todo off.
+> Files: agent-doc-element/src/todo.rs, agent-doc-queue/src/subagent_brief.rs, agent-doc-preflight-io/src/lib.rs, specs/02-document-format.md, specs/07-orchestration-commands.md, tests/todo_queue_sync_cli.rs (new).
+> Follow-ups: forward an edit to a referenced backlog item or Todo to its claimed worker; --todo-done strikes its do [#id] row in the same closeout; agent:todo priority does nothing; Todo same-id duplicates fold only after patch:todo or --todo-done.
+<!-- agent-doc-subagent-completion key=4d32b85aba39c80f7a87d8e68360885cc6aa3b9d3dcd0151dca030239ace30f1 -->
+> **Queue prompt:** `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
+
+### Re: agent:todo kept in sync like agent:backlog — opus-5 · 2026-10-28T00:05-04:00
+
+**Done: a `do [#id]` queue row backed by a Todo now stays in sync with that Todo, the way a backlog-backed row does** (`a4a550c3a4`, on agent-doc `main` and installed; `make check` 12011/12011; I checked that no editor was quarantined before installing; not released).
+
+| Area | Backlog-backed row | Todo-backed row, before | Now |
+|---|---|---|---|
+| Worker brief | Quotes the backlog item | "No backlog/review item carries #id" (this is why I pasted `#pmsyncquestions` by hand) | Quotes the Todo, with every nested sub-item and reply verbatim |
+| You check the item off | Row is struck | Row stayed live and could be dispatched again | Row is struck once every Todo row with that id is `[x]`; a reported claim ends with it |
+| `--done <id>` | Closes both | Same | Same |
+| `queue consume --ack-id` | Closes the row; item stays open | Same since `dd65b2dfa9` | Same |
+
+**Rules kept:**
+- A Todo is still yours: agent-doc never checks one off because a queue row finished, and never edits its text.
+- Backlog wins when a backlog item and a Todo share an id.
+- A Todo isn't mirrored into the queue, because a Todo is your action, not runnable work.
+
+**Follow-ups (Icebox):**
+- `#trackededitforward`: an edit to a backlog item or Todo that a running worker's row references isn't forwarded to that worker. This was never Todo-only; backlog has the same gap.
+- `#tododonestrikerow`: `--todo-done` doesn't strike the matching `do [#id]` row in the same closeout; the next preflight does.
+- `#todopriorityinert`: `agent:todo priority` sorts nothing.
+- `#tododupefold`: Todo duplicates fold later than backlog duplicates do.
+
+Still running: the worker on your `automation-api.md` lazily questions.
+<!-- agent:boundary:b9f22656 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#pmsyncquestions]~~
-- 🚧 [#subagent:todosync#1] `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
-- ~~[#lazily-stale-cell-repair]: done~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~`agent:todo` should always be in sync, like how `agent:backlog` is always in sync.~~
 - 🚧 [#subagent:lazilyapi#1] automation-api.md
   - Can we use lazily's built-in features for this?
   - Should we extend lazily to provide api endpoints?
   - We have effective made lazily the api with different language bindings. Is this a good route or should we expand to a web-like api server? If yes, does the web server implementation belong in lazily?
+- todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is a duplicate 
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -639,28 +677,8 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
 - [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
 - [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
-- [x] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
-- [x] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
-  - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
-    - One per provider.
-  - Do credential profiles live in project config or user-global config?
-    - The credential profiles can live in both 60 it should also be configurable in the frontmatter.
-    - Precedence: frontmatter > project config > global config
-  - What default refresh intervals, and should refresh pause when no editor has the document open?
-    - Configurable. If we use deterministic logic to detect changes, then what do you recommend?
-  - Should tracker refreshes be committed to git?
-    - Only when there is a change.
-  - When you edit a synced row: overwrite and log it, treat the edit as a command, or refuse visibly?
-    - Treat the edit as a diffable command.
-    - We want to encourable operators to use subitems, but the intent of appending should be clear to the agent. What happens when a status is updated? agent-doc should use the source of truth which is github/gitlab/jira/etc
-  - What gesture sends a command (component `go`, a per-row marker, or both), and do destructive verbs need per-row confirmation?
-    - Same rules as queue items. We should have a list. `subagents` attribute should be supported.
-  - Can a tracker row feed `agent:run` automatically?
-    - yes...and agent:todo.
-  - Does "related to me" mean `involves:@me`, or only review-requested and assigned?
-    - `involves:@me`
 - [ ] [#automationapiquestions] Answer the automation-API design questions (specs/proposals/automation-api.md on branch design/automationapi)
   - Who is the first real caller: CI, a dashboard, another agent, or a bridge?
   - Local-only, or remote and multi-user (which needs a security spec first)?
@@ -672,11 +690,19 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
   - One endpoint per project, or a user-level gateway across projects?
 - [ ] [#pmsyncstillopen] Decide the PM-sync points still open (specs/proposals/pm-sync-integrations.md, "Still open")
   - Should the GitHub default also merge a second `review-requested:@me` query, since `involves:@me` misses review requests?
+    - Yes
   - OK for a component `auth=` attribute to rank above frontmatter?
+    - yes
   - Are the names `feed-run=` / `feed-todo=` and the filter list (`needs-me`, `review-requested`, `changes-requested`, `ci-failing`, `assigned`, Jira `status=`) right?
+    - yes
   - What are the GitLab and Jira equivalents of `involves:@me`?
+    - do the research
   - Where is a hidden (deleted) row stored, and how do you un-hide it?
+    - Let's start with a list item that has sub list items with the operator using code folding. The list item can pick any title for the parent list item.
+    - If the item is not in the list tree, agent-doc can add the item. If the item 
+    - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.
   - Until provider idempotency keys are confirmed, is a local sent-command record plus a provider re-read before any retry acceptable?
+    - yes
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
@@ -689,6 +715,10 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#trackededitforward] An operator edit to a backlog item or Todo that a claimed queue row references is never forwarded to that worker (`forward_to_owner`); steering watches only exchange and queue edits (`#steerbacklogsource`). Affects backlog and Todo alike.
+- [ ] [#tododonestrikerow] `--todo-done <id>` does not strike the matching `do [#id]` queue row in the same closeout the way `--done` does; the next preflight closes it (`source=todo_checked`).
+- [ ] [#todopriorityinert] `<!-- agent:todo priority -->` does nothing: no pass sorts the Todo, and Todo `priority=` tokens do not rank `do [#todo]` rows under `agent:run priority`.
+- [ ] [#tododupefold] Backlog drops identical same-id duplicates every preflight; the Todo folds them only after `patch:todo` or `--todo-done`.
 - [ ] [#echosteermisread] Exchange steering reports the coordinator's own committed `> **Queue prompt:**` echo cells as new operator prompts, on almost every cycle.
 - [ ] [#claimmarkersteer] Steering reports a claimed row as operator-edited (dispatch=forward_to_owner) when the only difference is the binary ☑️ claim marker plus nested rows that were there at claim time. It asks to forward to a worker that already finished.
 - [ ] [#servegetdisk] serve follow-ups: GET /doc still reads disk, not the authority; a browser save carries no base revision, so it cannot be merged; the editor-attached check races the commit.

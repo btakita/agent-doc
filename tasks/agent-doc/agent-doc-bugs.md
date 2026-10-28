@@ -552,13 +552,6 @@ Both fixes are on agent-doc `main` (`00caa013ac..dd65b2dfa9`, fast-forward) and 
 > **Queue prompt:** There are remaining ☑️ items in this queue.
 
 > **Queue prompt:** [#automationapiquestions]: give me the full path to specs/proposals/automation-api.md if it's in a worktree
-
-### Re: Subagent completed: `subagent:pmsyncdecisions` returned work for queue item “do [#pmsyncquestions]” — agent-doc
-<!-- agent-doc-subagent-response sha256=48311a4967ca66a44d8d20237a57e6f5fcd1e6c0470b351246ccad2180a6b939 -->
-> **Subagent response:**
->
-> Branch feat/pmsyncdecisions, commit 7f1bf60b7e on dd65b2dfa9 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 12004 passed (186 skipped). Docs only: specs/proposals/pm-sync-integrations.md. All 8 questions recorded as Decisions from the operator answers; Recommendation sections for refresh cadence (5m default, 1m floor, conditional requests + updated-since cursors + periodic full re-fetch + row digest, refresh only while the document is in use) and status updates (provider is the source of truth; commands carry a captured version and are refused as stale when state moved); Still open list of 7.
-<!-- agent-doc-subagent-completion key=6f62e8e62cd0af55c721b2f64a3f99f63ee6904a94f72b98f54a9e9d6f3b36e0 -->
 > **Queue prompt:** do [#pmsyncquestions]
 
 ### Re: PM-sync decisions recorded — opus-5 · 2026-10-27T23:20-04:00
@@ -620,7 +613,7 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:pmsyncdecisions#1] do [#pmsyncquestions]
+- ~~do [#pmsyncquestions]~~
 - 🚧 [#subagent:todosync#1] `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
 - 📥 [#lazily-stale-cell-repair]: done
 - 📥 automation-api.md

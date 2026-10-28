@@ -168,6 +168,18 @@ pub fn pane_title_status_marker_count(title: &str) -> usize {
 // "reason":"interrupted",...}}`; every new Codex turn writes `task_started`,
 // `turn_context` and `response_item` records after it, so the same
 // newest-decisive-record rule applies.
+//
+// `#ctrlcrerun`: Grok Build behaves the same way. It runs the Claude-compatible
+// `UserPromptSubmit` hook (`turn-status active`) with `transcript_path` naming
+// the session's `updates.jsonl`, and a Ctrl+C cancel runs NO `stop` hook. Grok
+// records the boundary as `{"timestamp":<unix secs>,"method":
+// "_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed",
+// "stop_reason":"cancelled",...}}}`. Every new Grok turn writes a
+// `user_prompt_submit` `hook_execution` and a `user_message_chunk` after it, so
+// the same newest-decisive-record rule applies. Before this the probe could not
+// read Grok records at all, so an interrupted Grok turn's lease read as a live
+// turn and route reported steering "delivered to the agent already running"
+// into a pane sitting at its idle prompt.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -419,6 +431,36 @@ pub const CODEX_TURN_ACTIVITY_EVENTS: &[&str] = &[
     "agent_reasoning",
 ];
 
+/// Grok Build `updates.jsonl` `sessionUpdate` kind the harness writes when a
+/// turn ends, completed or not (`#ctrlcrerun`).
+pub const GROK_TURN_COMPLETED_UPDATE: &str = "turn_completed";
+
+/// The only Grok `turn_completed` `stop_reason` accepted as an interrupt: the
+/// operator's Ctrl+C cancel (`cancellation_context.trigger = "ctrl_c"` in the
+/// session's `events.jsonl`), which runs no `stop` hook. Every other stop
+/// reason (`end_turn`, `error`, `rate_limit`, ...) is followed by the `stop`
+/// hook that clears the lease, so it proves nothing here.
+pub const GROK_TURN_CANCELLED_STOP_REASON: &str = "cancelled";
+
+/// Grok `sessionUpdate` kinds that are main-turn conversation activity. Other
+/// kinds are bookkeeping (`background_tasks`, `task_*`, `subagent_*`,
+/// `memory_dream_*`, `auto_compact_*`, `compaction_checkpoint`,
+/// `hook_annotation`, `retry_state`, `session_recap`) and are skipped.
+pub const GROK_TURN_ACTIVITY_UPDATES: &[&str] = &[
+    "user_message_chunk",
+    "agent_message_chunk",
+    "agent_thought_chunk",
+    "tool_call",
+    "tool_call_update",
+    "plan",
+];
+
+/// Grok `hook_execution` events that only run inside a live turn. A
+/// `user_prompt_submit` execution is the strongest proof a newer turn began;
+/// `session_start` / `session_end` / `stop` executions are bookkeeping.
+pub const GROK_TURN_ACTIVITY_HOOK_EVENTS: &[&str] =
+    &["user_prompt_submit", "pre_tool_use", "post_tool_use"];
+
 /// True when `text` is a harness interrupt record.
 pub fn is_harness_interrupt_marker_text(text: &str) -> bool {
     text.trim_start()
@@ -536,6 +578,60 @@ fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvid
         .then(|| record_activity_evidence(record))
 }
 
+/// `#ctrlcrerun`: the `params.update` object of a Grok Build `updates.jsonl`
+/// record, or `None` for any other transcript shape.
+fn grok_session_update(record: &serde_json::Value) -> Option<&serde_json::Value> {
+    record.get("method").and_then(serde_json::Value::as_str)?;
+    let update = record.get("params")?.get("update")?;
+    update
+        .get("sessionUpdate")
+        .and_then(serde_json::Value::as_str)?;
+    Some(update)
+}
+
+/// Grok writes `timestamp` as integer Unix seconds.
+fn grok_record_secs(record: &serde_json::Value) -> Option<u64> {
+    let value = record.get("timestamp")?;
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(parse_rfc3339_utc_secs))
+}
+
+/// `#ctrlcrerun`: what one Grok `updates.jsonl` record proves, or `None` when
+/// it is bookkeeping the scan skips.
+fn classify_grok_update(
+    record: &serde_json::Value,
+    update: &serde_json::Value,
+) -> Option<TranscriptTailEvidence> {
+    let kind = update
+        .get("sessionUpdate")
+        .and_then(serde_json::Value::as_str)?;
+    let activity = || TranscriptTailEvidence::Activity {
+        at_secs: grok_record_secs(record),
+    };
+    if kind == GROK_TURN_COMPLETED_UPDATE {
+        let reason = update
+            .get("stop_reason")
+            .and_then(serde_json::Value::as_str);
+        return Some(
+            match (
+                reason == Some(GROK_TURN_CANCELLED_STOP_REASON),
+                grok_record_secs(record),
+            ) {
+                (true, Some(at_secs)) => TranscriptTailEvidence::Interrupted { at_secs },
+                _ => TranscriptTailEvidence::Unknown,
+            },
+        );
+    }
+    if kind == "hook_execution" {
+        let event = update.get("event_name").and_then(serde_json::Value::as_str);
+        return event
+            .is_some_and(|event| GROK_TURN_ACTIVITY_HOOK_EVENTS.contains(&event))
+            .then(activity);
+    }
+    GROK_TURN_ACTIVITY_UPDATES.contains(&kind).then(activity)
+}
+
 /// Classify the newest conversation record in a transcript tail.
 ///
 /// `tail` is the last bytes of a JSONL transcript; `starts_mid_file` is true
@@ -545,8 +641,11 @@ fn classify_codex_event(record: &serde_json::Value) -> Option<TranscriptTailEvid
 /// history) and subagent sidechain records are skipped; the first `user` or
 /// `assistant` record decides. For a Codex rollout (`#devclear`) the first
 /// `response_item`, `turn_context`, conversation `event_msg`, or interrupted
-/// `turn_aborted` record decides; other `event_msg` records are skipped. Any
-/// unparseable segment met before that record,
+/// `turn_aborted` record decides; other `event_msg` records are skipped. For a
+/// Grok Build `updates.jsonl` (`#ctrlcrerun`) the first `turn_completed`,
+/// conversation update, or in-turn `hook_execution` decides; `turn_completed`
+/// is `Interrupted` only for stop reason `cancelled`, else `Unknown`; other
+/// updates are skipped. Any unparseable segment met before that record,
 /// including a trailing line still being written, yields
 /// [`TranscriptTailEvidence::Unknown`]: the probe never reaches past a record
 /// it cannot read to an older interrupt.
@@ -599,6 +698,13 @@ pub fn classify_transcript_tail(tail: &str, starts_mid_file: bool) -> Transcript
             == Some(true)
         {
             continue;
+        }
+        // Grok Build `updates.jsonl` records (`#ctrlcrerun`) carry no `type`.
+        if let Some(update) = grok_session_update(&record) {
+            match classify_grok_update(&record, update) {
+                Some(evidence) => return evidence,
+                None => continue,
+            }
         }
         let kind = record.get("type").and_then(serde_json::Value::as_str);
         match kind {
@@ -1457,6 +1563,160 @@ mod tests {
             "{}\n{}\n",
             codex_event(100, "task_started"),
             codex_event(101, "token_count")
+        );
+        assert_eq!(
+            classify_transcript_tail(&live, false),
+            TranscriptTailEvidence::Activity { at_secs: Some(100) }
+        );
+    }
+
+    fn grok_update(at: u64, method: &str, update: serde_json::Value) -> String {
+        serde_json::json!({
+            "timestamp": at,
+            "method": method,
+            "params": {"sessionId": "01a180e1-d079-7520-be90-2be28053e294", "update": update},
+        })
+        .to_string()
+    }
+
+    fn grok_hook(at: u64, event: &str) -> String {
+        grok_update(
+            at,
+            "_x.ai/session/update",
+            serde_json::json!({"sessionUpdate": "hook_execution", "event_name": event, "runs": []}),
+        )
+    }
+
+    fn grok_chunk(at: u64, kind: &str) -> String {
+        grok_update(
+            at,
+            "session/update",
+            serde_json::json!({"sessionUpdate": kind, "content": {"type": "text", "text": "x"}}),
+        )
+    }
+
+    fn grok_turn_completed(at: u64, stop_reason: &str) -> String {
+        grok_update(
+            at,
+            "_x.ai/session/update",
+            serde_json::json!({"sessionUpdate": "turn_completed", "prompt_id": "dfd1eb06",
+                "stop_reason": stop_reason, "elapsed_ms": 9169}),
+        )
+    }
+
+    /// `#ctrlcrerun` (live 2026-10-28, haiven-dev game-sessions.md pane %16):
+    /// Run Agent Doc auto-triggered Grok at 05:00:55; the operator pressed
+    /// Ctrl+C at 05:00:57 (`turn_ended outcome=cancelled trigger=ctrl_c`) and
+    /// Grok ran no `stop` hook. Record shapes are trimmed copies of session
+    /// `01a180e1-…/updates.jsonl`.
+    fn grok_ctrl_c_incident_tail() -> String {
+        [
+            grok_hook(1_793_163_647, "session_start"),
+            grok_hook(1_793_163_655, "user_prompt_submit"),
+            grok_chunk(1_793_163_655, "user_message_chunk"),
+            grok_turn_completed(1_793_163_657, "cancelled"),
+            String::new(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn grok_updates_tail_reports_a_ctrl_c_cancelled_turn() {
+        assert_eq!(
+            classify_transcript_tail(&grok_ctrl_c_incident_tail(), false),
+            TranscriptTailEvidence::Interrupted {
+                at_secs: 1_793_163_657
+            }
+        );
+        // Bookkeeping after the cancel is skipped.
+        for late in [
+            grok_update(
+                1_793_163_658,
+                "_x.ai/session/update",
+                serde_json::json!({"sessionUpdate": "background_tasks", "tasks": []}),
+            ),
+            grok_update(
+                1_793_163_658,
+                "_x.ai/session/update",
+                serde_json::json!({"sessionUpdate": "subagent_finished", "subagent_id": "s"}),
+            ),
+            grok_update(
+                1_793_163_658,
+                "_x.ai/session/update",
+                serde_json::json!({"sessionUpdate": "memory_dream_queued"}),
+            ),
+            grok_hook(1_793_163_658, "session_end"),
+        ] {
+            let tail = format!("{}{late}\n", grok_ctrl_c_incident_tail());
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Interrupted {
+                    at_secs: 1_793_163_657
+                },
+                "{late}"
+            );
+        }
+    }
+
+    /// `#ctrlcrerun`: the operator's next prompt (05:01:15 in the incident)
+    /// supersedes the cancel, as does any other in-turn record.
+    #[test]
+    fn grok_updates_newer_turn_activity_supersedes_the_cancel() {
+        let cancelled = grok_ctrl_c_incident_tail();
+        for newer in [
+            grok_hook(1_793_163_683, "user_prompt_submit"),
+            grok_hook(1_793_163_683, "pre_tool_use"),
+            grok_chunk(1_793_163_683, "user_message_chunk"),
+            grok_chunk(1_793_163_683, "agent_thought_chunk"),
+            grok_chunk(1_793_163_683, "agent_message_chunk"),
+            grok_update(
+                1_793_163_683,
+                "session/update",
+                serde_json::json!({"sessionUpdate": "tool_call", "toolCallId": "c", "title": "read_file"}),
+            ),
+        ] {
+            let tail = format!("{cancelled}{newer}\n");
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Activity {
+                    at_secs: Some(1_793_163_683)
+                },
+                "{newer}"
+            );
+        }
+    }
+
+    /// `#ctrlcrerun`: only a `cancelled` turn end is an interrupt. A turn that
+    /// completed any other way runs the `stop` hook, so its record proves
+    /// nothing; an untimestamped cancel proves nothing either.
+    #[test]
+    fn grok_updates_only_a_timestamped_cancel_is_an_interrupt() {
+        for stop_reason in ["end_turn", "error", "rate_limit", "interrupted"] {
+            let tail = format!(
+                "{}\n{}\n",
+                grok_chunk(100, "agent_message_chunk"),
+                grok_turn_completed(101, stop_reason)
+            );
+            assert_eq!(
+                classify_transcript_tail(&tail, false),
+                TranscriptTailEvidence::Unknown,
+                "{stop_reason}"
+            );
+        }
+        let untimestamped = serde_json::json!({
+            "method": "_x.ai/session/update",
+            "params": {"update": {"sessionUpdate": "turn_completed", "stop_reason": "cancelled"}},
+        })
+        .to_string();
+        assert_eq!(
+            classify_transcript_tail(&format!("{untimestamped}\n"), false),
+            TranscriptTailEvidence::Unknown
+        );
+        // A live Grok turn with no turn end is activity.
+        let live = format!(
+            "{}\n{}\n",
+            grok_chunk(100, "agent_thought_chunk"),
+            grok_hook(101, "session_end")
         );
         assert_eq!(
             classify_transcript_tail(&live, false),

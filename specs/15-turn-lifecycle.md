@@ -452,6 +452,28 @@ for ~90s after "unwedge agent-doc" was interrupted).
   new Codex turn always writes `task_started`, `turn_context` and a
   `response_item` first, so they never hide newer turn activity. A screen
   scrape of Codex's "Conversation interrupted" banner is never evidence.
+- **Grok Build update evidence (`#ctrlcrerun`).** Grok runs the
+  Claude-compatible hooks: `UserPromptSubmit` runs `turn-status active` with a
+  `transcript_path` naming the session's `updates.jsonl`, so the same binding
+  applies; a Ctrl+C cancel runs no `stop` hook. Grok records each turn end as
+  `{"timestamp":<unix secs>,"method":"_x.ai/session/update","params":{"update":
+  {"sessionUpdate":"turn_completed","stop_reason":<reason>}}}`. Scanning newest
+  first: a `turn_completed` with stop reason `cancelled` and an integer (or
+  RFC 3339) `timestamp` is the interrupt (`GROK_TURN_CANCELLED_STOP_REASON`);
+  any other stop reason (`end_turn`, `error`, `rate_limit`, `interrupted`),
+  or no timestamp, is `Unknown`, because those ends run the `stop` hook that
+  clears the lease. The updates `user_message_chunk`, `agent_message_chunk`,
+  `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`
+  (`GROK_TURN_ACTIVITY_UPDATES`) and a `hook_execution` for
+  `user_prompt_submit` / `pre_tool_use` / `post_tool_use`
+  (`GROK_TURN_ACTIVITY_HOOK_EVENTS`) are activity. Every other update
+  (`background_tasks`, `task_*`, `subagent_*`, `memory_dream_*`,
+  `auto_compact_*`, `compaction_checkpoint`, `hook_annotation`, `retry_state`,
+  `session_recap`, and `hook_execution` for `session_start` / `session_end` /
+  `stop`) is skipped as bookkeeping. A new Grok turn always writes a
+  `user_prompt_submit` `hook_execution` and a `user_message_chunk`, so the
+  cancel never hides newer turn activity. Grok's footer losing its
+  `Ctrl+c:cancel` cue is a screen scrape and is never evidence.
 - **Retirement.** A lease is retired when the newest conversation record is an
   interrupt no older than the lease heartbeat that has settled for
   `TURN_INTERRUPT_SETTLE_SECS` (`turn_lease_ended_by_interrupt`). The settle
@@ -477,6 +499,20 @@ evidence=turn_active_lease` because the classifier read Codex rollouts as
 one-hour TTL. The operator-clear guard reads `turn_active_for_pane`, which
 applies the retirement above, so the Codex interrupt now releases it (and
 leaves an `interrupt` receipt).
+
+Observed 2026-10-28 on haiven-dev `tasks/sdk/game-sessions.md` (Grok pane
+%16): Run Agent Doc auto-triggered the prompt at 05:00:55Z, the operator
+pressed Ctrl+C at 05:00:57Z (`turn_completed stop_reason=cancelled`; Grok's
+`events.jsonl` says `turn_ended outcome=cancelled trigger=ctrl_c`), and Grok
+ran no `stop` hook. A second Run Agent Doc at 05:01:03Z read the cancelled
+turn's lease as live (`cancel_preflight_cycle_protected
+reason=harness_turn_ended_not_proven turn_live=true`), session-check said IN
+PROGRESS, and route reported `steering_delivered_to_owner` into the idle pane;
+nothing ran until the operator retyped the prompt at 05:01:15Z. The Grok
+classifier above retires that lease once the cancel settles and leaves an
+`interrupt` receipt newer than the cycle, so the second route's
+`HarnessTurnEnded` reclaim cancels the orphaned preflight and dispatches a
+fresh trigger.
 
 ### Cancelled-before-persist prompts (`#sdkclearwedge`)
 

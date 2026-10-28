@@ -246,6 +246,60 @@ pub fn live_owner_turn_route_outcome(
     ))
 }
 
+/// `#ctrlcrerun`: pure outcome for a route that met session-check's live-owner
+/// verdict (a fresh turn-active lease) while it had just observed the owning
+/// pane at an empty dispatch-ready composer across two captures.
+///
+/// The two signals contradict each other. A harness that ends a turn without
+/// a `Stop` hook (Ctrl+C / Esc) leaves its lease behind until its own
+/// interrupt record settles, so the lease alone cannot prove a turn is still
+/// running. Reporting "delivered to the agent already running" here strands
+/// the request in an idle pane, and re-triggering could duplicate a live turn,
+/// so route says it cannot tell, keeps the steering durable, injects nothing,
+/// and names the operator's next action. Never `ok`.
+pub fn ambiguous_owner_turn_route_outcome(
+    file: &Path,
+    pane: &str,
+    owner_verdict: &str,
+    explicit_items: usize,
+) -> CloseoutWaitRouteOutcome {
+    let fields = agent_doc_flow::outcome::user_outcome_fields(
+        agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+    );
+    let pending = match explicit_items {
+        0 => String::new(),
+        1 => " 1 update stays saved in the document; it was not handed to a running turn."
+            .to_string(),
+        n => format!(
+            " {n} updates stay saved in the document; they were not handed to a running turn."
+        ),
+    };
+    CloseoutWaitRouteOutcome::Deferred(format!(
+        "[route] could not tell whether the agent on {} is still running: its turn lease says a turn is live, but pane {pane} shows an idle prompt (a turn stopped with Ctrl+C or Esc can leave its lease behind for a few seconds).{pending} No second trigger was injected, so nothing is working on this request yet. Run Agent Doc again in a few seconds; if this message repeats, run `agent-doc session cancel-turn {}` and then Run Agent Doc. steering_delivered=0 owner_turn=ambiguous (owner: {owner_verdict}) {fields}",
+        file.display(),
+        file.display(),
+    ))
+}
+
+/// `#ctrlcrerun`: the outcome for a route that met a lease-backed live-owner
+/// verdict, given whether the same route saw the owning pane stably
+/// dispatch-ready. Idle pane: [`ambiguous_owner_turn_route_outcome`];
+/// otherwise [`live_owner_turn_route_outcome`].
+pub fn lease_live_owner_route_outcome(
+    file: &Path,
+    pane: &str,
+    head: Option<&str>,
+    owner_verdict: &str,
+    explicit_items: usize,
+    owner_pane_dispatch_ready: bool,
+) -> CloseoutWaitRouteOutcome {
+    if owner_pane_dispatch_ready {
+        ambiguous_owner_turn_route_outcome(file, pane, owner_verdict, explicit_items)
+    } else {
+        live_owner_turn_route_outcome(file, head, owner_verdict, explicit_items)
+    }
+}
+
 /// Pure outcome for the `WaitForActiveQueueHead` closeout block.
 pub fn closeout_wait_route_outcome(
     file: &Path,
@@ -358,6 +412,9 @@ pub fn route_via_authoritative_actor(
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
     let closeout_harness = actor_transport_harness(&actor.record.harness);
+    // `#ctrlcrerun`: what the drain's two-capture pane probe saw, if it ran.
+    // A live-owner verdict below must not contradict it silently.
+    let stable_dispatch_ready_observed: std::cell::Cell<Option<bool>> = std::cell::Cell::new(None);
     let closeout_drain = agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
         apply_routed_dispatch_closeout_policy(
             file,
@@ -369,8 +426,10 @@ pub fn route_via_authoritative_actor(
                 // receipt after a manual interrupt + `/clear`. Require current
                 // structural readiness across two captures before offering
                 // pane state as closeout recovery authority.
-                current_pane_ready_prompt_proven(tmux, &actor, &closeout_harness)
-                    && confirm_pane_still_dispatch_ready(tmux, &actor, &closeout_harness)
+                let ready = current_pane_ready_prompt_proven(tmux, &actor, &closeout_harness)
+                    && confirm_pane_still_dispatch_ready(tmux, &actor, &closeout_harness);
+                stable_dispatch_ready_observed.set(Some(ready));
+                ready
             },
         )
     })?;
@@ -443,6 +502,20 @@ pub fn route_via_authoritative_actor(
                         .flatten()
                 })
             };
+            // `#ctrlcrerun`: a live-owner verdict rests on the turn lease. If
+            // the owning pane sits at an empty ready composer across two
+            // captures, liveness is ambiguous: route says so instead of
+            // claiming a running turn received the request. A busy frame the
+            // drain already saw is reused; an idle one is re-proven now,
+            // because the drain's projection wait (up to 30s) sits between
+            // that capture and this verdict.
+            let observe_owner_pane_idle = || {
+                stable_dispatch_ready_observed.get() != Some(false)
+                    && agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
+                        current_pane_ready_prompt_proven(tmux, &actor, &closeout_harness)
+                            && confirm_pane_still_dispatch_ready(tmux, &actor, &closeout_harness)
+                    })
+            };
             // GH #228: without a prompt to queue, a live owner turn is a benign
             // yield, with or without a drainable head: never the
             // "remains queued behind the closeout" wait or a FailClosed bail.
@@ -471,7 +544,26 @@ pub fn route_via_authoritative_actor(
                     agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file)
                         .map(|items| items.len())
                         .unwrap_or(0);
-                let outcome = live_owner_turn_route_outcome(file, head, verdict, explicit);
+                let pane_idle = observe_owner_pane_idle();
+                if pane_idle {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_owner_turn_liveness_ambiguous file={} pane={} harness={} explicit_items={explicit} lease=live pane=dispatch_ready (#ctrlcrerun)",
+                            file.display(),
+                            dispatch_pane,
+                            actor.record.harness,
+                        ),
+                    );
+                }
+                let outcome = lease_live_owner_route_outcome(
+                    file,
+                    &dispatch_pane,
+                    head,
+                    verdict,
+                    explicit,
+                    pane_idle,
+                );
                 eprintln!("{}", outcome.message());
                 outcome.record(file, explicit);
                 // A live owner can be doing the right work in an off-screen
@@ -506,6 +598,36 @@ pub fn route_via_authoritative_actor(
                             effects.queue_effects,
                         )?,
                     };
+                    if let Some(verdict) = live_owner_verdict.as_deref()
+                        && observe_owner_pane_idle()
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_owner_turn_liveness_ambiguous file={} pane={} harness={} explicit_items=0 queued=true lease=live pane=dispatch_ready (#ctrlcrerun)",
+                                file.display(),
+                                dispatch_pane,
+                                actor.record.harness,
+                            ),
+                        );
+                        let message = format!(
+                            "[route] could not tell whether the agent on {} is still running: its turn lease says a turn is live, but pane {} shows an idle prompt (a turn stopped with Ctrl+C or Esc can leave its lease behind for a few seconds). Queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}); no second trigger was injected, so nothing is working on it yet. Run Agent Doc again in a few seconds; if this message repeats, run `agent-doc session cancel-turn {}` and then Run Agent Doc. owner_turn=ambiguous (owner: {}) {}",
+                            file.display(),
+                            dispatch_pane,
+                            queued.prompt_text,
+                            queued.appended,
+                            queued.already_present,
+                            queued.superseded,
+                            file.display(),
+                            verdict,
+                            agent_doc_flow::outcome::user_outcome_fields(
+                                agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+                            )
+                        );
+                        eprintln!("{message}");
+                        crate::invocation::record_route_deferral(message);
+                        return Ok(dispatch_pane);
+                    }
                     if let Some(verdict) = live_owner_verdict.as_deref() {
                         let message = format!(
                             "[route] a turn is already running on {}; queued pending dispatch {:?} in active agent:queue (appended={}, already_present={}, superseded={}) for after that turn's boundary. Nothing needs recovery (owner: {}) owner_turn=live {}",
@@ -1833,6 +1955,75 @@ mod tests {
         assert!(message.contains("state and delivery edges"), "{message}");
         assert!(message.contains("already ran immediate repair"), "{message}");
         assert!(!message.contains("stale-empty-preflight"), "{message}");
+    }
+
+    /// `#ctrlcrerun` (live 2026-10-28, game-sessions.md pane %16): Run Agent
+    /// Doc → Ctrl+C → Run Agent Doc. The cancelled turn's lease still read
+    /// live, so route printed "Sent 1 update to the agent already running …
+    /// ui_outcome=steering_delivered_to_owner ui_outcome_class=ok" while the
+    /// pane sat at its idle prompt and nothing ran. With the pane proven idle,
+    /// the outcome must say liveness is ambiguous and name the next action;
+    /// it must never claim delivery or `ok`.
+    #[test]
+    fn idle_owner_pane_with_a_live_lease_is_ambiguous_never_delivered() {
+        let file = Path::new("/tmp/game-sessions.md");
+        let verdict = "[session-check] IN PROGRESS: cycle `cycle-1793163655242` remains `preflight_started` (preflight_started) while owning pane `%16` has a fresh active-turn lease";
+        // A busy-looking pane keeps the existing live-owner outcomes.
+        assert!(matches!(
+            lease_live_owner_route_outcome(file, "%16", None, verdict, 1, false),
+            CloseoutWaitRouteOutcome::SteeringDelivered(_)
+        ));
+        assert!(matches!(
+            lease_live_owner_route_outcome(file, "%16", None, verdict, 0, false),
+            CloseoutWaitRouteOutcome::OwnerTurnBusy(_)
+        ));
+        for explicit in [0, 1, 2] {
+            let outcome = lease_live_owner_route_outcome(
+                file,
+                "%16",
+                Some("commitpush"),
+                verdict,
+                explicit,
+                true,
+            );
+            let CloseoutWaitRouteOutcome::Deferred(message) = &outcome else {
+                panic!("ambiguous liveness is a deferral, never a delivery: {outcome:?}");
+            };
+            for forbidden in [
+                "already running",
+                "it will handle",
+                "steering_delivered_to_owner",
+                "ui_outcome_class=ok",
+                "owner_turn=live",
+            ] {
+                assert!(!message.contains(forbidden), "{forbidden}: {message}");
+            }
+            assert!(message.contains("could not tell whether"), "{message}");
+            assert!(
+                message.contains("pane %16 shows an idle prompt"),
+                "{message}"
+            );
+            assert!(
+                message.contains("No second trigger was injected"),
+                "{message}"
+            );
+            assert!(message.contains("Run Agent Doc again"), "{message}");
+            assert!(
+                message.contains("agent-doc session cancel-turn /tmp/game-sessions.md"),
+                "{message}"
+            );
+            assert!(message.contains("steering_delivered=0"), "{message}");
+            assert!(message.contains("owner_turn=ambiguous"), "{message}");
+            assert!(
+                message.contains("ui_outcome=deferred_for_operator_proof"),
+                "{message}"
+            );
+            assert_eq!(
+                message.contains("saved in the document"),
+                explicit > 0,
+                "{message}"
+            );
+        }
     }
 
     /// GH #228 live repro (2026-10-09): a route during a healthy live turn

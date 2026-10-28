@@ -2629,6 +2629,132 @@ mod tests {
         assert!(!ops.contains("cancel_preflight_cycle_abandoned"), "{ops}");
     }
 
+    /// `#ctrlcrerun` (live 2026-10-28, haiven-dev game-sessions.md pane %16):
+    /// Run Agent Doc auto-triggered Grok, the operator pressed Ctrl+C two
+    /// seconds in, then ran Run Agent Doc again. Grok ran no `stop` hook, so
+    /// the cancelled turn's lease was still fresh; session-check said IN
+    /// PROGRESS, the drain labelled the block `LiveOwnerTurn`, and route
+    /// reported `steering_delivered_to_owner` into an idle pane. Grok's own
+    /// `turn_completed stop_reason=cancelled` record must end that turn, so
+    /// the block is never a live-owner verdict.
+    #[test]
+    fn drain_never_reports_a_live_owner_after_a_grok_ctrl_c() {
+        use agent_doc_controller::dispatch::RouteCloseoutBlockContext;
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+        use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("game-sessions.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- Read the linked message and implement its directive\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let mut registry = tmux_router::Registry::new();
+        registry.insert(
+            doc.display().to_string(),
+            tmux_router::RegistryEntry {
+                pane: "%16".to_string(),
+                pid: 1,
+                cwd: dir.path().display().to_string(),
+                started: "2026-10-28T05:00:44Z".to_string(),
+                session_id: "session-grok".to_string(),
+                file: doc.display().to_string(),
+                window: "@3".to_string(),
+                supervisor_instance_id: String::new(),
+            },
+        );
+        agent_doc_session_registry_io::save_in(dir.path(), &registry).unwrap();
+
+        // The Grok `UserPromptSubmit` hook bound the lease to `updates.jsonl`;
+        // the turn was cancelled 2s later and settled before the second route.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let submitted = now - 8;
+        let cancelled = submitted + 2;
+        let updates = dir.path().join("updates.jsonl");
+        let record = |at: u64, method: &str, update: serde_json::Value| {
+            serde_json::json!({"timestamp": at, "method": method,
+                "params": {"sessionId": "01a180e1", "update": update}})
+            .to_string()
+        };
+        std::fs::write(
+            &updates,
+            [
+                record(
+                    submitted,
+                    "_x.ai/session/update",
+                    serde_json::json!({"sessionUpdate": "hook_execution", "event_name": "user_prompt_submit"}),
+                ),
+                record(
+                    submitted,
+                    "session/update",
+                    serde_json::json!({"sessionUpdate": "user_message_chunk",
+                        "content": {"type": "text", "text": "agent-doc tasks/sdk/game-sessions.md"}}),
+                ),
+                record(
+                    cancelled,
+                    "_x.ai/session/update",
+                    serde_json::json!({"sessionUpdate": "turn_completed", "stop_reason": "cancelled"}),
+                ),
+                String::new(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        agent_doc_turn_status_io::write_turn_active_marker_with_transcript_at(
+            dir.path(),
+            "%16",
+            submitted,
+            Some(&updates),
+        )
+        .unwrap();
+
+        let mut effects = super::route_closeout_drain_effects(super::route_repair_closeout);
+        // 05:01:08 in the trace: the projection wait reported OwnerReleased.
+        effects.await_closeout_projection = |_, _, _| Ok(CloseoutCycleWaitOutcome::OwnerReleased);
+        let outcome =
+            super::drain_open_closeout_before_routed_dispatch(&doc, effects, || false).unwrap();
+
+        if let DrainOutcome::Blocked { reason, context } = &outcome {
+            assert_ne!(
+                *context,
+                RouteCloseoutBlockContext::LiveOwnerTurn,
+                "a Ctrl+C-cancelled Grok turn is not a live owner: {reason}"
+            );
+            assert!(
+                !reason.starts_with("[session-check] IN PROGRESS:"),
+                "{reason}"
+            );
+        }
+        assert!(
+            !agent_doc_turn_status_io::turn_active_for_pane_for_file(&doc, "%16"),
+            "the cancelled turn's lease is retired"
+        );
+        let receipt =
+            agent_doc_turn_status_io::last_harness_turn_end_for_pane_for_file(&doc, "%16")
+                .expect("the cancel leaves a turn-end receipt for the reclaim proof");
+        assert_eq!(receipt.reason, "interrupt");
+        assert_eq!(receipt.ended_at, cancelled);
+    }
+
     #[test]
     fn drain_fails_closed_on_an_unlandable_capture_without_waiting() {
         // GH 91: an open cycle whose durable capture can never land (GH 90's

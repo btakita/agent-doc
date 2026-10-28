@@ -1,7 +1,7 @@
 ---
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
-  claude: 5c496cf2-d923-4cdb-bff1-73ad7c75c246
+  claude: 1e5af625-094d-4a1a-a550-dc47b70b064a
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
 agent: claude
 claude_model: opus
@@ -10,11 +10,11 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 presets:
-  '#agent-doc-causes': 'Fix agent-doc causes'
-  '#audit': 'Audit agent-doc runtime for dogfooding. Add issues to the backlog + queue.'
-  '#fix-dataflow': 'Fix any issue you see at multiple levels of the dataflow.'
-  '#repo': 'https://github.com/btakita/agent-doc'
-  '#self': 'agent-doc-bugs.md'
+  '#agent-doc-causes': Fix agent-doc causes
+  '#audit': Audit agent-doc runtime for dogfooding. Add issues to the backlog + queue.
+  '#fix-dataflow': Fix any issue you see at multiple levels of the dataflow.
+  '#repo': https://github.com/btakita/agent-doc
+  '#self': agent-doc-bugs.md
 dogfood:
   path: tasks/agent-doc/agent-doc-bugs.md
   auto: true
@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Released and published agent-doc v0.35.559 from release commit `5870713c02` (agent-doc main); tag `v0.35.559` is GitHub Latest with 24 assets (Linux gnu/musl/aarch64, macOS, Windows archives; JetBrains classic 0.2.871 / 262 0.2.872 / 263 0.2.873; VS Code 0.2.89), PyPI 0.35.559 public, Homebrew bumped, `make release` public-publication complete, installed locally. Restart IDEA to load plugin 0.2.873 (live IDE still on 0.2.866).
+Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `efb6029b84`, unreleased and installed locally. Since 558: struck-parent children close (`ddc48d30e3`), reported rows close (`dd65b2dfa9`), Todo-backed rows synced (`a4a550c3a4`), retained writes never re-insert stale typing (`91cf5570c2`), inline answers never close a `subagents` row (`0624a41b9d`), PM-sync decisions (docs), extract copies only local presets + nested controller claims its tmux window + sliver rebalance (`30c17f1e8b`), supervisor screen model bounded so a 1-column pane cannot run away to 138 GB (`8203772b57`), pruned struck rows no longer report a false claim mismatch (`a7e60e9f50`), blocked rows get ⛔ and stay out of dispatch (`efb6029b84`). v0.35.559 is being prepared (Grok double-dispatch, Restart Agent EDT crash with JetBrains 0.2.871/0.2.872/0.2.873, extract layout, Ctrl+C re-run).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1116,10 +1116,26 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 ### Re: release row closed — opus-5 · 2026-10-28T03:00-04:00
 
 Closed `release + publish: include all active queue items`: v0.35.559 is published and installed (details in the cell above). This row was marked for subagent dispatch. Under today's `subagents` fix, an inline answer can't close such a row, so I recorded my own release run through the claim lifecycle and closed it with this echo.
-<!-- agent:boundary:2af22689 -->
+### Re: two run rows dispatched — opus-5 · 2026-10-28T09:01-04:00
+
+I dispatched both new `agent:run` rows to background subagents. Each one has its own agent-doc worktree branched from `origin/main` (`5870713c02`, v0.35.559). Both claims are now 🚧 running. When they report back, I'll merge their branches one at a time, run `make check`, then run `make install`.
+
+- **Ambiguous-retained-projection attach error** (`subagent:ambigproj`, branch `fix/ambigproj`). The JetBrains plugin refused to attach this document's editor replica at 12:57:53Z (`attach_refused_ambiguous-retained-projection` in ops.log). The subagent is looking for the root cause and fixing it so that case attaches without losing any of your text.
+- **Why ☑️ rows stay unstruck in `sdk-demo.md` and `game-sessions.md`** (`subagent:reportedstrike`, branch `fix/reportedstrike`). It will write out the exact rules agent-doc uses to strike a ☑️ row. It will also check each stuck row and say whether a correct hold (such as an open 🙋 operator request) is keeping it, or a bug. If it's a bug, it fixes it.
+
+**Your `## Status` text had rolled back.** After that attach failure, your copy of the document showed the older v0.35.558 status text. Your `presets:` values had also lost their quotes. The quote change is harmless YAML. The status text was stale, so I rewrote it with the v0.35.559 facts. The stale copy is evidence for the first subagent.
+
+**Restart Agent EDT crash (`sdk-dev.md`):** this prompt showed up again as a target. The fix is already in v0.35.559, in JetBrains plugins 0.2.871/0.2.872/0.2.873. If IDEA is still running 0.2.866, restart it to load the fix.
+
+Session note: the exchange is 1083 lines. I'm not compacting it while the queue is active.
+<!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 [#subagent:ambigproj#1] Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.
+- 🚧 [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+- subagent operator request is still difficult to read.
+  - Use a nested list
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -1142,21 +1158,6 @@ Closed `release + publish: include all active queue items`: v0.35.559 is publish
   - Should API calls launch a controller, and should event subscribers keep it from retiring?
   - What stability promise for v1, and how long a deprecation window?
   - One endpoint per project, or a user-level gateway across projects?
-- [x] [#pmsyncstillopen] Decide the PM-sync points still open (specs/proposals/pm-sync-integrations.md, "Still open")
-  - Should the GitHub default also merge a second `review-requested:@me` query, since `involves:@me` misses review requests?
-    - Yes
-  - OK for a component `auth=` attribute to rank above frontmatter?
-    - yes
-  - Are the names `feed-run=` / `feed-todo=` and the filter list (`needs-me`, `review-requested`, `changes-requested`, `ci-failing`, `assigned`, Jira `status=`) right?
-    - yes
-  - What are the GitLab and Jira equivalents of `involves:@me`?
-    - do the research
-  - Where is a hidden (deleted) row stored, and how do you un-hide it?
-    - Let's start with a list item that has sub list items with the operator using code folding. The list item can pick any title for the parent list item.
-    - If the item is not in the list tree, agent-doc can add the item. If the item 
-    - If the item is not in the list tree, agent-doc can add the item. If the item is in the list tree, the sync can match that item. Do a full walk.
-  - Until provider idempotency keys are confirmed, is a local sent-command record plus a provider re-read before any retry acceptable?
-    - yes
 - [ ] [#pmsyncconfirm] Confirm the PM-sync research defaults (specs/proposals/pm-sync-integrations.md, decision 12 and "Still open")
   - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
   - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?

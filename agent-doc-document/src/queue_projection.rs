@@ -652,6 +652,52 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
     ids
 }
 
+/// Whether an operator request still holds this queue row open
+/// (`#operatoractionstrike`, `#answeredrequeststrike`).
+///
+/// [`operator_action_ids`] also returns the id of a locally ANSWERED canonical
+/// row (`[#subagent-operator-request-x]: <answer>`, no `🙋`), because the
+/// answer still has to route to its todo. That id is answer provenance, not an
+/// open request. The row is held only while it visibly carries `🙋`, or while
+/// one of its request ids still names an open todo (`open_todo_ids`,
+/// lowercased): the same rule the `🙋` projection uses
+/// (`set_prompt_operator_actions`). Without this, an answered `☑️` row whose
+/// todo was closed showed no `🙋` yet every completion path vetoed it, so its
+/// exact closeout echo never struck it (haiven-dev sdk-demo.md, 2026-10-28).
+pub fn operator_action_holds_row(
+    text: &str,
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> bool {
+    let ids = operator_action_ids(text);
+    if ids.is_empty() {
+        return false;
+    }
+    operator_action_marked(text) || ids.iter().any(|id| open_todo_ids.contains(id))
+}
+
+/// True when the row's leading projection prefixes carry the `🙋` marker.
+pub fn operator_action_marked(text: &str) -> bool {
+    let mut rest = text.trim_start();
+    loop {
+        if strip_operator_action_marker_prefix(rest).is_some() {
+            return true;
+        }
+        if let Some(after) = strip_lifecycle_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = strip_owner_annotation_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some((_, after)) = priority_prefix(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        return false;
+    }
+}
+
 /// Whether the operator supplied a non-empty answer beside `request_id`.
 ///
 /// Canonical rows append `[#request-id]`; adding `: <answer>` resolves the
@@ -1415,6 +1461,35 @@ mod tests {
             "  /clear  ",
             "a no-op projection preserves literal prompt whitespace"
         );
+    }
+
+    /// `#answeredrequeststrike`: an answered request whose todo closed no
+    /// longer holds its row; an open todo or a visible `🙋` still does.
+    #[test]
+    fn operator_action_holds_row_only_while_the_request_is_open() {
+        let id = "subagent-operator-request-slack-app-bootstrap";
+        let open: std::collections::HashSet<String> = [id.to_string()].into_iter().collect();
+        let none = std::collections::HashSet::new();
+        let answered = format!(
+            "☑️ [#subagent:slack-pr-status#1] Setup the PR status app. [#{id}]: I ran this before in Codex."
+        );
+        assert_eq!(operator_action_ids(&answered), vec![id.to_string()]);
+        assert!(!operator_action_marked(&answered));
+        assert!(
+            !operator_action_holds_row(&answered, &none),
+            "answered, todo closed: the row is ordinary reported work"
+        );
+        assert!(
+            operator_action_holds_row(&answered, &open),
+            "answered but the todo is still open: the closeout checks it off first"
+        );
+        let marked = apply_operator_action_ids("☑️ fix sdk demo", &[id.to_string()]);
+        assert!(operator_action_marked(&marked));
+        assert!(
+            operator_action_holds_row(&marked, &none),
+            "a visible 🙋 holds the row until the projection clears it"
+        );
+        assert!(!operator_action_holds_row("☑️ fix sdk demo", &open));
     }
 
     #[test]

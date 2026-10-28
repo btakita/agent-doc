@@ -445,7 +445,12 @@ pub fn free_text_queue_head_is_completed_residue_with_claim(
     // current evidence that the row still needs the linked answer. Keep this
     // predicate aligned with closeout consumption and preflight catch-up so
     // session-check never asks maintenance to strike an unanswered `🙋☑️` row.
-    if !agent_doc_document::queue_projection::operator_action_ids(head).is_empty() {
+    // `#answeredrequeststrike`: an answered request whose todo closed holds
+    // nothing.
+    if agent_doc_document::queue_projection::operator_action_holds_row(
+        head,
+        &agent_doc_element::todo::open_todo_ids(content),
+    ) {
         return false;
     }
     if crate::queue_continuation::is_recurring_imperative_head(head) {

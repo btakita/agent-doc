@@ -6147,6 +6147,8 @@ pub fn run_queue_maintenance_with_coin_gate(
         let mut loop_scope_skips: Vec<&'static str> = Vec::new();
         let mut struck_claimed_heads: Vec<String> = Vec::new();
         let mut struck_count = 0usize;
+        // `#answeredrequeststrike`: the open-request hold matches the `🙋` projection.
+        let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current_content);
         let new_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = activation
             .entries_after
             .iter()
@@ -6167,7 +6169,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                                 // leave an exact queue echo while its linked
                                 // operator request is still unanswered. That
                                 // `🙋` gate outranks historical answer evidence.
-                                && agent_doc_document::queue_projection::operator_action_ids(&p.text).is_empty()
+                                && !agent_doc_document::queue_projection::operator_action_holds_row(&p.text, &open_todo_ids)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text))
                                 && answered_residue_in(&exchange_text, &p.text)

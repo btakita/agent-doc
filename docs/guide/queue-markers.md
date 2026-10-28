@@ -114,6 +114,49 @@ annotation change. To unblock a row by hand, close the blocker or edit the
 clause in the tracked item. The exact rule is in
 `specs/07-orchestration-commands.md` (`#queueblocked`).
 
+## When a `☑️` row closes
+
+`☑️` (reported) means a worker finished and reported back, but nobody has
+integrated its result yet. The state comes from one of two records: a
+`Reported` claim attempt (`queue report-complete`), or a release receipt
+(`queue release` without `--requeue`). agent-doc never strikes a `☑️` row by
+itself, and time never clears it. The coordinator closes it in a closeout, and
+which close works depends on the row's shape:
+
+| Row | What strikes it |
+| --- | --- |
+| Free text (`Setup … channel.`) | The coordinator's response quotes the row exactly as `> **Queue prompt:** <row>`, with no `**Deferred:**` line beside the quote. The row must also be in the turn's baseline, or be backed by its claim or release receipt. |
+| Id-backed, and the work is done (`do [#id]`, `[#id]`, `#review [#id]`) | `--done <id>` in the closeout (it resolves the backlog item or Todo and strikes the row). If the id no longer names an open backlog item, use `agent-doc queue consume <FILE> --id <id>`. |
+| Id-backed, and the item must stay open | `agent-doc queue consume <FILE> --ack-id <id>`. The backlog item or Todo stays open. For a backlog item, the id is also recorded as kept open, so session-check does not requeue the row. |
+
+A quote never closes an id-backed row; it needs one of the id commands. A
+leading tag such as `#review` is not the row's id: `#review [#adr0043-publish]`
+closes as `adr0043-publish`, the same id its claim uses.
+
+These keep a `☑️` row open on purpose:
+
+- **`🙋☑️`**: a blocking operator request is still open. The `🙋` stays until
+  that request's Todo is checked off. You can answer on the row itself:
+  append `: <answer>` after the `[#subagent-operator-request-…]` id, and the
+  next closeout checks the Todo off. After that, the row closes the usual way.
+  An answered request whose Todo is closed does not hold the row.
+- **A `**Deferred:**` line** next to the quote: the response says the work is
+  still outstanding, so the row stays.
+- **`🟡` / `🚧` on the same work**: `--id` and `--ack-id` refuse a row whose
+  worker is still running. Report or release that attempt first.
+- **The worker reported that the work is blocked**: do not close it with
+  `--done`. Acknowledge the report with `--ack-id <id>`, which keeps the
+  backlog item open. Name an open blocker in the item, as in
+  `(stays open: blocked behind #blocker)`. A clause that only names closed
+  items blocks nothing, so a row queued again would be dispatched again. When
+  the blocker closes, queue the item again with
+  `agent-doc backlog <FILE> requeue <id>`.
+
+The exact rules are in `specs/07-orchestration-commands.md`
+(`#reportedrelease`, `#claimstrike`, `#taggedidhead`, `#ackkeepsopen`) and
+`specs/07-closeout-commands.md` (`#operatoractionstrike`,
+`#answeredrequeststrike`).
+
 ## What `🔄` means
 
 `🔄` (needs reconcile) means agent-doc found finished-work evidence for a row

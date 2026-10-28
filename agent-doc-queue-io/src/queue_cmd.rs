@@ -228,8 +228,8 @@ pub fn derive_claim_runtime_projection_scoped(
                 .iter()
                 .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
         })
-        .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
-        .collect::<std::collections::HashSet<_>>();
+        .map(|evidence| evidence.item)
+        .collect::<Vec<_>>();
     let cleared_identity = cleared_item.map(agent_doc_queue::queue_claim::claim_identity);
     // `#queueblocked`: a row whose tracked item waits on open blockers paints
     // `⛔ ⟦blocked by ...⟧`, outranking a stale `⏭️`/`⏳` it may still carry.
@@ -316,7 +316,12 @@ pub fn derive_claim_runtime_projection_scoped(
                         claim.state.projection_marker()
                     } else if receipt.is_some() {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                    } else if completion_evidence.contains(&identity) {
+                    } else if completion_evidence.iter().any(|item| {
+                        agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                            item,
+                            &prompt.text,
+                        )
+                    }) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     } else if selected.claims(&prompt.text) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Running
@@ -819,6 +824,121 @@ mod tests {
 
         let closed = content.replace(&format!("- {item}\n"), &format!("- ~~{item}~~\n"));
         assert!(crate::queue_claim::completion_evidence_head_texts(&closed).is_empty());
+    }
+
+    /// A completion cell recorded as `do [#id] - <child>` shares the parent's
+    /// tracked id and must not paint `🔄` on `do [#id]`, hold that parent out
+    /// of dispatch, or retire when only the parent is struck. The one-line row
+    /// whose work is the cell item, and a child row with its own cell, still
+    /// reconcile. Projecting the markers does not change the row count.
+    #[test]
+    fn completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let parent = "do [#alpha]";
+        let child = "unblock the sample";
+        let composite = "do [#alpha] - unblock the sample";
+        let cells = format!(
+            "{}\n\n{}",
+            agent_doc_document::subagent_completion::cell(
+                "subagent:sample",
+                composite,
+                "composite-key"
+            ),
+            agent_doc_document::subagent_completion::cell("subagent:sample", child, "child-key"),
+        );
+        let content = format!(
+            "<!-- agent:exchange -->\n{cells}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- {parent}\n  - {child}\n- {composite}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        assert!(agent_doc_queue::queue_claim::completion_evidence_matches_row(
+            parent,
+            &format!("📥 {parent}\n  - {child}"),
+        ));
+        assert!(agent_doc_queue::queue_claim::completion_evidence_matches_row(
+            "parent - child",
+            "parent\n  - child",
+        ));
+        assert!(!agent_doc_queue::queue_claim::completion_evidence_matches_row(
+            composite, parent,
+        ));
+
+        let queue_len = |document: &str| {
+            let components = agent_doc_element::element::parse(document).unwrap();
+            let body = components
+                .iter()
+                .find(|component| component.name == "queue")
+                .unwrap()
+                .content(document);
+            agent_doc_queue::document_queue::parse(body).unwrap().len()
+        };
+        assert_eq!(queue_len(&content), 3, "tracked parent keeps its child");
+
+        let projection = derive_claim_runtime_projection(&doc, &content, None).unwrap();
+        assert_eq!(queue_len(&projection.target_content), 3);
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 📥 {parent}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection
+                .target_content
+                .contains(&format!("- 🔄 {parent}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("  - 🔄 {child}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains(&format!("- 🔄 {composite}\n")),
+            "{}",
+            projection.target_content
+        );
+
+        let held = crate::queue_claim::completion_evidence_head_texts(&content);
+        let work = |head: &str| {
+            agent_doc_element_queue::subprompts::head_without_subprompts(
+                agent_doc_element_queue::strip_attempt_projection_prefix(head),
+            )
+            .trim()
+            .to_string()
+        };
+        let held_work = held.iter().map(|head| work(head)).collect::<Vec<_>>();
+        assert!(held_work.iter().any(|head| head == composite));
+        assert!(held_work.iter().any(|head| head == child));
+        assert!(!held_work.iter().any(|head| head == parent));
+
+        let (parent_struck, parent_keys) =
+            agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                &content,
+                &[parent.to_string()],
+            );
+        assert!(parent_keys.is_empty(), "{parent_keys:?}");
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_evidence(&parent_struck).len(),
+            2
+        );
+        let (line_struck, line_keys) =
+            agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
+                &content,
+                &[composite.to_string()],
+            );
+        assert!(line_keys.contains("composite-key"));
+        assert!(!line_keys.contains("child-key"));
+        let remaining = agent_doc_document::subagent_completion::completion_evidence(&line_struck);
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].item, child);
     }
 
     #[derive(Default)]

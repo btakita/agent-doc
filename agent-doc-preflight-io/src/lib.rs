@@ -7258,7 +7258,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         .filter(|receipt| !claim_by_identity.contains_key(&receipt.identity))
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<std::collections::HashMap<_, _>>();
-    let completion_identities =
+    let completion_items =
         agent_doc_document::subagent_completion::completion_evidence(&current_content)
             .into_iter()
             .filter(|evidence| {
@@ -7266,8 +7266,8 @@ pub fn run_queue_maintenance_with_coin_gate(
                     .iter()
                     .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
             })
-            .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
-            .collect::<std::collections::HashSet<_>>();
+            .map(|evidence| evidence.item)
+            .collect::<Vec<_>>();
     let row_blockers = agent_doc_queue::queue_blocked::queue_blockers(&current_content);
     // `#strikeisterminal`, per queue: a struck row whose identity is also live in this queue
     // is an earlier attempt's record, never the claim's row.
@@ -7308,7 +7308,9 @@ pub fn run_queue_maintenance_with_coin_gate(
                 claim.state.projection_marker()
             } else if receipt.is_some() {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-            } else if completion_identities.contains(&identity) {
+            } else if completion_items.iter().any(|item| {
+                agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &prompt.text)
+            }) {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
             } else if active_identities.contains(&identity) {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Running

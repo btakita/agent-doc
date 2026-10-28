@@ -306,7 +306,7 @@ class ShellRegistrationOwnershipTest {
 
         /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
         val STAGED_WORK: Map<String, Int> = sortedMapOf(
-            "executeOnPooledThread" to 20,
+            "executeOnPooledThread" to 21,
             "invokeLater" to 43,
             "newPooledAlarm" to 1,
             "newSingleThreadExecutor" to 1,

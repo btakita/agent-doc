@@ -141,7 +141,10 @@ These keep a `☑️` row open on purpose:
   next closeout checks the Todo off. After that, the row closes the usual way.
   An answered request whose Todo is closed does not hold the row.
 - **A `**Deferred:**` line** next to the quote: the response says the work is
-  still outstanding, so the row stays.
+  still outstanding, so the row stays. A deferral counts only when the
+  response states it: a phrase inside backticks or a code block is a quotation,
+  and a phrase like "waiting on" counts only in the first bullet (or the first
+  paragraph) after the quote, not in a later bullet about other work.
 - **`🟡` / `🚧` on the same work**: `--id` and `--ack-id` refuse a row whose
   worker is still running. Report or release that attempt first.
 - **The worker reported that the work is blocked**: do not close it with

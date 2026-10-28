@@ -1022,10 +1022,7 @@ fn response_heading_targets_distinctive_identifier(response_body: &str, head_tex
             scope.push(' ');
             scope.push_str(next);
         }
-        let scope = scope.to_ascii_lowercase();
-        !FREE_TEXT_HEAD_DEFERRAL_MARKERS
-            .iter()
-            .any(|marker| scope.contains(marker))
+        !text_states_deferral(&scope)
     })
 }
 
@@ -1091,6 +1088,10 @@ pub fn free_text_head_answered_by_response(response_body: &str, head_text: &str)
 /// `**Deferred…**` lead counts, e.g. `**Deferred, not done:**`). The quote then
 /// satisfies the pre-write evidence gate while the head stays queued.
 pub const QUEUE_PROMPT_DEFERRAL_MARKER: &str = "**Deferred:**";
+
+/// Lowercased structured deferral lead (`QUEUE_PROMPT_DEFERRAL_MARKER` and its
+/// bold variants such as `**Deferred, not done:**`).
+const STRUCTURED_DEFERRAL_MARKER: &str = "**deferred";
 
 const FREE_TEXT_HEAD_DEFERRAL_MARKERS: &[&str] = &[
     // Structured lead (`QUEUE_PROMPT_DEFERRAL_MARKER` and its bold variants).
@@ -1227,6 +1228,73 @@ pub fn exchange_text_newer_than(current_exchange: &str, anchor_exchange: &str) -
     current[prefix..current.len() - suffix].join("\n")
 }
 
+/// `text` without its Markdown code (inline spans and blocks), whitespace
+/// collapsed and lowercased, so a deferral phrase wrapped across lines still
+/// matches and a quoted one does not.
+///
+/// `#deferquotedmarker`: a code span or block only quotes a phrase. A response
+/// explaining the strike rule (``with no `**Deferred:**` line beside it``) is
+/// not deferring the head it just answered.
+fn deferral_scan_text(text: &str) -> String {
+    let ranges = agent_doc_element::element::find_code_ranges(text);
+    let mut prose = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end) in ranges {
+        if start < cursor || end > text.len() {
+            continue;
+        }
+        prose.push_str(&text[cursor..start]);
+        prose.push(' ');
+        cursor = end;
+    }
+    prose.push_str(&text[cursor..]);
+    prose
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+/// True when `text` states a deferral (`#ftstrikedefer`): a
+/// [`FREE_TEXT_HEAD_DEFERRAL_MARKERS`] phrase outside Markdown code.
+fn text_states_deferral(text: &str) -> bool {
+    let prose = deferral_scan_text(text);
+    FREE_TEXT_HEAD_DEFERRAL_MARKERS
+        .iter()
+        .any(|marker| prose.contains(marker))
+}
+
+/// The lead statement of a block: its first list item (with continuation
+/// lines) when the block is a list, otherwise the whole paragraph.
+fn block_lead_statement(block: &str) -> String {
+    let is_item = |line: &str| {
+        let line = line.trim_start();
+        line.starts_with("- ")
+            || line.starts_with("* ")
+            || line.starts_with("+ ")
+            || line
+                .split_once(". ")
+                .is_some_and(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    };
+    let mut lines = block.lines().skip_while(|line| line.trim().is_empty());
+    let Some(first) = lines.next() else {
+        return String::new();
+    };
+    if !is_item(first) {
+        return block.to_string();
+    }
+    let indent = first.len() - first.trim_start().len();
+    let mut lead = vec![first];
+    for line in lines {
+        let line_indent = line.len() - line.trim_start().len();
+        if line_indent <= indent && is_item(line) {
+            break;
+        }
+        lead.push(line);
+    }
+    lead.join("\n")
+}
+
 /// Whether the block at `index` plus the block after it states a deferral.
 ///
 /// Blockquote lines are the head's own echo, not the response's statement
@@ -1238,27 +1306,39 @@ pub fn exchange_text_newer_than(current_exchange: &str, anchor_exchange: &str) -
 /// canonical response places between the `> **Queue prompt:**` echo and the
 /// deferral paragraph. Those operator-note blocks belong to the echo, so they
 /// are skipped and the block after them is the one that states the deferral.
+///
+/// `#deferquotedmarker`: markers inside Markdown code are quotations, never a
+/// deferral. In the block after the echo, the structured `**Deferred…**` lead
+/// counts anywhere, but a natural-language phrase (`waiting on`, `the next
+/// cycle`, ...) counts only in the block's lead statement: its first list item,
+/// or the whole paragraph when it is not a list. A later bullet in an answer
+/// usually describes other work. Live 2026-10-28 (agent-doc-bugs.md): the
+/// answer to the reported `I'm still seeing run items in a ☑️ state …` row
+/// quoted it exactly, explained the rule as ``no `**Deferred:**` line``, and
+/// said in its sixth bullet that three other rows were "waiting on your
+/// choices". Both read as a deferral, so that row alone survived a closeout
+/// that struck its two quoted siblings.
 fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
     let prose = |block: &str| {
         block
             .lines()
             .filter(|line| !line.trim_start().starts_with('>'))
             .collect::<Vec<_>>()
-            .join(" ")
+            .join("\n")
     };
-    let mut scope = prose(blocks[index]);
-    let next = blocks
+    if text_states_deferral(&prose(blocks[index])) {
+        return true;
+    }
+    let Some(next) = blocks
         .iter()
         .skip(index + 1)
-        .find(|block| !block_is_operator_note_quote(block));
-    if let Some(next) = next {
-        scope.push(' ');
-        scope.push_str(&prose(next));
-    }
-    let scope = scope.to_ascii_lowercase();
-    FREE_TEXT_HEAD_DEFERRAL_MARKERS
-        .iter()
-        .any(|marker| scope.contains(marker))
+        .find(|block| !block_is_operator_note_quote(block))
+    else {
+        return false;
+    };
+    let next = prose(next);
+    deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
+        || text_states_deferral(&block_lead_statement(&next))
 }
 
 /// True when `block` is nothing but a `> **Operator note:** ...` blockquote

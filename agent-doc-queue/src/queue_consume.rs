@@ -3033,6 +3033,61 @@ mod tests {
         "Released v0.35.453: tagged, the GitHub release and PyPI published, issues closed.\n",
     );
 
+    /// `#deferquotedmarker` live shape (agent-doc-bugs.md, 2026-10-28): a
+    /// reported row whose text itself contains a queue-marker emoji is quoted
+    /// exactly by an answer that explains the strike rule (a `**Deferred:**`
+    /// mention in code) and later says other rows are "waiting on" choices.
+    /// Neither is a deferral of this head, so the exact echo strikes it.
+    #[test]
+    fn deferquotedmarker_exact_echo_of_marker_emoji_row_strikes_despite_quoted_rule() {
+        let work = "I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?";
+        let row = format!("☑️ [#subagent:reportedstrike#1] {work}");
+        let document = active_queue_doc(&format!("- {row}\n- do [#later]\n"));
+        let answer = |tail: &str| {
+            format!(
+                "### Re: rules — opus\n\n> **Queue prompt:** {work}\n\n\
+                 - **The rule:** a ☑️ row is struck only by a closeout that quotes it, with no `**Deferred:**` line beside it.\n\
+                 - **Fixed:** the strike paths.\n\
+                 {tail}"
+            )
+        };
+        let response = answer("- The three 🙋☑️ rows are correctly waiting on your choices.\n");
+        assert!(
+            !crate::queue_response::response_defers_free_text_head(&response, &row),
+            "a quoted marker and a later bullet about other rows are not a deferral"
+        );
+        let projected = project_answered_free_text_strike_with_claims(
+            &document,
+            &response,
+            Some(&document),
+            std::slice::from_ref(&row),
+        )
+        .unwrap()
+        .expect("the exact echo strikes the marker-emoji row");
+        assert_eq!(projected.node_keys.len(), 1);
+
+        // Controls: a real deferral still holds the row.
+        let structured_later = answer("- **Deferred:** the doc update waits for review.\n");
+        assert!(crate::queue_response::response_defers_free_text_head(
+            &structured_later,
+            &row
+        ));
+        let natural_lead = format!(
+            "> **Queue prompt:** {work}\n\nDispatched to a subagent; it waits for the integration batch.\n"
+        );
+        assert!(crate::queue_response::response_defers_free_text_head(
+            &natural_lead,
+            &row
+        ));
+        let natural_first_bullet = format!(
+            "> **Queue prompt:** {work}\n\n- Still waiting on the integration batch.\n- Other notes.\n"
+        );
+        assert!(crate::queue_response::response_defers_free_text_head(
+            &natural_first_bullet,
+            &row
+        ));
+    }
+
     #[test]
     fn deferstrike_quoted_head_with_concrete_deferral_is_not_struck() {
         let keys = answered_free_text_head_node_keys(

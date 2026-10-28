@@ -456,6 +456,11 @@ pub fn free_text_queue_head_is_completed_residue_with_claim(
     if crate::queue_continuation::is_recurring_imperative_head(head) {
         return false;
     }
+    // Release-include context is not an answer while a named subagent row is
+    // still live, so the residue set stays equal to the strike set.
+    if crate::queue_response::release_include_context_is_open(content, head) {
+        return false;
+    }
     let answered = if claimed {
         crate::queue_response::free_text_head_has_explicit_answer_evidence(exchange_text, head)
             || crate::queue_response::response_explicitly_echoes_nest_vector(

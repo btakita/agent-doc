@@ -3272,6 +3272,121 @@ mod tests {
         );
     }
 
+    /// Live shape (agent-doc-bugs.md 2026-10-28): `release + publish` names the
+    /// subagent work it must contain. Those `Include #subagent:` children are
+    /// release context, not sub-prompts. Echoing the whole block struck the
+    /// row while `#subagent:nestedlineage` was still a live queue row.
+    const RELEASE_INCLUDE_OPEN_DOC: &str = concat!(
+        "---\nqueue_active: true\n---\n\n",
+        "<!-- agent:run subagents go -->\n",
+        "- 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage.\n",
+        "- release + publish\n",
+        "  - Include #subagent:nestvector + #subagent:nestedproject\n",
+        "  - Include #subagent:nestedlineage\n",
+        "- later free-text work stays queued\n",
+        "<!-- /agent:run -->\n",
+    );
+    const RELEASE_INCLUDE_HEAD: &str = concat!(
+        "release + publish\n",
+        "  - Include #subagent:nestvector + #subagent:nestedproject\n",
+        "  - Include #subagent:nestedlineage",
+    );
+    const RELEASE_INCLUDE_ECHO: &str = concat!(
+        "### Re: release — opus\n\n",
+        "> **Queue prompt:** release + publish\n",
+        ">   - Include #subagent:nestvector + #subagent:nestedproject\n",
+        ">   - Include #subagent:nestedlineage\n\n",
+        "No release was published.\n",
+    );
+
+    #[test]
+    fn nestedechostrike_release_include_open_subagent_echo_leaves_the_row_queued() {
+        assert!(
+            crate::queue_response::release_include_context_is_open(
+                RELEASE_INCLUDE_OPEN_DOC,
+                RELEASE_INCLUDE_HEAD,
+            ),
+            "nestedlineage is an open include"
+        );
+        for claimed in [Vec::new(), vec![RELEASE_INCLUDE_HEAD.to_string()]] {
+            let keys = answered_free_text_head_node_keys_with_claims(
+                RELEASE_INCLUDE_OPEN_DOC,
+                RELEASE_INCLUDE_ECHO,
+                Some(RELEASE_INCLUDE_OPEN_DOC),
+                &claimed,
+            )
+            .unwrap();
+            assert!(
+                keys.is_empty(),
+                "claimed={claimed:?}: an open include keeps the row queued: {keys:?}"
+            );
+            let projected = project_answered_free_text_strike_with_claims(
+                RELEASE_INCLUDE_OPEN_DOC,
+                RELEASE_INCLUDE_ECHO,
+                Some(RELEASE_INCLUDE_OPEN_DOC),
+                &claimed,
+            )
+            .unwrap();
+            assert!(
+                projected.is_none(),
+                "claimed={claimed:?}: the echo must not strike: {projected:?}"
+            );
+        }
+        assert!(
+            !crate::queue_heads::free_text_queue_head_is_completed_residue(
+                RELEASE_INCLUDE_OPEN_DOC,
+                RELEASE_INCLUDE_ECHO,
+                RELEASE_INCLUDE_HEAD,
+            ),
+            "an open include is not completed residue"
+        );
+    }
+
+    /// Once every named include is done, the same verbatim echo strikes the
+    /// parent and its include lines together. `nestvector` and `nestedproject`
+    /// are already absent; a struck `nestedlineage` row is done too.
+    #[test]
+    fn nestedechostrike_release_include_echo_strikes_when_every_include_is_done() {
+        let done = RELEASE_INCLUDE_OPEN_DOC.replace(
+            "- 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage.\n",
+            "- ~~[#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage.~~\n",
+        );
+        assert!(
+            !crate::queue_response::release_include_context_is_open(&done, RELEASE_INCLUDE_HEAD),
+            "a struck include row is done"
+        );
+        for claimed in [Vec::new(), vec![RELEASE_INCLUDE_HEAD.to_string()]] {
+            let keys = answered_free_text_head_node_keys_with_claims(
+                &done,
+                RELEASE_INCLUDE_ECHO,
+                Some(&done),
+                &claimed,
+            )
+            .unwrap();
+            assert_eq!(keys.len(), 1, "claimed={claimed:?}: {keys:?}");
+            let projected = project_answered_free_text_strike_with_claims(
+                &done,
+                RELEASE_INCLUDE_ECHO,
+                Some(&done),
+                &claimed,
+            )
+            .unwrap()
+            .expect("a done include lets the verbatim echo strike");
+            assert!(
+                projected.target_content.contains("~~release + publish~~"),
+                "{}",
+                projected.target_content
+            );
+            assert!(
+                projected
+                    .target_content
+                    .contains("- later free-text work stays queued\n"),
+                "{}",
+                projected.target_content
+            );
+        }
+    }
+
     /// `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28T03:22Z):
     /// preflight listed `https://.../pull/74/changes` + its nested sub-prompt
     /// under `queue_subagent_dispatch` for `<!-- agent:run priority subagents

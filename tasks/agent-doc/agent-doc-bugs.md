@@ -27,7 +27,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `67413e99fd`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `939f306bbb`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1250,12 +1250,18 @@ The undo question on the 🙋 row is still open. My recommendation is **Confirm 
 You answered `[#subagent-operator-request-undo-agent-writes]` with: "I want sync to use the latest state...even if the operator reverted." In chat you confirmed you mean **re-sync agent-owned text**: the auto-synced status always gets rewritten to the current truth, even after you Ctrl+Z it, and undo still works on everything else. I sent that to `subagent:stalereplay`, the worker that owns the request. I didn't dispatch a new subagent for your answer row. The Todo stays open until the worker's fix lands.
 
 The Stop-hook fix (`edc4debc24`) is still in its integration `make check`.
+
+### Re: Stop-hook fix on main and installed — opus-5 · 2026-10-28T12:05-04:00
+
+> **Queue prompt:** The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
+
+Fixed on `main` and installed (`67413e99fd..939f306bbb`, commit `edc4debc24`). The combined `make check` exited 0: 12078 of 12078 tests passed, with 187 skipped. Claude's Stop hook now pauses once when a subagent row is reported or released but not yet struck. It names the closeout that strikes the row, the same way Codex already did.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- ☑️ [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
+- ~~The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended~~ — auto-struck: answered this cycle (#ftstrike)
 - [#subagent-operator-request-undo-agent-writes]
   - I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->

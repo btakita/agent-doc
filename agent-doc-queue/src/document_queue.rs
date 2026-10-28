@@ -3128,6 +3128,103 @@ pub fn entry_is_ancestor_of(entries: &[QueueEntry], ancestor_idx: usize, leaf_id
     false
 }
 
+/// Work text submitted for the live executable row at `index` (`#nestsubmit`).
+///
+/// A nested leaf is [`nest_vector_at`] (`root parent: parent: item`). A
+/// top-level row is the marker-stripped line, pins kept. Group parents and
+/// non-prompts return `None`. Slash commands are not special-cased here;
+/// callers keep a slash head literal.
+pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<String> {
+    let prompt = match entries.get(index)? {
+        QueueEntry::Prompt(prompt) if !entry_is_group_parent(entries, index) => prompt,
+        _ => return None,
+    };
+    let identity = strip_in_progress_marker(prompt.text.trim());
+    if identity.trim().is_empty() {
+        return None;
+    }
+    Some(nest_vector_at(entries, index, &identity).unwrap_or(identity))
+}
+
+/// The `nth` live executable row (0-based) whose work text matches `head_text`,
+/// skipping rows for which `skip` is true.
+///
+/// `skip` receives the row's raw text. A slash-command head is returned
+/// unchanged. When no row matches, `head_text` is returned unchanged.
+pub fn submitted_prompt_for_nth(
+    entries: &[QueueEntry],
+    head_text: &str,
+    nth: usize,
+    skip: impl Fn(&str) -> bool,
+) -> String {
+    if head_text.trim().is_empty() || crate::queue_command::slash_command_text(head_text).is_some()
+    {
+        return head_text.to_string();
+    }
+    locate_submitted_prompt(entries, head_text, nth, &skip).unwrap_or_else(|| head_text.to_string())
+}
+
+/// Like [`submitted_prompt_for_nth`], but `None` when no live row matches.
+pub fn locate_submitted_prompt(
+    entries: &[QueueEntry],
+    head_text: &str,
+    nth: usize,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    let mut seen = 0usize;
+    for (idx, entry) in entries.iter().enumerate() {
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if entry_is_group_parent(entries, idx) || !same_prompt(&prompt.text, head_text) {
+            continue;
+        }
+        if skip(prompt.text.as_str()) {
+            continue;
+        }
+        if seen == nth {
+            return submitted_prompt_at(entries, idx);
+        }
+        seen += 1;
+    }
+    None
+}
+
+/// Submitted prompts for `heads` in queue order (`#nestsubmit`).
+///
+/// Each head binds to the next live executable row at or after a cursor whose
+/// work text matches, so a batch of identical leaves takes a different parent
+/// each. A slash head and a head with no remaining row stay unchanged.
+pub fn submitted_prompts_in_order(
+    entries: &[QueueEntry],
+    heads: &[String],
+    skip: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut cursor = 0usize;
+    heads
+        .iter()
+        .map(|head| {
+            if head.trim().is_empty() || crate::queue_command::slash_command_text(head).is_some() {
+                return head.clone();
+            }
+            for (idx, entry) in entries.iter().enumerate().skip(cursor) {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    continue;
+                };
+                if entry_is_group_parent(entries, idx) || !same_prompt(&prompt.text, head) {
+                    continue;
+                }
+                if skip(prompt.text.as_str()) {
+                    continue;
+                }
+                cursor = idx + 1;
+                return submitted_prompt_at(entries, idx).unwrap_or_else(|| head.clone());
+            }
+            head.clone()
+        })
+        .collect()
+}
+
 /// Compile nested ordered-list sibling groups into `after=` dependency edges.
 ///
 /// List shape is ingress sugar, not a second scheduling authority: callers
@@ -8219,6 +8316,87 @@ mod tests {
         let folded = parse(SUBPROMPT_BODY).unwrap();
         let head = prompts(&folded)[0].text.clone();
         assert_eq!(nest_vector_for_prompt_text(&folded, &head), None);
+    }
+
+    /// `#nestsubmit`: the prompt handed to a worker is the nest vector.
+    #[test]
+    fn submitted_prompt_uses_the_nest_vector_for_a_nested_leaf() {
+        let body = "\
+- 📥 https://github.com/haiven-dev/haiven-api/pull/758
+  - ☑️ [#subagent:pr767-rebase#1] #rebase
+- parent epic
+  - do [#first]
+";
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false),
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        );
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "do [#first]", 0, |_| false),
+            "parent epic: do [#first]"
+        );
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "/clear", 0, |_| false),
+            "/clear"
+        );
+
+        let flat = parse("- ship the fix\n").unwrap();
+        assert_eq!(
+            submitted_prompt_for_nth(&flat, "ship the fix", 0, |_| false),
+            "ship the fix"
+        );
+        let folded = parse(SUBPROMPT_BODY).unwrap();
+        let head = prompts(&folded)[0].text.clone();
+        assert_eq!(submitted_prompt_for_nth(&folded, &head, 0, |_| false), head);
+
+        let multiline = vec![
+            nest_row("root parent", 0),
+            nest_row("first line of the item\ncontinued", 2),
+        ];
+        assert_eq!(
+            submitted_prompt_for_nth(&multiline, "first line of the item\ncontinued", 0, |_| {
+                false
+            }),
+            "root parent: first line of the item\ncontinued"
+        );
+    }
+
+    /// A struck earlier duplicate does not supply the parent. A skipped earlier
+    /// live row yields the next parent. A batch walks those rows in order.
+    #[test]
+    fn submitted_prompt_keeps_each_duplicate_leaf_with_its_own_parent() {
+        let struck_first = "\
+- https://github.com/haiven-dev/haiven-api/pull/736
+  - ~~#rebase~~
+- https://github.com/haiven-dev/haiven-api/pull/758
+  - #rebase
+";
+        let entries = parse(struck_first).unwrap();
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false),
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        );
+
+        let both_live = "\
+- https://github.com/haiven-dev/haiven-api/pull/736
+  - ☑️ [#subagent:pr736-rebase#1] #rebase
+- https://github.com/haiven-dev/haiven-api/pull/758
+  - #rebase
+";
+        let entries = parse(both_live).unwrap();
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "#rebase", 0, |row| row.contains("pr736-rebase")),
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        );
+        let heads = vec!["#rebase".to_string(), "#rebase".to_string()];
+        assert_eq!(
+            submitted_prompts_in_order(&entries, &heads, |_| false),
+            vec![
+                "https://github.com/haiven-dev/haiven-api/pull/736: #rebase".to_string(),
+                "https://github.com/haiven-dev/haiven-api/pull/758: #rebase".to_string(),
+            ]
+        );
     }
 
     // ---- Nested sub-prompts (`#nestedsubprompts`) ----

@@ -1459,8 +1459,18 @@ fn run_with_options_to_writer_in_pass(
         && let Some(head_prompt) = queue_state.continuation_head()
     {
         let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
-        let prompt_source = slash_command.as_deref().unwrap_or(head_prompt);
-        diff_result = Some(diff::synthetic_added_lines_diff(prompt_source, "queue"));
+        // `#nestsubmit`: slash stays the command. A nested leaf is submitted as
+        // its nest vector. `selected_queue_prompts` stays the leaf.
+        let prompt_source = if let Some(command) = slash_command.as_deref() {
+            command.to_string()
+        } else {
+            agent_doc_queue::queue_response::submitted_continuation_prompt(
+                queue_authoritative_content,
+                head_prompt,
+                |row| queue_state.head_is_claimed(row),
+            )
+        };
+        diff_result = Some(diff::synthetic_added_lines_diff(&prompt_source, "queue"));
         classification = diff_result.as_ref().map(|d| diff::classify_diff(d));
         diff_from_queue_head_only = true;
     }

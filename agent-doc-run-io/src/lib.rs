@@ -1888,6 +1888,23 @@ pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
         );
         return Ok(None);
     }
+    // `#nestsubmit`: the typed ledger head stays the leaf. The diff submitted
+    // to the child carries that leaf's parent lineage when the document has it.
+    let prompt = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "active_queue_prompt_diff",
+    ) {
+        Ok(content) => {
+            let claimed =
+                agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(file, &content);
+            agent_doc_queue::queue_response::submitted_continuation_prompt(
+                &content,
+                &prompt,
+                |row| claimed.claims(row),
+            )
+        }
+        Err(_) => prompt,
+    };
     Ok(Some(diff::synthetic_added_lines_diff(&prompt, "queue")))
 }
 

@@ -272,6 +272,47 @@ mod tests {
         );
     }
 
+    /// `#nestsubmit`: direct run submits the nest vector, not the bare leaf.
+    #[test]
+    fn active_queue_prompt_diff_submits_nested_leaf_lineage() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto go -->\n",
+            "- 📥 https://github.com/haiven-dev/haiven-api/pull/758\n",
+            "  - #rebase\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let node_key = first_queue_node_key(content);
+        append_typed_selected_queue_head(dir.path(), &doc, &node_key, "#rebase", true);
+
+        let diff = active_queue_prompt_diff(&doc)
+            .unwrap()
+            .expect("nested leaf synthesizes a prompt diff");
+        assert!(
+            diff.contains("+https://github.com/haiven-dev/haiven-api/pull/758: #rebase\n"),
+            "{diff}"
+        );
+        assert!(!diff.contains("+#rebase\n"), "{diff}");
+    }
+
     #[test]
     fn active_queue_prompt_state_refuses_markdown_prompt_without_typed_head() {
         let dir = TempDir::new().unwrap();

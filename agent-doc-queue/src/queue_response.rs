@@ -709,6 +709,96 @@ pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<Strin
     crate::document_queue::nest_vector_at(&entries, index, prompt_text)
 }
 
+fn parsed_queue_bodies(content: &str) -> Vec<Vec<crate::document_queue::QueueEntry>> {
+    queue_bodies_for_nest(content)
+        .into_iter()
+        .filter_map(|body| crate::document_queue::parse(body).ok())
+        .collect()
+}
+
+fn first_submitted_in_document(
+    content: &str,
+    head_text: &str,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    for entries in parsed_queue_bodies(content) {
+        if let Some(found) =
+            crate::document_queue::locate_submitted_prompt(&entries, head_text, 0, skip)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Prompt text to submit for `head_text` (`#nestsubmit`).
+///
+/// A nested leaf becomes its nest vector. A top-level row, a folded
+/// `#nestedsubprompts` head, a slash command, and text that is not a live row
+/// stay `head_text` (slash and absent rows are unchanged; a top-level row is
+/// its marker-stripped line when that differs). Completed rows do not match.
+pub fn submitted_queue_prompt(content: &str, head_text: &str) -> String {
+    submitted_queue_prompt_skipping(content, head_text, |_| false)
+}
+
+/// [`submitted_queue_prompt`], skipping live rows for which `skip` is true.
+///
+/// `skip` receives the row's raw text. Claim identity does not distinguish
+/// duplicate leaves, so a caller that skips by identity skips every copy.
+pub fn submitted_queue_prompt_skipping(
+    content: &str,
+    head_text: &str,
+    skip: impl Fn(&str) -> bool,
+) -> String {
+    if head_text.trim().is_empty() || crate::queue_command::slash_command_text(head_text).is_some()
+    {
+        return head_text.to_string();
+    }
+    first_submitted_in_document(content, head_text, &skip).unwrap_or_else(|| head_text.to_string())
+}
+
+/// [`submitted_queue_prompt_skipping`] for a continuation diff.
+///
+/// Prefers the first matching live row that is also drainable. When that
+/// filter matches nothing, falls back to the first unskipped match, then to
+/// `head_text`.
+pub fn submitted_continuation_prompt(
+    content: &str,
+    head_text: &str,
+    skip: impl Fn(&str) -> bool,
+) -> String {
+    if head_text.trim().is_empty() || crate::queue_command::slash_command_text(head_text).is_some()
+    {
+        return head_text.to_string();
+    }
+    let prefer = |row: &str| {
+        skip(row)
+            || !crate::queue_continuation::is_drainable_queue_head(
+                &agent_doc_document::queue_projection::strip_in_progress_marker(row),
+            )
+    };
+    if let Some(found) = first_submitted_in_document(content, head_text, &prefer) {
+        return found;
+    }
+    submitted_queue_prompt_skipping(content, head_text, skip)
+}
+
+/// Submitted prompts for `heads`, using the selected queue when it parses.
+///
+/// Heads are a subsequence in queue order. Each identical leaf takes the next
+/// live row's parent (`#nestsubmit`).
+pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<String> {
+    for entries in parsed_queue_bodies(content) {
+        if entries
+            .iter()
+            .any(|entry| matches!(entry, crate::document_queue::QueueEntry::Prompt(_)))
+        {
+            return crate::document_queue::submitted_prompts_in_order(&entries, heads, |_| false);
+        }
+    }
+    heads.to_vec()
+}
+
 /// True when the response carries an explicit `> **Queue prompt:**` echo of
 /// this head's document-proven nest vector.
 pub fn response_explicitly_echoes_nest_vector(
@@ -2814,5 +2904,30 @@ mod tests {
         );
         assert!(updated.contains(&format!("```\n> **Queue prompt:** {NEST_CHILD}\n```")));
         assert!(updated.contains(&format!("#vscodecodersmoke: {NEST_CHILD}")));
+    }
+
+    #[test]
+    fn submitted_queue_prompt_uses_the_live_rows_parent() {
+        let content = "\
+---
+queue_active: true
+---
+
+<!-- agent:queue go -->
+- https://github.com/haiven-dev/haiven-api/pull/736
+  - ~~#rebase~~
+- https://github.com/haiven-dev/haiven-api/pull/758
+  - #rebase
+<!-- /agent:queue -->
+";
+        assert_eq!(
+            submitted_queue_prompt(content, "#rebase"),
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        );
+        assert_eq!(submitted_queue_prompt(content, "/clear"), "/clear");
+        assert_eq!(
+            submitted_continuation_prompt(content, "#rebase", |_| false),
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        );
     }
 }

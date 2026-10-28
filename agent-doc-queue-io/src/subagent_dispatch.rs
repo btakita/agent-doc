@@ -257,6 +257,7 @@ pub fn subagent_authorization_for_content(
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     let components = agent_doc_element::element::parse(content).unwrap_or_default();
+    let submitted = agent_doc_queue::queue_response::submitted_queue_prompt(content, item);
     Ok(
         agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
             &file.display().to_string(),
@@ -264,6 +265,30 @@ pub fn subagent_authorization_for_content(
             item,
             &components,
             &prompt_presets,
+            Some(submitted.as_str()),
+        ),
+    )
+}
+
+/// [`subagent_authorization_for_content`] with a caller-resolved `#nestsubmit`
+/// prompt. A dispatch batch passes each head's own parent lineage.
+pub fn subagent_authorization_for_content_submitted(
+    file: &Path,
+    content: &str,
+    item: &str,
+    submitted_prompt: &str,
+) -> Result<agent_doc_queue::subagent_brief::SubagentAuthorization> {
+    let prompt_presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
+    let components = agent_doc_element::element::parse(content).unwrap_or_default();
+    Ok(
+        agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
+            &file.display().to_string(),
+            content,
+            item,
+            &components,
+            &prompt_presets,
+            Some(submitted_prompt),
         ),
     )
 }
@@ -304,6 +329,7 @@ pub fn subagent_authorization_for_item(
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
     let components = agent_doc_element::element::parse(&content).unwrap_or_default();
+    let submitted = agent_doc_queue::queue_response::submitted_queue_prompt(&content, &head);
     Ok(
         agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
             &file.display().to_string(),
@@ -311,6 +337,7 @@ pub fn subagent_authorization_for_item(
             &head,
             &components,
             &prompt_presets,
+            Some(submitted.as_str()),
         ),
     )
 }

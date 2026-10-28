@@ -961,13 +961,18 @@ pub fn queue_subagent_dispatch_entries(
     items: &[String],
 ) -> anyhow::Result<Vec<QueueSubagentDispatch>> {
     let document = file.display().to_string();
+    let submitted_prompts =
+        agent_doc_queue::queue_response::submitted_prompts_for_heads(content, items);
     items
         .iter()
-        .map(|item| {
-            let authorization =
-                agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
-                    file, content, item,
-                )?;
+        .zip(submitted_prompts.iter())
+        .map(|(item, submitted)| {
+            let authorization = agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content_submitted(
+                file,
+                content,
+                item,
+                submitted,
+            )?;
             Ok(QueueSubagentDispatch {
                 item: item.clone(),
                 claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(

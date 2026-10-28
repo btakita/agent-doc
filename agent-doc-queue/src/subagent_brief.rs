@@ -198,16 +198,28 @@ pub fn subagent_authorization(document: &str, content: &str, item: &str) -> Suba
         .as_ref()
         .map(|fm| fm.prompt_presets.clone())
         .unwrap_or_default();
-    subagent_authorization_with_presets(document, content, item, &components, &presets)
+    let submitted = crate::queue_response::submitted_queue_prompt(content, item);
+    subagent_authorization_with_presets(
+        document,
+        content,
+        item,
+        &components,
+        &presets,
+        Some(submitted.as_str()),
+    )
 }
 
 /// Resolve subagent authorization with caller-provided effective presets.
+///
+/// `submitted_prompt` is the `#nestsubmit` text for this item. `None` resolves
+/// the first live row whose work text matches `item`.
 pub fn subagent_authorization_with_presets(
     document: &str,
     content: &str,
     item: &str,
     components: &[element::Component],
     presets_map: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    submitted_prompt: Option<&str>,
 ) -> SubagentAuthorization {
     let mut presets: Vec<PresetAuthorization> = Vec::new();
     let mut push_preset = |requested: &str, source: PresetSource| {
@@ -339,7 +351,15 @@ pub fn subagent_authorization_with_presets(
         effort,
         subagent_prompt_preamble: String::new(),
     };
-    authorization.subagent_prompt_preamble = render_preamble(document, &authorization);
+    let computed;
+    let submitted = match submitted_prompt {
+        Some(prompt) => prompt,
+        None => {
+            computed = crate::queue_response::submitted_queue_prompt(content, item);
+            computed.as_str()
+        }
+    };
+    authorization.subagent_prompt_preamble = render_preamble(document, &authorization, submitted);
     authorization
 }
 
@@ -550,7 +570,7 @@ pub const SUBAGENT_NESTED_OUTWARD_AUTHORIZATION: &str = concat!(
 /// Marker line present exactly when the authorization failed closed.
 pub const UNRESOLVED_AUTHORIZATION_MARKER: &str = "AUTHORIZATION NOT RESOLVED";
 
-fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
+fn render_preamble(document: &str, auth: &SubagentAuthorization, submitted: &str) -> String {
     let mut out = String::new();
     out.push_str(SUBAGENT_PREAMBLE_MARKER);
     out.push_str(&format!(
@@ -559,6 +579,13 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
          own words, not the coordinator's paraphrase.\n\nQueue item (verbatim):\n{}\n",
         quote(&auth.item)
     ));
+    let submitted = submitted.trim();
+    if !submitted.is_empty() && submitted != auth.item.trim() {
+        out.push_str(&format!(
+            "\nSubmitted prompt (`#nestsubmit`), including parent lineage:\n{}\n",
+            quote(submitted)
+        ));
+    }
     if let Some(queue_id) = &auth.queue_id {
         out.push_str(&format!(
             "\nOrigin queue id (dispatch-time provenance):\n> {queue_id}\n\nAny follow-up queue heads produced by this work belong immediately after the originating head in this queue. Report them to the coordinator in order; the coordinator applies them with `agent-doc queue follow-up {document} --id {queue_id} --after <origin> --item <text>...`. Do not place them in a selected or mirrored sibling queue.\n"
@@ -749,6 +776,71 @@ mod tests {
         assert!(p.contains("without asking the operator to repeat those words"));
         assert!(p.contains("does not itself grant a harness-native tool permission"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
+    }
+
+    /// `#nestsubmit`: the preamble quotes the parent lineage as the work, and
+    /// the operator-request `queue_item` stays the leaf that claims the row.
+    #[test]
+    fn nested_rebase_preamble_quotes_parent_lineage_and_keeps_the_leaf() {
+        let content = "\
+---
+agent_doc_session: s
+agent_doc_format: template
+---
+
+## Queue
+
+<!-- agent:queue subagents go -->
+- 📥 https://github.com/haiven-dev/haiven-api/pull/736
+  - #rebase
+- 📥 https://github.com/haiven-dev/haiven-api/pull/758
+  - #rebase
+<!-- /agent:queue -->
+";
+        let heads = vec!["#rebase".to_string(), "#rebase".to_string()];
+        let submitted = crate::queue_response::submitted_prompts_for_heads(content, &heads);
+        assert_eq!(
+            submitted,
+            vec![
+                "https://github.com/haiven-dev/haiven-api/pull/736: #rebase".to_string(),
+                "https://github.com/haiven-dev/haiven-api/pull/758: #rebase".to_string(),
+            ]
+        );
+        let first = subagent_authorization("api.md", content, "#rebase");
+        assert_eq!(first.item, "#rebase");
+        let preamble = &first.subagent_prompt_preamble;
+        assert!(
+            preamble.contains("Queue item (verbatim):\n> #rebase\n"),
+            "{preamble}"
+        );
+        assert!(
+            preamble.contains(
+                "Submitted prompt (`#nestsubmit`), including parent lineage:\n> https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"
+            ),
+            "{preamble}"
+        );
+        assert!(preamble.contains("\n  - #rebase\n"), "{preamble}");
+        assert!(!preamble.contains("pull/758: #rebase"), "{preamble}");
+
+        let components = agent_doc_element::element::parse(content).unwrap_or_default();
+        let presets = agent_doc_frontmatter::frontmatter::PromptPresets::default();
+        let second = subagent_authorization_with_presets(
+            "api.md",
+            content,
+            "#rebase",
+            &components,
+            &presets,
+            Some(submitted[1].as_str()),
+        );
+        assert_eq!(second.item, "#rebase");
+        assert!(
+            second
+                .subagent_prompt_preamble
+                .contains("pull/758: #rebase"),
+            "{}",
+            second.subagent_prompt_preamble
+        );
+        assert!(second.subagent_prompt_preamble.contains("\n  - #rebase\n"));
     }
 
     #[test]

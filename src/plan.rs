@@ -266,7 +266,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     // preflight had already deferred. Defer to the same in-session drainable-head
     // selection preflight uses; when no head is drainable in this scope, plan
     // reports no queue-driven work rather than inventing one.
-    let queue_prompt = if doc_diff.is_none() && harness_diff.is_none() {
+    let (queue_prompt, submit_claims) = if doc_diff.is_none() && harness_diff.is_none() {
         let mut out_of_loop =
             agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(file, &content);
         if let Some(queue_subagent_plan) =
@@ -276,14 +276,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
                 .with_heads(&pending_queue_subagent_dispatch)
                 .with_heads(&queue_subagent_plan.held);
         }
-        agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed_with_presets(
+        let prompt = agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed_with_presets(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
             &out_of_loop,
             &effective_prompt_presets,
-        )
+        );
+        (prompt, out_of_loop)
     } else {
-        None
+        (
+            None,
+            agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+        )
     };
     let queue_head_slash_command = queue_prompt
         .as_deref()
@@ -304,7 +308,20 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             .as_ref()
             .and_then(|cycle| cycle.selected_free_text_queue_heads.first().cloned())
     });
-    let queue_diff = queue_prompt
+    // `#nestsubmit`: the leaf stays `queue_prompt` (slash detection and the
+    // orchestrate source). The diff the agent receives carries parent lineage.
+    let submitted_queue_prompt = queue_prompt.as_ref().map(|prompt| {
+        if queue_head_slash_command.is_some() {
+            prompt.clone()
+        } else {
+            agent_doc_queue::queue_response::submitted_continuation_prompt(
+                &content,
+                prompt,
+                |row| submit_claims.claims(row),
+            )
+        }
+    });
+    let queue_diff = submitted_queue_prompt
         .as_deref()
         .map(|prompt| diff::synthetic_added_lines_diff(prompt, "queue"));
 
@@ -405,6 +422,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
     let mut prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
+    // `#nestsubmit`: a nested leaf's vector is the prompt even when the
+    // classifier does not recognize `parent: #id` as an imperative or question.
+    // Top-level submission equals the leaf, so this adds nothing there.
+    if let Some(submitted) = submitted_queue_prompt.as_deref().filter(|submitted| {
+        queue_head_slash_command.is_none() && queue_prompt.as_deref() != Some(*submitted)
+    }) {
+        agent_doc_prompt_contract::push_unique_strings(
+            &mut prompt_targets,
+            [submitted.to_string()],
+        );
+    }
     agent_doc_prompt_contract::push_unique_strings(&mut prompt_targets, chat_prompts.clone());
     let added_diff_lines = agent_doc_prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
@@ -2305,6 +2333,56 @@ Done.
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
             plan.required_commands
+        );
+    }
+
+    /// `#nestsubmit`: plan's queue diff carries the parent lineage. The leaf
+    /// `#rebase` is not the prompt the agent is handed.
+    #[test]
+    fn build_plan_submits_a_nested_run_leaf_with_its_parent() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+- 📥 https://github.com/haiven-dev/haiven-api/pull/758
+  - #rebase
+<!-- /agent:queue -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        assert!(
+            plan.blockers.is_empty(),
+            "nested queue prompt should not plan as a no-op: {:?}",
+            plan.blockers
+        );
+        assert!(
+            plan.prompt_targets.iter().any(|target| {
+                target == "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+            }),
+            "submitted prompt should carry the parent: {:?}",
+            plan.prompt_targets
         );
     }
 

@@ -26,7 +26,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. make release completed the tag push, local install-full, and publication verification. The installed binary is 0.35.560. JetBrains pluginVersions on that commit stay 0.2.877, 0.2.878, and 0.2.879, with pluginReleaseVersion 0.35.560. Restart IDEA to load the installed plugins. Main is 343fe163c2, one commit after the tag: a completion cell matches a row only when its recorded item is that row's own work, so a longer tracked line no longer reconciles its parent. That commit is not in the v0.35.560 tag. CI for 343fe163c2 is in progress (run 40766108880).
+Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. make release completed the tag push, local install-full, and publication verification. The installed binary is 0.35.560. JetBrains pluginVersions on that release commit stay 0.2.877, 0.2.878, and 0.2.879, with pluginReleaseVersion 0.35.560. Main is 5291b1f93c. That commit reports live-owner steering as success and sets JetBrains pluginVersions to 0.2.880, 0.2.881, and 0.2.882, and VS Code to 0.2.90. make check on that tree exited 0 (nextest 12108 passed, 187 skipped) and make install exited 0. Restart IDEA to load JetBrains 0.2.882. CI for 343fe163c2 succeeded (run 40766108880). CI for 5291b1f93c is in progress (run 40774734370). Those main commits are outside tag v0.35.560.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -146,6 +146,7 @@ The api.md route suite finished in its own worktree. `make check` with socket `/
 - 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:nestvector#1] The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -1237,16 +1237,22 @@ Nothing was added to the backlog or queue.
   - **No change**: undo of agent edits is intended operator power. Close the item as working-as-designed and add a spec note.
 
 To answer, add `: <choice>` after the request id on the queue row, or reply here.
+
+### Re: Stop-hook fix integrating — opus-5 · 2026-10-28T11:45-04:00
+
+`subagent:uncommittedcell` reported back. Its finding is real and it's fixed on `edc4debc24`: the Claude Stop hook let me end turns while a subagent's row was ☑️ or released but not yet struck. Codex already enforced this. The commit is merged onto `main` in integration branch `integrate/20261028c`, and the combined `make check` is running now. Once it passes, I'll push, run `make install` and close the row.
+
+The undo question on the 🙋 row is still open. My recommendation is **Confirm before undo**, possibly together with **Tag undo/redo origin**.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- 🚧 [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
+- ☑️ [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->

@@ -976,9 +976,12 @@ cancellation receipt as a terminal, non-visible fence: an old release receipt
 with the same identity+generation and an old completion cell with its exact key
 are non-governing even across a crash or controller restart. Neither may add
 `☑️` (or legacy `📫` / `📤`), `🔄`, owner metadata, or terminality to the later row. Deleting a durably terminal struck row is only
-presentation cleanup; strikethrough that conflicts with a live claim, reported
-receipt, or completion outbox is a degraded mismatch and preserves/fences the
-work instead of cancelling or integrating it.
+presentation cleanup; strikethrough that conflicts with a live claim or reported
+receipt is a degraded mismatch and preserves/fences the work instead of
+cancelling or integrating it. A completion cell left after its claim closed and
+its receipt ended is stale residue, not ownership, so pruning its struck row is
+cleanup (`#deletedstruckmismatch`); each degraded mismatch is reported once per
+owning attempt.
 
 Independent `report-complete` processes serialize through a document-scoped cross-process owner, then re-read authority and recompute their insertion inside that owner. An attached-editor write is accepted as a durable retained intent and projected by the long-lived controller; the one-shot reporter does not wait through typing, delivery, or native-save backpressure and never writes editor-owned disk. A detached document uses the ordinary synchronous CAS write. Concurrent reports therefore compose without losing notices or operator edits and cannot race coordinator closeout with stale full-document successors.
 

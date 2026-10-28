@@ -23,10 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `939f306bbb`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `dffba0edcb`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1263,12 +1264,18 @@ Fixed on `main` and installed (`67413e99fd..939f306bbb`, commit `edc4debc24`). T
 It's merged onto `main` in integration branch `integrate/20261028d`, and the combined `make check` is running. I released the worker's claim so the row isn't left reported at turn end. Once the check passes, I'll push, run `make install`, strike the row, and close your answer row and its Todo with `--done subagent-operator-request-undo-agent-writes`.
 
 **Bug found while doing this:** your answer row (`- [#subagent-operator-request-undo-agent-writes]` with the answer nested under it) makes the queue marker projection count one row too few (`before=3, after=2`). `report-complete` was refused for that reason, and preflight logged the same mismatch earlier. `--ack-id` also refuses that row because it was never dispatched. I'll file it once this closes.
+
+### Re: undo fix on main and installed — opus-5 · 2026-10-28T12:50-04:00
+
+> **Queue prompt:** At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it.
+
+Fixed on `main` and installed (`939f306bbb..dffba0edcb`). The combined `make check` exited 0: 12086 of 12086 tests passed, with 187 skipped. The 12:27 revert was IntelliJ Undo, not a stale editor replay. Per your decision, undo still works everywhere. If an undo reverts the synced status block, the next preflight or Stop check shows both texts and requires a re-sync. Your answer row and its Todo `[#subagent-operator-request-undo-agent-writes]` are closed by this closeout.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- [#subagent-operator-request-undo-agent-writes]
+- ~~[#subagent-operator-request-undo-agent-writes]~~
   - I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->
 
@@ -1296,7 +1303,7 @@ It's merged onto `main` in integration branch `integrate/20261028d`, and the com
   - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
   - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
-- [ ] [#subagent-operator-request-undo-agent-writes] Answer the blocking subagent question for queue item ‘At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted…’ in agent:exchange: Should the JetBrains plugin keep letting IDE Undo reach agent-applied edits, and if not, which behaviour do you want? (choices: Confirm before undo, Tag undo/redo origin, Not undoable, No change)
+- [x] [#subagent-operator-request-undo-agent-writes] Answer the blocking subagent question for queue item ‘At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted…’ in agent:exchange: Should the JetBrains plugin keep letting IDE Undo reach agent-applied edits, and if not, which behaviour do you want? (choices: Confirm before undo, Tag undo/redo origin, Not undoable, No change)
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

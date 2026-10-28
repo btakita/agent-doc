@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `efb6029b84`, unreleased and installed locally. Since 558: struck-parent children close (`ddc48d30e3`), reported rows close (`dd65b2dfa9`), Todo-backed rows synced (`a4a550c3a4`), retained writes never re-insert stale typing (`91cf5570c2`), inline answers never close a `subagents` row (`0624a41b9d`), PM-sync decisions (docs), extract copies only local presets + nested controller claims its tmux window + sliver rebalance (`30c17f1e8b`), supervisor screen model bounded so a 1-column pane cannot run away to 138 GB (`8203772b57`), pruned struck rows no longer report a false claim mismatch (`a7e60e9f50`), blocked rows get ⛔ and stay out of dispatch (`efb6029b84`). v0.35.559 is being prepared (Grok double-dispatch, Restart Agent EDT crash with JetBrains 0.2.871/0.2.872/0.2.873, extract layout, Ctrl+C re-run).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets: Linux gnu/musl/aarch64, macOS, Windows archives, JetBrains 0.2.871/0.2.872/0.2.873, VS Code 0.2.89; PyPI 0.35.559; Homebrew bumped). Main is now at `2ad450b7e5`, unreleased and installed locally (JetBrains plugins 0.2.874/0.2.875/0.2.876 installed; restart IDEA to load them). Since 559: subagent operator requests nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -1128,18 +1128,60 @@ I dispatched both new `agent:run` rows to background subagents. Each one has its
 **Restart Agent EDT crash (`sdk-dev.md`):** this prompt showed up again as a target. The fix is already in v0.35.559, in JetBrains plugins 0.2.871/0.2.872/0.2.873. If IDEA is still running 0.2.866, restart it to load the fix.
 
 Session note: the exchange is 1083 lines. I'm not compacting it while the queue is active.
+
+### Re: three fixes on main and installed; three more dispatched — opus-5 · 2026-10-28T10:17-04:00
+
+**Three fixes are on agent-doc `main` and installed** (`5870713c02..2ad450b7e5`). The combined `make check` exited 0: 12065 of 12065 tests passed, with 187 skipped, and the classic, 262 and 263 JetBrains builds succeeded. JetBrains plugins 0.2.874, 0.2.875 and 0.2.876 are installed on disk. **Restart IDEA to load them.** Until then the IDE keeps running the old plugin; it only reloaded the native library.
+
+> **Queue prompt:** Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.
+
+- **Why it was refused (`b8932c1b90`):** you were typing without pause. The plugin's record of the last text the controller confirmed only moves forward on a confirmed save, and each keystroke postponed that save, so the record was 38 seconds old. Measured against it, the controller's copy and your buffer looked like two conflicting edits of one row, although they had changed different lines. Registration now re-checks from the text the controller has confirmed it holds. A real same-line conflict still refuses.
+- **Your `presets:` lost their quotes** because of an agent-doc bug: a frontmatter merge rewrote the whole block. It now keeps your original bytes for keys it didn't change. The quotes already lost stay lost unless you add them back.
+- **You didn't need to do anything for that error.** Only a second, replacement attach was refused; the existing connection kept syncing. The message wrongly told you to close the tab, and a new run row fixes that.
+
+> **Queue prompt:** I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+
+- **The rule:** a ☑️ row is struck only by a coordinator closeout, never by time. For a plain-text row, the closeout quotes the row exactly, with no `**Deferred:**` line beside it. A row with an id is never closed by a quote; it closes with `--done <id>`, `queue consume --id <id>`, or `queue consume --ack-id <id>` when the item stays open. These hold a row open: 🙋, a `**Deferred:**` line, a worker still at 🟡 or 🚧, or a report another live coordinator owns.
+- **Fixed (`0b27368c0e`):**
+  - A leading tag like `#review` is no longer taken as the row's id.
+  - An operator request you already answered no longer blocks the strike.
+  - `--ack-id` on an open backlog item now records it as kept open, so `session-check` stops requeueing it.
+- **`sdk-demo.md`:**
+  - `#review [#adr0043-publish]`: from that document's coordinator, run `agent-doc queue consume tasks/sdk/sdk-demo.md --id adr0043-publish`.
+  - The Slack PR-status row closes the next time a response quotes it exactly.
+  - The `sdk-pr-scope` row: from that document's coordinator, run `agent-doc queue consume tasks/sdk/sdk-demo.md --id subagent-operator-request-sdk-pr-scope`.
+- **`game-sessions.md`:**
+  - The three 🙋☑️ rows are correctly waiting on your choices.
+  - The four doubled rows are blocked behind PR #765 landing on sdk-dev. Their duplication is a separate bug, now a run row.
+
+> **Queue prompt:** subagent operator request is still difficult to read.
+>   - The text for *queue_item*, *request*, and *context* should be in a nested list with the key as the parent. Leave the rest as is.
+
+- **Done (`5d8e76137b`, `dc4fc37fcc`):** only the `queue_item`, `request` and `context` values are now nested under their key line, with context as one fact per bullet. The marker line, `kind`, `blocking` and `choices` keep their old layout, and packets already in documents still parse. The installed binary already prints the new form in subagent briefs.
+
+**Dispatched this turn, all 🚧 running:**
+- `subagent:repairmsg`: show the "close the tab and run repair" text only when no editor replica is attached.
+- `subagent:rowdupwrite`: why a write at 06:11:36Z doubled four rows in `game-sessions.md`.
+- `subagent:statussync`: your `status:sync is out of sync` row.
+
+**Your `status:sync is out of sync` row was right.** My 09:01 `patch:status` never landed. The merge with your editor's changes kept the stale v0.35.558 text and dropped my patch with no warning. My status checks after that were wrong to say nothing had changed. I set the current status with `agent-doc status set`, and the subagent is fixing why the patch was dropped silently.
+
+**Main CI is red on `5870713c02`.** `two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end` fails in tmux-ci, a pane-provisioning test none of these changes touch.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:ambigproj#1] Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.
-- 🚧 [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
-- 🚧 [#subagent:requestlayout#1] subagent operator request is still difficult to read.
-  - Use a nested list
+- ~~Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.~~
+- 🚧 [#subagent:repairmsg#1] The ambiguous-retained-projection error tells the operator to close the tab and run `agent-doc repair` even when only a replacement attach was refused and the existing editor replica is still attached and syncing. Check the live replica first and only show the repair instructions when no replica is attached.
+- ☑️ [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
+- 🚧 [#subagent:rowdupwrite#1] game-sessions.md: four run rows (publish-session-contracts, session-liveness-resume, session-ws-events, session-roster-list-update) were duplicated by a document write at 2026-10-28T06:11:36Z in retained_transition_projection_effect, next to a jb_cache_conflict_accept_duplicate event. Find why the duplicate was accepted and fix it.
+- ~~subagent operator request is still difficult to read.~~
+  - ~~The text for *queue_item*, *request*, and *context* should be in a nested list with the key as the parent. Leave the rest as is.~~
+- 🚧 [#subagent:statussync#1] status:sync is out of sync
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->

@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -116,14 +115,23 @@ The sealed batch includes `agent:rules` from ancestor `2b7ef088ea`. On the relea
 The sdk-demo `agent:run` mismatch is fixed on main at `343fe163c2` (`fix(queue): match completion cells to a row's own work`), the commit after the tag. A completion cell matches a row only when its recorded item is that row's own work, so a longer tracked child stays off its parent. Regression `completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent` passed on that tree. The push was `bd971e9b87..343fe163c2` to `main`. `make install` of that tree exited 0 and held JetBrains pluginVersions at 0.2.877, 0.2.878, and 0.2.879 because the plugin bytes were already current. The release worktree `feat/release-readiness` is clean and matches `origin/main` at `343fe163c2`. Tag `v0.35.560` stays at `bd971e9b87`. CI for `343fe163c2` was in progress as run 40766108880 when status was recorded.
 
 The api.md route claim stays open. `fix/api-md-route-error` has two local commits (`519352f34d`, `5291b1f93c`) and `make check` is still running in that worktree. The branch is unpushed, so it stays out of this closeout.
-<!-- agent:boundary:4be9b961 -->
+
+> **Queue prompt:** Where does this file live? My Coder agent is asking.
+
+**Deferred:** dispatched to `subagent:vscodecodersmoke` generation 1, worker `01a18450-c468-7a82-ac95-36f5f45e17ae`, on `fix/vscode-coder-file` in `/home/brian/worktrees/agent-doc-vscodecodersmoke`.
+
+### Re: Coder file question is with its worker — grok-4.7 · 2026-10-28T17:00-04:00
+
+The row nested under `#vscodecodersmoke` is claimed and running. The worker is resolving `scripts/vscode-remote-smoke.py`, `runbooks/coder-workspace.md`, and the VS Code on Coder cell in `editors/SPEC.md` section 13. It builds and tests in that worktree. The coordinator keeps `make install` and any main integration until the worker reports.
+
+The api.md route claim stays with its existing worker. Its branch is still unpushed.
+<!-- agent:boundary:9a16d60e -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~release + publish~~
-  - ~~include #subagent:agentrules~~
-- ~~sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+- 📥 [#vscodecodersmoke]
+  - 🚧 [#subagent:vscodecodersmoke#1] Where does this file live? My Coder agent is asking.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

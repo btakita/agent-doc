@@ -26,7 +26,7 @@ queue: go
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `91cf5570c2`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`), retained writes never re-insert a stale snapshot of in-progress operator typing (`91cf5570c2`).
+Latest release: agent-doc v0.35.558 (release commit `00caa013ac`; GitHub Latest with Linux gnu/musl/aarch64, macOS and Windows archives, JetBrains 0.2.865/0.2.867/0.2.866 and VS Code 0.2.89 assets; PyPI 0.35.558; Homebrew bumped). Main is now at `0624a41b9d`, unreleased and installed locally: struck-parent children close and a new child reopens (`ddc48d30e3`), reported rows close via nested echo and `queue consume --ack-id` (`dd65b2dfa9`), PM-sync design decisions (docs, `7f1bf60b7e`), Todo-backed queue rows kept in sync with their Todo (`a4a550c3a4`), retained writes never re-insert a stale snapshot of in-progress operator typing (`91cf5570c2`), an inline answer never closes a `subagents` dispatch row (`0624a41b9d`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -859,7 +859,7 @@ A regression test replays the exact incident and fails with either layer removed
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- do [#paneoomrunaway]
+- 🚧 [#subagent:paneoom#1] do [#paneoomrunaway]
 - ~~sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.~~
 - 🚧 [#subagent:qblocked#1] do [#queue-blocked-marker]
 - 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
@@ -872,7 +872,7 @@ A regression test replays the exact incident and fails with either layer removed
   - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
   - do a screenshot
 - 🚧 [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
-- 📥 do [#deletedstruckmismatch]
+- 🚧 [#subagent:dsmismatch#1] do [#deletedstruckmismatch]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -716,6 +716,11 @@ The answers are in a new section 5 of `/home/brian/work/btakita/agent-doc-wt/aut
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
 - 🚧 [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+- 📥 do [#queue-blocked-marker]
+- 🟡 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
+  - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
+  - When I open game-sessions.md in the editor, there are 3 tmux panes.
+  - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewpord is half width.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

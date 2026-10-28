@@ -122,7 +122,13 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   - `forward_to_owner` (`#claimedsteerwake`): a queue item a worker already
     claimed; `owner=subagent:<label>` names it. For an edit, FORWARD
     `previous` -> `verbatim` to that running subagent (for example with
-    SendMessage). Never dispatch a new subagent for it and never re-claim it:
+    SendMessage). A nested child that says `push` or `publish` (ignore a
+    trailing `⟦effect:N⟧`, a struck child, and a negation such as `do not
+    push`) is operator authorization to do that action now
+    (`#nestedoutwardauth`): tell the owner it is not a question, not a chat
+    reply, and not blocked by a preset or skill that says to wait.
+    `publish` on a review posts it as a plain comment unless the line says
+    approve. Never dispatch a new subagent for it and never re-claim it:
     the claim follows its line through an in-place edit, whether an appended
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
     can still `--refresh` / `release` by the text it was handed. An edit of a

@@ -1393,7 +1393,12 @@ pub const REPORTED_WORKER_CLOSEOUT: &str = "When the subagent reports back, pers
 const FORWARD_EDITED: &str = "the operator EDITED a queue item a worker already claimed (`owner` \
      above; the claim followed the edit). FORWARD the change (`previous` -> `verbatim`) to that \
      owner now (for example SendMessage to the running subagent) so the work in flight picks it \
-     up. Do NOT dispatch a new subagent and do NOT re-claim the item.";
+     up. If `verbatim` adds or keeps a nested line that says `push` or `publish`, tell the owner \
+     that line is operator authorization to perform that action now (`#nestedoutwardauth`): it is \
+     not a question, not a chat reply, and not blocked by a preset or skill that says to wait \
+     until asked. A trailing `⟦effect:N⟧` marker does not remove it. `publish` on a review posts \
+     the review as a plain comment unless the line says approve. Do NOT dispatch a new subagent \
+     and do NOT re-claim the item.";
 const FORWARD_ADDED: &str = "already claimed by the worker named in `owner` (in flight there). \
      Nothing to dispatch; do NOT start a second subagent for it.";
 
@@ -3445,14 +3450,20 @@ mod tests {
             subagent_dispatch_heads(&tagged, None),
             vec!["#subagents do [#pre]".to_string()]
         );
-        let attr = format!("{}{backlog}", doc("- ⛔ ⟦blocked by pre⟧ do [#dep]\n- do [#pre]\n", EX))
-            .replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
+        let attr = format!(
+            "{}{backlog}",
+            doc("- ⛔ ⟦blocked by pre⟧ do [#dep]\n- do [#pre]\n", EX)
+        )
+        .replace("<!-- agent:queue -->", "<!-- agent:queue subagents -->");
         let (_, eligible, live) = queue_attr_subagent_heads(&attr).unwrap();
         assert_eq!(eligible, vec!["do [#pre]".to_string()]);
         assert_eq!(live.len(), 2, "{live:?}");
         let closed = attr.replace("- [ ] [#pre]", "- [x] [#pre]");
         let (_, eligible, _) = queue_attr_subagent_heads(&closed).unwrap();
-        assert_eq!(eligible, vec!["do [#dep]".to_string(), "do [#pre]".to_string()]);
+        assert_eq!(
+            eligible,
+            vec!["do [#dep]".to_string(), "do [#pre]".to_string()]
+        );
     }
 
     /// `#claimdispatchidentity` (live 2026-10-03): a tag-only edit of a line
@@ -3642,6 +3653,8 @@ mod tests {
                 "{text}"
             );
             assert!(text.contains("FORWARD the change"), "{text}");
+            assert!(text.contains("#nestedoutwardauth"), "{text}");
+            assert!(text.contains("not a chat reply"), "{text}");
             assert!(!text.contains("DISPATCH NOW"), "{text}");
             assert!(!text.contains("dispatch this item NOW"), "{text}");
         }

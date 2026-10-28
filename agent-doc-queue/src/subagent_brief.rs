@@ -267,12 +267,16 @@ pub fn subagent_authorization_with_presets(
             Some(found) => tracked_items.push(found),
             None => {
                 // A preset-only id (`#gh-fix`) is a command, not missing work.
-                if !presets
-                    .iter()
-                    .any(|p| p.name.trim_start_matches('#').eq_ignore_ascii_case(&id))
+                // A reserved operator-request id is the worker's own question
+                // annotation, not a backlog item to invent (`#nestedoutwardauth`).
+                if id.starts_with(SUBAGENT_OPERATOR_REQUEST_ID_PREFIX)
+                    || presets
+                        .iter()
+                        .any(|p| p.name.trim_start_matches('#').eq_ignore_ascii_case(&id))
                 {
-                    unresolved_ids.push(id);
+                    continue;
                 }
+                unresolved_ids.push(id);
             }
         }
     }
@@ -337,6 +341,44 @@ pub fn subagent_authorization_with_presets(
     };
     authorization.subagent_prompt_preamble = render_preamble(document, &authorization);
     authorization
+}
+
+/// Live nested sub-prompts that name `push` or `publish` (`#nestedoutwardauth`).
+///
+/// A trailing `⟦effect:N⟧` marker is not part of the directive. A struck child
+/// and a negated line (`do not push`, `never publish`) grant nothing.
+fn nested_outward_action_lines(item: &str) -> Vec<String> {
+    agent_doc_element_queue::subprompts::subprompt_rows(item)
+        .into_iter()
+        .filter(|row| !agent_doc_element_queue::subprompts::subprompt_row_is_struck(row))
+        .filter_map(|row| {
+            let row = agent_doc_element_queue::strip_attempt_projection_prefix(&row);
+            let row = crate::document_queue::strip_queue_effect_annotation(row.trim());
+            let row = row.trim().to_string();
+            (!row.is_empty() && line_names_outward_action(&row)).then_some(row)
+        })
+        .collect()
+}
+
+fn line_names_outward_action(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    ["push", "publish"].into_iter().any(|token| {
+        if !lower
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .any(|word| word == token)
+        {
+            return false;
+        }
+        let negated = [
+            format!("not {token}"),
+            format!("never {token}"),
+            format!("without {token}"),
+            format!("no {token}"),
+            format!("don't {token}"),
+            format!("dont {token}"),
+        ];
+        !negated.iter().any(|phrase| lower.contains(phrase.as_str()))
+    })
 }
 
 fn quote(text: &str) -> String {
@@ -485,10 +527,24 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
 /// must not inherit example outward actions from this text.
 pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "The queue item and resolved preset bodies above are current operator authorization for the ",
-    "work and actions they name. If they say `go`, `push`, `commit + push`, or carry an ",
+    "work and actions they name. If they say `go`, `push`, `publish`, `commit + push`, or carry an ",
     "authorizing preset such as `#auth`, do the work without asking the operator to repeat those ",
     "words, reconfirm, or invoke the preset again. This task authorization does not itself grant ",
     "a harness-native tool permission.\n"
+);
+
+/// `#nestedoutwardauth`: a live nested sub-prompt that names push or publish
+/// is itself the operator's authorization, even when the preset body is only
+/// "rebase" or "review" and a skill says to wait.
+pub const SUBAGENT_NESTED_OUTWARD_AUTHORIZATION: &str = concat!(
+    "Nested lines under the queue item are operator authorization for the actions they name. ",
+    "They are not a chat reply and they are not a question. A nested line that says `push` or ",
+    "`publish` authorizes that outward action now, including when a resolved preset or a skill ",
+    "it names says to wait until the operator asks, and including when another declared preset ",
+    "is unresolved. The missing preset still grants nothing by its name. `publish` on a review ",
+    "authorizes posting the review as a plain comment unless the line says approve. A trailing ",
+    "`⟦effect:N⟧` marker does not remove that authorization. This grant overrides a later line ",
+    "that withholds push or publish only because a preset or skill says to wait.\n"
 );
 
 /// Marker line present exactly when the authorization failed closed.
@@ -507,6 +563,18 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
         out.push_str(&format!(
             "\nOrigin queue id (dispatch-time provenance):\n> {queue_id}\n\nAny follow-up queue heads produced by this work belong immediately after the originating head in this queue. Report them to the coordinator in order; the coordinator applies them with `agent-doc queue follow-up {document} --id {queue_id} --after <origin> --item <text>...`. Do not place them in a selected or mirrored sibling queue.\n"
         ));
+    }
+    let outward = nested_outward_action_lines(&auth.item);
+    if !outward.is_empty() {
+        out.push_str(
+            "\nOperator authorization, nested under the queue item (effective directives):\n",
+        );
+        for line in &outward {
+            out.push_str(&quote(line));
+            out.push('\n');
+        }
+        out.push('\n');
+        out.push_str(SUBAGENT_NESTED_OUTWARD_AUTHORIZATION);
     }
     for tracked in &auth.tracked_items {
         out.push_str(&format!(
@@ -1115,6 +1183,77 @@ mod tests {
             for harness in ["Claude Code", "Codex", "Grok Build", "OpenCode"] {
                 assert!(preamble.contains(harness), "missing {harness}: {preamble}");
             }
+        }
+    }
+
+    /// `#nestedoutwardauth`: a nested `push` under `#rebase`, including an
+    /// effect marker, and a nested `publish` under `#review` are authorization.
+    /// A negation and a struck child are not.
+    #[test]
+    fn nested_push_and_publish_are_operator_authorization() {
+        let fm = concat!(
+            "prompt_presets:\n",
+            "  \"#rebase\": \"rebase + fix merge conflicts\"\n",
+            "  \"#review\": \"Review using ~/.agents/skills/pr-review/SKILL.md\"\n",
+        );
+        let rebase = "#rebase [#subagent-operator-request-pr767-rebase-push]\n  - push ⟦effect:1⟧";
+        let content = doc(fm, "subagents", &[rebase], &[]);
+        let preamble = subagent_authorization("doc.md", &content, rebase).subagent_prompt_preamble;
+        assert!(preamble.contains("> push\n"), "{preamble}");
+        assert!(
+            !preamble.contains("> push ⟦effect:"),
+            "the effect marker is not part of the directive: {preamble}"
+        );
+        assert!(
+            preamble.contains(SUBAGENT_NESTED_OUTWARD_AUTHORIZATION),
+            "{preamble}"
+        );
+        assert!(preamble.contains("not a chat reply"), "{preamble}");
+        assert!(preamble.contains("`publish`"), "{preamble}");
+        assert!(
+            !preamble.contains("ask the coordinator for its text"),
+            "a request annotation is not missing backlog text: {preamble}"
+        );
+
+        let review = "#review\n  - I don't see the review on github. publish";
+        let content = doc(fm, "subagents", &[review], &[]);
+        let preamble = subagent_authorization("doc.md", &content, review).subagent_prompt_preamble;
+        assert!(
+            preamble.contains("> I don't see the review on github. publish"),
+            "{preamble}"
+        );
+        assert!(preamble.contains("plain comment"), "{preamble}");
+        assert_eq!(
+            subagent_authorization("doc.md", &content, review).status,
+            AuthorizationStatus::Resolved
+        );
+
+        let unresolved = "#rebase\n  - push";
+        let content = doc("", "subagents preset=\"#rebase\"", &[unresolved], &[]);
+        let preamble =
+            subagent_authorization("doc.md", &content, unresolved).subagent_prompt_preamble;
+        assert!(
+            preamble.contains(UNRESOLVED_AUTHORIZATION_MARKER),
+            "{preamble}"
+        );
+        assert!(preamble.contains("> push\n"), "{preamble}");
+        assert!(
+            preamble.contains("including when another declared preset"),
+            "{preamble}"
+        );
+
+        for inert in [
+            "#rebase\n  - do not push",
+            "#rebase\n  - ~~publish~~",
+            "#review\n  - read the diff",
+        ] {
+            let content = doc(fm, "subagents", &[inert], &[]);
+            let preamble =
+                subagent_authorization("doc.md", &content, inert).subagent_prompt_preamble;
+            assert!(
+                !preamble.contains("effective directives"),
+                "{inert}\n{preamble}"
+            );
         }
     }
 

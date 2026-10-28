@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -615,7 +616,6 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 
 `do [#pmsyncquestions]` is closed too. Its echo didn't strike the row, because the row is backed by a Todo, so I used `queue consume --id` after checking the Todo off. That's one more Todo-sync gap for the `agent:todo` worker that's still running.
 > **Queue prompt:** `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
-> **Queue prompt:** `agent:todo` should always be in sync, like how `agent:backlog` is always in sync.
 
 ### Re: Subagent completed: `subagent:todosync` returned work for queue item “`agent:todo` should always be in sync, like how `agent:backlog` is always in sync.” — agent-doc
 <!-- agent-doc-subagent-response sha256=afb90279f7fa0c32df965182f23baf23d300b3c4e01720a39781f95a8d18cbce -->
@@ -731,21 +731,74 @@ haiven-dev's ops log also shows a layout sync failing around 03:59Z:
 **Dispatched:** your extraction report (all `project.md` presets copied into `game-sessions.md`, 3 tmux panes when you open it, and `sdk-demo.md` at half width in the agent-doc-bugs.md | sdk-demo.md split) went to a worker, along with this layout snapshot and the log lines. It may only read your tmux server, so any pane cleanup will come back to you as instructions rather than being done for you.
 
 Still running: the duplicate-Todo-line fix and the `sdk-demo.md` `subagents` fix.
-<!-- agent:boundary:72822783 -->
+
+### Re: Subagent completed: `subagent:typingdupe` returned work for queue item “todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.” — agent-doc
+<!-- agent-doc-subagent-response sha256=ba74d2ac1534b4e2fca4b77c3b256d58b66086300bd80d788a3d76b3addc1313 -->
+> **Subagent response:**
+>
+> Branch fix/typingdupe, commit 91cf5570c2 on a4a550c3a4 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 12016 passed (186 skipped).
+> Root cause: the retried closeout queue consume composed two deferred write intents; composition kept the FIRST intent base for the whole document, so the Todo carried an older copy of the operator line in its base and a newer copy in its target, read as agent-edited (crdt_cp_write_component_scope components=[exchange:0,todo:0] 03:18:46Z); the line-based rebase over the still-newer editor text kept both replacements. A 14-byte todo-scoped write at 03:16:42Z had the same shape.
+> Fix: (1) composition, current-cut refinement and editor-reconnect supersession keep the original base only for components the intent chain wrote; every other region takes the new target base ({source}_deferred_write_base_advanced); (2) before rebasing an agent target over editor text, a component whose whole change is an older copy of in-progress operator text resets to base so operator text wins; real agent edits never qualify.
+> Files: agent-doc-element/src/component_scope.rs, agent-doc-document-realtime/src/write_policy.rs, agent-doc-document-realtime-io/src/lib.rs, specs/14-realtime-workflow.md.
+> Tests: regression on the real deferred-intent path with the incident three line versions reproduces the exact duplicate pair with both layers reverted; 3 write_policy + 1 component_scope units.
+> Follow-ups: an operator who deletes the half-typed line entirely before the write lands can still get it back off the composition path; intents persisted before install keep old bases. The existing duplicate line is safe to delete.
+<!-- agent-doc-subagent-completion key=51d58be94384486fac7739a787f77faa1cf9ebecd1638eb0b55575f2b41ef64b -->
+> **Queue prompt:** todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
+
+### Re: duplicated Todo line fixed; new rows dispatched — opus-5 · 2026-10-28T00:50-04:00
+
+**You were right: agent-doc introduced the duplicate, through my retried closeout.** The fix is `91cf5570c2`, on agent-doc `main` and installed. `make check` passed 12016 of 12016 tests, and no editor was quarantined before the install. Not released.
+
+**What happened** (ops log, 03:18:28 to 03:18:46Z):
+- The retry's queue consume lost a race with your typing, so agent-doc merged its two queued writes into one.
+- The merged write kept the first write's starting point for the **whole** document. Its Todo therefore held an older copy of your half-typed line as its "before" and a newer copy as its "after", so agent-doc treated your Todo as something it had edited itself.
+- When that write was replayed over your even newer text, the line-based merge saw two edits of the same line and kept both.
+
+A smaller write at 03:16:42Z had the same shape, and your editor removed it.
+
+**The fix, in two layers:**
+1. A merged queued write keeps its original starting point only for components it actually wrote. Every other part of the document comes from the newer text.
+2. Before an agent write is replayed over your text, a component whose only change is an older copy of what you're typing is dropped, so your text wins. A real agent edit (a checked box, an added line) never qualifies.
+
+A regression test replays the exact incident and fails with either layer removed.
+
+**You can delete the half-typed line safely;** nothing depends on it. Two cases are still open:
+- Deleting a half-typed line entirely before a queued write lands can still bring it back, outside the merge path.
+- Writes queued before this install keep their old starting points.
+
+**Dispatched:**
+- `do [#queue-blocked-marker]`: a worker is adding a blocked marker that names the blocking ids, keeping blocked rows out of subagent dispatch and drainable counts, and fixing the wrong ⏭️ on a blocked row that was never dispatched.
+- `do [#pmsyncstillopen]`: a worker is recording your answers as decisions:
+  - merge `review-requested:@me` into the GitHub default;
+  - let `auth=` rank above frontmatter;
+  - keep the `feed-*` names;
+  - accept the idempotency fallback;
+  - the hidden-row design you described: a foldable list item with sub-items, matched by a full walk;
+  - research on the GitLab and Jira equivalents of `involves:@me`.
+
+  It reads only your full line, not the half-typed copy.
+- `tmux sync failure`: this went to the extraction worker, since it's the same `game-sessions.md` | `sdk-demo.md` case. That worker also has your new repro for the half-width pane (agent-doc-bugs.md → game-sessions.md → back).
+
+**Filed `#deletedstruckmismatch`:** since the `agent:todo` sync row was pruned, steering has reported a `degraded_claim_mismatch` for it on nearly every call, although no todosync claim exists. Its work is merged and installed, so this is a false alarm.
+<!-- agent:boundary:e9f68224 -->
 <!-- /agent:exchange -->
 
 <!--
 -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
+- ☑️ [#subagent:typingdupe#1] todo item `- If the item is not in the list tree, agent-doc can add the item. If the item` is an agent-doc introduced duplicate that occurred while I was typing.
 - 🚧 [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
-- 📥 do [#queue-blocked-marker]
+- 🚧 [#subagent:qblocked#1] do [#queue-blocked-marker]
 - 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
   - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
   - When I open game-sessions.md in the editor, there are 3 tmux panes.
-  - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewpord is half width.
-- 📥 tmux sync failure: Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
+  - With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewport is half width.
+    - The right-side width viewport occurs when I navigate from the left editor side from agent-doc-bugs.md (2 tmux panes) to game-sessions.md (3 tmux panes) back to agent-doc-bugs.md.
+- 🚧 [#subagent:extractissues-tmuxsync#1] tmux sync failure
+  - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
+  - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
+- 🚧 [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -796,6 +849,7 @@ Still running: the duplicate-Todo-line fix and the `sdk-demo.md` `subagents` fix
 <!-- /agent:review -->
 
 ## Icebox <!-- agent:icebox -->
+- [ ] [#deletedstruckmismatch] After the closeout that struck the `agent:todo` sync row ended its claim and agent-doc pruned the struck row, mid-turn steering reports `dispatch=degraded_claim_mismatch owner=subagent:todosync` on nearly every tool call ("durable claim, report, or completion-outbox evidence still owns that exact work"), although `queue claims` lists no todosync claim. Some leftover record (completion outbox or lineage) outlives the closed claim, and the prune is read as an operator deletion.
 - [ ] [#lazilyspecagentdocfixtures] agent-doc-specific schemas and fixtures still live in lazily-spec (`schemas/agent-doc-state.json`, `conformance/agent-doc/`, the `editor_route` and `sync_tmux_layout` fixtures): move them into agent-doc or make them generic (automation-API proposal section 5).
 - [ ] [#apiversionexempt] `command_plane_submit` refuses any caller whose binary version differs from the controller's; the future public `agent-doc api` command must be exempt or every install breaks automation clients (automation-API proposal, Phase 2).
 - [ ] [#trackededitforward] An operator edit to a backlog item or Todo that a claimed queue row references is never forwarded to that worker (`forward_to_owner`); steering watches only exchange and queue edits (`#steerbacklogsource`). Affects backlog and Todo alike.

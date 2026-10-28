@@ -540,6 +540,91 @@ fn compose_status_sync_body(status_body: &str, text: &str, mode: StatusSyncMode)
     ))
 }
 
+/// What the authoritative document's `agent:status` holds right now, for a
+/// status-sync checkpoint to compare against (`#statuspatchdrop` (c)).
+///
+/// On 2026-10-28 the Stop hook asked the agent to re-evaluate the sync
+/// instruction, and the agent answered "no change" from its memory of a
+/// `patch:status` the write path had silently dropped. A checkpoint that quotes
+/// the current payload lets the agent compare against the document instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusSyncCheckpointEvidence {
+    /// The managed `status:sync` payload, `None` when the status has no block.
+    pub payload: Option<String>,
+    /// First 12 hex digits of the payload's SHA-256 (empty payload when none).
+    pub payload_hash: String,
+    /// Non-blank ordinary prose lines outside the managed block: not the queue
+    /// legend and not a binary-owned operational line. An additive status write
+    /// never rewrites these.
+    pub outside_prose_lines: usize,
+}
+
+/// Read [`StatusSyncCheckpointEvidence`] from `content`; `Ok(None)` when the
+/// document has no status component.
+pub fn status_sync_checkpoint_evidence(
+    content: &str,
+) -> Result<Option<StatusSyncCheckpointEvidence>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let Some(status) = components
+        .iter()
+        .find(|component| component.name == "status")
+    else {
+        return Ok(None);
+    };
+    let (outside, payload) =
+        crate::status_sync_tree::split_status_sync_body(status.content(content))?;
+    let outside_prose_lines = outside
+        .lines()
+        .filter(|line| {
+            !line.trim().is_empty()
+                && !is_protected_status_line(line)
+                && !agent_doc_frontmatter::frontmatter::is_queue_marker_legend_line(line)
+        })
+        .count();
+    let payload_hash = agent_doc_hash::content_hash(payload.as_deref().unwrap_or(""));
+    Ok(Some(StatusSyncCheckpointEvidence {
+        payload,
+        payload_hash: payload_hash.chars().take(12).collect(),
+        outside_prose_lines,
+    }))
+}
+
+/// Render [`status_sync_checkpoint_evidence`] as checkpoint text: the current
+/// payload quoted verbatim, its hash, and a note when ordinary prose outside
+/// the block would survive an additive write. `None` without a status
+/// component or when the status body cannot be read.
+pub fn render_status_sync_checkpoint_evidence(content: &str) -> Option<String> {
+    let evidence = status_sync_checkpoint_evidence(content).ok().flatten()?;
+    let mut rendered = match evidence.payload.as_deref().map(str::trim) {
+        Some(payload) if !payload.is_empty() => {
+            let quoted = payload
+                .lines()
+                .map(|line| format!("> {line}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!(
+                "The document's current `status:sync` payload (sha256 {}), read from the \
+                 authoritative document now. Compare against THIS text, not against what you \
+                 remember writing: an earlier status write may not have landed.\n{quoted}",
+                evidence.payload_hash,
+            )
+        }
+        _ => "The document's `agent:status` has no `status:sync` payload yet, so no earlier \
+              status write landed in it."
+            .to_string(),
+    };
+    if evidence.outside_prose_lines > 0 {
+        rendered.push_str(&format!(
+            "\nOutside that block the status also holds {} line(s) of ordinary prose that an \
+             additive `status set` never rewrites. If it is stale, pass a full status body \
+             (prose plus its own `<!-- status:sync -->` block) to `--text`; that replaces \
+             the ordinary prose too.",
+            evidence.outside_prose_lines,
+        ));
+    }
+    Some(rendered)
+}
+
 /// Apply `write --status` semantics while honoring an optional status sync
 /// directive. Documents without `sync` retain the legacy destructive replace.
 pub fn update_status_content(content: &str, text: &str) -> Result<String> {
@@ -1205,6 +1290,68 @@ mod tests {
                 "unexpected error for {marker}: {err:#}"
             );
         }
+    }
+
+    /// `#statuspatchdrop` (c): the checkpoint quotes what the document holds,
+    /// so "did the answer change" is decided against the payload, not memory.
+    #[test]
+    fn status_sync_checkpoint_evidence_quotes_the_current_payload_and_stale_prose() {
+        let doc = concat!(
+            "<!-- agent:status sync=\"##sync-release\" -->\n",
+            "Main is at `b6b9af6e15` (older prose).\n\n",
+            "<!-- status:sync -->\nLatest release: v0.35.558\n<!-- /status:sync -->\n\n",
+            "Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))\n",
+            "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n",
+            "<!-- /agent:status -->\n",
+        );
+        let evidence = status_sync_checkpoint_evidence(doc).unwrap().unwrap();
+        assert_eq!(
+            evidence.payload.as_deref(),
+            Some("Latest release: v0.35.558\n")
+        );
+        assert_eq!(
+            evidence.payload_hash,
+            agent_doc_hash::content_hash("Latest release: v0.35.558\n")[..12]
+        );
+        // The legend and the binary-owned handoff line are not ordinary prose.
+        assert_eq!(evidence.outside_prose_lines, 1);
+
+        let rendered = render_status_sync_checkpoint_evidence(doc).unwrap();
+        assert!(
+            rendered.contains("> Latest release: v0.35.558"),
+            "{rendered}"
+        );
+        assert!(rendered.contains(&evidence.payload_hash), "{rendered}");
+        assert!(
+            rendered.contains("not against what you remember writing"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("1 line(s) of ordinary prose"),
+            "{rendered}"
+        );
+
+        // After an additive write the evidence follows the document.
+        let updated = update_status_content(doc, "Latest release: v0.35.559").unwrap();
+        let rendered = render_status_sync_checkpoint_evidence(&updated).unwrap();
+        assert!(
+            rendered.contains("> Latest release: v0.35.559"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("v0.35.558"), "{rendered}");
+
+        // No managed block yet, and no ordinary prose: say so plainly.
+        let empty = "<!-- agent:status sync=\"x\" -->\n<!-- /agent:status -->\n";
+        let rendered = render_status_sync_checkpoint_evidence(empty).unwrap();
+        assert!(
+            rendered.contains("has no `status:sync` payload yet"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("ordinary prose"), "{rendered}");
+        assert_eq!(
+            render_status_sync_checkpoint_evidence("no components\n"),
+            None
+        );
     }
 
     #[test]

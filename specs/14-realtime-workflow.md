@@ -1708,6 +1708,23 @@ The rules:
   a changed key is re-rendered. Re-serialising the whole mapping stripped the
   operator's quotes from every untouched preset whenever the resume-id capture
   rebased over live typing (agent-doc-bugs.md, 2026-10-28).
+- Agent component ops survive the response-only rebase (`#statuspatchdrop`).
+  When the target introduces a response the cut lacks, the rebase builds it from
+  the editor cut plus the missing `### Re:` block. Every other component the
+  agent changed over the merge base rolls forward onto that result: the agent's
+  body lands where the operator left the component at the base, and the per-cell
+  authorship policy decides a component both sides changed (operator-owned keeps
+  the operator's edit, disjoint edits converge, agent-owned `status`/`log` keeps
+  the agent's op with a logged `cell_merge conflict`). Measured on
+  `tasks/agent-doc/agent-doc-bugs.md` 2026-10-28T13:01Z: a closeout's
+  `patch:status` won the first-stage cell merge, then the CP write's rebase over
+  the operator's typing rebuilt the target from the cut plus the response and
+  the status patch vanished; the retained transition was scoped `[exchange:0]`
+  and `respond` reported success. Any rebase that still leaves an agent
+  component at the editor's body prints
+  `[write] warning: agent_component_patch_dropped component=<name> …
+  operator_changed=<bool>` on stderr, so a dropped patch is never reported as a
+  clean write.
 - `rebase_retained_target_over_editor_cut` then proves it. Every operator-added
   line of the reconciled cut must survive: every copy the cut holds, less the
   base copies the agent removed. A line the operator edited also counts as

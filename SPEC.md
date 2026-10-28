@@ -63,6 +63,16 @@
   of the epoch), and a commit refused over a quarantined replica names the
   quarantine (the barrier verdict crosses the controller RPC, `bool`-compatible).
 
+- An agent component patch (`patch:status`, a todo or backlog patch) survives
+  the response-only rebase onto a newer editor cut (`#statuspatchdrop`): it
+  rolls forward where the operator left the component untouched, a component
+  both sides changed goes through the per-cell authorship policy, and any agent
+  component op a rebase still leaves at the editor's body is reported on stderr
+  as `agent_component_patch_dropped`. Status-sync checkpoints quote the current
+  `status:sync` payload and hash so they are answered against the document, not
+  memory. See [Real-Time Workflow Authority](specs/14-realtime-workflow.md#retained-writes-never-replace-operator-text)
+  and [Document Format](specs/02-document-format.md).
+
 - `agent-doc serve`'s `POST /save` is a whole-document write with no base
   (`#servesavebypass`). It is refused with `409 Conflict` while an editor
   replica holds the document, and writes nothing and commits nothing then;

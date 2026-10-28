@@ -339,9 +339,25 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     .unwrap_or_else(|| editor_cut.to_string());
     let target_introduces_response = !buffer_presents_reference_response(agent_target, merge_base);
     if target_introduces_response {
+        // `#statuspatchdrop`: both shortcuts below place only the RESPONSE
+        // onto the editor cut. Every other component the agent changed over
+        // `merge_base` (a `patch:status`, a todo or backlog patch) must roll
+        // forward onto that cut too, or the agent's op is silently discarded.
         if buffer_presents_reference_response(agent_target, &editor_reconciled) {
+            let rebased = carry_agent_component_ops_onto_response_rebase(
+                merge_base,
+                agent_target,
+                &editor_reconciled,
+                editor_reconciled.clone(),
+            );
+            warn_dropped_agent_component_ops(
+                merge_base,
+                agent_target,
+                &editor_reconciled,
+                &rebased,
+            );
             return Ok(ReconciledRebase {
-                rebased: editor_reconciled.clone(),
+                rebased,
                 editor_reconciled,
             });
         }
@@ -350,8 +366,20 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
             &editor_reconciled,
             normalize_visible_recovery_compare,
         ) {
+            let rebased = carry_agent_component_ops_onto_response_rebase(
+                merge_base,
+                agent_target,
+                &editor_reconciled,
+                recovered,
+            );
+            warn_dropped_agent_component_ops(
+                merge_base,
+                agent_target,
+                &editor_reconciled,
+                &rebased,
+            );
             return Ok(ReconciledRebase {
-                rebased: recovered,
+                rebased,
                 editor_reconciled,
             });
         }
@@ -367,10 +395,201 @@ fn rebase_agent_candidate_over_editor_cut_reconciled(
     let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(merge_base).encode_state();
     let (rebased, _) =
         agent_doc_merge::merge_contents_crdt(Some(&base_state), agent_target, &editor_reconciled)?;
+    warn_dropped_agent_component_ops(merge_base, agent_target, &editor_reconciled, &rebased);
     Ok(ReconciledRebase {
         rebased,
         editor_reconciled,
     })
+}
+
+/// `#statuspatchdrop`: roll every non-response component op the agent made over
+/// `merge_base` forward onto `rebased`, a response-only rebase of the agent
+/// target onto `editor_cut`.
+///
+/// The response shortcuts in [`rebase_agent_candidate_over_editor_cut`] take
+/// the editor cut as the whole document and add just the missing `### Re:`
+/// block. On 2026-10-28 (tasks/agent-doc/agent-doc-bugs.md, 13:01Z) the agent's
+/// `patch:status` won the first-stage cell merge, then this rebase rebuilt the
+/// target from the editor cut plus the response and the status patch vanished
+/// with no warning; the Stop hook's status checkpoint was then answered from
+/// memory as "already current".
+///
+/// Per top-level component (matched by name and occurrence across all three
+/// texts) the agent changed, and that `rebased` still holds verbatim from the
+/// editor cut:
+/// - the operator left it at `merge_base` → the agent's body lands; no operator
+///   byte can be lost, since the operator never touched it;
+/// - the operator changed it too → the component takes the per-cell merge's
+///   result, so the established authorship policy decides (operator-owned
+///   components keep the operator's edit, disjoint edits converge, and an
+///   agent-owned `status`/`log` keeps the agent's op with a logged conflict).
+///
+/// The response component is the shortcut's own and is never touched. When the
+/// texts do not share one component layout nothing is carried, and
+/// [`warn_dropped_agent_component_ops`] reports the loss instead.
+pub fn carry_agent_component_ops_onto_response_rebase(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+    rebased: String,
+) -> String {
+    use agent_doc_element::component_scope::{
+        ComponentWriteScope, replace_component_bodies, top_level_component_bodies,
+    };
+    let (Some(base), Some(agent), Some(editor), Some(current)) = (
+        top_level_component_bodies(merge_base),
+        top_level_component_bodies(agent_target),
+        top_level_component_bodies(editor_cut),
+        top_level_component_bodies(&rebased),
+    ) else {
+        return rebased;
+    };
+    let same_layout = |other: &[agent_doc_element::component_scope::TopLevelComponentBody]| {
+        other.len() == base.len()
+            && other
+                .iter()
+                .zip(&base)
+                .all(|(left, right)| left.component == right.component)
+    };
+    if !same_layout(&agent) || !same_layout(&editor) || !same_layout(&current) {
+        return rebased;
+    }
+    let mut take_agent = Vec::new();
+    let mut take_merged = Vec::new();
+    for (((base_body, agent_body), editor_body), current_body) in
+        base.iter().zip(&agent).zip(&editor).zip(&current)
+    {
+        if base_body.component.name == AGENT_RESPONSE_COMPONENT {
+            continue;
+        }
+        let base_text = &merge_base[base_body.body.clone()];
+        let agent_text = &agent_target[agent_body.body.clone()];
+        let editor_text = &editor_cut[editor_body.body.clone()];
+        let current_text = &rebased[current_body.body.clone()];
+        if agent_text == base_text || agent_text == editor_text || current_text != editor_text {
+            continue;
+        }
+        if editor_text == base_text {
+            take_agent.push(base_body.component.clone());
+        } else {
+            take_merged.push(base_body.component.clone());
+        }
+    }
+    let mut rebased = rebased;
+    if !take_agent.is_empty()
+        && let Some(carried) = replace_component_bodies(
+            &rebased,
+            agent_target,
+            &ComponentWriteScope::new(take_agent),
+        )
+    {
+        rebased = carried;
+    }
+    if !take_merged.is_empty() {
+        let plan = agent_doc_merge::merge(agent_doc_merge::MergeRequest::cell(
+            merge_base,
+            agent_target,
+            editor_cut,
+        ));
+        if !plan.fell_back
+            && let Some(carried) = replace_component_bodies(
+                &rebased,
+                &plan.merged_doc,
+                &ComponentWriteScope::new(take_merged),
+            )
+        {
+            rebased = carried;
+        }
+    }
+    rebased
+}
+
+/// One agent component op a rebase onto the editor cut did not carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DroppedAgentComponentOp {
+    /// Component marker name (`status`, `todo`, ...).
+    pub component: String,
+    /// Zero-based occurrence among components sharing the name.
+    pub occurrence: usize,
+    /// True when the operator changed the component too, so the editor's
+    /// version was kept on purpose; false when nothing justified the drop.
+    pub operator_changed: bool,
+}
+
+/// `#statuspatchdrop`: the non-response component ops the agent made over
+/// `merge_base` that `rebased` does not carry: the component holds the editor
+/// cut's body verbatim, not the agent's.
+///
+/// Pure. Empty when nothing was dropped or the texts do not share one
+/// component layout (a layout change is not attributable per component).
+pub fn dropped_agent_component_ops(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+    rebased: &str,
+) -> Vec<DroppedAgentComponentOp> {
+    use agent_doc_element::component_scope::top_level_component_bodies;
+    let (Some(base), Some(agent), Some(editor), Some(current)) = (
+        top_level_component_bodies(merge_base),
+        top_level_component_bodies(agent_target),
+        top_level_component_bodies(editor_cut),
+        top_level_component_bodies(rebased),
+    ) else {
+        return Vec::new();
+    };
+    let same_layout = |other: &[agent_doc_element::component_scope::TopLevelComponentBody]| {
+        other.len() == base.len()
+            && other
+                .iter()
+                .zip(&base)
+                .all(|(left, right)| left.component == right.component)
+    };
+    if !same_layout(&agent) || !same_layout(&editor) || !same_layout(&current) {
+        return Vec::new();
+    }
+    base.iter()
+        .zip(&agent)
+        .zip(&editor)
+        .zip(&current)
+        .filter_map(|(((base_body, agent_body), editor_body), current_body)| {
+            if base_body.component.name == AGENT_RESPONSE_COMPONENT {
+                return None;
+            }
+            let base_text = &merge_base[base_body.body.clone()];
+            let agent_text = &agent_target[agent_body.body.clone()];
+            let editor_text = &editor_cut[editor_body.body.clone()];
+            let current_text = &rebased[current_body.body.clone()];
+            (agent_text != base_text && agent_text != editor_text && current_text == editor_text)
+                .then(|| DroppedAgentComponentOp {
+                    component: base_body.component.name.clone(),
+                    occurrence: base_body.component.occurrence,
+                    operator_changed: editor_text != base_text,
+                })
+        })
+        .collect()
+}
+
+/// `#statuspatchdrop` (b): say so on stderr when a rebase discards an agent
+/// component op, so `respond`/`finalize` output never reports success for a
+/// patch that did not land. The operator-changed case is the authorship policy
+/// keeping the operator's concurrent edit; the other case is a defect.
+fn warn_dropped_agent_component_ops(
+    merge_base: &str,
+    agent_target: &str,
+    editor_cut: &str,
+    rebased: &str,
+) {
+    for dropped in dropped_agent_component_ops(merge_base, agent_target, editor_cut, rebased) {
+        let reason = if dropped.operator_changed {
+            "the operator edited the same component concurrently and their edit was kept"
+        } else {
+            "the rebase onto the editor cut discarded it"
+        };
+        eprintln!(
+            "[write] warning: agent_component_patch_dropped component={} occurrence={} operator_changed={}: the agent's patch:{} did not land ({reason}); re-read the document and re-apply it (for agent:status use `agent-doc status set`)",
+            dropped.component, dropped.occurrence, dropped.operator_changed, dropped.component,
+        );
+    }
 }
 
 /// Rebase a retained target only when the converged editor cut still carries a
@@ -5767,4 +5986,156 @@ fn rebase_residue_outside_every_component_is_detected() {
     // Changes inside a component never count.
     let inside = cut.replace("- slow?\n", "- slow?\n- new item\n");
     assert!(!rebase_introduces_unscoped_text(&inside, cut, target));
+}
+
+#[cfg(test)]
+mod status_patch_drop_tests {
+    //! `#statuspatchdrop`: an agent component patch must survive the
+    //! response-only rebase onto a newer editor cut (agent-doc-bugs.md,
+    //! 2026-10-28 13:01Z: the closeout's `patch:status` won the cell merge, then
+    //! vanished when the target was rebuilt from the editor cut plus the
+    //! response, and nothing said so).
+    use super::*;
+
+    const LEGEND: &str = "Queue markers: 📥 pending · 🚧 running";
+
+    fn doc(status_body: &str, exchange_tail: &str, queue: &str) -> String {
+        format!(
+            "---\nagent_doc_format: template\n---\n\n\
+             ## Status <!-- agent:status patch=replace sync=\"##sync-release\" -->\n\
+             {status_body}<!-- /agent:status -->\n\n\
+             ## Exchange <!-- agent:exchange patch=append -->\n\
+             ❯ release status?\n{exchange_tail}<!-- /agent:exchange -->\n\n\
+             ## Queue <!-- agent:queue -->\n{queue}<!-- /agent:queue -->\n"
+        )
+    }
+
+    fn status_body(payload: &str) -> String {
+        format!(
+            "\nMain is at `b6b9af6e15` (older prose).\n\n<!-- status:sync -->\n{payload}\n<!-- /status:sync -->\n\n{LEGEND}\n"
+        )
+    }
+
+    fn status_of(content: &str) -> String {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        components
+            .iter()
+            .find(|component| component.name == "status")
+            .unwrap()
+            .content(content)
+            .to_string()
+    }
+
+    const AGENT_STATUS: &str =
+        "\nReleased v0.35.559 from `5870713c02`.\n\nQueue markers: 📥 pending · 🚧 running\n";
+    const RESPONSE: &str = "### Re: release status — opus\n\nReleased v0.35.559.\n";
+
+    /// The incident shape: the merge base already carries the agent's status,
+    /// the operator never touches status, but types a queue row while the
+    /// response is in flight. The rebase must keep the status patch, the
+    /// operator's row, and land the response once.
+    #[test]
+    fn response_rebase_keeps_the_agents_status_patch_when_the_operator_typed_elsewhere() {
+        let base = doc(&status_body("Latest release: v0.35.558"), "", "- old row\n");
+        let target = doc(AGENT_STATUS, RESPONSE, "- old row\n");
+        let cut = doc(
+            &status_body("Latest release: v0.35.558"),
+            "",
+            "- old row\n- typed while the response was in flight\n",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert_eq!(status_of(&rebased), AGENT_STATUS, "{rebased}");
+        assert!(
+            rebased.contains("- typed while the response was in flight"),
+            "{rebased}"
+        );
+        assert_eq!(
+            rebased.matches("### Re: release status").count(),
+            1,
+            "{rebased}"
+        );
+        assert!(dropped_agent_component_ops(&base, &target, &cut, &rebased).is_empty());
+
+        // The retained-delivery path shares the same semantic owner.
+        let retained = rebase_retained_target_over_editor_cut(&base, &target, &cut).unwrap();
+        assert_eq!(status_of(&retained), AGENT_STATUS, "{retained}");
+        assert!(retained.contains("- typed while the response was in flight"));
+    }
+
+    /// The editor already shows the response: whichever path rebases it, the
+    /// status patch still lands and the response is not duplicated.
+    #[test]
+    fn response_already_visible_still_carries_the_status_patch() {
+        let base = doc(&status_body("Latest release: v0.35.558"), "", "- old row\n");
+        let target = doc(AGENT_STATUS, RESPONSE, "- old row\n");
+        let cut = doc(
+            &status_body("Latest release: v0.35.558"),
+            RESPONSE,
+            "- old row\n- typed\n",
+        );
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        assert_eq!(status_of(&rebased), AGENT_STATUS, "{rebased}");
+        assert!(rebased.contains("- typed\n"), "{rebased}");
+        assert_eq!(
+            rebased.matches("### Re: release status").count(),
+            1,
+            "{rebased}"
+        );
+    }
+
+    /// When the operator edited status too, the per-cell authorship policy
+    /// decides instead of the response shortcut silently keeping the cut:
+    /// disjoint edits converge, so the operator's prose edit and the agent's
+    /// payload both survive.
+    #[test]
+    fn operator_and_agent_status_edits_go_through_the_cell_policy() {
+        let base_status = status_body("Latest release: v0.35.558");
+        let base = doc(&base_status, "", "- old row\n");
+        let agent_status =
+            base_status.replace("Latest release: v0.35.558", "Latest release: v0.35.559");
+        let target = doc(&agent_status, RESPONSE, "- old row\n");
+        let operator_status = base_status.replace("(older prose)", "(operator note)");
+        let cut = doc(&operator_status, "", "- old row\n");
+
+        let rebased = rebase_agent_candidate_over_editor_cut(&base, &target, &cut).unwrap();
+
+        let status = status_of(&rebased);
+        assert!(status.contains("Latest release: v0.35.559"), "{status}");
+        assert!(status.contains("(operator note)"), "{status}");
+        assert!(!status.contains("v0.35.558"), "{status}");
+    }
+
+    /// An operator-owned component the agent and the operator both changed
+    /// keeps the operator's edit (cell policy), and the drop is reported as
+    /// the operator's, never as a silent defect.
+    #[test]
+    fn dropped_agent_component_ops_attributes_operator_owned_drops() {
+        let base = doc(&status_body("p"), "", "- row\n");
+        let target = doc(&status_body("p"), RESPONSE, "- agent row\n");
+        let cut = doc(&status_body("p"), "", "- operator row\n");
+        let rebased = cut.clone();
+
+        assert_eq!(
+            dropped_agent_component_ops(&base, &target, &cut, &rebased),
+            vec![DroppedAgentComponentOp {
+                component: "queue".to_string(),
+                occurrence: 0,
+                operator_changed: true,
+            }]
+        );
+        // The unjustified case: the operator never touched status.
+        let status_target = doc(AGENT_STATUS, RESPONSE, "- row\n");
+        assert_eq!(
+            dropped_agent_component_ops(&base, &status_target, &base, &base),
+            vec![DroppedAgentComponentOp {
+                component: "status".to_string(),
+                occurrence: 0,
+                operator_changed: false,
+            }]
+        );
+    }
 }

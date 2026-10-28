@@ -20,8 +20,10 @@
   worker or invalidating a reported completion receipt. Detached disk edits keep
   the direct deletion path. Deleting a
   durably terminal struck row is presentation-only cleanup; a strikethrough that
-  conflicts with claim, receipt, or outbox evidence emits a degraded mismatch
-  and preserves/fences the work instead of cancelling or integrating it.
+  conflicts with claim or receipt evidence emits a degraded mismatch, once per
+  owning attempt, and preserves/fences the work instead of cancelling or
+  integrating it. A completion cell whose claim closed and whose receipt ended
+  is stale residue, never ownership (`#deletedstruckmismatch`).
 
 - Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
 

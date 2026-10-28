@@ -232,6 +232,14 @@ pub struct SteeringWatermark {
     /// stays stable across a re-entrant preflight.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prior_cycle_queue: Option<Vec<String>>,
+    /// Struck-row deletions this consumer already reported as
+    /// [`SteeringDispatch::DegradedClaimMismatch`], keyed by
+    /// [`struck_removal_report_key`] (`#deletedstruckmismatch`). The struck
+    /// row is diffed against the cycle `baseline`, which never advances, so
+    /// without this receipt every later observation of a changed document
+    /// re-derived and re-reported the same deletion.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub surfaced_struck_removals: BTreeSet<String>,
 }
 
 impl SteeringWatermark {
@@ -259,6 +267,7 @@ impl SteeringWatermark {
             last_observed_stat: None,
             closed: false,
             prior_cycle_queue: None,
+            surfaced_struck_removals: BTreeSet::new(),
         }
     }
 }
@@ -1453,6 +1462,26 @@ pub fn apply_claim_attempts(
             item.worker_id = claim.worker.map(|worker| worker.worker_id);
         }
     }
+}
+
+/// The receipt key of one degraded struck-row deletion report
+/// (`#deletedstruckmismatch`): the work identity plus the exact owning
+/// attempt. A later attempt on the same text (a new generation or owner) is a
+/// new mismatch and reports again; the same attempt reports once.
+pub fn struck_removal_report_key(
+    identity: &agent_doc_element_queue::QueueItemIdentity,
+    owner: Option<&str>,
+    generation: Option<u64>,
+) -> String {
+    let identity = match identity {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("id:{id}"),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(text) => format!("ft:{text}"),
+    };
+    format!(
+        "{identity}|{}|{}",
+        owner.unwrap_or("-"),
+        generation.map_or_else(|| "-".to_string(), |generation| generation.to_string())
+    )
 }
 
 /// Add authoritative cancellation steering for claimed queue rows the

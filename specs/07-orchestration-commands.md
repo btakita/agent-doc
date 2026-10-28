@@ -987,9 +987,27 @@ portable agent-doc fallback:
   fail closed without dispatching worker cancellation; detached disk edits retain
   direct deletion semantics. A durably terminal struck-row deletion is
   presentation-only cleanup. If Markdown strikethrough conflicts with a live
-  claim, reported receipt, or completion outbox, steering emits
-  `degraded_claim_mismatch`, preserves/fences that work, and performs no
-  interrupt, release, integration, apply, publication, or terminal inference.
+  claim or reported receipt, steering emits `degraded_claim_mismatch`,
+  preserves/fences that work, and performs no interrupt, release, integration,
+  apply, publication, or terminal inference. A binary completion cell is a
+  transient projection of a claim attempt, not ownership on its own
+  (`#deletedstruckmismatch`): once the struck row's claim closed and no
+  reported receipt remains, a leftover cell, whether in committed exchange
+  history or a retained outbox target, is stale residue for
+  `queue repair-stale-completion`, and the binary-owned prune of that struck
+  row is cleanup, never an operator deletion of owned work. Live 2026-10-28: a
+  closeout whose `queue_consume` write timed out at the editor delivery barrier
+  (`queue_write_retained_delivery_awaited landed=false`) still settled as
+  committed; the committed document carried the queue strike but not the cell
+  retirement held in the retained `queue_consume` target, the claim was pruned
+  closed, no receipt existed, and after maintenance pruned the struck row every
+  tool call reported
+  `degraded_claim_mismatch owner=subagent:todosync`. The struck row is diffed
+  against the cycle baseline, which never advances, so a degraded mismatch is
+  delivered once per owning attempt (work identity, owner, generation) per
+  steering consumer: the consumer's acknowledged watermark records it in
+  `surfaced_struck_removals`, and a later attempt on the same text reports
+  again.
 
 **Claim closure is part of the strike (`#claimstrike`, GH #303).** Free-text answer strikes and id-backed done/gate/edit consumes release the live claim at the same successful document-mutation boundary. In particular, an id-backed `Reported` attempt must not wait for later disk-based closeout pruning: after its anchored line is struck, a later operator re-add of the same `#id` is new, unclaimed, dispatchable intent and never inherits the earlier attempt's `☑️` marker. A tracked-work transition strikes only the heads its ids name: it never consumes a free-text head, and a quoted head followed by a `**Deferred:**` paragraph stays queued on every closeout path (`#trackedworkftbudget`, `#deferstrike`).
 

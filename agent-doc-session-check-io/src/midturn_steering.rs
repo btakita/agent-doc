@@ -265,7 +265,7 @@ fn route_claimed_items(
     content: &str,
     watermark: &SteeringWatermark,
     items: &mut Vec<SteeringItem>,
-) -> Result<()> {
+) -> Result<BTreeSet<String>> {
     let ledger = agent_doc_queue_io::queue_claim::load_ledger_following(file, content)
         .with_context(|| format!("read queue claims while routing {}", file.display()))?;
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
@@ -368,7 +368,8 @@ fn route_claimed_items(
             .or_else(|| cancellations.get(&identity))
             .cloned()
     });
-    append_struck_removal_mismatches(file, content, watermark, &attempts, items)?;
+    let struck_removals =
+        append_struck_removal_mismatches(file, content, watermark, &attempts, items)?;
     for item in items
         .iter()
         .filter(|item| item.dispatch == core::SteeringDispatch::CancelClaimed)
@@ -386,7 +387,7 @@ fn route_claimed_items(
                 .cloned()
         });
     }
-    Ok(())
+    Ok(struck_removals)
 }
 
 fn queue_claim_identities(
@@ -446,8 +447,17 @@ fn all_queue_item_identities(
 }
 
 /// A struck-row deletion is presentation cleanup only when durable state also
-/// proves terminality. Conflicting claim/receipt/outbox evidence is surfaced as
-/// degraded and is never converted into cancellation authority.
+/// proves terminality. Conflicting claim or reported-receipt evidence is
+/// surfaced as degraded and is never converted into cancellation authority.
+///
+/// `#deletedstruckmismatch`: a binary completion cell is a transient projection
+/// of a claim attempt, never ownership on its own. Once the struck row's claim
+/// closed and no reported receipt remains, a leftover cell (in the document
+/// history or a retained outbox target) is stale residue that
+/// `queue repair-stale-completion` retires; the binary-owned prune of that row
+/// is cleanup, not an operator deletion of owned work. A mismatch is reported
+/// once per owning attempt per consumer: the returned keys join the consumer's
+/// watermark, and a key already there is never re-reported.
 fn append_struck_removal_mismatches(
     file: &Path,
     content: &str,
@@ -457,25 +467,18 @@ fn append_struck_removal_mismatches(
         agent_doc_queue::queue_claim::QueueClaim,
     >,
     items: &mut Vec<SteeringItem>,
-) -> Result<()> {
+) -> Result<BTreeSet<String>> {
+    let mut reported = BTreeSet::new();
     let current = all_queue_item_identities(content);
     let deleted = completed_queue_items(&watermark.baseline)
         .into_iter()
         .filter(|text| !current.contains(&agent_doc_queue::queue_claim::claim_identity(text)))
         .collect::<Vec<_>>();
     if deleted.is_empty() {
-        return Ok(());
+        return Ok(reported);
     }
     let receipts = agent_doc_queue_io::claim_release_receipt::load(file)
         .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
-    let pending_content = agent_doc_document_realtime_io::pending_document_write(file)
-        .map(|pending| pending.target_content);
-    let completion_evidence = pending_content
-        .as_deref()
-        .into_iter()
-        .chain(std::iter::once(content))
-        .flat_map(agent_doc_document::subagent_completion::completion_evidence)
-        .collect::<Vec<_>>();
 
     for text in deleted {
         let identity = agent_doc_queue::queue_claim::claim_identity(&text);
@@ -484,10 +487,17 @@ fn append_struck_removal_mismatches(
             .receipts
             .iter()
             .find(|receipt| receipt.identity == identity);
-        let completion = completion_evidence.iter().find(|evidence| {
-            agent_doc_queue::queue_claim::claim_identity(&evidence.item) == identity
-        });
-        if claim.is_none() && receipt.is_none() && completion.is_none() {
+        if claim.is_none() && receipt.is_none() {
+            continue;
+        }
+        let owner = claim
+            .map(|claim| claim.owner.clone())
+            .or_else(|| receipt.map(|receipt| receipt.owner.clone()));
+        let generation = claim
+            .map(|claim| claim.generation)
+            .or_else(|| receipt.map(|receipt| receipt.generation));
+        let key = core::struck_removal_report_key(&identity, owner.as_deref(), generation);
+        if watermark.surfaced_struck_removals.contains(&key) || !reported.insert(key) {
             continue;
         }
         items.push(SteeringItem {
@@ -499,20 +509,15 @@ fn append_struck_removal_mismatches(
             previous: None,
             presets: Vec::new(),
             possibly_partial: false,
-            owner: claim
-                .map(|claim| claim.owner.clone())
-                .or_else(|| receipt.map(|receipt| receipt.owner.clone()))
-                .or_else(|| completion.map(|evidence| evidence.owner.clone())),
-            generation: claim
-                .map(|claim| claim.generation)
-                .or_else(|| receipt.map(|receipt| receipt.generation)),
+            owner,
+            generation,
             worker_id: claim
                 .and_then(|claim| claim.worker.as_ref().map(|worker| worker.worker_id.clone()))
                 .or_else(|| receipt.and_then(|receipt| receipt.worker_id.clone())),
             explicit: false,
         });
     }
-    Ok(())
+    Ok(reported)
 }
 
 /// Serialize removal against `queue report-complete`, tombstone the exact
@@ -1083,11 +1088,14 @@ fn prepare_with_gate(
         explicit: explicit_send,
         decisions: std::mem::take(&mut observation.decisions),
     };
-    route_claimed_items(file, &content, &watermark, &mut observation.ready)?;
+    let struck_removals = route_claimed_items(file, &content, &watermark, &mut observation.ready)?;
     // `#steerbaselineabsorb`: a prompt a cycle already carried or answered is
     // never re-surfaced (the watermark still advances past it).
     crate::absorbed_steering::drop_consumed(file, &mut observation.ready);
     let mut next = observation.next;
+    // `#deletedstruckmismatch`: a degraded struck-row deletion is delivered
+    // once; acknowledging this observation records it.
+    next.surfaced_struck_removals.extend(struck_removals);
     next.last_observed_stat = Some(fingerprint);
     let report = SteeringReport {
         document: file.display().to_string(),
@@ -3796,6 +3804,135 @@ mod tests {
             .unwrap()
             .expect("observation");
         assert!(cleanup.items.is_empty(), "{cleanup:?}");
+    }
+
+    /// `#deletedstruckmismatch` (agent-doc-bugs.md, 2026-10-28): a closeout
+    /// struck the `subagent:todosync` row, the claim was pruned closed, and no
+    /// reported receipt existed, but the completion cell the worker's
+    /// `report-complete` wrote stayed in the committed exchange. Queue
+    /// maintenance then pruned the struck row, and mid-turn steering read that
+    /// binary-owned prune as an operator deletion of owned work on every tool
+    /// call. A completion cell with no claim attempt or receipt behind it is
+    /// stale residue, never ownership.
+    #[test]
+    fn pruned_struck_row_with_only_a_stale_completion_cell_is_cleanup() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head =
+            "`agent:todo` should always be in sync, like how `agent:backlog` is always in sync.";
+        let cell =
+            agent_doc_document::subagent_completion::cell("subagent:todosync", head, "k-todosync");
+        let struck = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange -->\nEarlier answer.\n\n{cell}\n<!-- /agent:exchange -->\n\n<!-- agent:queue go -->\n- current task\n- ~~{head}~~\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &struck).unwrap();
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_evidence(&struck).len(),
+            1,
+            "fixture carries the leftover completion cell"
+        );
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&struck), Some(&struck)).unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &struck,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let pruned = struck.replace(&format!("- ~~{head}~~\n"), "");
+        std::fs::write(&file, &pruned).unwrap();
+        backdate(&file);
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("observation");
+        assert!(
+            report
+                .items
+                .iter()
+                .all(|item| item.dispatch != core::SteeringDispatch::DegradedClaimMismatch),
+            "a closed claim's leftover completion cell must not own the pruned row: {report:?}"
+        );
+    }
+
+    /// `#deletedstruckmismatch`: the struck row is diffed against the cycle
+    /// baseline, which never advances, so every later document change used to
+    /// re-derive and re-report the same degraded deletion. A real mismatch is
+    /// delivered once per owning attempt; a new attempt reports again.
+    #[test]
+    fn degraded_struck_row_deletion_is_reported_once_per_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let head = "finish worker result";
+        let live = format!(
+            "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue go -->\n- current task\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &live).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, head, "subagent:worker", 3600).unwrap();
+        let struck = live.replace(&format!("- {head}\n"), &format!("- ~{head}~\n"));
+        std::fs::write(&file, &struck).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&struck), Some(&struck)).unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &struck,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        let degraded = |report: &SteeringReport| {
+            report
+                .items
+                .iter()
+                .filter(|item| item.dispatch == core::SteeringDispatch::DegradedClaimMismatch)
+                .count()
+        };
+
+        let deleted = struck.replace(&format!("- ~{head}~\n"), "");
+        std::fs::write(&file, &deleted).unwrap();
+        backdate(&file);
+        let first = observe(&file, CONSUMER_HOOK, true).unwrap().expect("hook");
+        assert_eq!(degraded(&first), 1, "{first:?}");
+        assert_eq!(first.items[0].generation, Some(claim.generation));
+
+        // Unrelated later document changes (the coordinator's own writes, other
+        // queue traffic) must not resurface the same mismatch.
+        for (round, heading) in ["# S2", "# S3"].into_iter().enumerate() {
+            let changed = deleted.replace("# S\n", &format!("{heading}\n"));
+            std::fs::write(&file, &changed).unwrap();
+            backdate(&file);
+            let later = observe(&file, CONSUMER_HOOK, true).unwrap();
+            assert!(
+                later.as_ref().is_none_or(|report| degraded(report) == 0),
+                "round {round}: the same mismatch re-reported: {later:?}"
+            );
+        }
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&file)
+                .unwrap()
+                .claims
+                .len(),
+            1,
+            "reporting once never fences or cancels the durable claim"
+        );
+
+        // A different owning attempt on the same text is a new mismatch.
+        let key_a = core::struck_removal_report_key(
+            &agent_doc_queue::queue_claim::claim_identity(head),
+            Some("subagent:worker"),
+            Some(claim.generation),
+        );
+        let key_b = core::struck_removal_report_key(
+            &agent_doc_queue::queue_claim::claim_identity(head),
+            Some("subagent:worker"),
+            Some(claim.generation + 1),
+        );
+        assert_ne!(key_a, key_b);
     }
 
     /// `#nestedsubprompts`: nested rows under a claimed free-text parent are

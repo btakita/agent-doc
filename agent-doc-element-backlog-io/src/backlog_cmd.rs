@@ -89,6 +89,35 @@ pub fn answered_queue_operator_action_ids(content: &str) -> Result<Vec<String>> 
     Ok(answered)
 }
 
+/// `#queueoperatoranswer`: lowercased request ids answered by a live selected-queue row
+/// that is nothing but an operator answer (`[#request-id]: <answer>`, or the
+/// request id as its own row with the answer nested beneath it).
+pub fn queue_operator_answer_row_ids(content: &str) -> Result<Vec<String>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
+        return Ok(Vec::new());
+    };
+    let Some(component) =
+        agent_doc_queue::queue_set::component_for_id(content, &components, &queue.id)?
+    else {
+        return Ok(Vec::new());
+    };
+    let mut ids = Vec::new();
+    for entry in agent_doc_queue::document_queue::parse(component.content(content))? {
+        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if let Some(id) =
+            agent_doc_document::queue_projection::operator_answer_row_request_id(&prompt.text)
+            && !ids.contains(&id)
+        {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
 /// Project blocking operator requests onto their originating selected-queue
 /// rows. Existing annotations survive only while the same-id todo remains open.
 pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {

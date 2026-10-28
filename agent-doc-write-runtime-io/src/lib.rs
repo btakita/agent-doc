@@ -3446,7 +3446,19 @@ fn run_command_inner_within_pass(
         } else {
             resolve_current_document(file, "queue_operator_action_answers")?.into_content()
         };
+        let answer_rows = backlog_cmd::queue_operator_answer_row_ids(&current_content)?;
         for id in backlog_cmd::answered_queue_operator_action_ids(&current_content)? {
+            // `#queueoperatoranswer`: an answer written as its own row is spent once the
+            // closeout applies it. Strike it with its request, as the canonical
+            // answer appended to the originating row goes with that row.
+            if answer_rows.contains(&id)
+                && !options
+                    .queue_completion_ids
+                    .iter()
+                    .any(|done| done.eq_ignore_ascii_case(&id))
+            {
+                options.queue_completion_ids.push(id.clone());
+            }
             if !options
                 .todo_done
                 .iter()

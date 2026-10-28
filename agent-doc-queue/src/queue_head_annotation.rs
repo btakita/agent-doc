@@ -52,6 +52,12 @@ pub struct QueueHeadAnnotation {
 /// invocation (`#gh-fix <url>`), and the inert-prose `[#id]: note` shape, which
 /// is a free-text head answered through the `#ftstrike` quote path.
 pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
+    // `#queueoperatoranswer`: an operator answer row (`[#request-id]: <answer>`, or the
+    // request id with the answer nested beneath it) is the operator's answer
+    // to a request, not steering appended to tracked work.
+    if agent_doc_document::queue_projection::operator_answer_row_request_id(head).is_some() {
+        return None;
+    }
     let stripped = strip_priority_markers(head);
     let text = stripped.trim().trim_start_matches('❯').trim();
     if text.is_empty() || text.lines().next().is_some_and(|line| line.contains("~~")) {

@@ -1963,6 +1963,7 @@ pub fn queue_attr_subagent_heads_with_presets(
     // `#queueblocked`: a row whose tracked item waits on open blockers is not
     // dispatchable, so it never fills a subagent slot.
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
+    let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
     let eligible = items
         .iter()
         .filter(|item| {
@@ -1970,6 +1971,8 @@ pub fn queue_attr_subagent_heads_with_presets(
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| !blockers.blocks_row(&item.norm))
+        // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
+        .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
         .map(|item| item.norm.clone())
         .collect();
     let live = items.into_iter().map(|item| item.norm).collect();
@@ -2015,6 +2018,7 @@ pub fn subagent_dispatch_heads_with_presets(
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
+    let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
     executable_queue_items(content)
         .into_iter()
         .filter(|item| {
@@ -2022,6 +2026,7 @@ pub fn subagent_dispatch_heads_with_presets(
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
         .filter(|item| !blockers.blocks_row(&item.norm))
+        .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
         .filter(|item| {
             reference.as_ref().is_none_or(|(norms, identities)| {
                 !norms.contains(item.norm.as_str())

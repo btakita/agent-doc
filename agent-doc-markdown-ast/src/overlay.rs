@@ -477,19 +477,54 @@ fn queue_prompt_content_line(line: &str) -> bool {
 /// completed item can never be resurrected as live text.
 pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
     let item = parse_item(item_content, 0, item_content.len());
-    !item.struck
-        && item.kind == ItemKind::FreeText
-        && !item.text.is_empty()
-        && !item.text.starts_with("[#")
+    !item.struck && queue_item_work_text(&item.text).is_some_and(|work| !work.starts_with("[#"))
+}
+
+/// The work text of a parsed queue row for segmentation decisions: the row's
+/// text without its leading binary-owned attempt projection (`🚧`, `📥`, `☑️`,
+/// `🙋`, `[#subagent:x#1]`, ...), when that work is free text.
+///
+/// `#nestedsubprompts`: whether a row owns the lines beneath it is a property of the
+/// work the operator wrote, never of the projection the binary stamped on it.
+/// Deciding on the raw text made `- [#id]` + `  - child` two rows and
+/// `- 📥 [#id]` + `  - child` one row, so stamping a marker changed the row
+/// count and every marker projection over that queue failed closed with
+/// "changed item count" (agent-doc-bugs.md, 2026-10-28).
+fn queue_item_work_text(text: &str) -> Option<&str> {
+    let work = agent_doc_element_queue::strip_attempt_projection_prefix(text).trim();
+    (!work.is_empty() && matches!(classify(work), ItemKind::FreeText)).then_some(work)
+}
+
+/// True when `work` opens with a reserved operator-request id
+/// (`[#subagent-operator-request-<id>]`).
+fn starts_with_operator_request_id(work: &str) -> bool {
+    work.strip_prefix("[#")
+        .and_then(|rest| rest.split_once(']'))
+        .is_some_and(|(id, _)| {
+            id.to_ascii_lowercase()
+                .starts_with("subagent-operator-request-")
+        })
 }
 
 /// True when a runnable list row whose content (after its bullet) is
 /// `item_content` can own nested sub-prompt rows (`#nestedsubprompts`): a
 /// free-text row, live or struck. A tracked-id directive never does; its
 /// nested rows keep the `#queuenest` / `#f1s3` group semantics.
+///
+/// The decision reads the row's work, not its projection prefix
+/// ([`queue_item_work_text`]), so a lifecycle or `🙋` marker never changes
+/// which lines a row owns.
+///
+/// `#queueoperatoranswer`: a row whose work opens with a reserved operator-request id
+/// (`- [#subagent-operator-request-x]` with the answer nested beneath it) is
+/// the operator's answer to that request, not tracked work. It owns its nested
+/// rows exactly as a bare `#subagent-operator-request-x` hashtag parent does,
+/// so the answer is one row keyed by the request id and is never offered as a
+/// separate free-text head.
 pub fn queue_item_accepts_subprompts(item_content: &str) -> bool {
     let item = parse_item(item_content, 0, item_content.len());
-    item.kind == ItemKind::FreeText && !item.text.is_empty() && !item.text.starts_with("[#")
+    queue_item_work_text(&item.text)
+        .is_some_and(|work| !work.starts_with("[#") || starts_with_operator_request_id(work))
 }
 
 /// End (exclusive line index) of the sub-prompt block owned by the runnable

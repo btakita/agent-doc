@@ -604,6 +604,10 @@ pub fn apply_owner_projection(text: &str, owner: Option<&QueueOwnerProjection>) 
 /// Request ids carried by canonical trailing `[#id]` annotations or legacy
 /// leading `🙋 [#id]` annotations while `🙋` is active.
 pub fn operator_action_ids(text: &str) -> Vec<String> {
+    // `#nestedsubprompts`: request annotations live on the parent part. A
+    // sub-prompt row never lends its parent a request id.
+    let full = text;
+    let text = agent_doc_element_queue::subprompts::head_without_subprompts(text);
     let mut rest = text.trim_start();
     let mut ids = Vec::new();
     let mut marked = false;
@@ -649,7 +653,96 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
             ids.push(id);
         }
     }
+    if let Some((id, _)) = nested_operator_answer(full) {
+        let id = id.to_ascii_lowercase();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
     ids
+}
+
+/// `#queueoperatoranswer`: the lowercased request id a row answers when the row is
+/// nothing but an operator answer: the canonical local answer
+/// `[#subagent-operator-request-x]: <answer>` or the nested shape
+/// ([`nested_operator_answer`]), with any projection prefix. `None` for a work
+/// row, including one that carries a request annotation after its work text.
+pub fn operator_answer_row_request_id(text: &str) -> Option<String> {
+    if let Some((id, _)) = nested_operator_answer(text) {
+        return Some(id.to_ascii_lowercase());
+    }
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    let head = agent_doc_element_queue::strip_attempt_projection_prefix(head).trim();
+    let (id, after) = head.strip_prefix("[#")?.split_once(']')?;
+    (is_reserved_operator_action_id(id)
+        && after
+            .trim_start()
+            .strip_prefix(':')
+            .is_some_and(|answer| !answer.trim().is_empty()))
+    .then(|| id.to_ascii_lowercase())
+}
+
+/// `#queueoperatoranswer`: lowercased reserved request ids a WORK row carries, marked
+/// (`🙋`) or not: the canonical trailing `[#subagent-operator-request-x]`
+/// annotation and legacy leading `🙋 [#id]` prefixes. Empty for an answer row
+/// ([`operator_answer_row_request_id`]), which answers a request rather than
+/// pausing work on it.
+pub fn operator_request_annotation_ids(text: &str) -> Vec<String> {
+    if operator_answer_row_request_id(text).is_some() {
+        return Vec::new();
+    }
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    let mut ids = operator_action_ids(head)
+        .into_iter()
+        .filter(|id| is_reserved_operator_action_id(id))
+        .collect::<Vec<_>>();
+    if let Some((id, _, start)) = trailing_operator_action_annotation(head.trim())
+        && start > 0
+        && is_reserved_operator_action_id(id)
+    {
+        let id = id.to_ascii_lowercase();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// `#queueoperatoranswer`: the operator's answer written as its own row keyed by the
+/// request id, with the answer nested beneath it:
+///
+/// ```text
+/// - [#subagent-operator-request-x]
+///   - I want sync to use the latest state.
+/// ```
+///
+/// It means exactly what the canonical local answer row
+/// `[#subagent-operator-request-x]: I want sync to use the latest state.`
+/// means. Returns the request id (as written) and the answer: the live nested
+/// rows' work text, joined by newlines. `None` for any other shape, for a
+/// parent that carries work text beside the id, and when no live nested row
+/// has text (an unanswered or already-struck block).
+pub fn nested_operator_answer(text: &str) -> Option<(&str, String)> {
+    use agent_doc_element_queue::subprompts;
+    let (head, _) = subprompts::split_subprompt_block(text);
+    let head = agent_doc_element_queue::strip_attempt_projection_prefix(head).trim();
+    let (id, after) = head.strip_prefix("[#")?.split_once(']')?;
+    let after = after.trim();
+    if !is_reserved_operator_action_id(id) || !(after.is_empty() || after == ":") {
+        return None;
+    }
+    let answer = subprompts::subprompt_rows(text)
+        .into_iter()
+        .filter(|row| !subprompts::subprompt_row_is_struck(row))
+        .map(|row| {
+            agent_doc_element_queue::strip_attempt_projection_prefix(&row)
+                .trim()
+                .to_string()
+        })
+        .filter(|row| !row.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!answer.is_empty()).then_some((id, answer))
 }
 
 /// Whether an operator request still holds this queue row open
@@ -710,6 +803,10 @@ pub fn operator_action_is_answered(text: &str, request_id: &str, queue_item: &st
     {
         return false;
     }
+    if nested_operator_answer(text).is_some_and(|(id, _)| id.eq_ignore_ascii_case(request_id)) {
+        return true;
+    }
+    let text = agent_doc_element_queue::subprompts::head_without_subprompts(text);
     if let Some((id, after, _)) = trailing_operator_action_annotation(text.trim())
         && id.eq_ignore_ascii_case(request_id)
         && after
@@ -774,6 +871,12 @@ fn strip_operator_action_annotations_preserving_markers(text: &str) -> String {
 /// Replace the leading operator-action annotations while preserving worker
 /// lifecycle and priority projections. `ids` are normalized and deduplicated.
 pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
+    // `#nestedsubprompts` / `#queueoperatoranswer`: the annotation belongs to the parent
+    // part. Appending a missing `[#id]` to the whole text would land it after
+    // the last nested row and re-segment the row.
+    if let (head, Some(block)) = agent_doc_element_queue::subprompts::split_subprompt_block(text) {
+        return format!("{}\n{block}", apply_operator_action_ids(head, ids));
+    }
     let content_start = text.len() - text.trim_start().len();
     let leading = &text[..content_start];
     let (content, trailing) = split_trailing_whitespace(&text[content_start..]);
@@ -1490,6 +1593,62 @@ mod tests {
             "a visible 🙋 holds the row until the projection clears it"
         );
         assert!(!operator_action_holds_row("☑️ fix sdk demo", &open));
+    }
+
+    /// `#queueoperatoranswer`: the request id as its own row with the answer nested
+    /// beneath it means what `[#request-id]: <answer>` means.
+    #[test]
+    fn nested_operator_answer_row_is_a_local_answer() {
+        let id = "subagent-operator-request-undo-agent-writes";
+        let answer = format!("[#{id}]\n  - I want sync to use the latest state.");
+        assert_eq!(
+            nested_operator_answer(&answer),
+            Some((id, "I want sync to use the latest state.".to_string()))
+        );
+        assert_eq!(operator_action_ids(&answer), vec![id.to_string()]);
+        assert!(operator_action_is_answered(&answer, id, "do"));
+        assert_eq!(
+            operator_answer_row_request_id(&answer),
+            Some(id.to_string())
+        );
+        assert!(operator_request_annotation_ids(&answer).is_empty());
+        let none = HashSet::new();
+        assert!(
+            !operator_action_holds_row(&answer, &none),
+            "a closed request holds nothing"
+        );
+
+        // Projection prefixes and a projected child never hide the answer.
+        let projected = format!("🙋📥 [#{id}]\n  - 📥 I want sync.");
+        assert_eq!(
+            nested_operator_answer(&projected),
+            Some((id, "I want sync.".to_string()))
+        );
+        // The `🙋` annotation lands on the parent part, never after the answer.
+        assert_eq!(
+            apply_operator_action_ids(&answer, &[id.to_string()]),
+            format!("🙋 [#{id}]\n  - I want sync to use the latest state.")
+        );
+        assert_eq!(
+            apply_operator_action_ids(&format!("🙋 [#{id}]\n  - yes"), &[]),
+            format!("[#{id}]\n  - yes")
+        );
+
+        // Not answers: an empty block, a struck block, a tracked id, and a work
+        // row that carries the request annotation.
+        assert_eq!(nested_operator_answer(&format!("[#{id}]")), None);
+        assert_eq!(
+            nested_operator_answer(&format!("[#{id}]\n  - ~~done~~")),
+            None
+        );
+        assert_eq!(nested_operator_answer("[#alpha]\n  - child"), None);
+        let work = format!("fix the replay [#{id}]");
+        assert_eq!(operator_answer_row_request_id(&work), None);
+        assert_eq!(operator_request_annotation_ids(&work), vec![id.to_string()]);
+        assert_eq!(
+            operator_answer_row_request_id(&format!("[#{id}]: resync")),
+            Some(id.to_string())
+        );
     }
 
     #[test]

@@ -715,3 +715,146 @@ fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
     );
     assert!(claim_owners(dir.path(), path).is_empty());
 }
+
+/// `#queueoperatoranswer` (live, agent-doc-bugs.md 2026-10-28): the request id the
+/// coordinator's operator-request packet minted, and the queue row it paused.
+const REQUEST_ID: &str = "subagent-operator-request-undo-agent-writes";
+const PAUSED_ROW: &str =
+    "Find why a stale replica replay is treated as an operator edit and stop it.";
+const ANSWER: &str = "I want sync to use the latest state...even if the operator reverted.";
+
+fn answer_row_todo(state: char) -> String {
+    format!(
+        "- [{state}] [#{REQUEST_ID}] Answer the blocking subagent question for queue item ‘{PAUSED_ROW}’ in agent:exchange: may the binary rewrite an operator undo? (choices: resync, keep)\n"
+    )
+}
+
+/// `#queueoperatoranswer`: the operator answered a request by writing the request id as
+/// its own run row with the answer nested beneath it. The binary read the
+/// bare `[#id]` row and its nested answer as two heads, offered the answer as
+/// fresh dispatch work, and the first marker it stamped on the bare row made
+/// that row own its child: one row fewer, so every marker projection over the
+/// queue (claim, `report-complete`, `release`, preflight maintenance) failed
+/// with "changed item count". The answer row is one row keyed by the request
+/// id, is never dispatch work, and closes its request like
+/// `[#request-id]: <answer>`, after which the paused row's exact echo strikes
+/// it.
+#[test]
+fn an_answer_row_nested_under_its_request_id_answers_the_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = format!(
+        "- 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n- separate flat head\n- [#{REQUEST_ID}]\n  - {ANSWER}\n"
+    );
+    let doc = closeout_session(dir.path(), &rows, &answer_row_todo(' '));
+    let path = doc.to_str().unwrap();
+
+    let state = preflight_json(dir.path(), &doc);
+    let prompts = string_list(&state, "queue_prompts");
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    for (what, list) in [("queue_prompts", &prompts), ("dispatch", &dispatch)] {
+        assert!(
+            list.iter().all(|item| !item.starts_with(ANSWER)),
+            "{what}: the nested answer is never its own head: {list:#?}"
+        );
+    }
+    assert!(
+        dispatch.iter().all(|item| !item.contains(ANSWER)),
+        "the answer row is never fresh dispatch work: {dispatch:#?}"
+    );
+    assert!(
+        dispatch.iter().any(|item| item == "separate flat head"),
+        "{dispatch:#?}"
+    );
+    let body = run_body(&doc, "run");
+    assert!(
+        body.contains(&format!("[#{REQUEST_ID}]\n  - {ANSWER}\n")),
+        "the answer row and its nested answer stay one row, unmarked below its parent:\n{body}"
+    );
+    assert!(!body.contains("📥 I want"), "{body}");
+
+    // The worker that owns the request reports back; every marker projection
+    // over the queue now succeeds.
+    dispatch_and_report(dir.path(), path, PAUSED_ROW, "subagent:stalereplay");
+    let body = run_body(&doc, "run");
+    assert!(
+        body.starts_with(&format!(
+            "- 🙋☑️ [#subagent:stalereplay#1] {PAUSED_ROW} [#{REQUEST_ID}]\n"
+        )),
+        "{body}"
+    );
+
+    // The closeout echoes the paused row exactly as the Stop hook suggests.
+    // The nested answer completes the request's Todo in the same write, which
+    // clears 🙋, so the echo strikes the row and ends its reported claim.
+    let response = format!(
+        "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nFixed; sync re-applies the latest state.\n<!-- /patch:exchange -->\n"
+    );
+    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
+    assert_ok(&output, "respond");
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(
+        after.contains(&answer_row_todo('x')),
+        "the nested answer completes the request's Todo:\n{after}"
+    );
+    let body = run_body(&doc, "run");
+    assert!(
+        body.starts_with(&format!("- ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
+        "the exact echo strikes the answered row:\n{body}"
+    );
+    assert!(
+        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - ~~{ANSWER}~~\n")),
+        "the applied answer row closes with its request:\n{body}"
+    );
+    assert!(!body.contains('🙋'), "{body}");
+    assert!(
+        claim_owners(dir.path(), path).is_empty(),
+        "the reported attempt ended with the strike"
+    );
+}
+
+/// `#queueoperatoranswer`, the state the live document was left in: the request's Todo
+/// is closed but the paused row still shows `🙋`, the answer row was struck
+/// alone and its nested answer was projected `📥` as if it were a new head.
+/// Preflight clears the stale `🙋`, closes the nested answer with its struck
+/// parent, never dispatches it, and the exact echo then strikes the row.
+#[test]
+fn a_struck_answer_row_with_a_projected_child_is_closed_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let rows = format!(
+        "- 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n- separate flat head\n- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n"
+    );
+    let doc = closeout_session(dir.path(), &rows, &answer_row_todo('x'));
+    let path = doc.to_str().unwrap();
+    dispatch_and_report(dir.path(), path, PAUSED_ROW, "subagent:stalereplay");
+
+    let state = preflight_json(dir.path(), &doc);
+    let prompts = string_list(&state, "queue_prompts");
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    for (what, list) in [("queue_prompts", &prompts), ("dispatch", &dispatch)] {
+        assert!(
+            list.iter().all(|item| !item.contains(ANSWER)),
+            "{what}: the struck answer is closed work: {list:#?}"
+        );
+    }
+    let body = run_body(&doc, "run");
+    assert!(
+        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - ~~{ANSWER}~~\n")),
+        "the struck answer row closes its nested answer too:\n{body}"
+    );
+    assert!(
+        !body.contains('🙋'),
+        "a closed Todo clears the paused row's 🙋:\n{body}"
+    );
+
+    let response = format!(
+        "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nClosed.\n<!-- /patch:exchange -->\n"
+    );
+    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
+    assert_ok(&output, "respond");
+    let body = run_body(&doc, "run");
+    assert!(
+        body.starts_with(&format!("- ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
+        "the exact echo strikes the row once its request is closed:\n{body}"
+    );
+}

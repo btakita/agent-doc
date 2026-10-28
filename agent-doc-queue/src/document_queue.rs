@@ -9732,6 +9732,99 @@ mod tests {
             assert_eq!(render(&entries), format!("- ~~{ROW}~~\n"));
         }
     }
+
+    /// `#queueoperatoranswer`: whether a row owns the rows nested beneath it is a
+    /// property of its work, never of the projection stamped on it.
+    #[test]
+    fn row_segmentation_ignores_projection_markers() {
+        const REQUEST: &str = "subagent-operator-request-undo-agent-writes";
+        for prefix in [
+            "",
+            "🙋 ",
+            "🚧 ",
+            "📥 ",
+            "🟡 [#subagent:x#1] ",
+            "🙋☑️ ",
+            "~~",
+        ] {
+            let close = if prefix == "~~" { "~~" } else { "" };
+            let answer = format!("- {prefix}[#{REQUEST}]{close}\n  - I want sync.\n");
+            assert_eq!(
+                parse(&answer).unwrap().len(),
+                1,
+                "an answer row owns its nested answer: {answer:?}"
+            );
+            let tracked = format!("- {prefix}[#alpha]{close}\n  - child\n");
+            assert_eq!(
+                parse(&tracked).unwrap().len(),
+                2,
+                "a tracked id row keeps the group shape: {tracked:?}"
+            );
+        }
+        for prefix in ["", "🚧 ", "📥 "] {
+            let tracked = format!("- {prefix}do [#alpha]\n  - child\n");
+            assert_eq!(parse(&tracked).unwrap().len(), 2, "{tracked:?}");
+        }
+    }
+
+    /// `#queueoperatoranswer` (live, agent-doc-bugs.md 2026-10-28): the operator answered
+    /// a request as its own row. Stamping the pending marker on that row made it
+    /// absorb its nested answer, so the projection failed with "changed item
+    /// count (before=4, after=3)" and refused every queue command over the
+    /// document. The row is one entry before and after the marker.
+    #[test]
+    fn marker_projection_over_an_answer_row_keeps_the_row_count() {
+        use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
+        const REQUEST: &str = "subagent-operator-request-undo-agent-writes";
+        let paused = format!("Find why a stale replay is an operator edit. [#{REQUEST}]");
+        let body = format!(
+            "- 🙋🚧 [#subagent:stalereplay#1] {paused}\n- ☑️ [#subagent:cell#1] third row\n- [#{REQUEST}]\n  - I want sync to use the latest state.\n"
+        );
+        let entries = parse(&body).unwrap();
+        assert_eq!(entries.len(), 3, "{entries:#?}");
+        let answer_row = match &entries[2] {
+            QueueEntry::Prompt(prompt) => prompt.text.clone(),
+            other => panic!("the answer row is one live entry: {other:?}"),
+        };
+        assert_eq!(
+            answer_row,
+            format!("[#{REQUEST}]\n  - I want sync to use the latest state.")
+        );
+
+        let (projected, after) = project_prompt_runtime_projections(
+            &body,
+            &[
+                QueueRowProjection {
+                    text: paused.clone(),
+                    marker: QueueLifecycleMarker::Reported,
+                    owner: Some(QueueOwnerProjection {
+                        owner: "subagent:stalereplay".to_string(),
+                        generation: 1,
+                    }),
+                    blockers: Vec::new(),
+                    reopen_completed: false,
+                },
+                QueueRowProjection {
+                    text: answer_row,
+                    marker: QueueLifecycleMarker::Pending,
+                    owner: None,
+                    blockers: Vec::new(),
+                    reopen_completed: false,
+                },
+            ],
+        )
+        .expect("the projection keeps every row")
+        .expect("the markers change");
+        assert_eq!(after.len(), 3, "{projected}");
+        assert!(
+            projected.ends_with(&format!(
+                "- 📥 [#{REQUEST}]\n  - I want sync to use the latest state.\n"
+            )),
+            "the marker lands on the answer row, never on its nested answer:\n{projected}"
+        );
+        project_prompts_in_progress(&projected, std::slice::from_ref(&paused))
+            .expect("a later in-progress projection keeps the row count too");
+    }
 }
 
 /// Redacted fixture for `#multilinequeuehead`: the queue shape of the live

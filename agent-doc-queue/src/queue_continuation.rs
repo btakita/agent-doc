@@ -629,6 +629,51 @@ fn head_id_in_set(head: &str, ids: &HashSet<String>) -> bool {
     ids.contains(&id)
 }
 
+/// `#queueoperatoranswer`: lowercased operator-request ids that a live WORK row in the
+/// selected queue still carries (`ROW [#subagent-operator-request-x]`, marked
+/// `🙋` or not).
+pub fn operator_request_ids_with_work_rows(content: &str) -> HashSet<String> {
+    let Some((_, entries)) = queue_component_entries(content) else {
+        return HashSet::new();
+    };
+    document_queue::prompts(&entries)
+        .into_iter()
+        .flat_map(|prompt| {
+            agent_doc_document::queue_projection::operator_request_annotation_ids(&prompt.text)
+        })
+        .collect()
+}
+
+/// `#queueoperatoranswer`: which operator answer rows are NOT fresh subagent dispatch
+/// work in `content`.
+///
+/// An answer row (`[#request-id]: <answer>`, or the request id as its own row
+/// with the answer nested beneath it) routes to the worker that asked. While a
+/// live work row still carries the request, the answer belongs to that row's
+/// attempt and the coordinator relays it there. Once the request's todo is
+/// closed there is nothing left to route. Only an open request whose work row
+/// is gone leaves the answer row itself as the dispatchable carrier.
+#[derive(Debug, Default, Clone)]
+pub struct AnswerRowRouting {
+    work_row_ids: HashSet<String>,
+    open_todo_ids: HashSet<String>,
+}
+
+impl AnswerRowRouting {
+    pub fn for_content(content: &str) -> Self {
+        Self {
+            work_row_ids: operator_request_ids_with_work_rows(content),
+            open_todo_ids: agent_doc_element::todo::open_todo_ids(content),
+        }
+    }
+
+    /// True when `head` is an operator answer row that must not be dispatched.
+    pub fn holds_from_dispatch(&self, head: &str) -> bool {
+        agent_doc_document::queue_projection::operator_answer_row_request_id(head)
+            .is_some_and(|id| self.work_row_ids.contains(&id) || !self.open_todo_ids.contains(&id))
+    }
+}
+
 /// Lowercased ids of active queue heads carrying an operator verdict
 /// (`#opverifyanswered`).
 pub fn operator_answered_head_ids(content: &str) -> HashSet<String> {

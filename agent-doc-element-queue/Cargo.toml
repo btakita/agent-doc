@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-queue"
-version = "0.35.558"
+version = "0.35.559"
 edition = "2024"
 description = "Queue element descriptor for agent-doc"
 license = "Apache-2.0"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_element_queue"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.558" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.558" }
-agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.558" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.559" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.559" }
+agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.559" }
 lazily = { version = "0.61.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

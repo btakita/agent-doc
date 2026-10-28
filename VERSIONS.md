@@ -2,6 +2,38 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.559
+
+- **A pane squeezed to one column can no longer grow its supervisor until the machine runs out of memory.** The
+  supervisor's internal screen copy hit a terminal-library bug at one column (a two-cell character such as an emoji
+  could not be placed, so rows were added forever, about 1.5 GB/s), and systemd-oomd killed six panes at 135–142 GB.
+  The screen copy is now held to at least two columns, the harness terminal is resized before it, and a memory guard
+  logs growth and aborts the supervisor loudly at 4 GiB (`AGENT_DOC_SUPERVISOR_RSS_LIMIT_MB`, `0` disables).
+- **Restart Agent works again in JetBrains.** The 0.35.558 `--expect-agent` check called the native library on the IDE
+  event-dispatch thread, which the plugin forbids, so every Restart Agent threw. The editor's `agent:` value is now read
+  off the UI thread, and the restart still runs without `--expect-agent` if that read fails.
+- **`agent-doc extract` and `transfer` write a clean new document.** The new document copies only the source document's
+  own frontmatter, not every merged project preset; each component heading sits on its opening-tag line; and the run
+  component is headed `## Run`.
+- **Tmux layout across nested projects.** A nested project's controller now claims the shared tmux window it arranges,
+  so another project's pane is stashed instead of kept as a third column, and a row left with a one-column sliver is
+  rebalanced evenly.
+- **Blocked queue rows get `⛔ ⟦blocked by …⟧`.** A row whose tracked item is blocked by open items (a stays-open blocker
+  clause or `after=`) is never dispatched or counted as runnable, never shows `⏭️`, and returns to `📥` when its blockers
+  close.
+- **A `subagents` queue row can no longer be closed by an inline answer.** It stays queued and is offered for dispatch
+  again, with a warning.
+- **Turn liveness after an interrupt.** A Grok turn cancelled with Ctrl+C now ends its turn lease, so the next Run Agent
+  Doc starts a fresh turn; when the lease says a turn is running but the pane is idle, the route says so instead of
+  reporting delivery. A Run Agent Doc that lands while the supervisor's own trigger for that document is starting reports
+  "already running" instead of an error.
+- **Queue and Todo upkeep.** Closing a row strikes its nested child rows, and a row added under a struck parent reopens
+  it as new work; a nested echo strikes its parent; `queue consume --ack-id` closes a reported row backed by a backlog
+  item or a Todo; a Todo-backed `do [#id]` row's brief quotes the Todo and the row closes when the Todo is checked off;
+  `--todo-add` and `--todo-edit` take nested sub-items.
+- **A retried write never re-inserts a stale snapshot of text being typed**, and a pruned struck row whose claim closed
+  no longer reports a claim mismatch on every tool call.
+
 ## 0.35.558
 
 - **A retained captured write no longer overwrites operator text.** A write that agent-doc captured earlier and

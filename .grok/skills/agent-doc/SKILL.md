@@ -2,7 +2,7 @@
 description: "Interactive markdown session. TRIGGER: agent-doc <file>, or a bare `/agent-doc` / `agent-doc` (the file this tmux pane claims). Requires binary admission and committed closeout."
 user-invocable: true
 argument-hint: "[file]"
-agent-doc-version: "0.35.558"
+agent-doc-version: "0.35.559"
 ---
 
 # agent-doc

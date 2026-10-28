@@ -2,7 +2,7 @@
 description: "Interactive markdown session for Codex. TRIGGER: user writes agent-doc <file> (or a bare `agent-doc`, for the file this tmux pane claims) as a normal Codex message. Requires a markdown session document, installed CLI, and write+commit every cycle. Do not use slash commands; Codex rejects project-defined /agent-doc."
 user-invocable: true
 argument-hint: "[file]"
-agent-doc-version: "0.35.558"
+agent-doc-version: "0.35.559"
 ---
 
 # agent-doc

@@ -23,10 +23,11 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets, published 2026-10-28T07:06:13Z; PyPI 0.35.559; Homebrew bumped). Main is now at `2b7ef088ea`, unreleased. The local binary installed from that commit is 0.35.559 (JetBrains plugins 0.2.877/0.2.878/0.2.879 on that commit; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`); an operator answer row nested under its request id is accepted and row splitting ignores binary markers (`dc7efbcbf6`); agent:rules is composed into every admitted turn (`2b7ef088ea`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`, run 40647917293). Later main CI on `dc7efbcbf6` succeeded (run 40738098623). CI for `2b7ef088ea` is in progress (run 40748955632, job `check`).
+Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. make release completed the tag push, local install-full, and publication verification. The installed binary is 0.35.560. JetBrains pluginVersions on that commit stay 0.2.877, 0.2.878, and 0.2.879, with pluginReleaseVersion 0.35.560. Restart IDEA to load the installed plugins. Main is 343fe163c2, one commit after the tag: a completion cell matches a row only when its recorded item is that row's own work, so a longer tracked line no longer reconciles its parent. That commit is not in the v0.35.560 tag. CI for 343fe163c2 is in progress (run 40766108880).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -184,13 +185,45 @@ The api.md route row is claimed and running. The pasted diagnostic says two upda
 `subagent:sdksync` generation 1 is still running on `fix/sdk-demo-agent-run`. Its claim was refreshed. `subagent:release` generation 4 has reported and is waiting for integration: project `0.35.560`, one `make check`, push `main`, then `make release`. This cycle does not cut that release.
 
 No new backlog item. The api.md row stays queued under the running claim.
+
+### Re: Subagent completed: `subagent:sdksync` returned work for queue item “sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.” — agent-doc
+<!-- agent-doc-subagent-response sha256=4af063e78f77f66418de5d30c6304330726d56b820e80482bca9496a371c1ac3 -->
+> **Subagent response:**
+>
+> `fix/sdk-demo-agent-run` is pushed at `05340c5a6de1e5b4986efaf3280dcb5841d5ced5`. `origin/main` is still `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7`. No follow-up queue heads.
+>
+> A completion cell whose item is `do [#id] - <child>` shares the parent's tracked id, so `agent:run` painted the parent as needing reconcile. The cell now matches a row only when its recorded item is that row's own work (`queue_claim::completion_evidence_matches_row`). Receipts stay identity-keyed. `extract_head_id` is unchanged.
+>
+> Files (10, +193/−31):
+>
+> - `agent-doc-queue/src/queue_claim.rs`
+> - `agent-doc-queue/src/queue_consume.rs`
+> - `agent-doc-queue-io/src/queue_cmd.rs`
+> - `agent-doc-queue-io/src/queue_claim.rs`
+> - `agent-doc-preflight-io/src/lib.rs`
+> - `agent-doc-crdt-relay-io/src/lib.rs`
+> - `agent-doc-document/src/queue_projection.rs`
+> - `agent-doc-queue-icons/src/legend.rs`
+> - `docs/guide/queue-markers.md`
+> - `specs/07-orchestration-commands.md`
+>
+> Scratch files and `.agent-doc-private-denylist` stayed untracked. The denylist scan does not intersect this diff.
+>
+> Tests:
+>
+> - `./scripts/with-cargo-cache cargo test -p agent-doc-queue-io --lib completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent --offline -- --test-threads=8` — exit 0. 1 passed, 0 failed, 265 filtered out.
+> - Unsanitized `make check` — exit 2. Nextest fail-fast, exit 100: 4 failures (`bare_file_invocation_outside_supported_harness_fails_before_run_cycle`, `codex_bare_run_inside_owning_pane_with_unresolved_prompt_fails_before_pre_commit`, `codex_owned_pane_active_auto_queue_hands_off_without_drift`, `codex_owned_pane_independent_queue_edit_defers_until_closeout`), 11727 of 12108 not run. `detect_harness` sees `GROK_SESSION_ID` before `CODEX_SESSION`.
+> - `env -u TMUX -u TMUX_PANE -u GROK_SESSION_ID -u GROK_AGENT -u AGENT_DOC_SUPERVISOR -u AGENT_DOC_WRITE_AUTHORITY -u AGENT_DOC_LOG -u AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS make check` — the recipe finished and wrote `target/.agent-doc-full-check.json`. The wrapper then exited 1 on zsh's read-only `status`. Clippy (`-D warnings`) passed with no output. Nextest exit 0: 12108 passed, 0 failed, 187 skipped (the new test is in that run). Batched exit 0: 2065 passed, 0 failed, 148 ignored. Doctest exit 0: 0 failed. `sim-medium` exit 0: 1 passed, 0 failed. `sim-net` exit 0: 2 passed, 0 failed. Three JetBrains `BUILD SUCCESSFUL`. Python bootstrap: 8 tests, OK. TLA runner self-test ok; the model run was skipped on an existing passing receipt.
+>
+> `make install` was not run.
+<!-- agent-doc-subagent-completion key=7a42ec09f9f82fb7f3ef761e140f89a0202e68b2bf1bf87221ccc9fc8801116d -->
 <!-- agent:boundary:d201dbb0 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:release#4] release + publish
   - include #subagent:agentrules
-- 🚧 [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
+- ☑️ [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
 - 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 <!-- /agent:run -->
 

@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1243,12 +1244,20 @@ To answer, add `: <choice>` after the request id on the queue row, or reply here
 `subagent:uncommittedcell` reported back. Its finding is real and it's fixed on `edc4debc24`: the Claude Stop hook let me end turns while a subagent's row was ☑️ or released but not yet struck. Codex already enforced this. The commit is merged onto `main` in integration branch `integrate/20261028c`, and the combined `make check` is running now. Once it passes, I'll push, run `make install` and close the row.
 
 The undo question on the 🙋 row is still open. My recommendation is **Confirm before undo**, possibly together with **Tag undo/redo origin**.
+
+### Re: undo answer sent to the worker — opus-5 · 2026-10-28T11:52-04:00
+
+You answered `[#subagent-operator-request-undo-agent-writes]` with: "I want sync to use the latest state...even if the operator reverted." In chat you confirmed you mean **re-sync agent-owned text**: the auto-synced status always gets rewritten to the current truth, even after you Ctrl+Z it, and undo still works on everything else. I sent that to `subagent:stalereplay`, the worker that owns the request. I didn't dispatch a new subagent for your answer row. The Todo stays open until the worker's fix lands.
+
+The Stop-hook fix (`edc4debc24`) is still in its integration `make check`.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋🚧 [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
 - ☑️ [#subagent:uncommittedcell#1] The exchange item `### Re: Subagent completed: `subagent:statussync` returned work for queue item “status:sync is out of sync” — agent-doc` was not committed when the last turn ended
+- [#subagent-operator-request-undo-agent-writes]
+  - I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

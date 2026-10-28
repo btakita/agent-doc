@@ -223,7 +223,17 @@ The nested `project.md` claim is still running and has no commit on main. The re
 `#subagent:nestedlineage` is claimed and running. A nested run submission has to carry the parent lineage. In the api.md example, the `#rebase` child under `https://github.com/haiven-dev/haiven-api/pull/758` became `[#subagent:pr767-rebase#1] #rebase` and bound to the wrong PR when only `#rebase` was sent. The same worker has the added instruction to use the AST, and that instruction is written in its worktree.
 
 `#subagent:nestedproject` is still on `fix/nested-project-md` at `8862b2f9b5` with uncommitted edits and no commit. `#apikeepsrefusing` is still running on a clean `fix/api-keeps-refusing`. The published release is still agent-doc v0.35.560 at `bd971e9b87`.
-<!-- agent:boundary:b34bda3d:agent-doc-bugs -->
+> **Queue prompt:** release + publish
+>   - Include #subagent:nestvector + #subagent:nestedproject
+
+### Re: release report is blocked — grok-4.7 · 2026-10-28T18:54-04:00
+
+The release worker's report is persisted. Release is blocked. No version bump, tag, `make release`, `make install`, or release commit was made.
+
+`#subagent:nestvector` is on origin/main at `8862b2f9b5`. `#subagent:nestedproject` is not on origin/main. The published release is still agent-doc v0.35.560 at `bd971e9b87`.
+
+The same row also listed `#subagent:nestedlineage`. That work is still running on `fix/nested-run-lineage`, and `#subagent:nestedproject` still has uncommitted edits on `fix/nested-project-md`. A release that includes both waits until those two are on main.
+<!-- agent:boundary:22ffb2cb:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->

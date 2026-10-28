@@ -5920,6 +5920,34 @@ pub fn run_queue_maintenance_with_coin_gate(
                 &effective_prompt_presets,
             )
     });
+    // `#todosync`: a live `do [#id]` row whose id an operator-CHECKED Todo owns
+    // is closed here, the way an operator-checked backlog item is reaped to
+    // `agent:done` and its row struck by the `done` source above. Without it a
+    // checked Todo kept a `📥 do [#id]` row live and dispatchable forever.
+    // Conservative: the id must not be open or gated tracked work (a legacy
+    // Todo that shares a backlog id is the operator prerequisite for that
+    // work, not the work), must not be held open by another Todo row, must not
+    // carry an operator verdict on the head (`do [#id]: ...`), and must not be
+    // a registered preset command. The Todo itself is never touched.
+    let todo_checked_ids: std::collections::HashSet<String> = {
+        let active_tracked =
+            agent_doc_queue::queue_continuation::active_tracked_ids(&current_content);
+        agent_doc_element::todo::checked_todo_own_ids(&current_content)
+            .into_iter()
+            .filter(|id| {
+                !active_tracked.contains(id)
+                    && !gated_ids.iter().any(|gated| gated.eq_ignore_ascii_case(id))
+                    && !operator_answered_ids.contains(id)
+                    && agent_doc_frontmatter::frontmatter::resolve_prompt_preset_key(
+                        &effective_prompt_presets,
+                        id,
+                    )
+                    .is_none()
+            })
+            .filter(|id| !eligible_ids.contains(id))
+            .collect()
+    };
+    eligible_ids.extend(todo_checked_ids.iter().cloned());
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
     // entry set for the strike pass in every branch.
@@ -5993,6 +6021,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                     match agent_doc_queue::queue_response::queue_prompt_done_id(prompt_text) {
                         Some(id) if done_ids.contains(&id) => "done",
                         Some(id) if gated_ids.contains(&id) => "review_gated",
+                        Some(id) if todo_checked_ids.contains(&id) => "todo_checked",
                         // `#fr79`: mirror-created head whose backlog id vanished.
                         Some(id) if drift_struck_ids.contains(&id.to_ascii_lowercase()) => {
                             "orphaned_mirror_drift"

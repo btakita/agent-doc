@@ -4,7 +4,7 @@
 //! A background subagent dispatched for a `queue_subagent_dispatch` item sees
 //! only the prompt its coordinator writes. Without help it gets none of the
 //! operator's authorization: the queue's `preset=` expansion, the item's own
-//! directive text, or the backlog text an `do [#id]` head points at. It then
+//! directive text, or the backlog (or Todo) text an `do [#id]` head points at. It then
 //! either refuses outward actions (commit, push) the operator authorized, or the
 //! coordinator paraphrases the authorization by hand.
 //!
@@ -77,7 +77,7 @@ pub struct PresetAuthorization {
 pub struct TrackedItemAuthorization {
     /// The tracked id, without `#`.
     pub id: String,
-    /// The component that holds it (`backlog`, `review`, `pending`).
+    /// The component that holds it (`backlog`, `review`, `pending`, `todo`).
     pub component: String,
     /// The item's text, verbatim, with any continuation lines.
     pub text: String,
@@ -95,7 +95,7 @@ pub struct SubagentAuthorization {
     /// Tracked items the head names, resolved to their text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tracked_items: Vec<TrackedItemAuthorization>,
-    /// Ids the head names that no backlog/review/pending item carries.
+    /// Ids the head names that no backlog/review/pending/todo item carries.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unresolved_ids: Vec<String>,
     /// Presets that apply to the item (queue-scoped first, then item tokens).
@@ -113,7 +113,27 @@ pub struct SubagentAuthorization {
 
 const TRACKED_COMPONENTS: &[&str] = &["backlog", "review", "pending"];
 
+/// Resolve the item an id-backed head names: tracked work first, then the
+/// `agent:todo` item that OWNS the id (`#todosync`). A `do [#id]` head may name
+/// an operator Todo; its brief quotes the Todo with its nested sub-items and
+/// replies verbatim, exactly as it quotes a backlog item.
 fn tracked_item(
+    content: &str,
+    components: &[element::Component],
+    id: &str,
+) -> Option<TrackedItemAuthorization> {
+    tracked_work_item(content, components, id).or_else(|| {
+        agent_doc_element::todo::todo_item_owning_id(content, id).map(|todo| {
+            TrackedItemAuthorization {
+                id: todo.id,
+                component: "todo".to_string(),
+                text: todo.text,
+            }
+        })
+    })
+}
+
+fn tracked_work_item(
     content: &str,
     components: &[element::Component],
     id: &str,
@@ -554,7 +574,7 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization) -> String {
             .map(|id| format!("#{id}"))
             .collect();
         out.push_str(&format!(
-            "\nNo backlog/review item in the document carries {}; ask the coordinator for its text \
+            "\nNo backlog/review/todo item in the document carries {}; ask the coordinator for its text \
              rather than guessing.\n",
             ids.join(", ")
         ));
@@ -780,6 +800,44 @@ mod tests {
         );
     }
 
+    /// `#todosync`: a `do [#id]` head that names an `agent:todo` item resolves
+    /// to the Todo text and its nested replies, not an unresolved id.
+    #[test]
+    fn id_head_resolves_todo_text_with_nested_replies() {
+        let content = format!(
+            "{}\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#pmq] Answer the questions\n  - One per provider?\n    - One per provider.\n<!-- /agent:todo -->\n",
+            doc("", "subagents", &["do [#pmq]"], &[])
+        );
+        let auth = subagent_authorization("doc.md", &content, "do [#pmq]");
+        assert!(auth.unresolved_ids.is_empty(), "{auth:?}");
+        assert_eq!(auth.tracked_items.len(), 1, "{auth:?}");
+        assert_eq!(auth.tracked_items[0].component, "todo");
+        assert_eq!(
+            auth.tracked_items[0].text,
+            "Answer the questions\n  - One per provider?\n    - One per provider."
+        );
+        let p = &auth.subagent_prompt_preamble;
+        assert!(p.contains("todo item #pmq (verbatim)"), "{p}");
+        assert!(p.contains(">     - One per provider."), "{p}");
+    }
+
+    /// Tracked work wins over a legacy Todo that shares its id.
+    #[test]
+    fn id_head_prefers_backlog_over_a_todo_sharing_its_id() {
+        let content = format!(
+            "{}\n<!-- agent:todo -->\n- [ ] [#abc] approve it\n<!-- /agent:todo -->\n",
+            doc(
+                "",
+                "subagents",
+                &["do [#abc]"],
+                &["[ ] [#abc] the backlog work"]
+            )
+        );
+        let auth = subagent_authorization("doc.md", &content, "do [#abc]");
+        assert_eq!(auth.tracked_items.len(), 1, "{auth:?}");
+        assert_eq!(auth.tracked_items[0].component, "backlog");
+    }
+
     #[test]
     fn free_text_head_has_no_tracked_items() {
         let content = doc(
@@ -830,7 +888,7 @@ mod tests {
         assert_eq!(auth.unresolved_ids, vec!["nope".to_string()]);
         assert!(
             auth.subagent_prompt_preamble
-                .contains("No backlog/review item in the document carries #nope")
+                .contains("No backlog/review/todo item in the document carries #nope")
         );
     }
 

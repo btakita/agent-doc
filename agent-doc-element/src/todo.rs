@@ -1949,6 +1949,76 @@ pub fn open_todo_ids(content: &str) -> std::collections::HashSet<String> {
         .collect()
 }
 
+/// `#todosync`: one `agent:todo` item that OWNS an id, as a dispatch brief
+/// quotes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedTodoItem {
+    /// The own id, lowercased.
+    pub id: String,
+    pub state: TodoState,
+    /// The item's action, then every deeper-indented continuation line
+    /// (nested sub-items and the operator's nested replies) byte-for-byte.
+    pub text: String,
+}
+
+/// `#todosync`: the first `agent:todo` item whose OWN id is `id`, with its
+/// nested lines verbatim. An item that only cites `id` is not returned.
+///
+/// A `do [#id]` queue head may name a Todo rather than a backlog item (the
+/// operator queues work on an operator checklist item they just answered
+/// inline). Its dispatch brief quotes this text the way it quotes a backlog
+/// item's, so the worker sees the Todo and its nested answers instead of an
+/// "ask the coordinator" placeholder.
+pub fn todo_item_owning_id(content: &str, id: &str) -> Option<OwnedTodoItem> {
+    let id = normalize_link_id(id);
+    if id.is_empty() {
+        return None;
+    }
+    let todo = find_todo_component(content).ok()??;
+    let body = TodoBody::parse(todo.content(content));
+    let item = body
+        .items
+        .iter()
+        .find(|item| item.own_id.as_deref() == Some(id.as_str()))?;
+    let span = body.item_span(item);
+    let mut text = item.action.trim_end().to_string();
+    for line in &body.lines[span.start + 1..span.end] {
+        text.push('\n');
+        text.push_str(line.trim_end_matches(['\n', '\r']));
+    }
+    Some(OwnedTodoItem {
+        id,
+        state: item.state,
+        text,
+    })
+}
+
+/// `#todosync`: own ids that the operator has checked off: every `agent:todo`
+/// item owning the id is `[x]`. An id that any item still holds `[ ]`/`[/]` is
+/// open and excluded, as is an id no item owns (a citation is not identity).
+///
+/// Queue maintenance closes a live `do [#id]` row whose id is in this set, the
+/// way an operator-checked backlog item is reaped to `agent:done` and its row
+/// struck: a checked Todo and a live queue row naming it cannot disagree.
+pub fn checked_todo_own_ids(content: &str) -> std::collections::HashSet<String> {
+    let Ok(Some(todo)) = find_todo_component(content) else {
+        return std::collections::HashSet::new();
+    };
+    let items = TodoBody::parse(todo.content(content)).items;
+    let open: std::collections::HashSet<&str> = items
+        .iter()
+        .filter(|item| item.state.is_open())
+        .filter_map(|item| item.own_id.as_deref())
+        .collect();
+    items
+        .iter()
+        .filter(|item| !item.state.is_open())
+        .filter_map(|item| item.own_id.as_deref())
+        .filter(|id| !open.contains(id))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Open (`[ ]`/`[/]`) todo items whose own id is, or whose action cites, one of
 /// `ids` — operator actions tied to work this closeout just resolved, which are
 /// usually finished too. Feeds the non-blocking closeout advisory.
@@ -2324,6 +2394,51 @@ pub fn auto_complete_linked_todos_except(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#todosync`: the brief quotes the Todo that OWNS the id, with its
+    /// nested lines byte-for-byte; a Todo that only cites the id is not it.
+    #[test]
+    fn todo_item_owning_id_returns_the_owner_with_nested_lines_verbatim() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] Verify [#pmq] after release\n",
+            "- [ ] [#pmq] Answer the questions\n",
+            "  - One per provider?\n",
+            "    - One per provider.\n",
+            "- [ ] [#next] unrelated\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let item = todo_item_owning_id(content, "#PMQ").expect("owner");
+        assert_eq!(item.id, "pmq");
+        assert_eq!(item.state, TodoState::Open);
+        assert_eq!(
+            item.text,
+            "Answer the questions\n  - One per provider?\n    - One per provider."
+        );
+        assert!(todo_item_owning_id(content, "nope").is_none());
+        assert!(todo_item_owning_id("no todo here\n", "pmq").is_none());
+    }
+
+    /// `#todosync`: an id is checked only when every Todo row owning it is
+    /// `[x]`; cited ids and ids another row holds open are excluded.
+    #[test]
+    fn checked_todo_own_ids_requires_every_owner_checked() {
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [x] [#done1] finished\n",
+            "- [x] [#split] one copy checked\n",
+            "- [ ] [#split] another copy open\n",
+            "- [/] [#gated] waiting\n",
+            "- [x] cites [#cited] only\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let ids = checked_todo_own_ids(content);
+        assert_eq!(
+            ids,
+            std::collections::HashSet::from(["done1".to_string()]),
+            "{ids:?}"
+        );
+    }
 
     fn todo_body(content: &str) -> String {
         find_todo_component(content)

@@ -707,6 +707,28 @@ and its done archive; no network, no clock, no prose heuristics:
   question or note about a decision todo) never completes the todo: only the
   explicit `--done` says the todo's work is finished.
 
+**Todo-backed queue rows stay in sync (`#todosync`).** The operator may queue
+work on a Todo directly (`do [#<todo own id>]`). Such a row shares the Todo's
+lifecycle the way a backlog-backed row shares its backlog item's:
+
+| Event | Backlog-backed `do [#id]` | Todo-backed `do [#id]` |
+|---|---|---|
+| Dispatch brief (`queue brief`, `queue_subagent_dispatch.authorization`) | quotes the backlog item and its continuation | quotes the Todo action and every nested sub-item and nested reply verbatim (`tracked_items[].component = "todo"`) |
+| Operator checks the item `[x]` | reaped to `agent:done`; preflight strikes the row (`source=done`) | the Todo stays `[x]` in place; preflight strikes the row (`source=todo_checked`) |
+| `--done <id>` | resolves the item, strikes the row | checks the Todo off, strikes the row (`#sdktododone`) |
+| Worker reported, item must stay open | `queue consume --ack-id <id>` | `queue consume --ack-id <id>` (`#nestedechostrike`) |
+
+The preflight strike is queue maintenance's done-id strike: it runs in the same
+pass, ends a reported attempt the same way, and never edits the Todo. It fires
+only when every Todo row owning the id is `[x]`, and it never fires for an id
+that is open or gated tracked work (a legacy Todo sharing a backlog id is that
+work's operator prerequisite, which `operator_done_backlog_open` reports),
+for a head carrying an operator verdict (`do [#id]: ...`), or for a registered
+preset name. A Todo that only cites an id never closes that id's row. The
+reverse direction stays operator-owned: a row that drains without `--done`
+never checks its Todo off, and unchecking a Todo does not re-add a struck
+row; to run it again, reopen the Todo and queue the row again.
+
 Unreadable evidence is not absent evidence: when the document's components or
 an existing done archive cannot be read, preflight emits no todo signal and the
 closeout completes nothing (logging `todo_auto_done_skipped

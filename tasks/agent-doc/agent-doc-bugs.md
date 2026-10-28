@@ -23,7 +23,6 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -781,6 +780,9 @@ A regression test replays the exact incident and fails with either layer removed
 - `tmux sync failure`: this went to the extraction worker, since it's the same `game-sessions.md` | `sdk-demo.md` case. That worker also has your new repro for the half-width pane (agent-doc-bugs.md → game-sessions.md → back).
 
 **Filed `#deletedstruckmismatch`:** since the `agent:todo` sync row was pruned, steering has reported a `degraded_claim_mismatch` for it on nearly every call, although no todosync claim exists. Its work is merged and installed, so this is a false alarm.
+> **Queue prompt:** sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+
+> **Chat prompt (#chatprompt:41c7841f748c):** should I restart Idea?
 
 ### Re: Subagent completed: `subagent:sdksubagents` returned work for queue item “sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.” — agent-doc
 <!-- agent-doc-subagent-response sha256=f18a9f618200573a76c38d4674ad7aea76908e56f29655d8c9675469ee2e729d -->
@@ -821,11 +823,44 @@ A regression test replays the exact incident and fails with either layer removed
 - `do [#queue-blocked-marker]`;
 - `do [#pmsyncstillopen]`;
 - the `game-sessions.md` extraction and tmux worker (presets, 3 panes, half width, the sync failure).
-<!-- agent:boundary:636ffbfa -->
+> **Queue prompt:** sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+
+> **Chat prompt (#chatprompt:41c7841f748c):** should I restart Idea?
+
+> **Chat prompt (#chatprompt:a8a7d941db1b):** do a screenshot of the tmux kitty terminal in desktop 43 now to inform [#subagent:extractissues-tmuxsync#1]
+
+> **Chat prompt (#chatprompt:0ea3bc8c6790):** Note the right tmux pane is not responsive...still screen at half width
+
+> **Chat prompt (#chatprompt:ff1db120eddf):** PAne is dead
+
+> **Chat prompt (#chatprompt:1a59ad4007b3):** Pane is dead (signal 9, Wed Oct 28 00:31:35 2026)
+
+> **Chat prompt (#chatprompt:76f6beb3d905):** This happens when I navigate to game-sessions.md then back to sdk-demo.md
+
+### Re: subagents honored; the dead sdk-demo.md pane was an out-of-memory kill — opus-5 · 2026-10-28T00:45-04:00
+
+**The dead pane: systemd-oomd killed it for memory, not agent-doc or me.**
+- At 00:31:35, `systemd-oomd` killed the pane's process group (`tmux-spawn-24bae26a….scope`, 53 processes), which peaked at **137.9 GB of memory and 128.8 GB of swap after only 4 min 54 s**.
+- The same thing happened **six times** between 23:53 and 00:31, each time to a freshly respawned pane, each at 135–142 GB within 2–5 minutes. That's why `%3`, `%17`, `%19`, `%20` and `%22` are all dead `sdk-demo.md` panes with signal 9.
+- Your repro (game-sessions.md → back to sdk-demo.md) is what respawns that pane.
+- The conversation it resumes is only 1.7 MB, and about 1 GB of growth per second points at a native process in the pane, probably agent-doc's own wrapper, rather than Claude.
+- I've filed it as `#paneoomrunaway`.
+- **A recorder is running for the next hour.** Every 3 seconds it logs the biggest processes in any tmux pane over 4 GB. One more repro would name the culprit, if you're willing. Otherwise, avoid that navigation until it's fixed.
+
+**Your screenshot** (workspace 43, 04:31:29Z), sent to the tmux worker: tmux had the right pane at 119 columns, but the Claude screen inside it was still drawn at about 60 columns, with the right half blank. It was unresponsive because its pane was already filling memory; it died six seconds later.
+
+**Fixed: an inline answer can no longer close a row that `subagents` hands to a worker** (`0624a41b9d`, on agent-doc `main` and installed). Integrated `make check`: 12020 of 12020 tests passed. No editor was quarantined before the install. Not released.
+- **What was happening in `sdk-demo.md`:** preflight listed its rows for subagent dispatch every turn. The session answered the PR #74 row itself, and agent-doc struck it as done; only `queue consume` used to refuse an inline answer. The 📥 `do [#bossroom-*]`, `do [#template-*]` and `do #sbx-deploy-749` rows sat idle because the session judged them blocked from free-text notes the binary can't read.
+- **Now:** such a row stays queued and is offered again, with a warning. The guidance says never to run it inline: if no subagent is available, leave it queued with a visible note, and name any row judged blocked. `do [#queue-blocked-marker]` (in flight) makes "blocked" something the binary can read.
+- Filed `#qresiduewedgeveto`, the one remaining strike path without this check.
+
+**Should you restart IDEA? No.** Every install today printed "No JetBrains restart is required; no installed plugin bytes changed", and the native library hot-reloaded each time.
+<!-- agent:boundary:e0bc73cc -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ☑️ [#subagent:sdksubagents#1] sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.
+- do [#paneoomrunaway]
+- ~~sdk-demo.md `agent:run` has `subagents`, but subagents are not being used.~~
 - 🚧 [#subagent:qblocked#1] do [#queue-blocked-marker]
 - 🚧 [#subagent:extractissues#1] I extracted game-sessions.md from sdk-demo.md. There were some issues.
   - All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.
@@ -835,6 +870,7 @@ A regression test replays the exact incident and fails with either layer removed
 - 🚧 [#subagent:extractissues-tmuxsync#1] tmux sync failure
   - Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src
   - editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted
+  - do a screenshot
 - 🚧 [#subagent:pmsyncopen#1] do [#pmsyncstillopen]
 - 📥 do [#deletedstruckmismatch]
 <!-- /agent:run -->
@@ -877,6 +913,7 @@ A regression test replays the exact incident and fails with either layer removed
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#paneoomrunaway] Navigating the editor from game-sessions.md back to sdk-demo.md (haiven-dev) respawns the sdk-demo.md tmux pane, and that pane scope grows to 135-142 GB memory (up to 129 GB swap) within 2-5 minutes until systemd-oomd SIGKILLs it ("Pane is dead (signal 9)"): six kills 2026-10-27 23:53 to 2026-10-28 00:31 (tmux-spawn-*.scope, 31-298 processes each). Pane %22 started 04:26:54Z (controller_session_start generation=31, route_owned_start_policy keep_alive) and died 04:31:35Z. The resumed transcript is only 1.7 MB; the growth rate (about 1 GB/s) points at a native process in the pane (agent-doc supervisor/route path) rather than the harness. Before dying, the pane also showed the harness TUI drawn at about 60 columns inside a 119-column pane.
 - [ ] [#queue-blocked-marker] Give agent:run rows a distinct blocked marker (e.g. ⛔ blocked) and keep blocked rows out of subagent dispatch. Observed in tasks/sdk/sdk-demo.md on 2026-10-27: backlog items whose text carries '(stays open: blocked behind #a, #b)' (#template-api-create, #template-cli-create, #template-frontend-create, #bossroom-sbx-provision, #bossroom-stg-provision) render as 📥 pending, the same as runnable work, while one equally blocked item (#template-cli-catalog-digest) renders ⏭️ skipped, whose legend meaning ('dispatched and came back unconsumed') is wrong for it. preflight's queue_subagent_dispatch and session-check's 'queue awaits subagent dispatch' also offer those blocked heads every cycle, so the coordinator has to re-judge blockers by hand and the operator reads a queue of 📥 rows as idle capacity ('why is only 1 item being worked on with many inboxes?'). Expected: the binary derives blocked state from the stays-open blocker clause (and after= / unmerged prerequisite ids still open in backlog/review), renders a dedicated marker with the blocking ids, excludes those rows from queue_subagent_dispatch and drainable counts, and lists the legend entry in agent-doc queue legend and the status line.
 <!-- /agent:backlog -->
 

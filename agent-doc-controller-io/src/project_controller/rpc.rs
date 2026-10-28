@@ -33716,6 +33716,44 @@ fn pane_layout_target_window_id_for_lane(
     }
 }
 
+/// `#nestedclaimwindow`: the window a generation stamps its layout claim on.
+///
+/// It must be the window the effect and the drift survey drive. Both resolve
+/// an unpinned project's session from its own layout-effect or registered
+/// supervisor panes ([`pane_layout_observation_session`]), but the claim gate
+/// used to resolve only `invocation.window` or the project's `tmux_session`
+/// pin. A nested root without a pin (observed live 2026-10-28: haiven-dev
+/// inside agent-loop) therefore never stamped the shared window it was about
+/// to arrange. The enclosing root's older claim stayed on the window, so the
+/// nested controller's own sync protected the enclosing root's pane as
+/// "another controller's column", left three panes in a two-column window, and
+/// its survey dropped that pane as a foreign extra and reported `synced`.
+fn pane_layout_claim_window_id_for_lane(
+    project_root: &Path,
+    tmux: &tmux_router::Tmux,
+    invocation_window: Option<&str>,
+    lane_session: Option<&str>,
+    effect_file_panes: &[(String, String)],
+    registered_supervisor_file_panes: &[(String, String)],
+) -> Option<String> {
+    pane_layout_target_window_id_for_lane(project_root, tmux, invocation_window, lane_session)
+        .or_else(|| {
+            // A navigation lane names its own session; only the shared lane
+            // falls back to the survey's pane-derived session.
+            if lane_session.is_some() {
+                return None;
+            }
+            let (session, _) = pane_layout_observation_session(
+                configured_tmux_session_for_project(project_root),
+                project_is_multi_tmux_session(project_root),
+                effect_file_panes,
+                registered_supervisor_file_panes,
+                |pane| tmux.pane_session(pane).ok(),
+            )?;
+            resolve_agent_doc_window_id_for_session(tmux, &session)
+        })
+}
+
 fn pane_layout_target_window_id(
     project_root: &Path,
     tmux: &tmux_router::Tmux,
@@ -34157,11 +34195,13 @@ fn pane_layout_effect_worker(
         // generation is older than another root's claim yields instead of
         // re-applying (two controllers sharing a window used to stash each
         // other's panes on every retry).
-        if let Some(claim_window) = pane_layout_target_window_id_for_lane(
+        if let Some(claim_window) = pane_layout_claim_window_id_for_lane(
             &bootstrap.project_root,
             &lane_tmux,
             desired.invocation.window.as_deref(),
             lane_observation_session.as_deref(),
+            &runtime.pane_layout_effect_file_panes(desired.generation),
+            &registered_supervisor_file_panes(&runtime),
         ) && let Some(newer) = pane_layout_window_claim_gate(
             &bootstrap.project_root,
             &lane_tmux,
@@ -51421,6 +51461,113 @@ mod tests {
         assert!(
             pane_layout_window_claim_gate(&outer, &tmux, &window, outer_graph, 36, 9_900).is_some()
         );
+    }
+
+    /// `#nestedclaimwindow`, real tmux: the 2026-10-28 game-sessions.md
+    /// report. agent-loop (pinned `tmux_session`) last drove the shared
+    /// `agent-doc` window for `agent-doc-bugs.md | sdk-demo.md`; the editor
+    /// then showed `game-sessions.md | sdk-demo.md`, both haiven-dev
+    /// documents, so the nested haiven-dev controller (no pin of its own)
+    /// published the newer generation. It must stamp the window it is about
+    /// to arrange, resolved from its own supervisor panes exactly as its drift
+    /// survey does; otherwise agent-loop's stale claim keeps agent-loop's pane
+    /// protected and the window keeps three panes.
+    #[test]
+    fn unpinned_nested_controller_claims_the_window_its_panes_live_in() {
+        use agent_doc_controller::layout_owner::{WINDOW_LAYOUT_CLAIM_OPTION, WindowLayoutClaim};
+        let tmux = agent_doc_tmux_io::isolated_test_tmux("nested-claim-window");
+        tmux.raw_cmd(&["new-session", "-d", "-s", "0", "-n", "agent-doc"])
+            .unwrap();
+        tmux.raw_cmd(&["new-window", "-d", "-t", "0:", "-n", "stash"])
+            .unwrap();
+        let window =
+            agent_doc_tmux_io::target_window_id(&*tmux, "0:agent-doc").expect("agent-doc window");
+        let sdk_demo_pane = tmux
+            .raw_cmd(&[
+                "split-window",
+                "-h",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-t",
+                &window,
+            ])
+            .unwrap()
+            .trim()
+            .to_string();
+        let outer_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(outer_dir.path().join(".agent-doc")).unwrap();
+        let outer = outer_dir.path().canonicalize().unwrap();
+        let inner = outer.join("src/haiven-dev");
+        std::fs::create_dir_all(inner.join(".agent-doc")).unwrap();
+        let outer_runtime = ControllerRuntime::new_arc(test_bootstrap(&outer_dir)).unwrap();
+        let inner_dir = tempfile::TempDir::new().unwrap();
+        let inner_runtime = ControllerRuntime::new_arc(test_bootstrap(&inner_dir)).unwrap();
+        let claim = || {
+            agent_doc_tmux_io::window_user_option(&*tmux, &window, WINDOW_LAYOUT_CLAIM_OPTION)
+                .and_then(|value| WindowLayoutClaim::decode(&value))
+        };
+
+        // agent-loop's cross-root generation drove the window first.
+        assert!(
+            pane_layout_window_claim_gate(
+                &outer,
+                &tmux,
+                &window,
+                outer_runtime.pane_layout_graph(),
+                21,
+                1_000,
+            )
+            .is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.project_root), Some(outer.clone()));
+
+        let supervisor_panes = vec![(
+            inner.join("tasks/sdk/sdk-demo.md").display().to_string(),
+            sdk_demo_pane.clone(),
+        )];
+        // The pin-only resolution the gate used to rely on finds nothing for
+        // an unpinned nested root...
+        assert_eq!(
+            pane_layout_target_window_id_for_lane(&inner, &tmux, None, None),
+            None
+        );
+        // ...while the claim window follows the controller's own panes.
+        let claim_window =
+            pane_layout_claim_window_id_for_lane(&inner, &tmux, None, None, &[], &supervisor_panes)
+                .expect("the nested controller resolves the window its panes live in");
+        assert_eq!(claim_window, window);
+        // A navigation lane never borrows the shared lane's pane-derived window.
+        assert_eq!(
+            pane_layout_claim_window_id_for_lane(
+                &inner,
+                &tmux,
+                None,
+                Some("missing-lane-session"),
+                &[],
+                &supervisor_panes,
+            ),
+            None
+        );
+
+        // haiven-dev's newer generation takes the window, so agent-loop's pane
+        // is an ordinary extra for it, not a protected foreign column.
+        assert!(
+            pane_layout_window_claim_gate(
+                &inner,
+                &tmux,
+                &claim_window,
+                inner_runtime.pane_layout_graph(),
+                3,
+                2_000,
+            )
+            .is_none()
+        );
+        assert_eq!(claim().map(|claim| claim.project_root), Some(inner.clone()));
+        assert!(!window_layout_driven_by_other_root(&tmux, &window, &inner));
+        assert!(window_layout_driven_by_other_root(&tmux, &window, &outer));
+        drop(inner_dir);
     }
 
     /// `#stalecontrollerhotupdate` (d), the queue item: the editor goes 2 -> 1

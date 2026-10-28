@@ -257,7 +257,14 @@ and indented continuation bytes exactly.
 An absent destination is initialized as a complete template document with a new
 session ID and the source collaboration/security-review, model,
 linked-resource, tool-search, and prompt-preset context (but no resume/routing
-identity). Relative linked-resource paths are rebased for the destination
+identity). That context is the source document's OWN frontmatter
+(`#extractpresetcopy`), never its effective frontmatter: project defaults from
+every visible `.agent-doc/project.md` already apply to the destination at read
+time, so copying the merged view would materialize every project preset (and
+project `model`/link defaults) as per-document overrides. Presets declared
+only in the source's frontmatter are real overrides and are kept; a destination
+under the same project roots therefore usually carries no `prompt_presets` at
+all. The same rule holds for `transfer`'s auto-created target. Relative linked-resource paths are rebased for the destination
 directory. The target records `agent-doc-extract` provenance; the source
 records an `agent-doc-extract-destination` pointer. These markers make recovery
 discoverable and prevent a target-first crash from duplicating content on retry.

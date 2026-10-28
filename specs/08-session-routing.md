@@ -490,6 +490,25 @@ controller. The invariants:
   `layout_foreign_pane_protected`). When the controller holds the claim, the
   editor's newest frame is its own and the foreign pane is an ordinary extra:
   going from 2 panes to 1 onto a nested-root document must still drop it.
+- The claim is stamped on the window the effect and the drift survey drive
+  (`#nestedclaimwindow`). An unpinned project (no `tmux_session` in its
+  `config.toml`, the usual nested root) resolves that window from its own
+  layout-effect or registered supervisor panes, as its survey does
+  (`pane_layout_claim_window_id_for_lane`); a navigation lane uses its own
+  session only. Observed 2026-10-28: the editor's left split went
+  `agent-doc-bugs.md` -> `game-sessions.md` -> `agent-doc-bugs.md` beside
+  `sdk-demo.md`. haiven-dev published `[game-sessions.md, sdk-demo.md]` but
+  resolved no claim window from its missing pin, so agent-loop's older claim
+  stayed on the window; haiven-dev's own sync then protected agent-loop's
+  `agent-doc-bugs.md` pane, left three panes in a two-column window, and its
+  survey dropped that pane as a foreign extra and logged `synced`.
+- A layout pass that leaves a protected foreign pane in a single-row window
+  rebalances that row evenly when any pane is narrower than half its even
+  share (`#protectedextrasliver`,
+  `layout_protected_extra_rebalanced`). tmux-router equalizes two columns by
+  resizing the first wanted pane to 50%, which with a third pane in the row
+  took every cell from the last column (`[%6 117 | %16 120 | %3 1]`).
+  Stacked columns are never flattened.
 
 The reference model is `sim_world::stale_controller_shared_window_model`: both
 round trips settle on the editor's newest frame under every seeded delivery

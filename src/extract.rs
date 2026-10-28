@@ -124,6 +124,23 @@ fn allow_selective_item_transfer(component_name: &str) -> bool {
     is_backlog_component(component_name) || is_icebox_component(component_name)
 }
 
+/// `#extractpresetcopy`: the source frontmatter a new target scaffold inherits.
+///
+/// Extraction copies the source document's OWN declarations only. The
+/// effective frontmatter (`session::parse_for_file`) overlays every
+/// `.agent-doc/project.md` layer visible to the source, and copying that merged
+/// view materialized every project preset (and project model/link defaults)
+/// into the new document as if they were per-document overrides. Project
+/// defaults already apply to the target through the same overlay, so only the
+/// source's document-local frontmatter is inherited.
+pub(crate) fn scaffold_inheritance_frontmatter(
+    source_content: &str,
+) -> Result<frontmatter::Frontmatter> {
+    frontmatter::parse(source_content)
+        .map(|(fm, _)| fm)
+        .context("failed to parse source document frontmatter for target scaffold")
+}
+
 pub(crate) fn render_target_scaffold(
     title: &str,
     agent: &str,
@@ -411,7 +428,8 @@ pub fn transfer(
             .agent
             .clone()
             .unwrap_or_else(|| "claude".to_string());
-        let target_content = render_target_scaffold(title, &agent, session_id, &source_fm);
+        let inherited_fm = scaffold_inheritance_frontmatter(&source_content)?;
+        let target_content = render_target_scaffold(title, &agent, session_id, &inherited_fm);
 
         if let Some(parent) = target.parent()
             && !parent.exists()

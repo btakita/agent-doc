@@ -167,54 +167,29 @@ The published version is still agent-doc v0.35.560. The GitHub Release is the la
 The nested `project.md` row is claimed and running. A session document under `src/haiven-dev` should read `src/haiven-dev/.agent-doc/project.md` and the workspace-root `.agent-doc/project.md`. The queue line spells the root as `ageunt-loop`.
 
 The nested queue-prompt worker is still editing `fix/nested-queue-prompt` in its own worktree. `#vscodecodersmoke` stays queued for the real Coder workspace run.
-### Re: Subagent completed: `subagent:nestvector` returned work for queue item “The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.” — agent-doc
-<!-- agent-doc-subagent-response sha256=123273f9b2de0adb757b85160423ba8f647e16ea2be941b09c338022dbb14042 -->
-> **Subagent response:**
->
-> The nested `agent:run` queue echo now shows the full nest vector, and that change is on `fix/nested-queue-prompt` at `77112d2a4eee2f040c6f7e2826bbb0b60a6fd769`. The branch is pushed to `origin/fix/nested-queue-prompt`. `main` was not pushed. No follow-up queue heads.
->
-> A nested leaf is quoted as `root parent: parent: item`. The struck child under `[#vscodecodersmoke]` echoes as `#vscodecodersmoke: Where does this file live? My Coder agent is asking.` The vector answers that leaf. A bare leaf quote is rewritten to the vector when the echo is embedded. Top-level rows and `#nestedsubprompts` folded heads stay verbatim.
->
-> Files changed (17, +813/−50):
->
-> - `agent-doc-queue/src/document_queue.rs`
-> - `agent-doc-queue/src/queue_response.rs`
-> - `agent-doc-queue/src/queue_consume.rs`
-> - `agent-doc-queue/src/queue_heads.rs`
-> - `agent-doc-queue/src/queue_closeout_guard.rs`
-> - `agent-doc-queue-io/src/queue_consume.rs`
-> - `agent-doc-preflight-io/src/lib.rs`
-> - `agent-doc-start-runtime-io/src/idle_watch.rs`
-> - `specs/07-orchestration-commands.md`
-> - `specs/07-closeout-commands.md`
-> - `specs/pending-system.md`
-> - `runbooks/respond.md` and the five harness copies (`.claude`, `.codex`, `.cursor`, `.grok`, `.opencode`)
->
-> `make check` in `/home/brian/worktrees/agent-doc-nestvector` exited 0 with `TMUX`, `TMUX_PANE`, `GROK_SESSION_ID`, `GROK_AGENT`, `AGENT_DOC_SUPERVISOR`, `AGENT_DOC_WRITE_AUTHORITY`, `AGENT_DOC_LOG`, and `AGENT_DOC_PREFLIGHT_HOOK_BUDGET_SECS` unset. Recorded results from `tmp/test-runs/20261028T222406Z-206070`:
->
-> - nextest: 12117 passed, 187 skipped, exit 0 (141.685s)
-> - batched: 2065 passed, 0 failed, 148 ignored across 13 binaries, exit 0
-> - doctest: 149 binaries, 0 passed, 0 failed, exit 0
-> - sim-medium: 1 passed, 0 failed, exit 0
-> - sim-net: 2 passed, 0 failed, exit 0
-> - clippy `--workspace --all-targets --all-features -D warnings`: passed
-> - version-sync: agent-doc 0.35.560 release projection synchronized
-> - audit-docs: no blocking issues (30 mtime advisories)
-> - editor parity: VS Code tests 225 passed and 4 package tests passed; `native_plugin_harnesses_peer_through_real_agent_doc_controller` 1 passed; parity audit covered 0.35.560
-> - JetBrains Gradle checks: `BUILD SUCCESSFUL`
-> - Python bootstrap: 8 tests OK
-> - TLA runner self-test: ok; the model run was skipped by the content-identical receipt
->
-> `make install` was not run.
-<!-- agent-doc-subagent-completion key=2b97681b273729935cac4dab11c5c2d2442d3b1bd6dfccbf8c32e763d0bb366a -->
-<!-- agent:boundary:3f2d5ea8 -->
+
+> **Queue prompt:** The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.
+
+> **Queue prompt:** release + publish
+>   - Include #subagent:nestvector + #subagent:nestedproject
+
+**Deferred:** claimed by `subagent:release` generation 5, worker `01a184a9-ec8a-73a1-85bc-90238454799f`. `#subagent:nestedproject` is not on main, so no release was cut.
+
+### Re: Nested queue prompt is on main — grok-4.7 · 2026-10-28T18:38-04:00
+
+A nested `agent:run` leaf is echoed as its nest vector, `root parent: parent: item`. That fix is on main at `8862b2f9b5` (`fix(queue): echo a nested agent:run leaf as its nest vector`), rebased onto `5291b1f93c` and fast-forwarded `5291b1f93c..8862b2f9b5`. The worker's `make check` exited 0: nextest 12117 passed and 187 skipped. After the rebase, 8 `nest_vector` tests passed. `make install` exited 0. The binary is still `agent-doc 0.35.560`. JetBrains bytes were already current. Tag `v0.35.560` stays at `bd971e9b87`.
+
+CI for `8862b2f9b5` is in progress: https://github.com/btakita/agent-doc/actions/runs/40781176636. Book and Pages for that commit succeeded.
+
+The release row stays open until `#subagent:nestedproject` is on main. That claim is still running, and its worktree has no commit yet.
+<!-- agent:boundary:daa0c129 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
-- ☑️ [#subagent:nestvector#1] The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.
+- ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
 - 🚧 [#subagent:release#5] release + publish
   - Include #subagent:nestvector + #subagent:nestedproject

@@ -338,6 +338,21 @@ The api.md run item that dropped `[#subagent-operator-request-pr759-fix-ci-push]
 A nested leaf is now submitted as its nest vector. The api.md case submits `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` stay the leaf. Commit `44210183cc` is on main. The worker's `make check` exited 0 (nextest 12126 passed, 187 skipped). The denylist scan of the added lines was clean. `make install` of that commit exited 0. JetBrains bytes were already current. VS Code stayed 0.2.90.
 
 The nest vector is the ancestor path. The entire prompt tree goes out as context on the next row, worker `01a184e6`.
+
+### Re: release include rows were submitted unstruck — grok-4.7 · 2026-10-28T19:52-04:00
+
+> **Chat prompt (#chatprompt):** re: Fix release include strike: The struck items were submitted as unstruck. I only gave you the effect after agent-doc struck the items.
+
+The submitted rows were unstruck: the parent `release + publish`, then `Include #subagent:nestvector + #subagent:nestedproject`, then `Include #subagent:nestedlineage`. The struck form is the effect agent-doc wrote after the strike.
+
+I forwarded that correction to the running include-strike worker `01a184ce` in `/home/brian/worktrees/agent-doc-releasecontext/OPERATOR-STEERING.md`. The file is untracked.
+
+Commit `571ab1df97` on `fix/release-include-context` already builds the regression from those unstruck lines. `~~release + publish~~` appears there as the projected effect once every named include is done. The worker is still running, and the note tells it to keep that input. The branch is one commit ahead of `44210183cc`. Integration waits until the worker finishes and pushes `fix/release-include-context`.
+
+`do [#grok-live-editor]` stays open. The nested line that references `[#grok-live-editor]` is claimed by `subagent:rtsteeringparity` (worker `01a184da`, generation 1). This turn leaves that claim in place.
+
+No additional backlog follow-up is needed because the include-strike fix is already with worker `01a184ce`, and `#grok-live-editor` remains its existing open backlog item.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 

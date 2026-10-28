@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
-    LEGACY_OWNER_ANNOTATION_OPEN, OWNER_ANNOTATION_OPEN, lifecycle_markers, operator_action_ids,
+    LEGACY_OWNER_ANNOTATION_OPEN, OWNER_ANNOTATION_OPEN, lifecycle_markers,
     strip_in_progress_marker, strip_owner_annotation_prefix, strip_priority_markers,
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
@@ -762,10 +762,15 @@ pub fn queue_consumption_allowed_for_response(
     // while the annotation remains. Completing the todo clears this projection
     // through `set_prompt_operator_actions`, after which ordinary completion
     // evidence is authoritative again.
-    if active_head
-        .as_ref()
-        .is_some_and(|head| !operator_action_ids(head).is_empty())
-    {
+    // `#answeredrequeststrike`: only an OPEN request holds the row (a visible
+    // `🙋` or a still-open linked todo); an answered request whose todo closed
+    // is answer provenance, not a hold.
+    if active_head.as_ref().is_some_and(|head| {
+        agent_doc_document::queue_projection::operator_action_holds_row(
+            head,
+            &agent_doc_element::todo::open_todo_ids(current_content),
+        )
+    }) {
         return Ok(false);
     }
     let head_is_free_text = active_head.is_some()
@@ -1153,6 +1158,7 @@ pub fn answered_free_text_strike_decision(
         None => HashSet::new(),
     };
     let mut struck_texts = already_applied;
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
     for node in nodes {
         if node.item.struck || is_loop_queue_node(&node.node_key) {
             continue;
@@ -1169,7 +1175,9 @@ pub fn answered_free_text_strike_decision(
         // This check belongs in the reactive projection itself so every adapter
         // observes the same invariant; todo completion removes the annotation
         // and invalidates/recomputes this derived target normally.
-        if !operator_action_ids(text).is_empty() {
+        // `#answeredrequeststrike`: an answered request whose todo closed no
+        // longer holds the row, matching the `🙋` projection.
+        if agent_doc_document::queue_projection::operator_action_holds_row(text, &open_todo_ids) {
             continue;
         }
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
@@ -4299,6 +4307,68 @@ Old.
         .expect("todo completion clears the gate and re-enables the normal strike projection");
         assert_eq!(projected.node_keys.len(), 1);
         assert!(projected.target_content.contains(STRUCK_FREE_TEXT_NOTE));
+    }
+
+    /// `#answeredrequeststrike` live shape (haiven-dev sdk-demo.md,
+    /// 2026-10-28): a reported free-text row whose operator request was
+    /// answered locally (`[#request-id]: <answer>`) and whose todo closed shows
+    /// no `🙋`, so its exact closeout echo strikes it. An open linked todo still
+    /// holds it, on every completion path.
+    #[test]
+    fn answeredrequeststrike_answered_request_with_closed_todo_strikes_on_echo() {
+        let id = "subagent-operator-request-slack-app-bootstrap";
+        let work = format!(
+            "Setup the PR status app for the sdk-reviews channel. [#{id}]: I ran this before in Codex."
+        );
+        let row = format!("☑️ [#subagent:slack-pr-status#1] {work}");
+        let document = active_queue_doc(&format!("- {row}\n- do [#later]\n"));
+        let response = format!("### Re: slack\n\n> **Queue prompt:** {work}\n\nDone.\n");
+
+        let projected = project_answered_free_text_strike_with_claims(
+            &document,
+            &response,
+            Some(&document),
+            std::slice::from_ref(&row),
+        )
+        .unwrap()
+        .expect("an answered request with a closed todo no longer vetoes the strike");
+        assert_eq!(projected.node_keys.len(), 1);
+        assert!(
+            crate::queue_heads::free_text_queue_head_is_completed_residue_with_claim(
+                &document, &response, &row, true,
+            ),
+            "the session-check residue set agrees with the strike set"
+        );
+
+        let held = format!(
+            "{document}\n<!-- agent:todo -->\n- [ ] [#{id}] Confirm Slack access.\n<!-- /agent:todo -->\n"
+        );
+        assert!(
+            project_answered_free_text_strike_with_claims(
+                &held,
+                &response,
+                Some(&held),
+                std::slice::from_ref(&row),
+            )
+            .unwrap()
+            .is_none(),
+            "an open linked todo still holds the row until the closeout checks it off"
+        );
+        assert!(
+            !crate::queue_heads::free_text_queue_head_is_completed_residue_with_claim(
+                &held, &response, &row, true,
+            )
+        );
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(&held),
+                &held,
+                &response,
+                &[],
+            )
+            .unwrap()
+        );
     }
 
     #[test]

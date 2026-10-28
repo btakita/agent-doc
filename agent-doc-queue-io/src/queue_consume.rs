@@ -2007,6 +2007,27 @@ pub fn acknowledge_open_id_backed_queue_head(
         return Ok(false);
     }
     let preserved = if open_backlog { "backlog" } else { "todo" };
+    // `#ackkeepsopen`: acknowledging a reported row whose backlog item stays
+    // open IS the statement `backlog keep-unqueued` records. Without that
+    // proof the session-check removal guard (`#queue-clear-unrun-items`) read
+    // the acknowledged strike as a lost head and offered `backlog requeue`,
+    // which restored the row; the `subagents` queue then dispatched the same
+    // blocked work again and it came back `☑️` (haiven-dev game-sessions.md,
+    // 2026-10-28: four session rows, acknowledged at 06:01, restored at 06:02,
+    // reported again at 06:10).
+    if open_backlog
+        && let Err(err) = agent_doc_cycle_state_io::record_pending_kept_open_ids(
+            file,
+            std::slice::from_ref(&target_id),
+        )
+    {
+        eprintln!(
+            "[queue] warning: acknowledged [#{target_id}] but could not record it as kept open \
+             ({err:#}); if session-check reports it lost, run `agent-doc backlog {} keep-unqueued \
+             {target_id}`, not `requeue`.",
+            file.display()
+        );
+    }
     eprintln!(
         "[queue] acknowledged id-backed head [#{target_id}] ({} node(s); {preserved} item left open; {}; #freshqueueauth)",
         keys.len(),
@@ -7577,6 +7598,125 @@ Old.
                     "claim_outcome=reported_attempt_closed owner=subagent:ahfe generation=1"
                 ),
             "{ops_log}"
+        );
+    }
+
+    /// `#taggedidhead` live shape (haiven-dev sdk-demo.md, 2026-10-28): a
+    /// reported `#review [#adr0043-publish]` row whose Todo was already closed.
+    /// The claim keys it as `adr0043-publish`; `--id` must find it by the same
+    /// key and end the reported attempt with the strike.
+    #[test]
+    fn taggedidhead_id_strike_closes_reported_tagged_row() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents priority go -->\n",
+            "- #review [#adr0043-publish]\n",
+            "- later operator work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo priority -->\n",
+            "- [ ] [#other] unrelated\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(
+            &doc,
+            "#review [#adr0043-publish]",
+            "subagent:adr0043-review",
+        );
+        crate::queue_claim::report_attempt(&doc, "#review [#adr0043-publish]", Some(generation))
+            .unwrap();
+        assert_eq!(
+            id_backed_head_node_keys(content, "adr0043-publish")
+                .unwrap()
+                .len(),
+            1,
+            "the tagged row is the id-backed head its claim names"
+        );
+
+        assert!(strike_orphan_id_backed_queue_head(&doc, "adr0043-publish").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~#review [#adr0043-publish]~~"),
+            "{result}"
+        );
+        assert!(!result.contains("☑️"), "{result}");
+        assert!(result.contains("- later operator work\n"), "{result}");
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:adr0043-review"),
+            "the reported attempt ended with the strike: {ledger:?}"
+        );
+    }
+
+    /// `#ackkeepsopen` live shape (haiven-dev game-sessions.md, 2026-10-28):
+    /// a reported `do [#id]` row whose backlog item stays open (its worker
+    /// reported the work is still blocked). `--ack-id` records the id as kept
+    /// open, so session-check's removal guard accepts the acknowledged strike
+    /// instead of offering `backlog requeue`, which re-dispatched the row.
+    #[test]
+    fn ackkeepsopen_ack_id_records_open_backlog_item_as_kept_open() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sessions.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents priority go -->\n",
+            "- do [#publish-session-contracts]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue -->\n",
+            "- [ ] [#publish-session-contracts] publish the session contract delta\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        let generation = running_claim(
+            &doc,
+            "#publish-session-contracts",
+            "subagent:publish-session-contracts",
+        );
+        crate::queue_claim::report_attempt(&doc, "#publish-session-contracts", Some(generation))
+            .unwrap();
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "publish-session-contracts").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- ~~do [#publish-session-contracts]~~"),
+            "{result}"
+        );
+        assert!(
+            result
+                .contains("- [ ] [#publish-session-contracts] publish the session contract delta"),
+            "the backlog item stays open:\n{result}"
+        );
+        let state = agent_doc_cycle_state_io::load(&doc)
+            .unwrap()
+            .expect("cycle state");
+        assert_eq!(
+            state.pending_kept_open_ids,
+            vec!["publish-session-contracts".to_string()],
+            "the acknowledgement is the keep-unqueued proof"
         );
     }
 

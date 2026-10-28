@@ -483,12 +483,14 @@ pub fn free_text_queue_head_provenance_decision_with_claims(
     let mut unresolved = Vec::new();
     let mut response_proven_removed = Vec::new();
     let mut completed_residue = Vec::new();
+    // `#answeredrequeststrike`: the open-request hold matches the `🙋` projection.
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
 
     for head in active_free_text_queue_heads {
         // Preserve the operator-action projection until its linked todo is
         // answered. Stripping cosmetic markers below intentionally produces
         // work identity, so this gate must inspect the visible row first.
-        if !agent_doc_document::queue_projection::operator_action_ids(head).is_empty() {
+        if agent_doc_document::queue_projection::operator_action_holds_row(head, &open_todo_ids) {
             continue;
         }
         let head = strip_priority_markers(head);

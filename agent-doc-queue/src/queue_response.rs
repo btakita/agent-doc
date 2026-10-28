@@ -30,6 +30,21 @@ pub fn queue_prompt_done_id(text: &str) -> Option<String> {
     // `☑️ [#subagent:x#1] do [#x]` row `subagent`, so the operator-delete
     // tombstone ledger recorded `x` as deleted the moment its claim projected,
     // and lifecycle convergence then dropped the live claimed row.
+    //
+    // `#taggedidhead`: a leading intent/preset tag routes the work, it does
+    // not name it. `#review [#adr0043-publish]` is claimed, reported and
+    // released as `adr0043-publish` (`queue_head_identity`,
+    // `#claimdispatchidentity`), so its done id is that id too. Reading the
+    // first `#` named it `review`: `queue consume --id adr0043-publish` found
+    // no head, `--done adr0043-publish` left the row, and the reported `☑️`
+    // row had no closing command at all (haiven-dev sdk-demo.md, 2026-10-28).
+    // Only an id-backed work identity overrides; a free-text identity keeps
+    // the first-`#` reading below.
+    if let agent_doc_element_queue::QueueItemIdentity::Id(id) =
+        agent_doc_element_queue::queue_head_identity(text)
+    {
+        return Some(id.to_ascii_lowercase());
+    }
     let visible = strip_priority_markers(text);
     let marker = visible.find('#')?;
     let tail = &visible[marker + 1..];
@@ -1433,6 +1448,33 @@ mod tests {
             queue_prompt_done_id("☑️ [#subagent:release_publish_patch#3] release + publish"),
             None,
             "a free-text row carries no id once its attempt annotation is ignored"
+        );
+    }
+
+    /// `#taggedidhead`: a leading intent tag never becomes the done id of an
+    /// id-backed row; the work identity's id does.
+    #[test]
+    fn queue_prompt_done_id_skips_leading_intent_tags_of_id_backed_rows() {
+        for row in [
+            "#review [#adr0043-publish]",
+            "☑️ [#subagent:adr0043-review#1] #review [#adr0043-publish]",
+            "#subagents do [#adr0043-publish]",
+        ] {
+            assert_eq!(
+                queue_prompt_done_id(row),
+                Some("adr0043-publish".to_string()),
+                "{row}"
+            );
+            assert_eq!(
+                agent_doc_element_queue::queue_head_identity(row),
+                agent_doc_element_queue::QueueItemIdentity::Id("adr0043-publish".into()),
+                "the done id and the claim identity are one key: {row}"
+            );
+        }
+        // A free-text identity keeps the first-`#` reading.
+        assert_eq!(
+            queue_prompt_done_id("#fix1 do the thing"),
+            Some("fix1".to_string())
         );
     }
 

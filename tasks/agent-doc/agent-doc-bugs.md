@@ -1134,7 +1134,7 @@ Session note: the exchange is 1083 lines. I'm not compacting it while the queue 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:ambigproj#1] Run Agent Doc on this document error: Agent Doc could not attach the open editor replica for agent-doc-bugs.md. Cause: ambiguous-retained-projection. Agent Doc could not prove that adopting the controller canonical, publishing this buffer, or merging the two keeps every edit, so the buffer was not changed. Copy any editor text you need to keep, close this editor tab, run `agent-doc repair <file>` while it is detached, reopen it, and paste back anything missing. The editor buffer and disk were left unchanged.
 - 🚧 [#subagent:reportedstrike#1] I'm still seeing run items in a ☑️ state in sdk-demo.md + game-sessions.md. What are the rules for agent-doc to strike those run items as done?
-- subagent operator request is still difficult to read.
+- 🚧 [#subagent:requestlayout#1] subagent operator request is still difficult to read.
   - Use a nested list
 <!-- /agent:run -->
 

@@ -289,7 +289,56 @@ Each leaf is submitted with its full lineage, and the entire prompt tree goes wi
 The api.md run item that dropped `[#subagent-operator-request-pr759-fix-ci-push]` is a separate worker. `01a184d6` is running as `[#subagent:pr759fixci#1]` on `fix/pr759-run-item`. That row stays open until the branch is on main.
 
 `do [#grok-live-editor]` and the nested line `re: [#grok-live-editor]: Also validate we have parity for the real-time steering` resolve as one claim. Worker `01a184da` is running as `[#subagent:rtsteeringparity#1]` on `fix/realtime-steering-parity`. It owns the live-editor push and the real-time steering parity check. An unbound duplicate on the same backlog was stopped. Both rows stay open until that branch is on main.
-<!-- agent:boundary:2d5e9347 -->
+
+### Re: Subagent completed: `subagent:nestedlineage` returned work for queue item “When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent. - Use the AST to guide the agent.” — agent-doc
+<!-- agent-doc-subagent-response sha256=8349f8c4064b8b834a543ac7127f9ca6fdf6568c5fb33ffb965fd1fadffea9e1 -->
+> **Subagent response:**
+>
+> A nested `agent:run` leaf is now submitted as its nest vector, the same `parent: item` string the response echo uses. For the api.md example that is `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims, `--item`, and `selected_queue_prompts` stay the leaf, so each duplicate `#rebase` keeps its own parent.
+>
+> - Branch: `fix/nested-run-lineage` (pushed to `origin/fix/nested-run-lineage`, not `main`)
+> - Commit: `44210183cc1885086bfbd1202549c3c81f7cf1e2`
+> - Follow-ups: none
+>
+> Files (17, +616/−23):
+> - `agent-doc-queue/src/document_queue.rs`
+> - `agent-doc-queue/src/queue_response.rs`
+> - `agent-doc-queue/src/subagent_brief.rs`
+> - `agent-doc-queue-io/src/subagent_dispatch.rs`
+> - `agent-doc-preflight-command-io/src/run.rs`
+> - `agent-doc-preflight-io/src/lib.rs`
+> - `agent-doc-run-io/src/lib.rs`
+> - `agent-doc-run-io/tests/direct_run.rs`
+> - `src/plan.rs`
+> - `specs/07-orchestration-commands.md`
+> - `specs/pending-system.md`
+> - `runbooks/respond.md` and the five harness copies
+>
+> Tests (cleaned env, private socket under `/tmp`; no `make install`):
+>
+> Focused, after rebase onto `origin/main`:
+> - `cargo test -p agent-doc-queue --lib -- submitted_prompt nested_rebase submitted_queue_prompt nested_push_and_publish` — 5 passed, 0 failed
+> - `cargo test -p agent-doc --bin agent-doc -- build_plan_submits_a_nested_run_leaf` — 1 passed, 0 failed
+> - `cargo test -p agent-doc-run-io --test direct_run -- active_queue_prompt_diff_submits` — 1 passed, 0 failed
+>
+> `make check` on that commit exited 0. Nextest: `12126 tests run: 12126 passed, 187 skipped` (87.377s). Doc audit reported no blocking issues. JetBrains, VS Code, Python bootstrap, and the TLA self-test passed.
+>
+> Coordinator: reviewed, denylist clean, fast-forwarded `493731820e..44210183cc` onto `origin/main`. The submitted prompt is the ancestor path. The later requirement that the entire prompt tree travel with each leaf is not in this commit.
+<!-- agent-doc-subagent-completion key=3174c2f71bda2a7d75e6054b71a97086ff44db66758a13a1ad7bc575aa24e6ef -->
+> **Queue prompt:** When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
+
+> **Queue prompt:**
+> The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
+>   - Use the AST to guide the agent.
+
+**Deferred:** dispatched to a subagent. Worker `01a184e6-ffb7-70d3-8266-21116f73f0a9` is running as `[#subagent:entiretree#1]`. That row stays queued.
+
+### Re: nested run lineage is on main — grok-4.7 · 2026-10-28T19:45-04:00
+
+A nested leaf is now submitted as its nest vector. The api.md case submits `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` stay the leaf. Commit `44210183cc` is on main. The worker's `make check` exited 0 (nextest 12126 passed, 187 skipped). The denylist scan of the added lines was clean. `make install` of that commit exited 0. JetBrains bytes were already current. VS Code stayed 0.2.90.
+
+The nest vector is the ancestor path. The entire prompt tree goes out as context on the next row, worker `01a184e6`.
+<!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -299,13 +348,14 @@ The api.md run item that dropped `[#subagent-operator-request-pr759-fix-ci-push]
   - ~~Where does this file live? My Coder agent is asking.~~
 - ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~
 - ~~Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [#subagent:nestedlineage#1] When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.
+- ~~When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:entiretree#1] The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
   - Use the AST to guide the agent.
 - ~~release + publish~~
   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
   - ~~Include #subagent:nestedlineage~~
 - 🚧 [#subagent:pr759fixci#1] api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
-- 🟡 [#subagent:grokliveeditor#1] do [#grok-live-editor]
+- 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 <!-- /agent:run -->
 

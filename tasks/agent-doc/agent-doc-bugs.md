@@ -1111,121 +1111,15 @@ I checked off `#pmsyncstillopen` and added `#pmsyncconfirm` with the three remai
 - two tmux-ci tests (supervisor and controller re-exec) that time out under load;
 - the controllers' editor-surface ping-pong on every left-tab switch;
 - `init`/`convert` still putting `## Exchange` on its own line.
-<!-- agent:boundary:0eb8b335 -->
+> **Queue prompt:** release + publish: include all active queue items
+
+### Re: release row closed — opus-5 · 2026-10-28T03:00-04:00
+
+Closed `release + publish: include all active queue items`: v0.35.559 is published and installed (details in the cell above). This row was marked for subagent dispatch. Under today's `subagents` fix, an inline answer can't close such a row, so I recorded my own release run through the claim lifecycle and closed it with this echo.
+<!-- agent:boundary:2af22689 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#paneoomrunaway]~~
-- ~~do [#queue-blocked-marker]~~
-- ~~I extracted game-sessions.md from sdk-demo.md. There were some issues.~~
-  - ~~All project.md presets were copied over. This should not be the case. There should have been only preset overrides in the game-sessions.md frontmatter...which is probably no presets unless explicitly added.~~
-  - ~~When I open game-sessions.md in the editor, there are 3 tmux panes.~~
-  - ~~With the agent-doc-bugs.md|sdk-demo.md split, the sdk-demo.md tmux viewport is half width.~~
-    - ~~The right-side width viewport occurs when I navigate from the left editor side from agent-doc-bugs.md (2 tmux panes) to game-sessions.md (3 tmux panes) back to agent-doc-bugs.md.~~
-- ~~tmux sync failure~~
-  - ~~Sync failed: {"applied":false,"reason":"tmux_effect_retry_pending","columns":["/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md"],"layout_generation":10,"layout_publisher":"command","window":null,"focus":"/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md","no_autostart":false,"exact_visible":true,"routes_created_panes":true,"file_panes":[["/home/brian/work/btakita/agent-loop/src~~
-  - ~~editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: editor route layout did not converge before dispatch: reason=layout_effect_refused for routed document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` (published columns: `/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md`); observed layout publisher=route generation=21 columns=`/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md`, `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` after 2 layout observation(s); the --wait-for-ready budget (which covers layout convergence before harness readiness) was exhausted~~
-  - ~~do a screenshot~~
-- ~~do [#deletedstruckmismatch]~~
-~~~done
-Restart Agent on sdk-dev.md after switch `agent: codex` to `agent: grok`
-```
-java.lang.IllegalStateException: agent-doc native calls are forbidden on the IDEA event-dispatch thread
-	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.callOnWorker(NativeLib.kt:1169)
-	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration.access$callOnWorker(NativeLib.kt:1041)
-	at com.github.btakita.agentdoc.AgentDocLib$Companion$LoadedGeneration$Companion.load$lambda$0(NativeLib.kt:1236)
-	at jdk.proxy14/jdk.proxy14.$Proxy103.agent_doc_frontmatter_agent(Unknown Source)
-	at com.github.btakita.agentdoc.NativePatching.frontmatterAgent(NativeLib.kt:2636)
-	at com.github.btakita.agentdoc.TerminalUtil.editorVisibleFrontmatterAgent(TerminalUtil.kt:1839)
-	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand(TerminalUtil.kt:1401)
-	at com.github.btakita.agentdoc.TerminalUtil.runRestartCommand$default(TerminalUtil.kt:1388)
-	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession(TerminalUtil.kt:1051)
-	at com.github.btakita.agentdoc.TerminalUtil.restartAgentSession$default(TerminalUtil.kt:1050)
-	at com.github.btakita.agentdoc.RestartAgentAction.actionPerformed(RestartAgentAction.kt:22)
-	at com.github.btakita.agentdoc.shell.ShellActionForwarder.actionPerformed(ShellActionForwarders.kt:39)
-	at com.intellij.openapi.actionSystem.ex.ActionUtil.doPerformActionOrShowPopup(ActionUtil.kt:514)
-	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction$lambda$0(ActionUtil.kt:477)
-	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1$0(ActionManagerImpl.kt:632)
-	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
-	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
-	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
-	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
-	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
-	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
-	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks$lambda$1(ActionManagerImpl.kt:821)
-	at com.intellij.concurrency.ThreadContext.installThreadContext(threadContext.kt:307)
-	at com.intellij.openapi.actionSystem.impl.ActionManagerImpl.performWithActionCallbacks(ActionManagerImpl.kt:629)
-	at com.intellij.openapi.actionSystem.ex.ActionUtil.performAction(ActionUtil.kt:476)
-	at com.intellij.ui.popup.ActionPopupStep.performActionItem(ActionPopupStep.java:305)
-	at com.intellij.ui.popup.ActionPopupStep.lambda$onChosen$1(ActionPopupStep.java:290)
-	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
-	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
-	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
-	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
-	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
-	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
-	at com.intellij.ui.popup.AbstractPopup.lambda$dispose$0(AbstractPopup.java:2267)
-	at com.intellij.openapi.wm.impl.FocusManagerImpl.lambda$doWhenFocusSettlesDown$0(FocusManagerImpl.java:197)
-	at com.intellij.util.ui.EdtInvocationManager.invokeLaterIfNeeded(EdtInvocationManager.java:32)
-	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:193)
-	at com.intellij.openapi.wm.impl.FocusManagerImpl.doWhenFocusSettlesDown(FocusManagerImpl.java:185)
-	at com.intellij.ui.popup.AbstractPopup.dispose(AbstractPopup.java:2265)
-	at com.intellij.ui.popup.WizardPopup.dispose(WizardPopup.java:204)
-	at com.intellij.ui.popup.list.ListPopupImpl.dispose(ListPopupImpl.java:457)
-	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.dispose(PopupFactoryImpl.java:371)
-	at com.intellij.openapi.util.ObjectTree.disposeStrandedList(ObjectTree.java:178)
-	at com.intellij.openapi.util.ObjectTree.runWithTrace(ObjectTree.java:229)
-	at com.intellij.openapi.util.ObjectTree.executeAll(ObjectTree.java:264)
-	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:222)
-	at com.intellij.openapi.util.Disposer.dispose(Disposer.java:210)
-	at com.intellij.ui.popup.WizardPopup.disposeAllParents(WizardPopup.java:369)
-	at com.intellij.ui.popup.list.ListPopupImpl.disposePopup(ListPopupImpl.java:594)
-	at com.intellij.ui.popup.list.ListPopupImpl.handleNextStep(ListPopupImpl.java:618)
-	at com.intellij.ui.popup.list.ListPopupImpl._handleSelect(ListPopupImpl.java:579)
-	at com.intellij.ui.popup.list.ListPopupImpl.handleSelect(ListPopupImpl.java:499)
-	at com.intellij.ui.popup.PopupFactoryImpl$ActionGroupPopup.handleSelect(PopupFactoryImpl.java:388)
-	at com.intellij.ui.popup.list.ListPopupImpl$1.actionPerformed(ListPopupImpl.java:340)
-	at com.intellij.ui.popup.WizardPopup.lambda$proceedKeyEvent$0(WizardPopup.java:506)
-	at com.intellij.openapi.application.WriteIntentReadAction.lambda$run$0(WriteIntentReadAction.java:24)
-	at com.intellij.openapi.application.ThrowableComputableToLambda.invoke(coroutines.kt:346)
-	at com.intellij.platform.locking.impl.NestedLocksThreadingSupport.runWriteIntentReadAction(NestedLocksThreadingSupport.kt:743)
-	at com.intellij.openapi.application.impl.ApplicationImpl.runWriteIntentReadAction(ApplicationImpl.java:1228)
-	at com.intellij.openapi.application.WriteIntentReadAction.computeThrowable(WriteIntentReadAction.java:55)
-	at com.intellij.openapi.application.WriteIntentReadAction.run(WriteIntentReadAction.java:23)
-	at com.intellij.ui.popup.WizardPopup.proceedKeyEvent(WizardPopup.java:505)
-	at com.intellij.ui.popup.WizardPopup.dispatch(WizardPopup.java:477)
-	at com.intellij.ui.popup.PopupDispatcher.dispatchKeyEvent(PopupDispatcher.java:130)
-	at com.intellij.ui.popup.PopupDispatcher.dispatch(PopupDispatcher.java:171)
-	at com.intellij.ide.IdePopupManager.dispatch(IdePopupManager.java:88)
-	at com.intellij.ide.IdeEventQueue._dispatchEvent(IdeEventQueue.kt:555)
-	at com.intellij.ide.IdeEventQueue.access$_dispatchEvent(IdeEventQueue.kt:143)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:405)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1$1.compute(IdeEventQueue.kt:404)
-	at com.intellij.openapi.progress.impl.CoreProgressManager.computePrioritized(CoreProgressManager.java:963)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:404)
-	at com.intellij.ide.IdeEventQueue$dispatchEvent$processEventRunnable$1$1$1$1.invoke(IdeEventQueue.kt:399)
-	at com.intellij.ide.IdeEventQueueKt.performActivity$lambda$0(IdeEventQueue.kt:1136)
-	at com.intellij.openapi.application.TransactionGuardImpl.performActivity(TransactionGuardImpl.java:114)
-	at com.intellij.ide.IdeEventQueueKt.performActivity(IdeEventQueue.kt:1136)
-	at com.intellij.ide.IdeEventQueue.dispatchEvent$lambda$0(IdeEventQueue.kt:399)
-	at com.intellij.ide.IdeEventQueue.dispatchEvent(IdeEventQueue.kt:440)
-	at java.desktop/java.awt.EventDispatchThread.pumpOneEventForFilters(EventDispatchThread.java:207)
-	at java.desktop/java.awt.EventDispatchThread.pumpEventsForFilter(EventDispatchThread.java:128)
-	at java.desktop/java.awt.EventDispatchThread.pumpEventsForHierarchy(EventDispatchThread.java:117)
-	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:113)
-	at java.desktop/java.awt.EventDispatchThread.pumpEvents(EventDispatchThread.java:105)
-	at java.desktop/java.awt.EventDispatchThread.run(EventDispatchThread.java:92)
-```
-~~~
-- ~~Run Agent Doc on sdk-dev.md: dispatch-only grok reopen refused to inject into pane %24 for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-dev.md because the pane still shows active Grok Build turn; restore an idle prompt and retry~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~game-sessions.md~~
-  - ~~Run Agent Doc then Ctrl+c in the terminal then Run Agent Doc again~~
-    - ~~[route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/game-sessions.md; it will handle it in this turn. No second trigger was injected. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~
-- ~~The extracted game-sessions.md had the wrong layout~~
-  - ~~The h2 headers for each open element tag should be prefixed on the same line as the open element tag.~~
-    - ~~`## Todo` should be on the same line before the `agent:todo` open tag.~~
-  - ~~`## Queue` should be `## Run`~~
-- 📥 release + publish: include all active queue items
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

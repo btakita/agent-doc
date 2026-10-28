@@ -153,7 +153,21 @@ The route diagnostic was live-owner steering delivery, classed `ok`. The fix is 
 CI for `343fe163c2` succeeded: https://github.com/btakita/agent-doc/actions/runs/40766108880. CI for `5291b1f93c` is in progress: https://github.com/btakita/agent-doc/actions/runs/40774734370. Tag `v0.35.560` stays at `bd971e9b87`.
 
 The nested queue-prompt row is claimed and running in its own worktree.
-<!-- agent:boundary:4725b83c -->
+
+> **Chat prompt (#chatprompt):** has a new version been published?
+
+> **Queue prompt:** Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
+
+**Deferred:** dispatched to `subagent:nestedproject` generation 1, worker `01a1849e-c77d-7910-8f66-460ccee632b9`, on `fix/nested-project-md` in `/home/brian/worktrees/agent-doc-nestedproject` at `5291b1f93c`.
+
+### Re: v0.35.560 is still the published release — grok-4.7 · 2026-10-28T18:26-04:00
+
+The published version is still agent-doc v0.35.560. The GitHub Release is the latest one, published 2026-10-28T20:11:42Z at tag `v0.35.560` (`bd971e9b87`). PyPI and the local binary are both `0.35.560`. `origin/main` is `5291b1f93c`, three commits past that tag: the queue completion-cell fix, the live-owner steering fix, and the VS Code 0.2.90 package bump. Those commits are outside the tag.
+
+The nested `project.md` row is claimed and running. A session document under `src/haiven-dev` should read `src/haiven-dev/.agent-doc/project.md` and the workspace-root `.agent-doc/project.md`. The queue line spells the root as `ageunt-loop`.
+
+The nested queue-prompt worker is still editing `fix/nested-queue-prompt` in its own worktree. `#vscodecodersmoke` stays queued for the real Coder workspace run.
+<!-- agent:boundary:3f2d5ea8 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -161,6 +175,7 @@ The nested queue-prompt row is claimed and running in its own worktree.
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestvector#1] The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.
+- 🚧 [#subagent:nestedproject#1] Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

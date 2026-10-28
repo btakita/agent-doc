@@ -173,14 +173,25 @@ No new backlog item. Both rows are the work, and both stay queued under their ru
 >
 > No `make` target was run. No follow-up queue item.
 <!-- agent-doc-subagent-completion key=f919db3262a6281b0bf6e1a937548c0885df1f89f5a9e57d6487f3caaa06edc6 -->
-<!-- agent:boundary:9fc5859f -->
+> **Queue prompt:** Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+
+**Deferred:** dispatched to `subagent:apiroute` generation 1, worker `01a18406-3ec5-7240-98f1-39f3e11d88cd`, on `fix/api-md-route-error` in `/home/brian/worktrees/agent-doc-apiroute`. Spec, tests, commit, and push belong to that worker. Integration and the single `make install` wait for its report.
+
+### Re: api.md route dispatch — grok-4.7 · 2026-10-28T15:39-04:00
+
+The api.md route row is claimed and running. The pasted diagnostic says two updates were delivered to the agent already running for `src/haiven-dev/tasks/api.md`, no second trigger was injected, and the route classed the outcome `steering_delivered_to_owner` / `ok`. The worker owns the agent-doc fix for that path.
+
+`subagent:sdksync` generation 1 is still running on `fix/sdk-demo-agent-run`. Its claim was refreshed. `subagent:release` generation 4 has reported and is waiting for integration: project `0.35.560`, one `make check`, push `main`, then `make release`. This cycle does not cut that release.
+
+No new backlog item. The api.md row stays queued under the running claim.
+<!-- agent:boundary:d201dbb0 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - ☑️ [#subagent:release#4] release + publish
   - include #subagent:agentrules
 - 🚧 [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
-- 📥 Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+- 🚧 [#subagent:apiroute#1] Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

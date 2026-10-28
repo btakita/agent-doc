@@ -511,8 +511,8 @@ A workspace image that installs the latest agent-doc gets 558. One that pins a v
   - This is the second subtask.
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
-- 📥 release + publish
-- 📥 [#ena0]: grok running
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~[#ena0]: grok running~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

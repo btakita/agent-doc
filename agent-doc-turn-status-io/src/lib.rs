@@ -1890,9 +1890,109 @@ mod tests {
             );
         }
 
+        /// `#ctrlcrerun`: one Grok Build `updates.jsonl` record at the
+        /// virtual clock (integer Unix-second `timestamp`, no `type`).
+        fn grok_record(&self, method: &str, update: serde_json::Value) {
+            self.append(serde_json::json!({
+                "timestamp": self.now, "method": method,
+                "params": {"sessionId": "01a180e1", "update": update},
+            }));
+        }
+
+        /// Grok prompt submission: the Claude-compatible `UserPromptSubmit`
+        /// hook (`turn-status active`) writes the lease bound to the
+        /// `updates.jsonl` named in its payload, then Grok records the hook
+        /// execution and the prompt.
+        fn grok_submit_prompt(&self, text: &str) {
+            let payload = serde_json::json!({
+                "hook_event_name": "UserPromptSubmit",
+                "session_id": "01a180e1",
+                "transcript_path": self.transcript,
+                "cwd": "/repo",
+                "prompt": text,
+            })
+            .to_string();
+            apply_turn_status_hook_at(&self.base, self.pane, true, Some(&payload), self.now)
+                .unwrap();
+            self.grok_record(
+                "_x.ai/session/update",
+                serde_json::json!({"sessionUpdate": "hook_execution", "event_name": "user_prompt_submit", "runs": []}),
+            );
+            self.grok_record(
+                "session/update",
+                serde_json::json!({"sessionUpdate": "user_message_chunk", "content": {"type": "text", "text": text}}),
+            );
+        }
+
+        /// Grok Ctrl+C: the turn completes `cancelled` and Grok runs NO `stop`
+        /// hook.
+        fn grok_ctrl_c(&self) {
+            self.grok_record(
+                "_x.ai/session/update",
+                serde_json::json!({"sessionUpdate": "turn_completed", "prompt_id": "p",
+                    "stop_reason": "cancelled", "elapsed_ms": 2000}),
+            );
+        }
+
         fn live(&self) -> bool {
             read_turn_active_marker_for_pane_at(&self.base, self.pane, self.now).is_some()
         }
+    }
+
+    /// `#ctrlcrerun` (live 2026-10-28, haiven-dev game-sessions.md pane %16):
+    /// Run Agent Doc → Ctrl+C → Run Agent Doc on a Grok pane. The cancelled
+    /// turn ran no `stop` hook, its lease stayed fresh, and the second route
+    /// reported steering "delivered to the agent already running" into an
+    /// idle pane. The cancel record must retire the lease and leave a turn-end
+    /// receipt newer than the cycle the cancelled turn opened, which is what
+    /// authorizes the route to reclaim that empty preflight and re-trigger.
+    #[test]
+    fn sim_grok_ctrl_c_retires_the_lease_and_records_a_turn_end_receipt() {
+        let mut world = TurnSimWorld::new("%16");
+        world.grok_submit_prompt("agent-doc tasks/sdk/game-sessions.md");
+        let cycle_updated_at = world.now; // preflight opens in the same hook
+        world.tick(1);
+        world.grok_record(
+            "session/update",
+            serde_json::json!({"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "…"}}),
+        );
+        assert!(world.live(), "a thinking Grok turn is live");
+        world.tick(1);
+        world.grok_ctrl_c();
+        assert!(
+            world.live(),
+            "an unsettled cancel keeps the lease (a same-second prompt may be landing)"
+        );
+        world.tick(agent_doc_turn::turn_status::TURN_INTERRUPT_SETTLE_SECS + 3);
+        // The second Run Agent Doc reads liveness the way the route's turn
+        // fence does: the lease read first, then the receipt.
+        assert!(
+            !world.live(),
+            "the cancelled Grok turn no longer reads live"
+        );
+        assert!(turn_active_rows(&world.base).is_empty());
+        let receipt = last_harness_turn_end_for_pane(&world.base, world.pane)
+            .expect("the cancel leaves a durable turn-end receipt");
+        assert_eq!(receipt.reason, "interrupt");
+        assert_eq!(receipt.ended_at, cycle_updated_at + 2);
+        assert!(
+            agent_doc_turn::repair::harness_turn_end_proves_orphaned_preflight(
+                false,
+                Some(receipt.ended_at),
+                cycle_updated_at,
+            ),
+            "the receipt proves the cancelled turn's preflight is orphaned"
+        );
+
+        // The next prompt opens a new lease the old cancel cannot retire.
+        world.tick(10);
+        world.grok_submit_prompt("agent-doc tasks/sdk/game-sessions.md");
+        world.tick(60);
+        assert!(world.live(), "the newer Grok turn stays live");
+        assert_eq!(
+            reclaim_interrupted_turn_for_pane_at(&world.base, world.pane, world.now),
+            None
+        );
     }
 
     #[test]

@@ -1276,12 +1276,20 @@ Fixed on `main` and installed (`939f306bbb..dffba0edcb`). The combined `make che
 > **Queue prompt:** 🙋 At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
 
 Closed. The fix is `dffba0edcb`, on `main` and installed (see the 12:50 cell above). This row needed the leading 🙋 and the trailing request tag in its echo. Even with its Todo already checked, the row's text still contained those two parts. That belongs with the answer-row bug that `subagent:answerrow` is now fixing.
+
+### Re: answer-row fix integrating — opus-5 · 2026-10-28T13:25-04:00
+
+`subagent:answerrow` found the cause. When the queue is split into rows, binary-added markers were still counted. A bare `- [#id]` with a nested line read as two rows, but the same row once marked `📥` or `🙋` read as one, so the first marker added to your answer row folded it in. Every later marker update then refused on the row-count change. That one fault explains the stuck 🙋, the 📥 on your nested answer, and the echo that wouldn't strike.
+
+Commit `dc7efbcbf6` makes splitting ignore those markers. It also reads your answer-row shape like `[#request-id]: <answer>`, and it never dispatches an answer row while a live row still carries the request id. The subagent's `make check` passed: 12091 of 12091 tests. It's merged onto `main` in integration branch `integrate/20261028e`, and the combined `make check` is running. I released its claim. Once this is installed, the next preflight clears the stale 🙋 and I can close the stale-replay row.
+
+**Policy to confirm:** an answer row is held out of dispatch while another live row still carries its request id, so the answer goes to the worker that asked. The canonical own-row `[#req]: answer` form is now held the same way.
 <!-- agent:boundary:069c4082:agent-doc-bugs -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🙋☑️ [#subagent:stalereplay#1] At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted 428 bytes, inserted 1060), and agent-doc accepted it as operator text. Find why a stale replica replay is treated as an operator edit and stop it. [#subagent-operator-request-undo-agent-writes]
-- 🚧 [#subagent:answerrow#1] An operator answer written as its own run row keyed by the request id (`- [#subagent-operator-request-<id>]` with the answer nested under it) made the queue in-progress marker projection fail with "changed item count (before=3, after=2)". That refused `queue report-complete`, `queue release` and preflight queue maintenance for the 🙋 row it answers, and `--ack-id` refused the answer row as never dispatched. Accept this answer shape (or fold it into the 🙋 row) without breaking the projection.
+- ☑️ [#subagent:answerrow#1] An operator answer written as its own run row keyed by the request id (`- [#subagent-operator-request-<id>]` with the answer nested under it) made the queue in-progress marker projection fail with "changed item count (before=3, after=2)". That refused `queue report-complete`, `queue release` and preflight queue maintenance for the 🙋 row it answers, and `--ack-id` refused the answer row as never dispatched. Accept this answer shape (or fold it into the 🙋 row) without breaking the projection.
 - ~~[#subagent-operator-request-undo-agent-writes]~~
   - 📥 I want sync to use the latest state...even if the operator reverted.
 <!-- /agent:run -->
@@ -1310,7 +1318,6 @@ Closed. The fix is `dffba0edcb`, on `main` and installed (see the 12:50 cell abo
   - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
   - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
-- [x] [#subagent-operator-request-undo-agent-writes] Answer the blocking subagent question for queue item ‘At 2026-10-28T12:27:33–36Z a just-reloaded (post-quarantine) JetBrains editor copy of agent-doc-bugs.md sent a change that reverted agent:status to an older version (ops.log edit offset 1226, deleted…’ in agent:exchange: Should the JetBrains plugin keep letting IDE Undo reach agent-applied edits, and if not, which behaviour do you want? (choices: Confirm before undo, Tag undo/redo origin, Not undoable, No change)
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

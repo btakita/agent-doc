@@ -52,11 +52,23 @@ The `agent:rules` row is claimed and running. The worker owns the spec, tests, b
 The Grok skill was behind the binary (`0.35.557` vs `0.35.559`). `agent-doc skill install --harness grok` updated `.grok/skills/agent-doc` to `0.35.559`. Those skill files are dirty in the agent-loop checkout and are outside this queue item.
 
 No new backlog item. The row is the work, and it stays queued under the running claim.
-<!-- agent:boundary:2e0fc005 -->
+> **Queue prompt:** release + publish
+>   - include #subagent:agentrules
+
+**Deferred:** `subagent:agentrules` generation 1 (worker `01a183a4-8f9b-7bb2-8cce-ae26ac1f190e`) is still running. Its worktree `/home/brian/worktrees/agent-doc-agentrules` is clean at `dc7efbcbf6`, so there is no commit to include. This row stays queued. After that worker reports, this session integrates `feat/agent-rules`, runs the single `make install`, then releases and publishes. A second worker is not dispatched: the row asks to include that claim, and a subagent is not allowed to run `make release`.
+
+### Re: release waits on agent:rules — grok-4.7 · 2026-10-28T13:59-04:00
+
+The running `agent:rules` claim was refreshed through generation 1. It remains the worker bound to `feat/agent-rules`.
+
+`release + publish` is not started this cycle. Publishing now would omit the feature the child line names.
+<!-- agent:boundary:91573855 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 🚧 [#subagent:agentrules#1] Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.
+- 📥 release + publish
+  - include #subagent:agentrules
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

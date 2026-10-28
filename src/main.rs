@@ -438,6 +438,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         agent_doc_sync_io::sync::promote_pane_to_agent_doc_window(tmux, pane_id)
     }
 
+    fn subagent_inline_veto_heads(&self, file: &std::path::Path, content: &str) -> Vec<String> {
+        agent_doc_queue_io::subagent_dispatch::inline_answer_vetoed_heads_for_content(file, content)
+    }
+
     fn project_answered_free_text_strike(
         &self,
         invocation: agent_doc_controller_io::project_controller::ControllerAnsweredFreeTextStrikeInvocation,
@@ -471,13 +475,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                         if let Ok(Some(snapshot)) =
                             agent_doc_snapshot_io::load_document_baseline(&file)
                             && let Ok(Some(snapshot_target)) =
-                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_authority(
+                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch(
                                     &snapshot,
                                     &invocation.response_body,
                                     invocation.baseline_content.as_deref(),
                                     &invocation.claimed_heads,
                                     &invocation.selected_heads,
+                                    &invocation.dispatch_owned_heads,
                                 )
+                                .map(|(projected, _)| projected)
                             && let Err(error) =
                                 agent_doc_snapshot_io::checkpoint_document_baseline(
                                     &file,

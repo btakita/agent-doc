@@ -19,7 +19,7 @@ use agent_doc_queue::{
         consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike_with_authority,
+        project_answered_free_text_strike_with_dispatch,
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
@@ -1206,15 +1206,21 @@ fn strike_free_text_queue_heads_with_proof(
         })
         .map(|state| state.selected_free_text_queue_heads)
         .unwrap_or_default();
+    // `#subagentinlineveto`: heads the queue's `subagents` attribute owns for
+    // dispatch with no worker attempt behind them. An inline answer of one is
+    // reported, never struck.
+    let dispatch_owned_heads =
+        crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(file, &content);
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
     let project = |doc: &str| match proof {
-        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_authority(
+        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_dispatch(
             doc,
             response_body,
             baseline.as_deref(),
             &claimed_heads,
             &selected_heads,
+            &dispatch_owned_heads,
         ),
         AnswerPresenceProof::CommittedHeadingReplay => {
             project_committed_heading_replay_free_text_strike_with_claims(
@@ -1223,9 +1229,12 @@ fn strike_free_text_queue_heads_with_proof(
                 baseline.as_deref(),
                 &claimed_heads,
             )
+            .map(|projected| (projected, Vec::new()))
         }
     };
-    let Some(projected) = project(&content)? else {
+    let (projected, inline_vetoed) = project(&content)?;
+    report_inline_answered_subagent_heads(file, &inline_vetoed, "free_text_strike");
+    let Some(projected) = projected else {
         return Ok(0);
     };
     let keys = projected.node_keys;
@@ -1237,7 +1246,7 @@ fn strike_free_text_queue_heads_with_proof(
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
         Some(snap) => match project(&snap) {
-            Ok(snapshot) => snapshot.map(|projected| projected.target_content),
+            Ok((snapshot, _)) => snapshot.map(|projected| projected.target_content),
             Err(err) => {
                 log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
                 None
@@ -1335,6 +1344,36 @@ fn strike_free_text_queue_heads_with_proof(
         }
     }
     Ok(keys.len())
+}
+
+/// `#subagentinlineveto`: say loudly that a `subagents` dispatch head was
+/// answered inline and therefore stays queued. Never silent: the operator's
+/// `subagents` attribute is the contract, and an inline run breaks it.
+pub fn report_inline_answered_subagent_heads(file: &Path, heads: &[String], source: &str) {
+    for head in heads {
+        let preview: String = head
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(80)
+            .collect();
+        eprintln!(
+            "[queue] WARNING: {preview:?} is a `subagents` dispatch item with no worker claim, \
+             but this response answered it inline. It stays queued and is offered for \
+             dispatch again: claim it, hand it to a subagent, and close it from the worker's \
+             report (`queue report-complete`). If this harness cannot spawn a subagent, say so \
+             with a `**Deferred:**` line instead of running it inline (#subagentinlineveto)."
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_subagent_inline_answer_refused file={} source={source} head_hash={} #subagentinlineveto",
+                file.display(),
+                agent_doc_hash::content_hash(head.trim())
+            ),
+        );
+    }
 }
 
 /// Release the worker claim on a queue head this closeout struck as answered
@@ -6552,6 +6591,79 @@ mod core_tests {
         assert_eq!(struck, 0);
         assert_eq!(effects.current_reads.load(Ordering::SeqCst), 0);
         assert_eq!(effects.force_disk_reads.load(Ordering::SeqCst), 1);
+    }
+
+    /// `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28T03:22Z):
+    /// under `<!-- agent:run priority subagents go -->` preflight listed the
+    /// PR #74 row for dispatch, the coordinator fixed it inline and echoed it,
+    /// and the closeout struck it as done. The row must stay queued (and be
+    /// reported) until a worker claim backs it.
+    #[test]
+    fn subagentinlineveto_closeout_keeps_an_inline_answered_dispatch_row_queued() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk-demo.md");
+        let response = concat!(
+            "### Re: PR 74 links — opus\n\n",
+            "> **Queue prompt:** https://github.com/example/docs/pull/74/changes\n",
+            ">   - The ADR links are malformed.\n\n",
+            "Fixed and pushed: every link is inline now.\n",
+        );
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run priority subagents go -->\n",
+                "- 📥 https://github.com/example/docs/pull/74/changes\n",
+                "  - The ADR links are malformed.\n",
+                "<!-- /agent:run -->\n",
+            ),
+            response,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        assert_eq!(
+            crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(&doc, &content),
+            vec![
+                "https://github.com/example/docs/pull/74/changes\n  - The ADR links are malformed."
+                    .to_string()
+            ],
+            "the unclaimed row is owned by the subagents dispatch"
+        );
+
+        let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
+        assert_eq!(struck, 0, "an inline answer must not close a subagents row");
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(updated, content, "the row stays queued for dispatch");
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_subagent_inline_answer_refused")
+                && ops.contains("#subagentinlineveto"),
+            "the refusal must be loud in ops.log:\n{ops}"
+        );
+
+        // Once a worker claim backs the row, the coordinator's echo of the
+        // worker's result closes it as before (`#claimstrike`).
+        crate::queue_claim::claim(
+            &doc,
+            "https://github.com/example/docs/pull/74/changes",
+            "subagent:pr74-links",
+            3600,
+        )
+        .unwrap();
+        assert!(
+            crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(&doc, &content)
+                .is_empty(),
+            "a claimed row is worker-backed"
+        );
+        let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
+        assert_eq!(struck, 1, "a worker-backed row strikes on its echo");
     }
 
     #[test]

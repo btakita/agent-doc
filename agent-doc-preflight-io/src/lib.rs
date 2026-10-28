@@ -1001,7 +1001,11 @@ backlog text, preset body) and the coordinator rules; never paraphrase it, and w
 Pass an entry's optional `model` and `effort` to the harness subagent launch (Claude Code Agent \
 `model` / `effort`; Codex `spawn_agent` `model` / `reasoning_effort`). Omitted fields inherit the \
 harness defaults. Do NOT execute \
-them inline in queue order; they are excluded from `selected_queue_prompts`. If a worker sends a \
+them inline in queue order; they are excluded from `selected_queue_prompts`. An inline answer \
+never closes one: closeout keeps an echoed dispatch item queued and offers it for dispatch again \
+(`#subagentinlineveto`). If this harness cannot spawn a subagent, do not run the item inline: \
+leave it queued and say so for that item with a `**Deferred:** no subagent available` line. If \
+you judge an item blocked, still name it in the response with why. If a worker sends a \
 `[#subagent-operator-request-<unique-id>]` packet, copy the complete packet (request, context, and every choice) verbatim \
 into `agent:exchange`, present it from the main session, and return the operator's answer to the \
 same worker when the harness can continue it. The closeout that presents a blocking packet must \
@@ -6100,6 +6104,16 @@ pub fn run_queue_maintenance_with_coin_gate(
         );
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+        // `#subagentinlineveto`: a head the queue's `subagents` attribute owns
+        // for dispatch, with no worker attempt behind it, is dispatch work even
+        // when an earlier response answered it inline. Never catch it up here;
+        // the cycle contract lists it under `queue_subagent_dispatch` again.
+        let inline_vetoed = agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(
+            &agent_doc_queue_io::subagent_dispatch::inline_answer_vetoed_heads_for_content(
+                file,
+                &current_content,
+            ),
+        );
         // `#ftstrikeclaimedmention`: a claimed head is residue only on an exact
         // `> **Queue prompt:**` echo, the same proof session-check and the
         // finalize strike require of it. `#deferstrike`: an echo followed by a
@@ -6148,6 +6162,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                     // INTERRUPT set disagree and a fresh `deploy` request gets struck
                     // with no action taken.
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
+                                && !inline_vetoed.claims(&p.text)
                                 // `#operatoractionresidue`: a reported worker can
                                 // leave an exact queue echo while its linked
                                 // operator request is still unanswered. That
@@ -10960,6 +10975,10 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("placeholder-only reports are refused"));
+        // `#subagentinlineveto`: never run a dispatch item inline, and say so
+        // when the harness cannot spawn a subagent.
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("#subagentinlineveto"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`**Deferred:** no subagent available`"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
         assert!(json.get("model").is_none(), "unset launch policy must be omitted");
@@ -18865,6 +18884,52 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
             agent_doc_turn::CyclePhase::Abandoned,
             "the unrecoverable backlog-capture cycle must be abandoned (terminal)"
+        );
+    }
+
+    #[test]
+    fn subagentinlineveto_queue_maintenance_never_catches_up_an_inline_answered_dispatch_row() {
+        // `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28): the
+        // coordinator answered a `subagents` dispatch row inline. The closeout
+        // strike now keeps it queued; this catch-up must not strike it on the
+        // next preflight either, or the inline run still closes the row.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: PR 74 links — opus\n\n",
+            "> **Queue prompt:** https://github.com/example/docs/pull/74/changes\n\n",
+            "Fixed and pushed: every link is inline now.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run priority subagents go -->\n",
+            "- 📥 https://github.com/example/docs/pull/74/changes\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("~~https://github.com/example/docs/pull/74/changes~~"),
+            "an inline-answered subagents dispatch row must stay queued:\n{updated}"
+        );
+        assert!(
+            updated
+                .contains("https://github.com/example/docs/pull/74/changes\n<!-- /agent:run -->"),
+            "{updated}"
         );
     }
 

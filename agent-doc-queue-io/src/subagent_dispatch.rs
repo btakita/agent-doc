@@ -197,6 +197,39 @@ pub fn out_of_loop_items_for_content(
     claimed.with_heads(&dispatch).with_heads(&held)
 }
 
+/// Live heads a queue-level `subagents` / `fan-out` attribute (or subagent
+/// intent) owns for dispatch that no worker attempt backs
+/// (`#subagentinlineveto`): the dispatchable and concurrency-held heads of
+/// [`out_of_loop_items_for_content`], minus every head with a claim attempt
+/// (any state, expired included), a reported-release receipt, or a binary
+/// completion cell. An inline answer never closes one of these; the
+/// answered-free-text strike keeps it queued and reports it.
+pub fn inline_answer_vetoed_heads_for_content(file: &Path, content: &str) -> Vec<String> {
+    let mut owned = pending_subagent_dispatch_or_warn(file, content);
+    if let Some(plan) = queue_attr_subagent_plan(file, content) {
+        owned.extend(plan.held);
+    }
+    if owned.is_empty() {
+        return owned;
+    }
+    let backed = agent_doc_queue::queue_claim::ClaimedQueueItems::none()
+        .with_heads(&crate::queue_claim::claim_attempt_head_texts_for_content(
+            file, content,
+        ))
+        .with_heads(&crate::claim_release_receipt::reported_head_texts_for_content(file, content))
+        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content));
+    let mut seen = agent_doc_queue::queue_claim::ClaimedQueueItems::none();
+    let mut vetoed = Vec::new();
+    for head in owned {
+        if backed.claims(&head) || seen.claims(&head) {
+            continue;
+        }
+        seen = seen.with_heads(std::iter::once(&head));
+        vetoed.push(head);
+    }
+    vetoed
+}
+
 /// The exact `agent-doc queue claim` command for dispatching `item`.
 pub fn claim_command(document: &str, item: &str) -> String {
     core::claim_command_for(document, item)

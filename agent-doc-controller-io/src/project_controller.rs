@@ -3291,6 +3291,9 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     /// selection authority for an exactly answered head introduced after the
     /// response baseline, not the cosmetic marker rendered in the document.
     pub selected_heads: Vec<String>,
+    /// `#subagentinlineveto`: heads a `subagents` attribute owns for dispatch
+    /// with no worker attempt behind them; an inline answer never strikes one.
+    pub dispatch_owned_heads: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -3370,6 +3373,15 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         invocation: ControllerAnsweredFreeTextStrikeInvocation,
     ) -> Result<()>;
+
+    /// `#subagentinlineveto`: live heads of `content` that a queue-level
+    /// `subagents` attribute owns for dispatch and that no worker claim attempt,
+    /// reported-release receipt, or completion cell backs. The derivation needs
+    /// the claim ledger and dispatch planner in `agent-doc-queue-io`, which
+    /// depends on this crate, hence the port.
+    fn subagent_inline_veto_heads(&self, _file: &Path, _content: &str) -> Vec<String> {
+        Vec::new()
+    }
 
     /// Perform the git commit for `file` from inside the controller process, where
     /// the converged relay canonical IS the authority. `authoritative_compaction`
@@ -3571,6 +3583,15 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _pane_id: &str,
     ) -> Result<bool> {
         Ok(false)
+    }
+
+    fn subagent_inline_veto_heads(&self, file: &Path, content: &str) -> Vec<String> {
+        // `#subagentinlineveto` fixture: this document's live free-text heads
+        // are all owned by a `subagents` dispatch with no worker attempt.
+        if file.file_name().and_then(|name| name.to_str()) == Some("subagent-inline-veto.md") {
+            return agent_doc_queue::queue_heads::active_free_text_queue_heads(content);
+        }
+        Vec::new()
     }
 
     fn project_answered_free_text_strike(
@@ -5785,6 +5806,9 @@ struct QueueAuthorityObservation {
     claimed_heads: Vec<String>,
     /// Live heads selected by this cycle's binary-owned preflight projection.
     selected_heads: Vec<String>,
+    /// `#subagentinlineveto`: live heads a `subagents` attribute owns for
+    /// dispatch with no worker attempt behind them.
+    dispatch_owned_heads: Vec<String>,
 }
 
 /// Live queue heads of `content` held by an active worker claim, read from the
@@ -5856,6 +5880,10 @@ struct AnsweredFreeTextQueueStrikeProjection {
     node_keys: Vec<String>,
     claimed_heads: Vec<String>,
     selected_heads: Vec<String>,
+    dispatch_owned_heads: Vec<String>,
+    /// `#subagentinlineveto`: answered heads kept queued because a
+    /// `subagents` attribute owns them and no worker attempt backs them.
+    inline_vetoed_heads: Vec<String>,
     error: Option<String>,
 }
 
@@ -7630,6 +7658,9 @@ impl ControllerDocumentGraphs {
             content_hash: agent_doc_hash::content_hash(&content),
             claimed_heads: claimed_live_queue_head_texts(file, &content),
             selected_heads: selected_live_queue_head_texts(file, &content),
+            dispatch_owned_heads: runtime_effects()
+                .map(|effects| effects.subagent_inline_veto_heads(file, &content))
+                .unwrap_or_default(),
             content,
         };
         self.queue_authority
@@ -7638,6 +7669,16 @@ impl ControllerDocumentGraphs {
         // scheduled queue; detached documents have no relay region Source.
         let _refresh_receipt = crate::queue_scheduler::note_document_changed(file)?;
         let strike = self.current_answered_free_text_strike(document_hash);
+        for head in &strike.inline_vetoed_heads {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_subagent_inline_answer_refused file={} source=answered_free_text_projection head_hash={} #subagentinlineveto",
+                    file.display(),
+                    agent_doc_hash::content_hash(head.trim())
+                ),
+            );
+        }
         if let Some(error) = strike.error {
             anyhow::bail!("{error}");
         }
@@ -7719,14 +7760,23 @@ impl ControllerDocumentGraphs {
                 ) {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 }
-                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_authority(
+                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch(
                     &observation.content,
                     &captured.response_body,
                     captured.baseline_content.as_deref(),
                     &observation.claimed_heads,
                     &observation.selected_heads,
+                    &observation.dispatch_owned_heads,
                 ) {
-                    Ok(Some(target)) => {
+                    Ok((target, inline_vetoed_heads))
+                        if !inline_vetoed_heads.is_empty() || target.is_some() =>
+                    {
+                        let Some(target) = target else {
+                            return AnsweredFreeTextQueueStrikeProjection {
+                                inline_vetoed_heads,
+                                ..AnsweredFreeTextQueueStrikeProjection::default()
+                            };
+                        };
                         let projection_id = agent_doc_hash::content_hash(&format!(
                             "{}:{}:{}",
                             captured.response_sha256,
@@ -7745,10 +7795,12 @@ impl ControllerDocumentGraphs {
                             node_keys: target.node_keys,
                             claimed_heads: observation.claimed_heads,
                             selected_heads: observation.selected_heads,
+                            dispatch_owned_heads: observation.dispatch_owned_heads,
+                            inline_vetoed_heads,
                             error: None,
                         }
                     }
-                    Ok(None) => AnsweredFreeTextQueueStrikeProjection::default(),
+                    Ok(_) => AnsweredFreeTextQueueStrikeProjection::default(),
                     Err(error) => AnsweredFreeTextQueueStrikeProjection {
                         error: Some(format!(
                             "answered free-text queue projection failed for {key}: {error}"
@@ -8150,6 +8202,7 @@ impl ControllerDocumentGraphs {
                 node_keys: projection.node_keys.clone(),
                 claimed_heads: projection.claimed_heads.clone(),
                 selected_heads: projection.selected_heads.clone(),
+                dispatch_owned_heads: projection.dispatch_owned_heads.clone(),
             };
             let Some(sender) = sender.get() else {
                 return;
@@ -26285,6 +26338,75 @@ revised operator request
         assert!(
             strike.has_target(),
             "a released head answered by the response is struck: {strike:?}"
+        );
+    }
+
+    /// `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28T03:25Z):
+    /// the controller's reactive answered-free-text projection struck a
+    /// `subagents` dispatch row the coordinator had answered inline. With the
+    /// row owned by the dispatch and no worker attempt, the projection keeps
+    /// it queued and names it as vetoed.
+    #[test]
+    fn subagentinlineveto_controller_projection_keeps_inline_answered_dispatch_row() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("subagent-inline-veto.md");
+        let head = "https://github.com/example/docs/pull/74/changes";
+        let response = format!(
+            "### Re: PR 74 links — opus\n\n> **Queue prompt:** {head}\n\nFixed and pushed.\n"
+        );
+        let content = format!(
+            concat!(
+                "---\nagent_doc_session: queue-projection\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run priority subagents go -->\n- 📥 {head}\n<!-- /agent:run -->\n",
+            ),
+            response = response,
+            head = head,
+        );
+        std::fs::write(&file, &content).unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        let runtime = ControllerRuntime::new(test_bootstrap(&dir)).unwrap();
+        let preflight = preflight_started_event(&document_hash);
+        append_state_event(dir.path(), &preflight).unwrap();
+        runtime.apply_state_event(&preflight).unwrap();
+        let captured = agent_doc_state_backbone::StateEvent::new(
+            "response-captured-subagent-inline-veto",
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.clone(),
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-subagent-inline-veto".to_string(),
+                response_sha256: agent_doc_hash::content_hash(&response),
+                response_body: Some(response),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: Some(content.clone()),
+            },
+        );
+        append_state_event(dir.path(), &captured).unwrap();
+        runtime.apply_state_event(&captured).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, content.clone())
+            .unwrap();
+
+        let strike = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            !strike.has_target(),
+            "an inline answer must not strike a subagents dispatch row: {strike:?}"
+        );
+        assert_eq!(strike.inline_vetoed_heads, vec![head.to_string()]);
+        assert_eq!(std::fs::read_to_string(&canonical).unwrap(), content);
+        let ops =
+            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
+        assert!(
+            ops.contains("queue_subagent_inline_answer_refused")
+                && ops.contains("source=answered_free_text_projection"),
+            "the controller refusal must be loud in ops.log:\n{ops}"
         );
     }
 

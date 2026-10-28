@@ -26,7 +26,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets; PyPI 0.35.559; Homebrew bumped). Main is now at `dc7efbcbf6`, unreleased and installed locally (JetBrains plugins 0.2.877/0.2.878/0.2.879 installed; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`); an operator answer row nested under its request id is accepted and row splitting ignores binary markers (`dc7efbcbf6`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`).
+Latest release: agent-doc v0.35.559 (release commit `5870713c02`; GitHub Latest with 24 assets, published 2026-10-28T07:06:13Z; PyPI 0.35.559; Homebrew bumped). Main is now at `2b7ef088ea`, unreleased. The local binary installed from that commit is 0.35.559 (JetBrains plugins 0.2.877/0.2.878/0.2.879 on that commit; restart IDEA to load them). Since 559: operator request packets nest the queue_item/request/context values (`dc4fc37fcc`); reported ☑️ rows close for tagged id rows, answered requests and acked open backlog (`0b27368c0e`); editor registration proves from the acknowledged replica text and frontmatter merges keep operator bytes (`b8932c1b90`); a quoted or unrelated deferral phrase no longer holds an exactly echoed row (`0dd4eeb0be`); the repair remedy shows only when no editor replica is attached (`5426def761`); a claim never reopens a struck row whose work is live in the same queue (`1e24cd70dd`); agent component patches survive the response-only rebase, with a warning if one is dropped (`220ba2d791`); Claude Stop holds once for a reported but unclosed queue row (`edc4debc24`); an editor undo of a status:sync block is detected and re-synced (`dffba0edcb`); an operator answer row nested under its request id is accepted and row splitting ignores binary markers (`dc7efbcbf6`); agent:rules is composed into every admitted turn (`2b7ef088ea`). Main CI on `5870713c02` is red in tmux-ci (`two_ide_lane_claims_start_panes_in_their_own_lanes_end_to_end`, run 40647917293). Later main CI on `dc7efbcbf6` succeeded (run 40738098623). CI for `2b7ef088ea` is in progress (run 40748955632, job `check`).
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -89,11 +89,95 @@ Both `agent:run` heads are claimed and worker-bound.
 `sdk-demo.md` is generation 1 on worker `01a183ed-f565-74d3-afe0-b1aa7050daf0`. It owns the agent-doc fix, tests, and the branch push. This cycle does not edit that demo inline.
 
 No new backlog item. Both rows are the work, and both stay queued under their running claims.
+
+### Re: Subagent completed: `subagent:release` returned work for queue item “release + publish - include #subagent:agentrules” — agent-doc
+<!-- agent-doc-subagent-response sha256=32577c3cb25ed48da6a83294439b94279b912af9ebc041cbddf6e29dc908cec6 -->
+> **Subagent response:**
+>
+> `#subagent:agentrules` is already on `origin/main`. No release defect to fix, so this worker did not bump, commit, tag, or publish.
+>
+> ## Result
+>
+> - **Branch:** `feat/release-readiness` (local only; upstream is `origin/main`)
+> - **Worktree:** `/home/brian/worktrees/agent-doc-release`
+> - **HEAD:** `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7` — `feat(rules): compose agent:rules into every admitted turn`
+> - **Committed:** no
+> - **Pushed:** no
+> - **Files changed by this worker:** none
+> - **Tests run by this worker:** none
+>
+> `origin/feat/agent-rules` and `/home/brian/worktrees/agent-doc-agentrules` are clean at that same SHA. Nothing from that claim is left to merge. `fix/sdk-demo-agent-run` is also still at this SHA, so the open sdk-demo row is not in this batch.
+>
+> ## Version
+>
+> `make release` does **not** bump the version. It reads `Cargo.toml` (`0.35.559`) and runs:
+>
+> ```text
+> python3 scripts/release-driver.py --version 0.35.559 --make make
+> ```
+>
+> That creates `v0.35.559`, pushes `HEAD:main` plus the tag, runs `make install-full`, then `scripts/verify-release-publication.py --tag v0.35.559`. Tag `v0.35.559` already points at `5870713c02c946cbd59c3677f942f6aa73ecf4cd`, so `make release` on current `origin/main` fails at `git tag`. Workspace and `pyproject.toml` versions are still uniformly `0.35.559`. There is no `v0.35.560` tag. The next patch is `0.35.560`.
+>
+> `make publish` is only the local twine fallback (`publish-pypi`). Publication of a normal release is the last phase of `make release`, not `make publish`.
+>
+> ## Coordinator command
+>
+> From a checkout of current `origin/main` (not `/home/brian/work/btakita/agent-doc`, whose local `main` is the old scaffold):
+>
+> ```text
+> make release-version VERSION=0.35.560
+> ```
+>
+> Then add one `VERSIONS.md` entry for the range below, run `make check` once, commit that projection, push it to `main`, and only then:
+>
+> ```text
+> make release
+> ```
+>
+> `make release-version` is what bumps Cargo manifests, lockfile, `pyproject.toml`, skill markers, and any JetBrains package generation the release check requires. `make release` tags that already-projected version. It also runs the one `make install-full`.
+>
+> ## Range since `v0.35.559`
+>
+> `v0.35.559..HEAD` is 18 commits, 85 files, +5823/−264. Non-merge commits:
+>
+> - `2b7ef088ea` feat(rules): compose agent:rules into every admitted turn
+> - `dc7efbcbf6` fix(queueoperatoranswer): accept an operator answer row nested under its request id
+> - `dffba0edcb` fix(statussyncrevert): re-sync a status:sync block an editor undo reverted
+> - `edc4debc24` fix(uncommittedcell): Claude Stop holds once for a reported but unclosed queue row
+> - `220ba2d791` fix(statuspatchdrop): carry agent component patches through the response-only rebase
+> - `1e24cd70dd` fix(queue): a claim never reopens a struck row whose identity is live in the same queue
+> - `5426def761` fix(jetbrains): show the repair remedy only when no editor replica is attached
+> - `0dd4eeb0be` fix(queue): a quoted or unrelated deferral phrase never holds an exactly echoed head
+> - `b8932c1b90` fix(jetbrains): prove registration from the acknowledged replica text; keep operator frontmatter bytes
+> - `dc4fc37fcc` fix: nest only the queue_item, request, and context values in operator requests
+> - `5d8e76137b` fix: render subagent operator requests as a nested list
+> - `0b27368c0e` fix(queue): reported rows close — tagged id rows, answered requests, acked open backlog
+>
+> ## CI
+>
+> Current `origin/main` (`2b7ef088ea`):
+>
+> - CI run [40748955632](https://github.com/btakita/agent-doc/actions/runs/40748955632): **in progress**. Job `check` is on `Run make check`; `make tmux-ci` has not started. No failed step.
+> - Book run 40748955649: success
+> - Pages run 40748955394: success
+>
+> Previous `main` CI on parent `dc7efbcbf6` (run 40738098623) completed success. The `v0.35.559` Release workflow (run 40647917515) completed success.
+>
+> ## Commands
+>
+> | Command | Exit |
+> |---|---|
+> | `git -C /home/brian/work/btakita/agent-doc fetch origin` | 0 |
+> | `git worktree add -b feat/release-readiness /home/brian/worktrees/agent-doc-release origin/main` | 0 |
+> | range / tag / `gh run list` / `gh run view` inspections | 0 |
+>
+> No `make` target was run. No follow-up queue item.
+<!-- agent-doc-subagent-completion key=f919db3262a6281b0bf6e1a937548c0885df1f89f5a9e57d6487f3caaa06edc6 -->
 <!-- agent:boundary:9fc5859f -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 🚧 [#subagent:release#4] release + publish
+- ☑️ [#subagent:release#4] release + publish
   - include #subagent:agentrules
 - 🚧 [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
 <!-- /agent:run -->

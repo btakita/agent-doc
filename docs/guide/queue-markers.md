@@ -25,7 +25,7 @@ lifecycle.
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | reported | The worker reported back (`queue report-complete`); the coordinator still has to integrate, verify, and close the row. |
 | ⚠️ | `lost` | lost | The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it. |
-| 🔄 | `reconciling` | needs reconcile | A binary completion cell for this row's work is in the document, but no current claim or report receipt owns it. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
+| 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |
 | ⏭️ | `skipped` | skipped | It was dispatched and came back unconsumed; the queue advanced past it to the next runnable head. |
 | ⏳ | `awaiting_operator` | awaiting operator | Agent work is finished and no worker holds it; it waits on an operator verdict (`[operator-verify]` or a gated review). |

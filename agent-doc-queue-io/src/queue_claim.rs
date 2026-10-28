@@ -1597,17 +1597,21 @@ pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueu
 /// when an older claim was pruned and its generation can no longer be proven.
 /// Such a row is held out of fresh dispatch/drain and projected as reconciling.
 pub fn completion_evidence_head_texts(content: &str) -> Vec<String> {
-    let evidence = agent_doc_document::subagent_completion::completion_evidence(content)
+    let items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
-        .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
-        .collect::<std::collections::HashSet<_>>();
-    if evidence.is_empty() {
+        .map(|evidence| evidence.item)
+        .collect::<Vec<_>>();
+    if items.is_empty() {
         return Vec::new();
     }
     live_queue_head_texts(content)
         .unwrap_or_default()
         .into_iter()
-        .filter(|head| evidence.contains(&agent_doc_queue::queue_claim::claim_identity(head)))
+        .filter(|head| {
+            items.iter().any(|item| {
+                agent_doc_queue::queue_claim::completion_evidence_matches_row(item, head)
+            })
+        })
         .collect()
 }
 

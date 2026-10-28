@@ -130,7 +130,7 @@ impl QueueMarker {
                     "The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it."
                 }
                 QueueLifecycleMarker::Reconciling => {
-                    "A binary completion cell for this row's work is in the document, but no current claim or report receipt owns it. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it."
+                    "A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it."
                 }
                 QueueLifecycleMarker::Unknown => {
                     "Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch."

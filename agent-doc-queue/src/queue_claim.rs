@@ -2125,6 +2125,33 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
     queue_head_identity(item.trim())
 }
 
+/// Whether completion cell item `cell_item` is queue row `row_text`'s own work
+/// (`#queueworkevidence`).
+///
+/// `claim_identity` keys `do [#id]` plus any further text as id `id`, the same
+/// identity as the parent row `do [#id]`. A cell matches a row only when the
+/// completion-heading form of its item equals that form of the row's own work
+/// (attempt-projection prefix stripped), or of that work's parent line when
+/// the row carries nested sub-prompts. A one-line row whose text is the cell
+/// item still matches. A longer line that only shares the tracked id does not.
+pub fn completion_evidence_matches_row(cell_item: &str, row_text: &str) -> bool {
+    let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
+    let (full, head) = completion_row_heading_forms(row_text);
+    cell == full || cell == head
+}
+
+/// Heading forms of a row's own work: the whole work text, and its parent
+/// line when nested sub-prompts follow. Both have the attempt-projection
+/// prefix removed first.
+fn completion_row_heading_forms(row_text: &str) -> (String, String) {
+    let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(row_text).trim();
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(stripped).trim();
+    (
+        agent_doc_document::subagent_completion::heading_item_text(stripped),
+        agent_doc_document::subagent_completion::heading_item_text(head),
+    )
+}
+
 /// The claim identity of `item`'s authored work with any trailing
 /// `⟦effect:N⟧` suffix removed: equal for a row, its effect-annotated
 /// successor, and its text-identical siblings (`#claimrowmigrate`).

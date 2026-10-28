@@ -1335,8 +1335,8 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     .iter()
                     .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
             })
-            .map(|evidence| agent_doc_queue::queue_claim::claim_identity(&evidence.item))
-            .collect::<std::collections::HashSet<_>>();
+            .map(|evidence| evidence.item)
+            .collect::<Vec<_>>();
     // `#queuemirrormarkers`: claims are keyed by work identity, so every queue
     // that displays an identity receives its durable attempt state. Only the
     // scheduler-selected queue may reopen a struck row; a sibling's struck row
@@ -1376,7 +1376,12 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         claim.state.projection_marker()
                     } else if receipt.is_some() {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                    } else if completion_evidence.contains(&identity) {
+                    } else if completion_evidence.iter().any(|item| {
+                        agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                            item,
+                            &prompt.text,
+                        )
+                    }) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     } else if blockers.blocks_row(&prompt.text) {
                         // `#queueblocked`: outranks a stale `⏭️`/`⏳`.

@@ -62,16 +62,15 @@ pub fn retire_consumed_completion_feedback(
     content: &str,
     consumed_heads: &[String],
 ) -> (String, HashSet<String>) {
-    let consumed_identities = consumed_heads
-        .iter()
-        .map(|head| crate::queue_claim::claim_identity(head))
-        .collect::<HashSet<_>>();
     let mut retired_keys = HashSet::new();
     let retired = agent_doc_document::subagent_completion::strip_completion_cells_matching(
         content,
         |evidence| {
-            let matches =
-                consumed_identities.contains(&crate::queue_claim::claim_identity(&evidence.item));
+            // The cell names the row's own work, not every row that shares its
+            // tracked id (`#queueworkevidence`).
+            let matches = consumed_heads.iter().any(|head| {
+                crate::queue_claim::completion_evidence_matches_row(&evidence.item, head)
+            });
             if matches {
                 retired_keys.insert(evidence.key.clone());
             }
@@ -190,10 +189,12 @@ pub fn heads_struck_by_successor(before: &str, after: &str) -> Vec<String> {
 /// Every binary strike path (closeout echo, preflight residue/backlog/done
 /// strike, the orphan `queue consume --id` strike, the controller's
 /// answered-head projection) closes finished work. Its transient completion
-/// cell is keyed only by work identity, so a cell that outlives the strike
-/// would project `🔄` onto a later row with the same text. Only structurally
-/// attested cells are removed ([`retire_consumed_completion_feedback`]);
-/// operator text and heading-shaped prose are never touched.
+/// cell names the row's own work text (`completion_evidence_matches_row`), so
+/// a cell that outlives the strike would project `🔄` onto a later row with
+/// that text. A longer line that only shares the tracked id is not that row.
+/// Only structurally attested cells are removed
+/// ([`retire_consumed_completion_feedback`]); operator text and heading-shaped
+/// prose are never touched.
 pub fn retire_struck_rows_completion_feedback(before: &str, after: &str) -> StruckRowRetirement {
     let struck_heads = heads_struck_by_successor(before, after);
     if struck_heads.is_empty() {

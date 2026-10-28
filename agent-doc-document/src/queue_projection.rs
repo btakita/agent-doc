@@ -166,8 +166,11 @@ pub use agent_doc_frontmatter::frontmatter::{ALL_LIFECYCLE_STATES, QueueLifecycl
 ///
 /// A bound attempt has strongest authority; a report receipt means `Reported`;
 /// otherwise completion evidence is generation-ambiguous and means
-/// `Reconciling`. Closure removes the row, so this function applies only while
-/// `q` is live. A cosmetic marker alone is not authority.
+/// `Reconciling`. Callers set `completion_feedback` only when the cell's
+/// recorded item is this row's own work (`completion_evidence_matches_row`):
+/// a longer `do [#id] …` line shares the tracked id and is not this row.
+/// Closure removes the row, so this function applies only while `q` is live.
+/// A cosmetic marker alone is not authority.
 pub fn worker_evidence_marker(
     bound_attempt: Option<QueueLifecycleMarker>,
     reported_receipt: bool,

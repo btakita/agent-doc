@@ -23,6 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 Main is at `b6b9af6e15` and agent-doc 0.35.532 is installed locally. Release v0.35.532 was published from `71f9801b49`. Post-release main now includes the inline-code-safe, occurrence-ordered queue preset authorization fix for GitHub issue #331 and the positive-evidence-only Remote Dev pane-order fix for GitHub issue #332; both issues are closed, the integrated full suite passed, and the current mainline was installed locally.
 
 <!-- status:sync -->
@@ -437,7 +438,7 @@ v1 has no document-text writes and no "run a turn now": automation queues work a
 > Tests: deterministic hook-driven CLI hold+roll-forward (epoch base and mid-epoch), controller mid-epoch hold, 2 shared-rule units, verdict round-trip, RPC compat, relay verdict, guard quarantine message, flow-io closeout over a quarantined replica (quarantine message, HEAD unchanged); focused runs all pass; 8 mutations killed.
 > Follow-ups: (1) the CLI hold adds one controller round-trip (document_state_projection) to most CP writes; (2) possible 60 s stall when this path runs inside the controller (e.g. compaction) with the editor delta queued behind the same request (safe refusal, unreproduced); (3) session-check does not yet report a quarantined replica as its own state.
 <!-- agent-doc-subagent-completion key=bfeba7fa9d78b6656cfe2322c8d54de8027aa7ca92bbe11f706636ea7e9adb5c -->
-> **Queue prompt:** Add the questions as todo items. Use a nested list so each question is on its own line.
+x> **Queue prompt:** Add the questions as todo items. Use a nested list so each question is on its own line.
 
 ### Re: questions as nested Todos; serve /save, in-flight typing hold — opus-5 · 2026-10-27T17:55-04:00
 
@@ -599,6 +600,19 @@ Both fixes are on agent-doc `main` (`00caa013ac..dd65b2dfa9`, fast-forward) and 
   - a refused command stays in the list until you re-arm it with `go` or delete it.
 
 I checked off `#pmsyncquestions` and added the six points the doc still has open as Todo `#pmsyncstillopen`, one per line.
+### Re: Subagent completed: `subagent:inflighttypinghold` returned work for queue item “do [#inflighttypinghold]” — agent-doc
+<!-- agent-doc-subagent-response sha256=478864591af0b730b59ebd4563bc5340d6bc2ccdd4ed77341526e15d55008b0e -->
+> **Subagent response:**
+>
+> Branch fix/inflighttypinghold, commit 66c136b4a9 (pushed); env -u TMUX -u TMUX_PANE make check exit 0, 11977 passed (186 skipped); make tmux-ci exit 0, 207 passed. No Kotlin/TS (no plugin calls the crdt_commit_barrier RPC).
+> (1) apply_canonical_replace_if_attached (agent-doc-document-realtime-io/src/lib.rs ~3847; the single path to apply_cp_write_for_file_scoped for atomic writes, retained settles, projected captures, try_editor_converge) never read the editor's op-capture record. Now checks agent_doc_op_capture_io::editor_ops_in_flight_over before writing and waits in its retry loop (awaiting_editor_ops; {source}_crdt_write_held_for_editor_ops ... pending_from=K recovery=await_editor_delta_then_rebase once per burst); the existing rebase rolls forward once the delta lands; an unreadable record proceeds unheld (no deadlock).
+> (2) editor_ops_in_flight_over_visible_cut (project_controller.rs ~8785) held only when the epoch base hash equalled the visible text. Shared rule agent_doc_merge::crdt::editor_ops_in_flight_over_visible (controller + CLI): hold when some tail of the epoch's ops replays from the visible text to the reported tip (whole-epoch still requires the base hash); never for lineage-less epochs, tip == visible, or non-replaying ops; shortest tails first with a 256 MiB work budget.
+> (3) Relay barrier (agent-doc-crdt-relay-io/src/lib.rs ~5467) and RPC returned a bool. New agent_doc_turn::commit_barrier::CommitBarrierVerdict (ready | refused convergence_pending | quarantined_replica); RPC returns it only for {"verdict":true} requests (older clients get the bool; an older controller's bool reads as convergence_pending); live-buffer guard, flow-io closeout and finalize_commit render via live_buffer_guard::commit_barrier_refusal, printing state=crdt_commit_barrier_refused_quarantined_replica with quarantined_replica_commit_remedy.
+> Files (18): agent-doc-merge/src/crdt.rs, agent-doc-op-capture-io/src/lib.rs, agent-doc-document-realtime-io/src/lib.rs, agent-doc-controller-io/src/project_controller.rs, .../rpc.rs, agent-doc-crdt-relay-io/src/lib.rs, agent-doc-git-io/src/live_buffer_guard.rs, agent-doc-commit-io/src/lib.rs, agent-doc-flow-io/src/closeout.rs, agent-doc-write-runtime-io/src/lib.rs, agent-doc-turn/src/{commit_barrier.rs (new), lib.rs, write_ownership.rs}, agent-doc-flow-io/tests/flow_closeout.rs, tests/test_cli.rs (guard forbids commit_barrier_verdict_for_file( outside the controller), specs/14-realtime-workflow.md, specs/07-closeout-commands.md, SPEC.md.
+> Tests: deterministic hook-driven CLI hold+roll-forward (epoch base and mid-epoch), controller mid-epoch hold, 2 shared-rule units, verdict round-trip, RPC compat, relay verdict, guard quarantine message, flow-io closeout over a quarantined replica (quarantine message, HEAD unchanged); focused runs all pass; 8 mutations killed.
+> Follow-ups: (1) the CLI hold adds one controller round-trip (document_state_projection) to most CP writes; (2) possible 60 s stall when this path runs inside the controller (e.g. compaction) with the editor delta queued behind the same request (safe refusal, unreproduced); (3) session-check does not yet report a quarantined replica as its own state.
+<!-- agent-doc-subagent-completion key=bfeba7fa9d78b6656cfe2322c8d54de8027aa7ca92bbe11f706636ea7e9adb5c -->
+> **Queue prompt:** Add the questions as todo items. Use a nested list so each question is on its own line.
 <!-- agent:boundary:fe2be4a2 -->
 <!-- /agent:exchange -->
 
@@ -627,7 +641,7 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
 - [ ] [#lazily-stale-cell-repair] After the next tasks/software/lazily.md cycle commits it clean (no uncommitted edits, pane prompt_ready=true), run `agent-doc queue repair-stale-completion tasks/software/lazily.md` (dry run, 14 stale completion cells as of 2026-10-26), then `--apply` and `agent-doc commit tasks/software/lazily.md`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
-- [ ] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
+- [x] [#pmsyncquestions] Answer the PM-sync design questions (specs/proposals/pm-sync-integrations.md)
   - One component per provider (`agent:github` / `agent:gitlab` / `agent:jira`), or one `agent:tracker provider=...`?
     - One per provider.
   - Do credential profiles live in project config or user-global config?
@@ -655,6 +669,13 @@ I checked off `#pmsyncquestions` and added the six points the doc still has open
   - Should API calls launch a controller, and should event subscribers keep it from retiring?
   - What stability promise for v1, and how long a deprecation window?
   - One endpoint per project, or a user-level gateway across projects?
+- [ ] [#pmsyncstillopen] Decide the PM-sync points still open (specs/proposals/pm-sync-integrations.md, "Still open")
+  - Should the GitHub default also merge a second `review-requested:@me` query, since `involves:@me` misses review requests?
+  - OK for a component `auth=` attribute to rank above frontmatter?
+  - Are the names `feed-run=` / `feed-todo=` and the filter list (`needs-me`, `review-requested`, `changes-requested`, `ci-failing`, `assigned`, Jira `status=`) right?
+  - What are the GitLab and Jira equivalents of `involves:@me`?
+  - Where is a hidden (deleted) row stored, and how do you un-hide it?
+  - Until provider idempotency keys are confirmed, is a local sent-command record plus a provider re-read before any retry acceptable?
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

@@ -511,8 +511,7 @@ A workspace image that installs the latest agent-doc gets 558. One that pins a v
   - This is the second subtask.
   - Subtasks should be editable and steerable.
   - Make sure these subtasks are being deterministically associated with the parent task.
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~[#ena0]: grok running~~ — auto-struck: answered this cycle (#ftstrike)
+- 📥 sdk-demo.md subtask `  - Describe the choices in more detail. Why do we need a SBX/STG id?` is not in sync with the agent-doc state.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

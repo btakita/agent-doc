@@ -278,7 +278,18 @@ The worker's `make check` exited 0: nextest 12119 passed and 187 skipped. `make 
 `#apikeepsrefusing` is on main at `493731820e`. A live nested `push` or `publish` is authorization in the subagent brief, including when `#rebase` or `#review` would otherwise wait. A struck child or a negation grants nothing. The worker's `make check` exited 0 (nextest 12118 passed, 187 skipped). `make install` exited 0. JetBrains plugin bytes were already current. The published release is agent-doc v0.35.560 at `bd971e9b87`.
 
 The struck `release + publish` row dropped its include lines while `#subagent:nestedlineage` was still open. That closeout is the bug. Worker `01a184ce-c9b1-7af3-a487-d5aac0c6938c` is fixing it on `fix/release-include-context` in `/home/brian/worktrees/agent-doc-releasecontext`, from `ce46068a9f`, and will rebase onto `493731820e` before it pushes.
-<!-- agent:boundary:cb48a94b -->
+> **Chat prompt (#chatprompt):** The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
+
+> **Chat prompt (#chatprompt):** Fix in a subagent
+
+### Re: each leaf gets the whole tree — grok-4.7 · 2026-10-28T19:31-04:00
+
+Each leaf is submitted with its full lineage, and the entire prompt tree goes with that leaf as context. That fix stays on the nested-lineage worker already editing the submission path (`[#subagent:nestedlineage#1]`, worker `01a184af`). I sent it those words. A second worker on that checkout would collide with the dirty tree, so I did not start one.
+
+The api.md run item that dropped `[#subagent-operator-request-pr759-fix-ci-push]` is a separate worker. `01a184d6` is running as `[#subagent:pr759fixci#1]` on `fix/pr759-run-item`. That row stays open until the branch is on main.
+
+`do [#grok-live-editor]` and the nested line `re: [#grok-live-editor]: Also validate we have parity for the real-time steering` resolve as one claim. Worker `01a184da` is running as `[#subagent:rtsteeringparity#1]` on `fix/realtime-steering-parity`. It owns the live-editor push and the real-time steering parity check. An unbound duplicate on the same backlog was stopped. Both rows stay open until that branch is on main.
+<!-- agent:boundary:2d5e9347 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -293,7 +304,9 @@ The struck `release + publish` row dropped its include lines while `#subagent:ne
 - ~~release + publish~~
   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
   - ~~Include #subagent:nestedlineage~~
-- 📥 api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
+- 🚧 [#subagent:pr759fixci#1] api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
+- 🟡 [#subagent:grokliveeditor#1] do [#grok-live-editor]
+  - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -323,6 +336,7 @@ The struck `release + publish` row dropped its include lines while `#subagent:ne
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#grok-live-editor] Grok Build should see live agent-doc editor changes. A Grok session reads the CRDT document only when it calls agent_doc_admit, agent_doc_plan, agent_doc_read, or agent_doc_finalize, or when it pulls agent-doc steering. The Read tool sees disk, which trails the editor replica. Queue rows the operator adds during a turn stay invisible until the next pull, so the coordinator dispatches only the rows the last plan listed and the operator sees idle inbox rows. Expected: while a Grok pane owns a session, converged editor ops (new queue rows, strikes, claim projection) are pushed into that session, and the next plan includes the newly runnable rows without waiting for another user message. Observed 2026-10-28 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md: the operator asked why only two subagents were running while more queue rows were visible. The prior plan queue_subagent_dispatch listed only those two.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

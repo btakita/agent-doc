@@ -71,13 +71,31 @@ Every `agent:rules` body in the nearest `.agent-doc/project.md` is composed in f
 ### Re: agent:rules on main — grok-4.7 · 2026-10-28T14:54-04:00
 
 The worker branch `feat/agent-rules` was verified before the fast-forward. `make test` had already passed with 12107 tests and 0 failures. The diff added no private-name denylist hits. The version was not bumped. The next row is still the release request.
-<!-- agent:boundary:8c15fcde -->
+> **Queue prompt:** release + publish
+>   - include #subagent:agentrules
+
+**Deferred:** dispatched to `subagent:release` generation 4, worker `01a183ed-f565-74d3-afe0-b1942fb321eb`, running in `/home/brian/worktrees/agent-doc-release`. `origin/main` is `2b7ef088eaaf6cc86152cceb6c1cd98a0979ccb7` (`v0.35.559-18-g2b7ef088ea`), which already contains the `agent:rules` commit. The worker verifies that commit and the release procedure. The coordinator rules forbid that worker from `make release`, a version bump, or a tag, so this session runs the release after the worker reports. The row stays queued.
+
+> **Queue prompt:** sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
+
+**Deferred:** dispatched to `subagent:sdksync` generation 1, worker `01a183ed-f565-74d3-afe0-b1aa7050daf0`, on `fix/sdk-demo-agent-run` in `/home/brian/worktrees/agent-doc-sdksync`. Spec, tests, commit, and push belong to that worker. Integration and the single `make install` wait for its report.
+
+### Re: both rows are running — grok-4.7 · 2026-10-28T15:13-04:00
+
+Both `agent:run` heads are claimed and worker-bound.
+
+`release + publish` is generation 4 on worker `01a183ed-f565-74d3-afe0-b1942fb321eb`. The child line's `agent:rules` work is already on `origin/main` at `2b7ef088ea`. The worker's report will name the release command, the range since `v0.35.559`, and CI for that SHA. This session publishes after that report.
+
+`sdk-demo.md` is generation 1 on worker `01a183ed-f565-74d3-afe0-b1aa7050daf0`. It owns the agent-doc fix, tests, and the branch push. This cycle does not edit that demo inline.
+
+No new backlog item. Both rows are the work, and both stay queued under their running claims.
+<!-- agent:boundary:9fc5859f -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~Add agent:rules tag, which provides context for each turn in the document. agent:rules takes a list or free text, similar to agent:run. This should also be supported with project.md and be composable. Multiple `agent:rules` elements should be allowed in a document.~~
-- 📥 release + publish
+- 🚧 [#subagent:release#4] release + publish
   - include #subagent:agentrules
+- 🚧 [#subagent:sdksync#1] sdk-demo.md `agent:run` is out of sync. Fix agent-doc causes.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

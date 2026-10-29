@@ -32,6 +32,7 @@ pub mod attach_failure;
 pub mod editor_view_policy;
 pub mod endpoint_retirement;
 pub mod exchange_prefix_repair;
+pub mod flat_sync;
 pub mod graph;
 pub mod group_layout;
 pub mod installation_focus;
@@ -63,6 +64,10 @@ pub use endpoint_retirement::{
 };
 pub use exchange_prefix_repair::{
     ExchangePrefixRepair, ExchangePrefixRepairEvidence, derive_exchange_prefix_repair,
+};
+pub use flat_sync::{
+    FRONTEND_GENERATION_MISMATCHED_REMEDY, FlatSyncAuthorityEvidence, FlatSyncDecision,
+    FlatSyncReadiness, decide_flat_sync,
 };
 pub use graph::{EditorSurfaceState, SurfaceFold};
 pub use group_layout::{

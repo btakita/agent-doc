@@ -39,9 +39,12 @@ pub const FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY: &str = "install the same Agent 
 /// Readiness classification for a Remote Dev peer that has not established the
 /// authenticated frontend surface lease after the startup grace period.
 ///
-/// The backend cannot distinguish an absent frontend module from a module whose
-/// generation cannot negotiate with it. Both are distribution/readiness faults,
-/// not transient editor geometry and not permission to reconstruct columns.
+/// Editor routes and the post-grace backend diagnostic keep this combined
+/// token: those paths do not inspect which of the two faults occurred. Explicit
+/// foreground `sync_tmux_layout` names `frontend_authority_absent`,
+/// `frontend_generation_mismatched`, or
+/// `frontend_connected_without_accepted_publication` instead (GH #383). None of
+/// these is permission to reconstruct columns.
 pub const FRONTEND_AUTHORITY_UNAVAILABLE_READINESS: &str =
     "frontend_authority_absent_or_generation_mismatched";
 

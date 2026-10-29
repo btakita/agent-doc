@@ -599,6 +599,19 @@ document. Recovery requires the same modular ZIP generation on both peers,
 verification that both report that exact plugin version, and both processes
 restarted. Retrying before that readiness invariant holds cannot create the
 missing authority.
+
+An explicit foreground `sync_tmux_layout` whose flat evidence would leave the
+focused document out of the retained columns, or would leave no authoritative
+snapshot, waits up to 5 seconds for an already-published editor-ordered surface
+that contains the focus and adopts that vector unchanged (GH #383). It does not
+reconstruct columns from the flat visible set or from live tmux widths. If no
+such surface is published, the deferral names exactly one of
+`frontend_authority_absent`, `frontend_generation_mismatched`, or
+`frontend_connected_without_accepted_publication`. The install-and-restart
+remedy applies only to an absent frontend and to a retired measured generation
+that was not accepted; a connected frontend that has not published reports
+`recovery=retry_after_published_layout`. Editor-route refusals keep the
+combined `frontend_authority_absent_or_generation_mismatched` readiness token.
 Restarting only the Remote Dev backend does not replace a frontend module that
 the still-running JetBrains Client/Gateway process already loaded. That client
 process must first have the matching plugin installed and must itself restart

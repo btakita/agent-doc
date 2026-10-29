@@ -234,6 +234,34 @@ thread_local! {
     /// unlocked, after every measured-route lookup, naming what it found.
     static TEST_MEASURED_ROUTE_LOOKUP: std::cell::RefCell<Option<MeasuredRouteLookupHook>> =
         const { std::cell::RefCell::new(None) };
+    /// GH #383: overrides how long a foreground flat `sync_tmux_layout` waits
+    /// for a published editor layout. Unset stays zero so this crate's tests
+    /// do not block; the production binary waits five seconds.
+    static TEST_FLAT_SYNC_WAIT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// How long explicit flat `sync_tmux_layout` waits for an editor-ordered
+/// surface that already contains the focus (GH #383). Five seconds matches the
+/// frontend authority diagnostic delay. This crate's tests default to zero
+/// unless the calling thread sets [`TEST_FLAT_SYNC_WAIT`].
+fn flat_sync_published_layout_wait() -> Duration {
+    #[cfg(test)]
+    {
+        TEST_FLAT_SYNC_WAIT
+            .with(|cell| cell.get())
+            .unwrap_or(Duration::ZERO)
+    }
+    #[cfg(not(test))]
+    {
+        Duration::from_secs(5)
+    }
+}
+
+/// GH #383: retained-surface facts a flat `sync_tmux_layout` command can use.
+struct FlatSyncLayoutScan {
+    published_columns: Option<Vec<String>>,
+    frontend_client_live: bool,
+    frontend_generation_stale: bool,
 }
 
 /// GH #376: the measured Remote Dev layout a zero-column editor route uses.
@@ -1208,6 +1236,103 @@ impl ControllerEditorSurfaceGraph {
             MeasuredRouteLookup::Absent
         };
         (lookup, found)
+    }
+
+    /// GH #383: scan retained surfaces for a flat `sync_tmux_layout` command.
+    ///
+    /// `published_columns` is the highest-sequence live editor-ordered vector
+    /// that already contains the focus, after that surface's own `Sync`
+    /// publication has settled. An in-flight publication is not adopted yet:
+    /// the observation notifies before the handler publishes, and adopting
+    /// early lets that handler overwrite the command. Measured-client liveness
+    /// is the `jetbrains-rd` family only; any non-retired editor-ordered
+    /// surface may supply the vector. The scan does not reconstruct columns.
+    fn await_flat_sync_published_layout(
+        &self,
+        project_root: &Path,
+        focus_matches: &dyn Fn(&str) -> bool,
+    ) -> (FlatSyncLayoutScan, Duration) {
+        let wait = flat_sync_published_layout_wait();
+        let started = Instant::now();
+        let mut roots = self.roots.lock();
+        let scan = Self::flat_sync_layout_scan(&roots, project_root, focus_matches);
+        if scan.published_columns.is_some() || wait.is_zero() {
+            return (scan, started.elapsed());
+        }
+        let deadline = started + wait;
+        loop {
+            if self.observed.wait_until(&mut roots, deadline).timed_out() {
+                return (
+                    Self::flat_sync_layout_scan(&roots, project_root, focus_matches),
+                    started.elapsed(),
+                );
+            }
+            let scan = Self::flat_sync_layout_scan(&roots, project_root, focus_matches);
+            if scan.published_columns.is_some() {
+                return (scan, started.elapsed());
+            }
+        }
+    }
+
+    fn flat_sync_layout_scan(
+        roots: &BTreeMap<(PathBuf, String, String), ControllerEditorSurfaceRoot>,
+        project_root: &Path,
+        focus_matches: &dyn Fn(&str) -> bool,
+    ) -> FlatSyncLayoutScan {
+        let mut best_settled: Option<(u64, Vec<String>)> = None;
+        let mut best_pending: Option<u64> = None;
+        let mut frontend_client_live = false;
+        let mut retired_measured = false;
+        for ((root, client_id, _), entry) in roots {
+            if root != project_root {
+                continue;
+            }
+            if is_measured_frontend_client(client_id) {
+                if entry.retired {
+                    retired_measured = true;
+                } else {
+                    frontend_client_live = true;
+                }
+            }
+            if entry.retired
+                || entry.state.surface().column_order
+                    != agent_doc_editor_surface::SurfaceColumnOrder::Editor
+            {
+                continue;
+            }
+            let columns = editor_surface_column_entries(&entry.state.surface());
+            if columns.is_empty() || !surface_columns_contain_focus(&columns, focus_matches) {
+                continue;
+            }
+            if entry.publications_in_flight.is_empty() {
+                let replace = best_settled
+                    .as_ref()
+                    .is_none_or(|(sequence, _)| entry.sequence > *sequence);
+                if replace {
+                    best_settled = Some((entry.sequence, columns));
+                }
+            } else {
+                let replace = best_pending.is_none_or(|sequence| entry.sequence > sequence);
+                if replace {
+                    best_pending = Some(entry.sequence);
+                }
+            }
+        }
+        // A newer in-flight vector must publish before an older settled one is
+        // adopted, or the handler's publication lands after the command.
+        let published_columns = match (best_settled, best_pending) {
+            (Some((sequence, columns)), pending)
+                if pending.is_none_or(|pending| sequence > pending) =>
+            {
+                Some(columns)
+            }
+            _ => None,
+        };
+        FlatSyncLayoutScan {
+            published_columns,
+            frontend_client_live,
+            frontend_generation_stale: retired_measured && !frontend_client_live,
+        }
     }
 
     fn forget(&self, project_root: &Path, client_id: &str, generation: u64) -> bool {
@@ -28592,6 +28717,158 @@ fn resolve_agent_doc_window_id_for_session(
     })
 }
 
+fn is_measured_frontend_client(client_id: &str) -> bool {
+    client_id.split_once('@').is_some_and(|(family, _)| {
+        family == agent_doc_editor_surface::REMOTE_CLIENT_MEASURED_SURFACE_FAMILY
+    })
+}
+
+fn editor_surface_column_entries(surface: &EditorSurface) -> Vec<String> {
+    surface
+        .sync_columns()
+        .iter()
+        .map(|column| {
+            column
+                .files
+                .iter()
+                .map(|file| file.trim())
+                .filter(|file| !file.is_empty())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .filter(|column| !column.is_empty())
+        .collect()
+}
+
+fn surface_columns_contain_focus(columns: &[String], focus_matches: &dyn Fn(&str) -> bool) -> bool {
+    columns.iter().any(|column| {
+        column.split(',').any(|file| {
+            let file = file.trim();
+            !file.is_empty() && focus_matches(file)
+        })
+    })
+}
+
+fn retained_columns_hold_foreground_focus(
+    project_root: &Path,
+    retained: Option<&PaneLayoutDesired>,
+    focus: &str,
+) -> bool {
+    let Some(retained) = retained else {
+        return false;
+    };
+    let canonical_focus = canonical_layout_document_id(project_root, focus);
+    retained
+        .invocation
+        .columns
+        .iter()
+        .any(|document| document == &canonical_focus)
+}
+
+fn flat_sync_command_deferral(
+    focus: &str,
+    retained_exists: bool,
+    readiness: agent_doc_editor_surface::FlatSyncReadiness,
+    waited_ms: u128,
+) -> String {
+    let head = if retained_exists {
+        format!(
+            "sync_tmux_layout deferred before layout publication: focused document `{focus}` is absent from the retained desired columns"
+        )
+    } else {
+        "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot"
+            .to_string()
+    };
+    let recovery = match readiness.remedy() {
+        Some(remedy) => format!("; remedy={remedy}, then retry Run Agent Doc"),
+        None => "; recovery=retry_after_published_layout".to_string(),
+    };
+    format!(
+        "{head}; reason=flat_evidence_has_no_column_geometry; frontend_publisher={}; action=awaited_published_layout; waited_ms={waited_ms}; frontend_readiness=blocked; frontend_readiness_reason={}; the retained tmux layout was not changed{recovery}",
+        readiness.publisher(),
+        readiness.reason(),
+    )
+}
+
+/// GH #383: wait for a published editor-ordered surface that already contains
+/// `focus`. On adopt, return the eligible columns and the desired-document
+/// vector. Otherwise defer with the readiness case the scan can see.
+fn resolve_flat_sync_command(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    eligibility: &MainLayoutEligibility,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    focus: &str,
+    retained_exists: bool,
+) -> Result<Option<(Vec<String>, Vec<String>)>> {
+    let project_root = &bootstrap.project_root;
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "sync_tmux_layout_published_layout_awaiting focus={focus} action=awaited_published_layout (GH #383)"
+        ),
+    );
+    let (scan, waited) = runtime
+        .editor_surface_graph
+        .await_flat_sync_published_layout(project_root, &|document| {
+            canonical_layout_document_id(project_root, document)
+                == canonical_layout_document_id(project_root, focus)
+        });
+    let waited_ms = waited.as_millis();
+    if let Some(columns) = scan.published_columns.clone() {
+        let mut candidate = invocation.clone();
+        candidate.columns = main_layout_eligible_columns(project_root, eligibility, &columns);
+        candidate.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        let collapsed = collapse_duplicate_pane_layout_columns(project_root, &candidate);
+        candidate.columns = collapsed.clone();
+        let desired_columns = layout_sync_state_expected_documents(
+            project_root,
+            &ControllerTmuxLayoutSyncStateInvocation {
+                columns: candidate.columns.clone(),
+                window: candidate.window.clone(),
+                focus: candidate.focus.clone(),
+            },
+        );
+        if !desired_columns.is_empty()
+            && pane_layout_foreground_focus_matches_columns(
+                project_root,
+                &candidate,
+                &desired_columns,
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!("sync_tmux_layout_published_layout_adopted focus={focus} (GH #383)"),
+            );
+            return Ok(Some((collapsed, desired_columns)));
+        }
+    }
+    let decision = agent_doc_editor_surface::decide_flat_sync(
+        agent_doc_editor_surface::FlatSyncAuthorityEvidence {
+            published_layout_contains_focus: false,
+            frontend_client_live: scan.frontend_client_live,
+            frontend_generation_stale: scan.frontend_generation_stale,
+        },
+    );
+    let readiness = match decision {
+        agent_doc_editor_surface::FlatSyncDecision::Defer(readiness) => readiness,
+        agent_doc_editor_surface::FlatSyncDecision::AdoptPublishedLayout => {
+            agent_doc_editor_surface::FlatSyncReadiness::AwaitingPublishedLayout
+        }
+    };
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "sync_tmux_layout_published_layout_unavailable focus={focus} frontend_readiness_reason={} (GH #383)",
+            readiness.reason()
+        ),
+    );
+    anyhow::bail!(
+        "{}",
+        flat_sync_command_deferral(focus, retained_exists, readiness, waited_ms)
+    )
+}
+
 fn canonical_layout_document_id(project_root: &Path, file: &str) -> String {
     let trimmed = file.trim();
     let path = if Path::new(trimmed).is_absolute() {
@@ -36942,8 +37219,34 @@ fn publish_pane_layout_desired_invocation_in_lane(
     // exists. Such input may carry a focus intent only when that document is already present in
     // the retained vector. Positive tmux geometry is an effect receipt, not editor-layout
     // authority: equal widths still do not identify which editor document belongs in which slot.
+    // GH #383: an explicit foreground sync command that would fail that check waits for a
+    // published editor-ordered surface containing the focus, or defers with the readiness
+    // case the controller can see. Routes and other publications keep the combined token.
     let mut incomplete_frontend_fallback =
         incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor;
+    if incomplete_frontend_fallback
+        && matches!(publication, PaneLayoutPublication::FreshCommandIntent)
+        && let Some(focus) = invocation.focus.clone()
+        && !retained_columns_hold_foreground_focus(
+            &bootstrap.project_root,
+            retained.as_ref(),
+            &focus,
+        )
+        && let Some((columns, adopted_desired)) = resolve_flat_sync_command(
+            bootstrap,
+            runtime,
+            &eligibility,
+            &invocation,
+            &focus,
+            retained.is_some(),
+        )?
+    {
+        invocation.columns = columns;
+        invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        incoming_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        incomplete_frontend_fallback = false;
+        desired_columns = adopted_desired;
+    }
     if incomplete_frontend_fallback {
         resolve_incomplete_frontend_layout(
             bootstrap,
@@ -42308,6 +42611,340 @@ mod tests {
             automatic.invocation.columns,
             vec![b.clone(), a.clone()],
             "manual unknown input must not become a new structural basis",
+        );
+    }
+
+    fn gh383_unknown_sync_request(columns: &[String], focus: &str) -> ControllerRequest {
+        let mut invocation = super::super::tests::pane_layout_desired_for_test(1).invocation;
+        invocation.columns = columns.to_vec();
+        invocation.focus = Some(focus.to_string());
+        invocation.caller_kind = "manual".to_string();
+        invocation.no_autostart = false;
+        invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+        invocation.client_id = None;
+        serde_json::from_value(serde_json::json!({
+            "command": "sync_tmux_layout",
+            "diagnostic_payload": serde_json::to_string(&invocation).unwrap(),
+        }))
+        .unwrap()
+    }
+
+    fn gh383_seed_editor_columns(
+        bootstrap: &ControllerBootstrap,
+        runtime: &ControllerRuntime,
+        columns: &[&str],
+        focus: &str,
+    ) {
+        let mut measured = plugin_unknown_order_publication(columns, focus);
+        measured.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        publish_pane_layout_desired_invocation(
+            bootstrap,
+            runtime,
+            measured,
+            None,
+            PaneLayoutPublication::FreshIntent,
+            PaneLayoutPublisher::PluginPublication,
+        )
+        .unwrap();
+    }
+
+    fn gh383_ops(dir: &std::path::Path) -> String {
+        std::fs::read_to_string(dir.join(".agent-doc/logs/ops.log")).unwrap_or_default()
+    }
+
+    /// GH #383: flat sync with no measured frontend names authority absence
+    /// after the published-layout wait, and does not publish a new vector.
+    #[test]
+    fn gh383_flat_sync_without_a_frontend_names_authority_absent_and_does_not_publish() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+        gh383_seed_editor_columns(&bootstrap, runtime.as_ref(), &[&a, &b], &a);
+        let before = runtime.pane_layout_desired().unwrap();
+
+        let error = handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            gh383_unknown_sync_request(&[a.clone(), b.clone(), c.clone()], &c),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("deferred before layout publication"),
+            "{error}"
+        );
+        assert!(error.contains("frontend_authority_absent"), "{error}");
+        assert!(error.contains("frontend_publisher=unavailable"), "{error}");
+        assert!(
+            error.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
+            "{error}"
+        );
+        assert!(error.contains("action=awaited_published_layout"), "{error}");
+        assert!(error.contains("waited_ms=0"), "{error}");
+        assert!(
+            !error.contains("frontend_authority_absent_or_generation_mismatched"),
+            "{error}"
+        );
+        let after = runtime.pane_layout_desired().unwrap();
+        assert_eq!(after.invocation.columns, vec![a, b]);
+        assert_eq!(after.generation, before.generation);
+        let ops = gh383_ops(dir.path());
+        assert!(
+            ops.contains("sync_tmux_layout_published_layout_awaiting")
+                && ops.contains("action=awaited_published_layout"),
+            "{ops}"
+        );
+        assert!(
+            ops.contains("sync_tmux_layout_published_layout_unavailable"),
+            "{ops}"
+        );
+    }
+
+    /// GH #383: the same deferral when nothing has ever been published.
+    #[test]
+    fn gh383_flat_sync_without_a_snapshot_or_frontend_names_authority_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let c = session_document(&dir, "c.md");
+        let error = handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            gh383_unknown_sync_request(std::slice::from_ref(&c), &c),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("incomplete frontend layout has no authoritative snapshot"),
+            "{error}"
+        );
+        assert!(error.contains("frontend_authority_absent"), "{error}");
+        assert!(
+            !error.contains("frontend_authority_absent_or_generation_mismatched"),
+            "{error}"
+        );
+        assert!(runtime.pane_layout_desired().is_none());
+    }
+
+    /// GH #383: a published editor-ordered surface that arrives during the wait
+    /// is adopted unchanged. Flat evidence does not invent the vector.
+    #[test]
+    fn gh383_flat_sync_adopts_a_published_layout_that_arrives_while_it_waits() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+        let d = session_document(&dir, "d.md");
+        gh383_seed_editor_columns(&bootstrap, runtime.as_ref(), &[&a, &b], &a);
+        let forwarded = "jetbrains-rd@IU.0a1b2c3d-pid:41";
+        let request = gh383_unknown_sync_request(std::slice::from_ref(&c), &c);
+
+        let receipt = std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                TEST_FLAT_SYNC_WAIT.with(|cell| cell.set(Some(Duration::from_secs(30))));
+                handle_sync_tmux_layout(&bootstrap, runtime.as_ref(), request)
+            });
+            let started = std::time::Instant::now();
+            while !gh383_ops(dir.path()).contains("sync_tmux_layout_published_layout_awaiting") {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "awaiting log did not appear: {}",
+                    gh383_ops(dir.path())
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            gh320_observe_surface(
+                &bootstrap,
+                runtime.as_ref(),
+                forwarded,
+                "remote-client:client-a:3",
+                1,
+                &c,
+                &[&d, &c],
+                agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+            );
+            worker.join().expect("flat sync wait thread")
+        })
+        .expect("the published layout is the sync target");
+        assert!(receipt.applied);
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.invocation.columns, vec![d, c.clone()]);
+        assert_eq!(
+            desired.invocation.column_order,
+            agent_doc_tmux::LayoutColumnOrder::Editor
+        );
+        assert_eq!(desired.invocation.focus.as_deref(), Some(c.as_str()));
+        assert_eq!(desired.provenance.publisher, PaneLayoutPublisher::Command);
+        let ops = gh383_ops(dir.path());
+        assert!(
+            ops.contains("sync_tmux_layout_published_layout_adopted"),
+            "{ops}"
+        );
+    }
+
+    /// GH #383: a live measured client that has not published column geometry
+    /// is a retry, not an install-and-restart failure.
+    #[test]
+    fn gh383_connected_frontend_without_columns_is_not_an_install_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+        gh383_seed_editor_columns(&bootstrap, runtime.as_ref(), &[&a, &b], &a);
+        let forwarded = "jetbrains-rd@IU.0a1b2c3d-pid:41";
+        let observation = EditorSurfaceObservation {
+            client_id: forwarded.to_string(),
+            surface_id: "remote-client:client-a:3".to_string(),
+            generation: 7,
+            sequence: 1,
+            surface: agent_doc_editor_surface::EditorSurface {
+                column_order: agent_doc_editor_surface::SurfaceColumnOrder::Unknown,
+                focused: c.clone(),
+                visible: vec![c.clone()],
+                open: vec![c.clone()],
+                columns: Vec::new(),
+                force_reconcile: false,
+                focus_only: false,
+                preserve_focus: true,
+            },
+        };
+        handle_editor_surface_observe(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_surface_observe".to_string(),
+                file: Some(std::path::PathBuf::from(&c)),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some(forwarded.to_string()),
+                reason: Some("editor_surface_observation".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&observation).unwrap()),
+                sequence: None,
+            },
+        )
+        .unwrap();
+
+        let error = handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            gh383_unknown_sync_request(std::slice::from_ref(&c), &c),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("frontend_connected_without_accepted_publication"),
+            "{error}"
+        );
+        assert!(error.contains("frontend_publisher=connected"), "{error}");
+        assert!(
+            error.contains("recovery=retry_after_published_layout"),
+            "{error}"
+        );
+        assert!(
+            !error.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
+            "{error}"
+        );
+        assert!(
+            !error.contains("frontend_authority_absent_or_generation_mismatched"),
+            "{error}"
+        );
+        let desired = runtime.pane_layout_desired().unwrap();
+        assert_eq!(desired.invocation.columns, vec![a, b]);
+        assert!(!desired.invocation.columns.iter().any(|column| column == &c));
+    }
+
+    /// GH #383: a retired measured generation is not the same fault as a
+    /// frontend that was never installed.
+    #[test]
+    fn gh383_retired_frontend_generation_is_not_authority_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let a = session_document(&dir, "a.md");
+        let b = session_document(&dir, "b.md");
+        let c = session_document(&dir, "c.md");
+        gh383_seed_editor_columns(&bootstrap, runtime.as_ref(), &[&a, &b], &a);
+        let forwarded = "jetbrains-rd@IU.0a1b2c3d-pid:41";
+        gh320_observe_surface(
+            &bootstrap,
+            runtime.as_ref(),
+            forwarded,
+            "remote-client:measured",
+            1,
+            &a,
+            &[&a, &b],
+            agent_doc_editor_surface::SurfaceColumnOrder::Editor,
+        );
+        handle_editor_surface_forget(
+            &bootstrap,
+            runtime.as_ref(),
+            ControllerRequest {
+                command: "editor_surface_forget".to_string(),
+                file: None,
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(7),
+                state: None,
+                caller: Some(forwarded.to_string()),
+                reason: Some("editor_surface_client_retired".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(r#"{"surface_id":"remote-client:measured"}"#.to_string()),
+                sequence: None,
+            },
+        )
+        .unwrap();
+        let before = runtime
+            .pane_layout_desired()
+            .unwrap()
+            .invocation
+            .columns
+            .clone();
+
+        let error = handle_sync_tmux_layout(
+            &bootstrap,
+            runtime.as_ref(),
+            gh383_unknown_sync_request(std::slice::from_ref(&c), &c),
+        )
+        .unwrap_err();
+        let error = format!("{error:#}");
+        assert!(error.contains("frontend_generation_mismatched"), "{error}");
+        assert!(error.contains("frontend_publisher=stale"), "{error}");
+        assert!(
+            error.contains("the frontend generation was not accepted"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("frontend_authority_absent_or_generation_mismatched"),
+            "{error}"
+        );
+        assert!(
+            !error.contains("frontend_readiness_reason=frontend_authority_absent;"),
+            "{error}"
+        );
+        assert_eq!(
+            runtime.pane_layout_desired().unwrap().invocation.columns,
+            before
         );
     }
 

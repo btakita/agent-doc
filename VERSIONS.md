@@ -2,11 +2,26 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.561
+
+- **A paused earlier `agent:run` does not hide the other runs.** A queue held by `pause` (a legacy marker `stop` included) stays live for `after=` and is skipped. The other `agent:run`, `agent:loop`, and legacy `agent:queue` elements are still processed in that turn, including when three runs are present and the first is paused. An earlier inline queue that still has owner-available work gates later queues. A `[focused-cycle]` head is not a pause and still gates.
+- **A claimed, reported, operator-gated, or group-label queue does not hide later `subagents` queues.** Each `subagents` queue whose `after=` predecessors are empty is offered in the same turn, including on Grok `agent_doc_plan`. An earlier inline queue that still has owner-available work gates later queues.
+- **Ancestor `project.md` rules are composed farthest first.** Every `agent:rules` body in every `.agent-doc/project.md` is included. A nested `.git` does not hide an ancestor project file.
+- **A nested `agent:run` leaf is submitted with its parent lineage.** The echo is the nest vector. A nested free-text leaf is keyed by that lineage, and a unique later sibling is still dispatched as its own bare text. The completion cell keeps the child in `held_work` and the parent stays absent. The first nested item added under a claim stays inside that claim.
+- **Nested push and publish are operator authorization.** A live nested push or publish is quoted in the brief, including when a preset says to wait. A struck child or a negation grants nothing.
+- **An operator-request id stays on its nested run item.** A release row stays queued while an included subagent is still open. Completion cells match a row's own work.
+- **The default `agent:run` scaffold omits `go`.** Go-mode is already the default.
+- **An unclosed component names the missing close.** The report names `unclosed component` and the opening line. A later bare opener stays another opener.
+- **A running Grok turn receives the document diff since the last send.** `steering_delivered_to_owner` is reported only after tmux accepts that submit. Live-owner steering is reported as success.
+- **Flat sync waits for a published split before it refuses, and starts an unstarted Remote Dev session from flat evidence.** A queued JetBrains File Cache Conflict is recorded in `idea.log`.
+- **The consolidated report prints beside a subagent report.** The VS Code extension is `0.2.91`.
+- **A group label and a sub-prompt child are not pending work.** A nesting group label carries no `📥`. The next projection removes a pending marker from a group label. A claim, report, or completion on that row still projects. A sub-prompt child carries no lifecycle marker of its own, and a bare `📥` on a child is removed. An operator pin on a child stays.
+- **A routine steering delivery stays silent.** Handing an update to the turn already running does not open a JetBrains notification or a VS Code status hint. Interrupt-and-clear and interrupt-and-restart confirmations stay.
+- **A shared `agent:run` leaf is claimed by its parent lineage.** A short leaf that names one live row still claims that row. A short leaf that names several rows is not a refusal and does not drop any row. `queue claim` binds the first unclaimed row by its parent lineage, and each other row stays live for its own `root: …: item`.
+
 ## 0.35.560
 
-- **A paused earlier `agent:run` does not hide the other runs.** A queue held by `pause` (a legacy marker `stop` included) stays live for `after=` and is skipped. The other `agent:run`, `agent:loop`, and legacy `agent:queue` elements are still processed in that turn, including when three runs are present and the first is paused. An earlier inline queue that still has owner-available work gates later queues.
-- **A claimed `agent:run` queue no longer hides a later ready `agent:run` from subagent dispatch.** Each `subagents` queue offers its own unclaimed heads every cycle, including on Grok `agent_doc_plan`. Sibling `subagents` queues are offered together. An `after=` queue still waits until its predecessors are empty, and an earlier inline queue that still has owner-available work gates later queues.
-- **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in every `.agent-doc/project.md`, farthest ancestor first, is composed in file order, then every body in the session document. A nested `.git` does not hide an ancestor project file. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
+- **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in the nearest `.agent-doc/project.md` is composed in file order, then every body in the session document. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
 - **Operator answers nest under the request they answer.** An answer row nested under its request id is accepted, and row splitting ignores binary markers.
 - **An editor undo of a `status:sync` block is detected and re-synced.** The managed block is derived state. The next sync checkpoint rewrites it from the instruction's source.
 - **Claude Stop holds once for a reported but unclosed queue row.** A worker report that no closeout has persisted stays in front of the stop hook until the response that records it is committed.

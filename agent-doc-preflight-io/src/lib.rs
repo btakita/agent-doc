@@ -10711,6 +10711,70 @@ mod tests {
     }
 
     #[test]
+    fn review_first_sync_preserve_keeps_leaf_on_first_queue_maintenance() {
+        // #review-first-sync-preserve: a session added a `#review` preset beneath
+        // its PR URL. The first Run Agent Doc maintenance pass treated the bare
+        // preset token as an id-backed mirror row and deleted it; re-adding it
+        // after activation survived only because active-loop sync was held.
+        let dir = setup_project();
+        let doc = dir.path().join("sampleorders.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "prompt_presets:\n",
+            "  '#review': Review the parent pull request.\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- https://github.com/example/sample-api/pull/762\n",
+            "  - #review\n",
+            "- do [#stale]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue=sync -->\n",
+            "- [ ] [#active] active backlog work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = state
+            .authoritative_content
+            .as_deref()
+            .unwrap_or_else(|| panic!("maintenance returned no authoritative content"));
+        let components = agent_doc_element::element::parse(updated).unwrap();
+        let queue = components.iter().find(|c| c.name == "queue").unwrap();
+        let entries = agent_doc_queue::document_queue::parse(queue.content(updated)).unwrap();
+
+        assert!(entries.iter().any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    if prompt.indent == 2
+                        && agent_doc_document::queue_projection::strip_priority_markers(&prompt.text)
+                            == "#review"
+            )
+        }), "nested #review leaf was deleted on first maintenance:\n{updated}");
+        assert!(
+            queue.content(updated).contains("do [#active]"),
+            "active backlog mirror row was not added:\n{updated}"
+        );
+        assert!(
+            !queue.content(updated).contains("[#stale]"),
+            "stale canonical mirror row was not replaced:\n{updated}"
+        );
+    }
+
+    #[test]
     fn run_queue_maintenance_admits_exchange_free_text_as_do_directive() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

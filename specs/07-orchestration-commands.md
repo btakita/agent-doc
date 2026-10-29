@@ -441,10 +441,14 @@ queue item, or marks a specific parked item with a per-item enqueue token.
   count as already-present, so a consumed id is never re-appended.
 - `<!-- agent:backlog queue=prepend -->` — like `append`, but new prompts are
   inserted at the front of the queue, in backlog order.
-- `<!-- agent:backlog queue=sync -->` — the queue body is **fully regenerated**
-  as the active-backlog `do [#id]` list, in backlog order. Any other queue
-  content (manual presets, fences, struck items) is dropped; use `append` /
-  `prepend` to preserve manual queue content.
+- `<!-- agent:backlog queue=sync -->` — the canonical top-level backlog-mirror
+  portion is regenerated as active-backlog `do [#id]` rows, in backlog order.
+  Only unannotated top-level rows in that exact binary-emitted shape are
+  mirror-owned and eligible for replacement. Manual queue-tree content is
+  preserved byte-for-byte, including presets, fences, struck non-mirror items,
+  bare `#preset` leaves, annotated references, and nested directives
+  (`#review-first-sync-preserve`). A preserved row that references an active id
+  already represents it, so sync does not add a duplicate mirror row.
 - Per-item enqueue markers — an open backlog/icebox item containing
   `:inbox_tray:`, `/enqueue`, or a Markdown-decorated `enqueue` token such as
   `**enqueue**` is appended to `agent:run` as `do [#id]` even when the component

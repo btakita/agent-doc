@@ -1308,6 +1308,43 @@ The two notes in this plan stay open. Annotation, worker-reported remains the re
 `subagent:checkedsubprompt` (`01a188de-5bf6-7fb0-be78-cf27940e3ced`) and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work. No second worker is started for them.
 
 Changed paths: none in this checkout. The leaf worker changed `SPEC.md`, `agent-doc-document/src/queue_projection.rs`, `agent-doc-element-backlog-io/src/backlog_cmd.rs`, `agent-doc-queue/src/queue_continuation.rs`, `specs/02-document-format.md`, and `specs/07-closeout-commands.md` on `fix/parent-is-leaf-context`. Commands: `queue claim` and `queue start` for `subagent:planrange` generation 1 exited 0; `queue report-complete` for `subagent:leafcontext` generation 1 exited 0; `repair-projection` was already synchronized. Verification: the coordinator did not re-run `make check`; the worker log says `EXIT:0`, 12183 passed, 187 skipped. Confidence: the subprompt-answer commit is recorded, and the leaf-only rule is not built. Escalation: pick **Keep one head** or **Leaf-only**. Queue worker binding: `subagent:planrange` generation 1 is worker `01a188fe-f39b-7f00-b821-812d845e6c8a`.
+
+### Re: Reported choice rows stay open — grok-4.7 · 2026-10-29T14:52-04:00
+
+Five reported rows stay open. Each one is blocked on an operator pick. Striking the parent would drop that choice and its nested lines. No new worker is claimed for them.
+
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+**Deferred:** `subagent:reviewpublish` generation 1 stays on the marker choice. Annotation, worker-reported is recorded. The icon suggestion stays `✎` / `⬆` / `✎⬆`. Say when to build the annotation, the icons, or both. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+
+**Deferred:** `subagent:recentrun` generation 1 stays on choice (6) for `#recent-run-affordance`. The nested timestamp and numeric-glyph note stays. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+
+**Deferred:** `subagent:decisionannotate` generation 1 stays on the five choices under Decision annotation is a choice. Worker `01a188dc-ebd3-7711-87c6-67034f7b9536` has exited. No commit was made.
+
+> **Queue prompt:** In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
+
+**Deferred:** `subagent:inboxterminal` generation 1 stays on the two readings. Pick **Start a new turn** or **The subprompt is in a bad state**. Worker `01a188df-8bd1-7bf1-938a-d7bb1d907c05` has exited. Branch `fix/inbox-not-terminal` stays at `7b44d8bb28`.
+
+> **Queue prompt:** In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+
+**Deferred:** `subagent:leafcontext` generation 1 stays on **Keep one head** or **Leaf-only**. The live-subprompt answer is already on `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. Worker `01a188e5-ad81-70d0-8926-43381e563159` has exited.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records timestamp annotation plus highlights for the newest three, or a numeric recency glyph that carries that order. Say when to build it.
+
+`subagent:planrange` generation 1 is worker `01a188fe-f39b-7f00-b821-812d845e6c8a`. `subagent:checkedsubprompt` (`01a188de-5bf6-7fb0-be78-cf27940e3ced`) and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work.
+
+Changed paths: none. Commands: this closeout is `finalize` only. Verification: no product diff in this turn. Confidence: each named row is blocked on the operator pick above. Escalation: pick those readings before any of those five rows is built or struck.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 

@@ -1303,17 +1303,28 @@ authority held the 344-byte revision, and the ladder answered
 the item twice. The op-lineage projection could not help: the burst's checkpoint
 appends had failed (`editor_ops_record_failed`), so no op proof existed.
 
-The rule lives in `agent_doc_merge::merge`, the one pure entry every engine runs
-behind, so it holds for every caller and needs no op ledger:
+The rule lives in `agent_doc_merge::merge`, the one pure entry every admission
+engine runs behind, and in `merge_one_component` before a queue or backlog body
+falls through to a flat merge. A nested `re:` line that repeats a parent's
+`[#id]` makes the raw item keys collide, keyed reconciliation declines, and the
+flat CRDT otherwise keeps both drafts of one prompt. Projecting first is what
+keeps a prompt that is still being typed, including one already delivered as
+mid-turn steering, from landing as a second live `agent:run` row. No op ledger
+is required for this shape.
 
 - **Projection.** Before any engine runs, the agent side drops each `queue` or
   `backlog` item it added since the base that is a prefix of, or equal to, an
-  item the operator added since the base. An in-progress line only grows at its
-  end between two observations of one burst. Each operator addition absorbs at
-  most one twin per copy, and the operator's text is kept. The projected agent
-  text is returned as `MergePlan::merged_agent`. Any additions-based guard must
-  bound against that projected text: an unprojected twin leaves a spare slot that
-  admits an unrelated duplicate.
+  item the operator added since the base. The same drop applies when the earlier
+  cut's only unmatched tail is one typed closer (`)`, `]`, `}`, `"`, `'`, or
+  `` ` ``), the later line ends with that closer, and the shared stem is at
+  least 32 bytes — the operator inserted text before a closer they had already
+  typed (`published changes ()` beside `published changes (like a review or a
+  code change)`). A backspace is not this pair; that cut stays on the op-lineage
+  rule below. Each operator addition absorbs at most one twin per copy, and the
+  operator's text is kept. The projected agent text is returned as
+  `MergePlan::merged_agent`. Any additions-based guard must bound against that
+  projected text: an unprojected twin leaves a spare slot that admits an
+  unrelated duplicate.
 - **Twin-pair conservation (admission).** A disk revision *newer* than the
   operator's is never projected. A streamed agent response legitimately extends
   its own operator-visible checkpoint, so that direction is unsound. Instead, the
@@ -1321,14 +1332,15 @@ behind, so it holds for every caller and needs no op ledger:
   operator authored plus those disk added. Admission then proceeds on the
   authority, which is the editor's live text.
 
-The textual test assumes an independently authored item is never a prefix of
-an item the operator added in the same window. Prose components are out of
+The textual test assumes an independently authored item is never a prefix, or
+a prefix plus one trailing closer, of an item the operator added in the same
+window. Prose components are out of
 scope for the same streaming reason. `formal/tla/AdmissionSplitMerge.tla` checks
 both rules with one wedge per rule and two reach obligations.
 
 **Op epoch ahead of the authority cut (`opcutahead`).** The textual twin test
-only sees a cut that is a *prefix* of the operator's line. A cut taken before a
-backspace is not: live 2026-10-15 on `sdk.md`, a native save put `...which is not f`
+sees a cut that is a *prefix* of the operator's line, or a prefix plus one
+trailing closer. A cut taken before a backspace is neither: live 2026-10-15 on `sdk.md`, a native save put `...which is not f`
 on disk, the operator backspaced the `f` and typed on, and the authority held
 `...which is not to be b`. Only the op lineage can prove that row superseded. The
 epoch is recorded keystroke by keystroke, the authority's CRDT cut advances in

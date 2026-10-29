@@ -13,10 +13,13 @@
 //! every item a merge emits is the image of exactly ONE authored item. The
 //! decidable form used here: an agent-side item that is a prefix of (or equal
 //! to) an item the operator ADDED since the baseline is an earlier revision of
-//! that item -- an in-progress line only grows at its end between two
-//! observations of one typing burst -- so the operator's text is the pair's
-//! only image. The assumption that makes this sound is that an independently
-//! authored item is never a prefix of an item the operator added in the same
+//! that item, so the operator's text is the pair's only image. An in-progress
+//! line usually only grows at its end. It is the same item when the operator
+//! instead inserts text before one closer they had already typed (`()` becoming
+//! `(like a review or a code change)`), and the earlier cut's only unmatched
+//! tail is that closer. A backspace is not this shape. The assumption that makes
+//! this sound is that an independently authored item is never a prefix, or a
+//! prefix plus one trailing closer, of an item the operator added in the same
 //! window; the reach config proves genuinely independent agent-side additions
 //! still land.
 //!
@@ -71,16 +74,41 @@ fn counts(items: &[ItemSpan]) -> HashMap<(String, String), usize> {
     counts
 }
 
+/// Closers an operator can type before the clause they belong to.
+const TYPING_CLOSERS: &[char] = &[')', ']', '}', '"', '\'', '`'];
+
+/// Shared stem required before a one-closer tail counts as the same line.
+/// A stub such as `- see)` must not absorb an unrelated longer item.
+const CLOSER_INSERTION_MIN_STEM: usize = 32;
+
 /// True when `earlier` can be an earlier revision of `later` in one typing
-/// burst: equal, or a prefix of it.
+/// burst: equal, a prefix of it, or the same line with text inserted before a
+/// single closer that was already typed.
 pub fn is_revision_twin(earlier: &str, later: &str) -> bool {
     let (earlier, later) = (twin_key(earlier), twin_key(later));
-    !earlier.is_empty() && later.starts_with(earlier)
+    if earlier.is_empty() {
+        return false;
+    }
+    if later.starts_with(earlier) {
+        return true;
+    }
+    let mut chars = earlier.chars();
+    let Some(closer) = chars.next_back() else {
+        return false;
+    };
+    if !TYPING_CLOSERS.contains(&closer) || !later.ends_with(closer) {
+        return false;
+    }
+    let stem = chars.as_str();
+    stem.len() >= CLOSER_INSERTION_MIN_STEM
+        && later.starts_with(stem)
+        && later.len() > earlier.len()
 }
 
 /// Remove from `agent` every item occurrence that the agent side added since
-/// `base` and that is a revision twin (prefix or equal) of an item the operator
-/// added since `base`. Each operator addition absorbs at most as many agent
+/// `base` and that is a revision twin (prefix, equal, or a one-closer insertion)
+/// of an item the operator added since `base`. Each operator addition absorbs at
+/// most as many agent
 /// twins as the operator added copies of it, so the pairing is injective.
 ///
 /// Returns the agent text unchanged when any plane fails to project: a
@@ -304,6 +332,27 @@ mod tests {
             merge_invents_revision_twins(&base, &base, &both, &both),
             None
         );
+    }
+
+    /// 2026-10-29: the operator typed `)` and then inserted the clause before it.
+    /// The cut is not a string prefix. A one-character stub and a backspace are
+    /// not this pair.
+    #[test]
+    fn insertion_before_a_typed_closer_is_one_revision() {
+        let stem = "- I'm running into confusion over published changes (";
+        let earlier = format!("{stem})");
+        let later = format!("{stem}like a review or a code change)");
+        assert!(is_revision_twin(&earlier, &later));
+        assert!(!is_revision_twin(&later, &earlier));
+        assert!(!is_revision_twin("- see)", &later));
+        assert!(!is_revision_twin("which is not f", "which is not to be b"));
+        let base = doc("- do [#first]\n");
+        let disk = doc(&format!("- do [#first]\n{earlier}\n"));
+        let operator = doc(&format!("- do [#first]\n{later}\n"));
+        let projected = project_out_revision_twins(&base, &disk, &operator);
+        assert_eq!(projected.collapsed, 1, "{}", projected.agent_text);
+        assert!(!projected.agent_text.contains("published changes ()"));
+        assert!(!projected.agent_text.contains("like a review"));
     }
 
     #[test]

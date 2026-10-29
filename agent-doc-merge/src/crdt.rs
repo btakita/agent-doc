@@ -1408,6 +1408,25 @@ pub(crate) fn merge_one_component(
     ours_text: &str,
     theirs_text: &str,
 ) -> Result<String> {
+    // A queue whose raw item keys collide (a nested `re:` line repeating a
+    // parent's `[#id]`) cannot take the keyed reconciler, and the flat body
+    // merge then keeps every concurrent insert — including an in-progress
+    // `agent:run` cut beside the line the operator is still typing. Project
+    // that twin out of the agent side first, the same rule admission runs
+    // before its engines. Keyed reconciliation still owns every unique-key queue.
+    let projected_ours = crate::revision_twin::REVISION_TWIN_COMPONENTS
+        .contains(&name)
+        .then(|| {
+            crate::revision_twin::project_out_revision_twins(
+                base_text.unwrap_or(""),
+                ours_text,
+                theirs_text,
+            )
+        });
+    let ours_text = projected_ours
+        .as_ref()
+        .map(|projected| projected.agent_text.as_str())
+        .unwrap_or(ours_text);
     if ours_text == theirs_text {
         return Ok(ours_text.to_string());
     }
@@ -5721,6 +5740,154 @@ Second answer line three.
         let children = split_exchange_children(body).unwrap();
         let joined: String = children.iter().map(|c| c.text.as_str()).collect();
         assert_eq!(joined, body, "exchange segmentation is not lossless");
+    }
+
+    /// 2026-10-29 `agent-doc-bugs.md`: while a turn was running the operator typed
+    /// one `agent:run` prompt, first closing the paren (`... changes ()`) and then
+    /// inserting the clause before that closer. Closeout rebased a snapshot of the
+    /// `()` cut over the live line and kept both as live rows (+281 bytes, the
+    /// exact shorter row). A prompt still being typed, including one already
+    /// delivered as mid-turn steering, stays one row.
+    #[test]
+    fn typed_run_prompt_inserted_before_a_closer_is_not_a_second_live_row() {
+        let short = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes ()\n";
+        let long = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)\n";
+        let base = "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n- do [#grok-live-editor]\n<!-- /agent:run -->\n";
+        let ours = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n\n### Re: publish — grok\n\nPublished.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n- do [#grok-live-editor]\n{short}<!-- /agent:run -->\n"
+        );
+        let theirs = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n- do [#grok-live-editor]\n{long}<!-- /agent:run -->\n"
+        );
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            merged.matches("I'm running into confusion").count(),
+            1,
+            "a still-typed run prompt must not be duplicated:\n{merged}"
+        );
+        assert!(
+            merged.contains("like a review or a code change"),
+            "the live line is the one the operator is typing:\n{merged}"
+        );
+        assert!(
+            !merged.contains("published changes ()"),
+            "the steered or snapshotted `()` cut is not a second row:\n{merged}"
+        );
+        assert!(
+            merged.contains("### Re: publish — grok"),
+            "the closeout response still lands:\n{merged}"
+        );
+    }
+
+    /// The capture baseline already held the `()` cut. Closeout keeps that cut
+    /// and appends the response; the editor has since inserted text before the
+    /// closer. The live row replaces the baseline cut. It is not a second row.
+    #[test]
+    fn baseline_closer_cut_is_replaced_by_the_live_typed_run_prompt() {
+        let short = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes ()\n";
+        let long = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)\n";
+        let base = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n{short}<!-- /agent:run -->\n"
+        );
+        let ours = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n\n### Re: publish — grok\n\nPublished.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n{short}<!-- /agent:run -->\n"
+        );
+        let theirs = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run subagents priority go -->\n- [#vscodecodersmoke]\n{long}<!-- /agent:run -->\n"
+        );
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            merged.matches("I'm running into confusion").count(),
+            1,
+            "baseline `()` cut must not survive beside the live line:\n{merged}"
+        );
+        assert!(
+            merged.contains("like a review or a code change"),
+            "{merged}"
+        );
+        assert!(!merged.contains("published changes ()"), "{merged}");
+        assert!(merged.contains("### Re: publish — grok"), "{merged}");
+    }
+
+    /// Same prompt, with the closeout also striking another queue row. The
+    /// strike must not keep the stale cut alive beside the live line.
+    #[test]
+    fn typed_run_prompt_stays_one_row_when_closeout_also_strikes() {
+        let short = "- I'm running into confusion over whether a `#review` is posted ()\n";
+        let long = "- I'm running into confusion over whether a `#review` is posted (like a review or a code change)\n";
+        let base = "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n- [#smoke]\n- [#subagent:releaseinclude#2] release + publish\n<!-- /agent:run -->\n";
+        let ours = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n\n### Re: publish — grok\n\nPublished.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n- [#smoke]\n- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)\n{short}<!-- /agent:run -->\n"
+        );
+        let theirs = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n- [#smoke]\n- [#subagent:releaseinclude#2] release + publish\n{long}<!-- /agent:run -->\n"
+        );
+        let base_state = CrdtDoc::from_text(base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            merged.matches("I'm running into confusion").count(),
+            1,
+            "{merged}"
+        );
+        assert!(
+            merged.contains("like a review or a code change"),
+            "{merged}"
+        );
+        assert!(!merged.contains("posted ()"), "{merged}");
+    }
+
+    /// 2026-10-29 `agent-doc-bugs.md`: the baseline predates the prompt. Closeout
+    /// still holds the `()` cut and also strikes another row. A nested `re:` line
+    /// repeats `[#grok-live-editor]`, so the queue's raw item keys are not unique
+    /// and keyed reconciliation falls through to a flat body merge. That merge
+    /// kept the cut beside the live line (the +281 row). A prompt still being
+    /// typed, including one already delivered as mid-turn steering, stays one row.
+    #[test]
+    fn closer_cut_is_not_a_second_row_when_queue_item_keys_collide() {
+        let short = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes ()\n";
+        let long = "- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)\n";
+        let nested = "- do [#grok-live-editor]\n  - re: [#grok-live-editor]: allow the lease\n";
+        let base = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n{nested}- [#subagent:releaseinclude#2] release + publish\n<!-- /agent:run -->\n"
+        );
+        let ours = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n\n### Re: publish — grok\n\nPublished.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n{nested}- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)\n{short}- disk branch\n<!-- /agent:run -->\n"
+        );
+        let theirs = format!(
+            "<!-- agent:exchange -->\n### Re: prior\n\nPrior.\n<!-- /agent:exchange -->\n\n\
+## Run <!-- agent:run priority go -->\n{nested}- [#subagent:releaseinclude#2] release + publish\n{long}<!-- /agent:run -->\n"
+        );
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            merged.matches("I'm running into confusion").count(),
+            1,
+            "a closer-cut of a prompt still being typed must not be a second row:\n{merged}"
+        );
+        assert!(
+            merged.contains("like a review or a code change"),
+            "{merged}"
+        );
+        assert!(!merged.contains("published changes ()"), "{merged}");
+        assert!(merged.contains("### Re: publish — grok"), "{merged}");
+        assert!(merged.contains("- disk branch"), "{merged}");
+        assert!(
+            merged.contains("auto-struck: answered this cycle"),
+            "{merged}"
+        );
     }
 
     /// #qheadresidue / #queuestatemachine2: a free-text queue head answered and

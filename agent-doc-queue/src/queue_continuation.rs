@@ -996,9 +996,20 @@ pub fn live_drainable_continuation_head_excluding_claimed_with_presets(
     claimed: &ClaimedQueueItems,
     presets: &frontmatter::PromptPresets,
 ) -> Option<String> {
-    let stripped = live_drainable_head_prompt_text_excluding_claimed_with_presets(
-        content, scope, claimed, presets,
-    )?;
+    live_drainable_continuation_head_for_owner(content, scope, claimed, claimed, presets)
+}
+
+/// [`live_drainable_continuation_head_excluding_claimed_with_presets`] that
+/// selects with `selection` and suppresses `suppressed` inside that queue.
+pub fn live_drainable_continuation_head_for_owner(
+    content: &str,
+    scope: DrainScope,
+    selection: &ClaimedQueueItems,
+    suppressed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    let stripped =
+        live_drainable_head_prompt_text_for_owner(content, scope, selection, suppressed, presets)?;
     let preset_only = preset_only_identity_ids_with_presets(content, presets);
     Some(tracked_head_id(&stripped, &preset_only).unwrap_or(stripped))
 }
@@ -1034,16 +1045,35 @@ pub fn live_drainable_head_prompt_text_excluding_claimed_with_presets(
     claimed: &ClaimedQueueItems,
     presets: &frontmatter::PromptPresets,
 ) -> Option<String> {
+    live_drainable_head_prompt_text_for_owner(content, scope, claimed, claimed, presets)
+}
+
+/// Drainable head of the queue `selection` chooses, ignoring `suppressed`
+/// heads inside that queue without selecting a later one.
+///
+/// `selection` only chooses the queue. A `Reported` attempt is in that set so
+/// an earlier queue with nothing left to dispatch does not hide a later run,
+/// and it stays drainable when its own queue is the one selected
+/// (`#reportedwritebackdebt`). `suppressed` is what drops a head: in-flight
+/// claims, this cycle's dispatch, and holds. Passing dispatch heads as
+/// `selection` would pause the queue just chosen and name the next `agent:run`.
+pub fn live_drainable_head_prompt_text_for_owner(
+    content: &str,
+    scope: DrainScope,
+    selection: &ClaimedQueueItems,
+    suppressed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
     let (queue_facts, activation) = active_queue_for_supervisor_start_excluding_claimed(
         content,
         matches!(scope, DrainScope::Supervisor),
-        claimed,
+        selection,
     )?;
     let entries: Vec<QueueEntry> = activation
         .entries_after
         .into_iter()
         .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
+            QueueEntry::Prompt(prompt) => !suppressed.claims(&prompt.text),
             _ => true,
         })
         .collect();
@@ -1178,6 +1208,53 @@ pub fn dispatchable_head_prompt_text_excluding_claimed_with_presets(
     }
 }
 
+/// [`dispatchable_head_prompt_text_excluding_claimed_with_presets`] that keeps
+/// the manual-queue fallback on the owner-selected queue.
+///
+/// Suppressing that queue's dispatch heads returns no inline prompt. It does
+/// not fall through to `selected()`, which would name a yet-later `agent:run`
+/// in the same plan.
+pub fn dispatchable_head_prompt_text_for_owner(
+    content: &str,
+    scope: DrainScope,
+    selection: &ClaimedQueueItems,
+    suppressed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> Option<String> {
+    if let Some(text) =
+        live_drainable_head_prompt_text_for_owner(content, scope, selection, suppressed, presets)
+    {
+        return Some(text);
+    }
+    let components = element::parse(content).ok()?;
+    let queues = crate::queue_set::QueueSet::parse(content, &components).ok()?;
+    let block = queues
+        .selected_reaching_inline_work(selection)
+        .or_else(|| queues.selected())?;
+    let entries = document_queue::parse(block.component.content(content)).ok()?;
+    let entries = crate::nested_claim_steer::expand_if_installed(entries);
+    let has_auto = document_queue::has_auto_attr(&block.component.attrs);
+    let (fm, _) = frontmatter::parse(content).ok()?;
+    let activation = document_queue::resolve_activation(
+        &entries,
+        has_auto,
+        false,
+        fm.queue_active.unwrap_or(false),
+    );
+    if !activation.active {
+        return None;
+    }
+    let head = document_queue::prompts(&activation.entries_after)
+        .into_iter()
+        .map(|prompt| strip_in_progress_marker(&prompt.text))
+        .find(|text| !suppressed.claims(text))?;
+    let deferred = deferred_backlog_ids_split(content, scope);
+    match extract_head_id(&head) {
+        Some(id) if deferred.defers(&id, false) => None,
+        _ => Some(head),
+    }
+}
+
 /// Count agent-drainable heads in the active queue for the in-session loop.
 pub fn drainable_head_count(content: &str) -> usize {
     drainable_head_count_excluding_claimed(content, &ClaimedQueueItems::none())
@@ -1202,8 +1279,23 @@ pub fn drainable_head_count_excluding_claimed_with_presets(
     claimed: &ClaimedQueueItems,
     presets: &frontmatter::PromptPresets,
 ) -> usize {
+    drainable_head_count_for_owner(content, claimed, claimed, presets)
+}
+
+/// [`drainable_head_count_excluding_claimed_with_presets`] for one owner queue.
+///
+/// `selection` chooses the queue. `suppressed` drops heads inside it (this
+/// cycle's dispatch and holds) without moving the count onto a later queue.
+/// Heads present only in `selection`, including a `Reported` writeback, still
+/// count when that queue is the one selected.
+pub fn drainable_head_count_for_owner(
+    content: &str,
+    selection: &ClaimedQueueItems,
+    suppressed: &ClaimedQueueItems,
+    presets: &frontmatter::PromptPresets,
+) -> usize {
     let Some((queue_facts, activation)) =
-        active_queue_for_supervisor_start_excluding_claimed(content, false, claimed)
+        active_queue_for_supervisor_start_excluding_claimed(content, false, selection)
     else {
         return 0;
     };
@@ -1213,7 +1305,7 @@ pub fn drainable_head_count_excluding_claimed_with_presets(
     let preset_only = preset_only_identity_ids_with_presets(content, presets);
     document_queue::prompts(&activation.entries_after)
         .into_iter()
-        .filter(|prompt| !claimed.claims(&prompt.text))
+        .filter(|prompt| !suppressed.claims(&prompt.text))
         .filter(|prompt| {
             head_is_drainable(
                 &prompt.text,
@@ -1353,10 +1445,32 @@ fn queue_component_entries_excluding_claimed(
     content: &str,
     claimed: &ClaimedQueueItems,
 ) -> Option<(QueueFacts, Vec<QueueEntry>)> {
+    queue_component_entries_from(content, claimed, false)
+}
+
+/// Drain and supervisor selection. A fully delegated queue yields to a later
+/// queue that has inline work. [`queue_component_entries_excluding_claimed`]
+/// does not: `queue brief` and claim identity still read the dispatch owner.
+fn queue_component_entries_reaching_inline(
+    content: &str,
+    claimed: &ClaimedQueueItems,
+) -> Option<(QueueFacts, Vec<QueueEntry>)> {
+    queue_component_entries_from(content, claimed, true)
+}
+
+fn queue_component_entries_from(
+    content: &str,
+    claimed: &ClaimedQueueItems,
+    reaching_inline: bool,
+) -> Option<(QueueFacts, Vec<QueueEntry>)> {
     let components = element::parse(content).ok()?;
     let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
-    let queue_component = queue_set
-        .selected_excluding_claimed(claimed)
+    let selected = if reaching_inline {
+        queue_set.selected_reaching_inline_work(claimed)
+    } else {
+        queue_set.selected_excluding_claimed(claimed)
+    };
+    let queue_component = selected
         // Preserve the selected queue's blocked/claimed facts when no sibling
         // is available to this drain owner.
         .or_else(|| queue_set.selected())?
@@ -1423,7 +1537,7 @@ fn active_queue_for_supervisor_start_excluding_claimed(
     // every finished queue undispatched by the idle watch and the Codex Stop
     // hook once a new head was added; only an in-session invocation ran it. An
     // operator who wants a queue kept by hand writes `pause` or `stop`.
-    let (queue_facts, entries) = queue_component_entries_excluding_claimed(content, claimed)?;
+    let (queue_facts, entries) = queue_component_entries_reaching_inline(content, claimed)?;
     let control = crate::control_binding::frontmatter_queue_control(&fm);
     let explicit_go = crate::control_binding::explicit_queue_go_mode(&queue_facts.attrs, control);
     let explicit_start = allow_supervisor_start
@@ -2096,6 +2210,55 @@ mod tests {
                 &claim(&["do [#a]", "do [#b]"])
             ),
             None
+        );
+    }
+
+    /// Three `agent:run` sections. The first is only an operator-gated head.
+    /// Dispatching the second queue's head must not name the third as inline work.
+    #[test]
+    fn suppressing_dispatched_heads_stays_on_the_owner_queue() {
+        let content = concat!(
+            "---\nqueue: go\n---\n",
+            "<!-- agent:queue id=main subagents go -->\n",
+            "- 🙋 do [#blocked]:\n",
+            "  - 🙋 merge the pull request [#subagent-operator-request-blocked]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=api-prs subagents -->\n",
+            "- https://example.com/pull/759\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=contracts-prs subagents -->\n",
+            "- https://example.com/pull/162\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let selection = ClaimedQueueItems::none();
+        let presets = frontmatter::PromptPresets::default();
+        let scope = DrainScope::InSessionLoop;
+        assert_eq!(
+            dispatchable_head_prompt_text_for_owner(
+                content, scope, &selection, &selection, &presets
+            )
+            .as_deref(),
+            Some("https://example.com/pull/759")
+        );
+        let suppressed = selection.with_heads(&["https://example.com/pull/759".to_string()]);
+        assert_eq!(
+            dispatchable_head_prompt_text_for_owner(
+                content,
+                scope,
+                &ClaimedQueueItems::none(),
+                &suppressed,
+                &presets
+            ),
+            None
+        );
+        assert_eq!(
+            drainable_head_count_for_owner(
+                content,
+                &ClaimedQueueItems::none(),
+                &suppressed,
+                &presets
+            ),
+            0
         );
     }
 

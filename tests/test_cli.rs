@@ -31897,12 +31897,13 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
     );
     assert!(
         plan_source.contains(
-            "agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed"
-        ) && plan_source.contains(
-            "agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan"
-        )
+            "agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_for_owner"
+        ) && plan_source
+            .contains("agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content")
+            && plan_source
+                .contains("agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan")
             && plan_source.contains("agent_doc_queue::queue_heads::queue_is_active_for_diff"),
-        "plan.rs should call active queue selection policy through agent-doc-queue and exclude the shared out-of-loop projection"
+        "plan.rs should select the owner queue through agent-doc-queue and suppress this cycle's dispatch heads inside that queue"
     );
 
     let queue_closeout_guard =

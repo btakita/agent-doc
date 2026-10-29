@@ -2049,6 +2049,10 @@ pub fn queue_component_subagent_heads(
             presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
         })
         .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
+        .filter(|item| {
+            // `🙋` plus a trailing `[#id]` is operator-gated, not a worker head.
+            agent_doc_document::queue_projection::operator_action_ids(&item.raw).is_empty()
+        })
         .filter(|item| !blockers.blocks_row(&item.norm))
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
         .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
@@ -2082,11 +2086,33 @@ pub fn queue_attr_subagent_heads_with_presets(
     Vec<String>,
     Vec<String>,
 )> {
+    queue_attr_subagent_heads_for_owner(
+        content,
+        prompt_presets,
+        &agent_doc_queue::queue_claim::ClaimedQueueItems::none(),
+    )
+}
+
+/// [`queue_attr_subagent_heads_with_presets`] for the queue `claimed` leaves
+/// runnable. No `selected()` fallback: an earlier `subagents` queue whose
+/// heads are all claimed or operator-gated must not return an empty plan and
+/// hide a later queue.
+pub fn queue_attr_subagent_heads_for_owner(
+    content: &str,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
+) -> Option<(
+    agent_doc_queue::subagent_intent::QueueSubagentsMode,
+    Vec<String>,
+    Vec<String>,
+)> {
     let components = agent_doc_element::element::parse(content).ok()?;
-    let queue = agent_doc_queue::queue_set::selected_component(content, &components)
-        .ok()
-        .flatten()?;
-    queue_component_subagent_heads(content, queue, prompt_presets)
+    let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components).ok()?;
+    // No `selected()` fallback: an earlier `subagents` queue whose heads are
+    // all claimed or operator-gated must not return an empty plan and hide a
+    // later queue. Callers that pass an empty claim set still see `selected()`.
+    let block = queues.selected_excluding_claimed(claimed)?;
+    queue_component_subagent_heads(content, block.component, prompt_presets)
 }
 
 /// Live queue heads with item- or queue-scoped subagent intent that are NEW
@@ -3451,6 +3477,22 @@ mod tests {
             live,
             vec!["organize B".to_string(), "publish B [inline]".to_string()]
         );
+    }
+
+    /// An earlier `subagents` run whose only head is operator-gated must not
+    /// hide the next run's unclaimed work, and must not name the run after that.
+    #[test]
+    fn operator_gated_run_yields_the_next_subagents_queue() {
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue id=main subagents go -->\n- 🙋 do [#blocked]:\n  - 🙋 merge the pull request [#subagent-operator-request-blocked]\n<!-- /agent:queue -->\n\n<!-- agent:queue id=api-prs subagents -->\n- https://example.com/pull/759\n<!-- /agent:queue -->\n\n<!-- agent:queue id=contracts-prs subagents -->\n- https://example.com/pull/162\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let (mode, eligible, live) = queue_attr_subagent_heads(&content).unwrap();
+        assert_eq!(
+            mode.capacity,
+            agent_doc_queue::subagent_intent::QueueSubagentsCapacity::AllEligible
+        );
+        assert_eq!(eligible, vec!["https://example.com/pull/759".to_string()]);
+        assert_eq!(live, vec!["https://example.com/pull/759".to_string()]);
     }
 
     /// `#struckparentkids`: a row the operator writes under a closed

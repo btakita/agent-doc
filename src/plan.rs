@@ -267,22 +267,29 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     // selection preflight uses; when no head is drainable in this scope, plan
     // reports no queue-driven work rather than inventing one.
     let (queue_prompt, submit_claims) = if doc_diff.is_none() && harness_diff.is_none() {
-        let mut out_of_loop =
-            agent_doc_queue_io::queue_claim::ledger_claimed_items_for_content(file, &content);
+        // Select with owner claims only. This cycle's dispatch heads are
+        // suppressed inside that queue; adding them to the selection set would
+        // pause it and inline the next `agent:run` in the same plan.
+        let owner_selection =
+            agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(
+                file, &content,
+            );
+        let mut suppressed = owner_selection.clone();
         if let Some(queue_subagent_plan) =
             agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan(file, &content)
         {
-            out_of_loop = out_of_loop
+            suppressed = suppressed
                 .with_heads(&pending_queue_subagent_dispatch)
                 .with_heads(&queue_subagent_plan.held);
         }
-        let prompt = agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_excluding_claimed_with_presets(
+        let prompt = agent_doc_queue::queue_continuation::dispatchable_head_prompt_text_for_owner(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
-            &out_of_loop,
+            &owner_selection,
+            &suppressed,
             &effective_prompt_presets,
         );
-        (prompt, out_of_loop)
+        (prompt, suppressed)
     } else {
         (
             None,
@@ -1812,6 +1819,72 @@ Done.
             "subagent dispatch heads must not become inline repo actions: {:?}",
             plan.repo_actions
         );
+    }
+
+    /// Three `agent:run` sections. The first is only an operator-gated head, so
+    /// the plan names both later `subagents` queues and does not inline them.
+    #[test]
+    fn connected_plan_names_the_next_run_when_the_first_has_nothing_to_do() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue: go
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Run <!-- agent:run id="main" subagents priority go -->
+- 🙋 do [#blocked]:
+  - 🙋 merge the pull request [#subagent-operator-request-blocked]
+<!-- /agent:run -->
+
+## API PRs <!-- agent:run id="api-prs" subagents -->
+- https://example.com/pull/759
+<!-- /agent:run -->
+
+## API PRs <!-- agent:run id="contracts-prs" subagents -->
+- https://example.com/pull/162
+<!-- /agent:run -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "https://example.com/pull/759",
+                "https://example.com/pull/162"
+            ]
+        );
+        assert!(
+            plan.prompt_targets.is_empty(),
+            "the later runs must not be inlined: {:?}",
+            plan.prompt_targets
+        );
+        assert!(plan.repo_actions.is_empty(), "{:?}", plan.repo_actions);
     }
 
     #[test]

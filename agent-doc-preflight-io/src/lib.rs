@@ -3645,11 +3645,13 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
     };
+    let owner_selection =
+        agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(file, &content);
     let selection_out_of_loop_items =
         agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &content);
     let comp = match agent_doc_queue::queue_set::QueueSet::parse(&content, &components) {
         Ok(queues) => match queues
-            .selected_excluding_claimed(&selection_out_of_loop_items)
+            .selected_reaching_inline_work(&owner_selection)
             // When every queue is held, keep exposing the ordinary selected
             // queue's blocked facts instead of degrading to an empty probe.
             .or_else(|| queues.selected())
@@ -3802,8 +3804,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let drain_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&content, file);
     let queue_drainable_head_count = if activation.active {
-        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed_with_presets(
+        agent_doc_queue::queue_continuation::drainable_head_count_for_owner(
             &drainability_content,
+            &owner_selection,
             &out_of_loop_queue_items,
             &drain_presets,
         )
@@ -3812,9 +3815,10 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     };
     let queue_continuation_required = activation.active && queue_drainable_head_count > 0;
     let queue_supervisor_continuation_head = if activation.active {
-        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed_with_presets(
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_for_owner(
             &drainability_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &owner_selection,
             &out_of_loop_queue_items,
             &drain_presets,
         )
@@ -4921,15 +4925,14 @@ pub fn run_queue_maintenance_with_coin_gate(
             return Ok(QueueState::default());
         }
     }
-    let selection_out_of_loop_items =
-        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(
-            file,
-            &current_content,
-        );
+    let owner_selection = agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(
+        file,
+        &current_content,
+    );
     let selected_queue_id =
         match agent_doc_queue::queue_set::QueueSet::parse(&current_content, &components) {
             Ok(queues) => match queues
-                .selected_excluding_claimed(&selection_out_of_loop_items)
+                .selected_reaching_inline_work(&owner_selection)
                 .or_else(|| queues.selected())
                 .or_else(|| queues.blocks().first())
             {
@@ -7690,6 +7693,13 @@ pub fn run_queue_maintenance_with_coin_gate(
     let queue_pause_reason =
         agent_doc_queue_io::controller_pause::document_queue_controller_pause_reason(file);
     let queue_paused = queue_pause_reason.is_some();
+    // Recompute owner claims on the post-maintenance document. The set
+    // captured when the queue component was chosen is stale once this
+    // function rewrites `current_content`.
+    let owner_selection = agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(
+        file,
+        &current_content,
+    );
     let queue_drainable_head_count = if activation.active
         && authority_queue_unresolved_prompts == Some(0)
         && current_content == authority_baseline
@@ -7697,8 +7707,9 @@ pub fn run_queue_maintenance_with_coin_gate(
         0
     } else if activation.active {
         // GH #381: project-inherited presets count as preset invocations.
-        agent_doc_queue::queue_continuation::drainable_head_count_excluding_claimed_with_presets(
+        agent_doc_queue::queue_continuation::drainable_head_count_for_owner(
             &current_content,
+            &owner_selection,
             &out_of_loop_queue_items,
             &effective_prompt_presets,
         )
@@ -7716,9 +7727,10 @@ pub fn run_queue_maintenance_with_coin_gate(
     // Run Agent Doc synthesize `+do [#id]` for the claimed head on every press,
     // opening a no-op cycle that tripped `expect_done_or_gate_guard`.
     let queue_supervisor_continuation_head = if activation.active {
-        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_excluding_claimed_with_presets(
+        agent_doc_queue::queue_continuation::live_drainable_head_prompt_text_for_owner(
             &current_content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            &owner_selection,
             &out_of_loop_queue_items,
             &effective_prompt_presets,
         )

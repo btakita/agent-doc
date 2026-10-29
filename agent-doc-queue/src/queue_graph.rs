@@ -234,17 +234,54 @@ impl QueueBlock<'_> {
         if self.is_drained() {
             return QueueNodeState::Empty;
         }
-        if self.entries.iter().any(|entry| match entry {
-            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
-            QueueEntry::Freeform(line) => !document_queue::is_noise_freeform_line(line),
-            _ => false,
-        }) {
+        // `#nestedclaimsteer`: a child split out of a claimed parent is its own
+        // head. Judge availability on that view when a steer guard is installed.
+        let entries = crate::nested_claim_steer::expand_slice_if_installed(&self.entries);
+        let agent_available = document_queue::prompts(entries.as_ref())
+            .into_iter()
+            .any(|prompt| {
+                !claimed.claims(&prompt.text)
+                    && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+                        .is_empty()
+            })
+            || entries.iter().any(|entry| {
+                matches!(entry, QueueEntry::Freeform(line) if !document_queue::is_noise_freeform_line(line))
+            });
+        if agent_available {
             QueueNodeState::Ready
         } else {
-            // Externally owned/held work remains live for dependency purposes,
-            // but must not monopolize selection ahead of an independent queue.
+            // Claimed, operator-gated, or group-label work stays live for
+            // `after=` but must not monopolize selection ahead of an
+            // independent queue that still has runnable heads.
             QueueNodeState::Paused
         }
+    }
+
+    /// Every agent-available head is subagent work, so an in-session drain
+    /// has nothing to run here. Opt-out tags (`[inline]`, `[operator-verify]`)
+    /// and a queue without subagent intent keep the block inline.
+    fn is_delegated_only(&self, claimed: &crate::queue_claim::ClaimedQueueItems) -> bool {
+        let entries = crate::nested_claim_steer::expand_slice_if_installed(&self.entries);
+        let available = document_queue::prompts(entries.as_ref())
+            .into_iter()
+            .filter(|prompt| {
+                !claimed.claims(&prompt.text)
+                    && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+                        .is_empty()
+            })
+            .collect::<Vec<_>>();
+        if available.is_empty() {
+            return false;
+        }
+        let queue_subagents =
+            crate::subagent_intent::queue_subagents_mode(&self.component.attrs).is_some();
+        available.iter().all(|prompt| {
+            if queue_subagents {
+                !crate::subagent_intent::opts_out_of_queue_subagents(&prompt.text)
+            } else {
+                crate::subagent_intent::carries_subagent_intent_tag(&prompt.text)
+            }
+        })
     }
 }
 
@@ -343,9 +380,10 @@ impl<'a> QueueGraph<'a> {
 
     /// Select the first queue with work available to this drain owner.
     ///
-    /// A queue whose every live head is claimed or otherwise held is paused,
-    /// not empty: independent later queues remain selectable, while an
-    /// `after=` dependent still waits for the externally owned work to finish.
+    /// A queue whose every executable head is claimed, operator-gated (`🙋`),
+    /// or only a non-executable group label is paused, not empty: independent
+    /// later queues remain selectable, while an `after=` dependent still waits
+    /// for the externally owned work to finish.
     pub fn selected_excluding_claimed(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
@@ -368,6 +406,63 @@ impl<'a> QueueGraph<'a> {
             .map(|block| (block.id.clone(), block.state_excluding_claimed(claimed)))
             .collect();
         self.schedule_with_states(&runtime_states)
+    }
+
+    /// In-session selection. A queue whose remaining heads are all
+    /// subagent-delegated stays the dispatch owner ([`Self::selected_excluding_claimed`])
+    /// but is paused when a later queue has inline work, so an open scheduled
+    /// loop is not hidden behind workers that are already running. A later
+    /// queue that is itself only delegated does not count: one cycle does not
+    /// skip from the first subagent run to the next. `after=` still waits.
+    pub fn selected_reaching_inline_work(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> Option<&QueueBlock<'a>> {
+        match self.schedule_reaching_inline_work(claimed) {
+            QueueScheduleDecision::Ready { queue_id, .. } => self.block(&queue_id),
+            QueueScheduleDecision::Idle
+            | QueueScheduleDecision::Blocked { .. }
+            | QueueScheduleDecision::InFlight { .. } => None,
+        }
+    }
+
+    pub fn schedule_reaching_inline_work(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> QueueScheduleDecision {
+        self.schedule_with_states(&self.inline_work_states(claimed))
+    }
+
+    fn inline_work_states(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+    ) -> HashMap<String, QueueNodeState> {
+        let annotated = self
+            .blocks
+            .iter()
+            .map(|block| {
+                let state = block.state_excluding_claimed(claimed);
+                let delegated = state == QueueNodeState::Ready && block.is_delegated_only(claimed);
+                (block.id.clone(), state, delegated)
+            })
+            .collect::<Vec<_>>();
+        annotated
+            .iter()
+            .enumerate()
+            .map(|(index, (id, state, delegated))| {
+                let later_inline = annotated[index + 1..].iter().any(
+                    |(_, later_state, later_delegated)| {
+                        *later_state == QueueNodeState::Ready && !*later_delegated
+                    },
+                );
+                let state = if *delegated && later_inline {
+                    QueueNodeState::Paused
+                } else {
+                    state.clone()
+                };
+                (id.clone(), state)
+            })
+            .collect()
     }
 
     pub fn schedule(&self) -> QueueScheduleDecision {
@@ -1354,6 +1449,138 @@ mod tests {
 
         assert!(matches!(
             graph.schedule_excluding_claimed(&claimed),
+            QueueScheduleDecision::Blocked { .. }
+        ));
+    }
+
+    /// Three `agent:run` sections: the first has only claimed work, an
+    /// operator-gated folded head, and a group label. That queue is paused,
+    /// so the next independent queue is the runnable work. `after=` still waits.
+    #[test]
+    fn operator_or_label_only_queue_does_not_hide_a_later_run() {
+        let doc = concat!(
+            "<!-- agent:queue id=main subagents go -->\n",
+            "- ☑️ do [#reported]\n",
+            "- 🙋 do [#blocked]:\n",
+            "  - 🙋 merge the pull request [#subagent-operator-request-blocked]\n",
+            "- do [#group]\n",
+            "  - do [#child]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=api-prs subagents -->\n",
+            "- https://example.com/pull/759\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=contracts-prs subagents -->\n",
+            "- https://example.com/pull/162\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let claimed = crate::queue_claim::ClaimedQueueItems::none()
+            .with_heads(&["☑️ do [#reported]".to_string(), "do [#child]".to_string()]);
+
+        assert_eq!(
+            graph.schedule(),
+            QueueScheduleDecision::Ready {
+                queue_id: "main".into(),
+                occurrence: 0,
+            }
+        );
+        assert_eq!(
+            graph.schedule_excluding_claimed(&claimed),
+            QueueScheduleDecision::Ready {
+                queue_id: "api-prs".into(),
+                occurrence: 1,
+            }
+        );
+
+        let waiting = concat!(
+            "<!-- agent:queue id=main subagents go -->\n",
+            "- 🙋 do [#blocked]:\n",
+            "  - 🙋 merge the pull request [#subagent-operator-request-blocked]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=publish after=main -->\n",
+            "- publish the release\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let waiting_components = element::parse(waiting).unwrap();
+        let waiting_graph = QueueGraph::parse(waiting, &waiting_components).unwrap();
+        assert!(matches!(
+            waiting_graph
+                .schedule_excluding_claimed(&crate::queue_claim::ClaimedQueueItems::none()),
+            QueueScheduleDecision::Blocked { .. }
+        ));
+    }
+
+    /// A `subagents` queue stays the dispatch owner, and an open later queue
+    /// with inline work is the in-session selection. A closed later head
+    /// (passed in the claim set) does not pull selection off the delegated
+    /// queue. Two delegated runs do not skip from the first to the second.
+    #[test]
+    fn delegated_queue_yields_to_a_later_inline_queue() {
+        let doc = concat!(
+            "<!-- agent:queue id=queue-1 subagents go -->\n",
+            "- delegated main work\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-2 go -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+        assert_eq!(
+            graph.schedule_excluding_claimed(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "queue-1".into(),
+                occurrence: 0,
+            }
+        );
+        assert_eq!(
+            graph.schedule_reaching_inline_work(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "queue-2".into(),
+                occurrence: 1,
+            }
+        );
+        let held = none.clone().with_heads(&["#upgrade".to_string()]);
+        assert_eq!(
+            graph.schedule_reaching_inline_work(&held),
+            QueueScheduleDecision::Ready {
+                queue_id: "queue-1".into(),
+                occurrence: 0,
+            }
+        );
+
+        let both = concat!(
+            "<!-- agent:queue id=api-prs subagents -->\n",
+            "- https://example.com/pull/759\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=contracts-prs subagents -->\n",
+            "- https://example.com/pull/162\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let both_components = element::parse(both).unwrap();
+        let both_graph = QueueGraph::parse(both, &both_components).unwrap();
+        assert_eq!(
+            both_graph.schedule_reaching_inline_work(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "api-prs".into(),
+                occurrence: 0,
+            }
+        );
+
+        let dependent = concat!(
+            "<!-- agent:queue id=queue-1 subagents go -->\n",
+            "- delegated main work\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=queue-2 after=queue-1 go -->\n",
+            "- #upgrade\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let dependent_components = element::parse(dependent).unwrap();
+        let dependent_graph = QueueGraph::parse(dependent, &dependent_components).unwrap();
+        assert!(matches!(
+            dependent_graph.schedule_reaching_inline_work(&none),
             QueueScheduleDecision::Blocked { .. }
         ));
     }

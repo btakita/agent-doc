@@ -1578,11 +1578,14 @@ pub fn run_read_only_with_options(
 /// drain a head a subagent was already working on (agent-doc-bugs.md,
 /// 2026-10-03).
 fn supervisor_scope_unclaimed_head(file: &Path, content: &str) -> Option<String> {
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
+    let presets =
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_for_owner(
         content,
         agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        &agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(file, content),
         &agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, content),
-        &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file),
+        &presets,
     )
 }
 

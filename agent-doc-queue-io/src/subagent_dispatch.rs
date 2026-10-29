@@ -130,6 +130,20 @@ pub fn queue_attr_subagent_plan(
     queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)
 }
 
+/// Claims that choose which queue owns this cycle: ledger attempts (including
+/// `Reported`), closed schedule windows, and completion evidence. This cycle's
+/// fresh dispatch heads are not included, so naming them does not pause the
+/// queue just selected.
+pub fn owner_selection_claims_for_content(
+    file: &Path,
+    content: &str,
+) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
+    let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
+    crate::queue_claim::ledger_claimed_items_for_content(file, content)
+        .with_heads(&schedule_held)
+        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content))
+}
+
 fn queue_attr_subagent_plan_with_presets(
     file: &Path,
     content: &str,

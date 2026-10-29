@@ -734,6 +734,14 @@ pub fn nested_operator_answer(text: &str) -> Option<(&str, String)> {
     if !is_reserved_operator_action_id(id) || !(after.is_empty() || after == ":") {
         return None;
     }
+    let answer = live_subprompt_answer(text)?;
+    Some((id, answer))
+}
+
+/// Live nested rows' work text, joined by newlines. `None` when every nested
+/// row is struck or empty.
+fn live_subprompt_answer(text: &str) -> Option<String> {
+    use agent_doc_element_queue::subprompts;
     let answer = subprompts::subprompt_rows(text)
         .into_iter()
         .filter(|row| !subprompts::subprompt_row_is_struck(row))
@@ -745,7 +753,18 @@ pub fn nested_operator_answer(text: &str) -> Option<(&str, String)> {
         .filter(|row| !row.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
-    (!answer.is_empty()).then_some((id, answer))
+    (!answer.is_empty()).then_some(answer)
+}
+
+/// `#subpromptanswer`: a work row carrying `request_id` is answered by a live
+/// sub-prompt. The request id stays annotation provenance, so this does not
+/// put the id into [`operator_action_ids`] once `🙋` is gone. An answer-only
+/// row is [`nested_operator_answer`], not this shape, and is not struck here.
+fn work_row_subprompt_answers(text: &str, request_id: &str) -> bool {
+    operator_request_annotation_ids(text)
+        .iter()
+        .any(|id| id.eq_ignore_ascii_case(request_id))
+        && live_subprompt_answer(text).is_some()
 }
 
 /// Whether an operator request still holds this queue row open
@@ -798,8 +817,14 @@ pub fn operator_action_marked(text: &str) -> bool {
 ///
 /// Canonical rows append `[#request-id]`; adding `: <answer>` resolves the
 /// request locally. Legacy prefix rows are also recognized when the operator
-/// appended `: <answer>` to the original queue item.
+/// appended `: <answer>` to the original queue item. A live sub-prompt under a
+/// work row that carries the request annotation is the answer too
+/// (`#subpromptanswer`): the parent is not held waiting for that same text to
+/// be copied onto the parent line.
 pub fn operator_action_is_answered(text: &str, request_id: &str, queue_item: &str) -> bool {
+    if work_row_subprompt_answers(text, request_id) {
+        return true;
+    }
     if !operator_action_ids(text)
         .iter()
         .any(|id| id.eq_ignore_ascii_case(request_id))
@@ -1719,8 +1744,10 @@ mod tests {
             format!("[#{id}]\n  - yes")
         );
 
-        // Not answers: an empty block, a struck block, a tracked id, and a work
-        // row that carries the request annotation.
+        // Not the id-only nested shape: an empty block, a struck block, a
+        // tracked id, and a work row that carries the request annotation
+        // beside other text. A live sub-prompt under that work row is still
+        // an answer (`#subpromptanswer`).
         assert_eq!(nested_operator_answer(&format!("[#{id}]")), None);
         assert_eq!(
             nested_operator_answer(&format!("[#{id}]\n  - ~~done~~")),
@@ -1730,10 +1757,51 @@ mod tests {
         let work = format!("fix the replay [#{id}]");
         assert_eq!(operator_answer_row_request_id(&work), None);
         assert_eq!(operator_request_annotation_ids(&work), vec![id.to_string()]);
+        assert!(!operator_action_is_answered(&work, id, "do"));
         assert_eq!(
             operator_answer_row_request_id(&format!("[#{id}]: resync")),
             Some(id.to_string())
         );
+    }
+
+    /// `#subpromptanswer`: the answer under a `🙋` work row counts. The parent
+    /// is not an answer-only row, so it is not struck with the request, and
+    /// clearing `🙋` does not leave the request id holding the row.
+    #[test]
+    fn subprompt_under_a_marked_work_row_answers_the_request() {
+        let id = "subagent-operator-request-review-publish-marker";
+        let marked = format!(
+            "🙋☑️ [#subagent:reviewpublish#1] confusion about review markers [#{id}]\n  - Annotation, worker-reported\n  - If we were to do icons, what icons would you suggest?"
+        );
+        assert_eq!(nested_operator_answer(&marked), None);
+        assert_eq!(operator_answer_row_request_id(&marked), None);
+        assert!(operator_action_is_answered(&marked, id, "do"));
+        assert_eq!(
+            operator_request_annotation_ids(&marked),
+            vec![id.to_string()]
+        );
+        let open: HashSet<String> = [id.to_string()].into_iter().collect();
+        assert!(
+            operator_action_holds_row(&marked, &open),
+            "the visible 🙋 holds the row until the closeout checks the todo"
+        );
+
+        let cleared = apply_operator_action_ids(&marked, &[]);
+        assert_eq!(
+            cleared,
+            format!(
+                "☑️ [#subagent:reviewpublish#1] confusion about review markers [#{id}]\n  - Annotation, worker-reported\n  - If we were to do icons, what icons would you suggest?"
+            )
+        );
+        assert!(operator_action_ids(&cleared).is_empty());
+        assert!(operator_action_is_answered(&cleared, id, "do"));
+        assert!(!operator_action_holds_row(&cleared, &HashSet::new()));
+        assert_eq!(operator_answer_row_request_id(&cleared), None);
+
+        let struck_only = format!("🙋☑️ confusion [#{id}]\n  - ~~Annotation, worker-reported~~");
+        assert!(!operator_action_is_answered(&struck_only, id, "do"));
+        let no_request = "🙋☑️ confusion about review markers\n  - Annotation, worker-reported";
+        assert!(!operator_action_is_answered(no_request, id, "do"));
     }
 
     #[test]

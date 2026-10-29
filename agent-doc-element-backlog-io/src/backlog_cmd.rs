@@ -39,7 +39,8 @@ fn operator_request_queue_item(action: &str) -> Option<&str> {
 ///
 /// The canonical local answer is `[#request-id]: <answer>`. Legacy prefix
 /// rows are also recognized when their original queue item gained a non-empty
-/// `: <answer>` suffix.
+/// `: <answer>` suffix. A live sub-prompt under the work row counts as well
+/// (`#subpromptanswer`).
 pub fn answered_queue_operator_action_ids(content: &str) -> Result<Vec<String>> {
     let Some(todo) = agent_doc_element::todo::find_todo_component(content)? else {
         return Ok(Vec::new());
@@ -2742,6 +2743,40 @@ mod tests {
         assert_eq!(
             answered_queue_operator_action_ids(&content).unwrap(),
             vec![id.to_string()]
+        );
+    }
+
+    /// `#subpromptanswer`: the answer sits on an unmarked sub-prompt. The
+    /// parent line does not also carry `: <answer>`, and the open todo is
+    /// still resolved.
+    #[test]
+    fn subprompt_answer_resolves_its_open_request_without_a_parent_suffix() {
+        let id = "subagent-operator-request-review-publish-marker";
+        let content = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- 🙋☑️ [#subagent:reviewpublish#1] confusion about review markers [#{id}]\n",
+                "  - Annotation, worker-reported\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{id}] Answer the blocking subagent question for queue item ‘confusion about review markers’ in agent:exchange: Which marker\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            id = id,
+        );
+        assert_eq!(
+            answered_queue_operator_action_ids(&content).unwrap(),
+            vec![id.to_string()]
+        );
+
+        let unanswered = content.replace(
+            "  - Annotation, worker-reported\n",
+            "  - ~~Annotation, worker-reported~~\n",
+        );
+        assert!(
+            answered_queue_operator_action_ids(&unanswered)
+                .unwrap()
+                .is_empty()
         );
     }
 

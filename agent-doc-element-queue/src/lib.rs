@@ -65,7 +65,9 @@ impl QueueReportState {
         match self {
             Self::Local => "✎",
             Self::Published => "⇧",
-            Self::PublishedLocal => "✎⇧",
+            // Preserve the state transition in reading order: published first,
+            // then a newer local edit.
+            Self::PublishedLocal => "⇧✎",
         }
     }
 }
@@ -850,6 +852,13 @@ pub fn strip_intent_tags(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn publication_glyphs_read_in_state_transition_order() {
+        assert_eq!(super::QueueReportState::Local.glyph(), "✎");
+        assert_eq!(super::QueueReportState::Published.glyph(), "⇧");
+        assert_eq!(super::QueueReportState::PublishedLocal.glyph(), "⇧✎");
+    }
+
     #[test]
     fn descriptor_recognizes_run_and_loop_component_spellings() {
         assert!(super::DESCRIPTOR.matches_name("queue"));

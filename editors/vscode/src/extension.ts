@@ -828,7 +828,7 @@ class SyntaxDecorationController implements vscode.Disposable {
         after: { contentText: ' ⇧', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
     });
     private readonly queueReportPublishedLocalDecoration = vscode.window.createTextEditorDecorationType({
-        after: { contentText: ' ✎⇧', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
+        after: { contentText: ' ⇧✎', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
     });
 
     constructor() {
@@ -968,7 +968,7 @@ class SyntaxDecorationController implements vscode.Disposable {
                     ranges.queueReportPublished.push({ range, hoverMessage: 'Worker-reported published state (⇧)' });
                     break;
                 case 'queue_report_published_local':
-                    ranges.queueReportPublishedLocal.push({ range, hoverMessage: 'Published, then changed locally again (✎⇧)' });
+                    ranges.queueReportPublishedLocal.push({ range, hoverMessage: 'Published, then changed locally again (⇧✎)' });
                     break;
             }
         }

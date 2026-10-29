@@ -183,7 +183,7 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 7] = [
     },
     QueueMarkerAnnotation {
         token: "⟦local⟧ / ⟦published⟧ / ⟦published+local⟧",
-        meaning: "Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (✎⇧). Metadata, not work identity.",
+        meaning: "Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (⇧✎). Metadata, not work identity.",
     },
     QueueMarkerAnnotation {
         token: "📫 / 📤",

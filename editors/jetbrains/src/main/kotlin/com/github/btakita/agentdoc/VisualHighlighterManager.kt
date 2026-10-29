@@ -658,7 +658,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
         when (kind) {
             "queue_report_local" -> "✎" to "Worker-reported local changes"
             "queue_report_published" -> "⇧" to "Worker-reported published state"
-            "queue_report_published_local" -> "✎⇧" to "Published, then changed locally again"
+            "queue_report_published_local" -> "⇧✎" to "Published, then changed locally again"
             else -> null
         }
 

@@ -833,9 +833,10 @@ mod tests {
     }
 
     /// A completion cell recorded as `do [#id] - <child>` shares the parent's
-    /// tracked id and must not paint `🔄` on `do [#id]`, hold that parent out
-    /// of dispatch, or retire when only the parent is struck. The one-line row
-    /// whose work is the cell item, and a child row with its own cell, still
+    /// tracked id and must not paint `🔄` on `do [#id]`, or retire when only
+    /// the parent is struck. That parent is a nesting label, so projection
+    /// leaves it unmarked rather than painting `📥`. The one-line row whose
+    /// work is the cell item, and a child row with its own cell, still
     /// reconcile. Projecting the markers does not change the row count.
     #[test]
     fn completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent() {
@@ -887,6 +888,13 @@ mod tests {
         assert_eq!(queue_len(&projection.target_content), 3);
         assert!(
             projection
+                .target_content
+                .contains(&format!("- {parent}\n")),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            !projection
                 .target_content
                 .contains(&format!("- 📥 {parent}\n")),
             "{}",

@@ -3068,6 +3068,34 @@ mod tests {
         );
     }
 
+    /// `#subpromptanswer`: a `🙋` parent is not drainable while the glyph is
+    /// visible. Once the closeout drops `🙋` because the sub-prompt answered
+    /// the request, that same parent is ordinary drainable work. The answer
+    /// does not have to be copied onto the parent line.
+    #[test]
+    fn subprompt_answer_unwedges_the_parent_after_the_glyph_clears() {
+        let id = "subagent-operator-request-review-publish-marker";
+        let marked = format!(
+            "🙋☑️ [#subagent:reviewpublish#1] confusion about review markers [#{id}]\n  - Annotation, worker-reported"
+        );
+        let cleared = agent_doc_document::queue_projection::apply_operator_action_ids(&marked, &[]);
+        let document = |row: &str| {
+            format!(
+                "---\nagent_doc_session: test\n---\n\n<!-- agent:queue go -->\n- {row}\n<!-- /agent:queue -->\n"
+            )
+        };
+        assert_eq!(
+            drainable_head_count(&document(&marked)),
+            0,
+            "a visible 🙋 still holds the row until projection clears it"
+        );
+        assert_eq!(
+            drainable_head_count(&document(&cleared)),
+            1,
+            "the sub-prompt answer leaves the parent drainable without a parent-line suffix"
+        );
+    }
+
     /// The preset map a `.agent-doc/project.md` declaring `'#review'` resolves
     /// to; the session document never carries it (GH #381).
     fn project_review_presets() -> frontmatter::PromptPresets {

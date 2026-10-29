@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const sourceDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 import {
     buildEditorRoutePayload,
@@ -77,24 +82,33 @@ test('resolveEditorRouteTerminal throws on a rejected terminal', () => {
     assert.throws(() => resolveEditorRouteTerminal(data, 'cmd-1'), /boom/);
 });
 
-test('explicit steering delivered behind the owner is presented as concise success', () => {
+test('explicit steering delivered behind the owner is silent success', () => {
     const output = 'Error: [route] Sent 2 updates to the agent already running for /repo/tasks/sampleapp/notes.md; '
         + 'No second trigger was injected. steering_delivered=2 sent=explicit '
         + 'ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner '
         + 'ui_outcome_class=ok next_action=owner_turn_handles_steering';
     assert.equal(isEditorRouteSteeringDelivered(output), true);
-    const hint = buildEditorRouteSuccessHint('tasks/sampleapp/notes.md', output);
-    assert.equal(
-        hint,
-        'Sent 2 updates to the Agent Doc turn already running for tasks/sampleapp/notes.md; no second turn was started.',
-    );
-    assert.equal(hint.includes('No second trigger was injected'), false);
-    assert.equal(hint.startsWith('Error'), false);
+    assert.equal(buildEditorRouteSuccessHint('tasks/sampleapp/notes.md', output), null);
     assert.equal(
         buildEditorRouteSuccessHint(
             'tasks/sampleapp/notes.md',
             'steering_delivered=1 ui_outcome=steering_delivered_to_owner',
         ),
-        'Sent 1 update to the Agent Doc turn already running for tasks/sampleapp/notes.md; no second turn was started.',
+        null,
     );
+    assert.equal(buildEditorRouteSuccessHint('tasks/sampleapp/notes.md', 'routed ok'), 'routed ok');
+
+    const extension = fs.readFileSync(path.join(sourceDir, 'extension.ts'), 'utf8');
+    const runStart = extension.indexOf('async function executeRunForDocument');
+    const runEnd = extension.indexOf('async function runSessionCommandForActiveFile', runStart);
+    assert.ok(runStart >= 0 && runEnd > runStart);
+    const run = extension.slice(runStart, runEnd);
+    const delivered = run.indexOf('isEditorRouteSteeringDelivered(err.message)');
+    assert.ok(delivered >= 0);
+    const deliveredBranch = run.slice(delivered, run.indexOf('recordRouteBlocked', delivered));
+    assert.equal(deliveredBranch.includes('showHint'), false);
+    assert.equal(deliveredBranch.includes('showError'), false);
+    assert.equal(deliveredBranch.includes('showInformationMessage'), false);
+    assert.equal(deliveredBranch.includes('showWarningMessage'), false);
+    assert.ok(deliveredBranch.includes('recordRouteDispatchProven'));
 });

@@ -105,11 +105,10 @@ export function isEditorRouteSteeringDelivered(output: string): boolean {
     return output.includes(STEERING_DELIVERED_OUTCOME) && Number(count) > 0;
 }
 
-export function buildEditorRouteSuccessHint(relativePath: string, output: string): string {
+/** Status hint for a successful route. Steering already handed to the owning turn is silent. */
+export function buildEditorRouteSuccessHint(relativePath: string, output: string): string | null {
     if (isEditorRouteSteeringDelivered(output)) {
-        const count = Number(STEERING_DELIVERED_COUNT.exec(output)?.[1] ?? 0);
-        const noun = count === 1 ? 'update' : 'updates';
-        return `Sent ${count} ${noun} to the Agent Doc turn already running for ${relativePath}; no second turn was started.`;
+        return null;
     }
     return output.trim() || `Routed ${relativePath}`;
 }

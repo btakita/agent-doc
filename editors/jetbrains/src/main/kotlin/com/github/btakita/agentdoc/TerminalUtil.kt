@@ -603,9 +603,9 @@ object TerminalUtil {
                         finalStage = "route_startup_not_ready"
                         finalError = routeAttemptError(exitCode, failureKind, output)
                     } else if (failureKind == RunAgentDocRouteFailureKind.STEERING_DELIVERED) {
+                        // Routine success stays silent. Destructive confirmations stay on their own actions.
                         LOG.info("[route] steering delivered to active owner for $relativePath: $output")
                         clearPersistedRouteFailureOutput(project, cwd, relativePath)
-                        notifyRunAgentDocSteeringDelivered(project, relativePath, output, outcome)
                         StateProjectionBridge.recordRouteDispatchProven(
                             documentPath,
                             routeGeneration,
@@ -3175,27 +3175,6 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             notification.addAction(NotificationAction.createSimple("Copy details") {
                 CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
                 showHint(project, "Copied queued route details for $relativePath")
-            })
-            notification.notify(project)
-        } catch (_: Exception) {
-            System.err.println("[agent-doc] $summary")
-        }
-    }
-
-    private fun notifyRunAgentDocSteeringDelivered(
-        project: Project,
-        relativePath: String,
-        routeOutput: String,
-        outcome: RouteOutcome.Result,
-    ) {
-        val summary = outcome.summary ?: buildRunAgentDocSteeringDeliveredMessage(relativePath)
-        try {
-            val notification = NotificationGroupManager.getInstance()
-                .getNotificationGroup("Agent Doc")
-                .createNotification(notificationHtml(summary), NotificationType.INFORMATION)
-            notification.addAction(NotificationAction.createSimple("Copy details") {
-                CopyPasteManager.getInstance().setContents(StringSelection(routeOutput))
-                showHint(project, "Copied steering delivery details for $relativePath")
             })
             notification.notify(project)
         } catch (_: Exception) {

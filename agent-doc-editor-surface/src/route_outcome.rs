@@ -506,8 +506,9 @@ fn steering_delivered_count(output: &str) -> Option<usize> {
     digits.parse().ok()
 }
 
-/// Operator notification for a delivered explicit send. Names the count. Never
-/// the blocked-route clause `No second trigger was injected`.
+/// Summary for a delivered explicit send. Editors do not show it: handing the
+/// update to the owning turn is a routine success. Names the count. Never the
+/// blocked-route clause `No second trigger was injected`.
 fn steering_delivered_summary(relative_path: &str, output: &str) -> String {
     match steering_delivered_count(output) {
         Some(1) => format!(

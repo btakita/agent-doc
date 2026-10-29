@@ -75,6 +75,46 @@ pub trait QueueCommandEffects {
     }
 }
 
+/// The narrow effect boundary for re-projecting derived queue runtime state.
+///
+/// Tracked-work mutations need this without also gaining authority to consume,
+/// acknowledge, or prune queue heads. Keeping the projection effect separate
+/// lets closeout repaint blockers from the newly authoritative document cut
+/// while the queue command surface retains its stronger capabilities.
+pub trait QueueRuntimeProjectionEffects {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()>;
+}
+
+impl<T: QueueCommandEffects + ?Sized> QueueRuntimeProjectionEffects for T {
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        QueueCommandEffects::current_document_content(self, file, source)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        QueueCommandEffects::converge_document_or_disk(
+            self,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+}
+
 /// Pure document successor derived from the durable claim-state ledger.
 /// Callers that also publish another binary-owned document effect can compose
 /// that effect onto `target_content` and land one CAS successor instead of
@@ -144,6 +184,12 @@ pub enum ClaimProjectionScope<'a> {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeProjectionRows {
+    All,
+    BlockedOrPreviouslyBlocked,
+}
+
 pub fn derive_claim_runtime_projection(
     file: &Path,
     current: &str,
@@ -171,6 +217,35 @@ pub fn derive_claim_runtime_projection_scoped(
     current: &str,
     cleared_item: Option<&str>,
     scope: ClaimProjectionScope<'_>,
+) -> Result<ClaimRuntimeProjection> {
+    derive_runtime_projection_scoped(
+        file,
+        current,
+        cleared_item,
+        scope,
+        RuntimeProjectionRows::All,
+    )
+}
+
+fn derive_blocker_runtime_projection(
+    file: &Path,
+    current: &str,
+) -> Result<ClaimRuntimeProjection> {
+    derive_runtime_projection_scoped(
+        file,
+        current,
+        None,
+        ClaimProjectionScope::Document,
+        RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
+    )
+}
+
+fn derive_runtime_projection_scoped(
+    file: &Path,
+    current: &str,
+    cleared_item: Option<&str>,
+    scope: ClaimProjectionScope<'_>,
+    rows: RuntimeProjectionRows,
 ) -> Result<ClaimRuntimeProjection> {
     let components = agent_doc_element::element::parse(current)?;
     if !components.iter().any(|component| component.name == "queue") {
@@ -344,6 +419,16 @@ pub fn derive_claim_runtime_projection_scoped(
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     };
+                    if rows == RuntimeProjectionRows::BlockedOrPreviouslyBlocked
+                        && observed
+                            != Some(
+                                agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked,
+                            )
+                        && marker
+                            != agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                    {
+                        return None;
+                    }
                     let owner = claim
                         .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
                             owner: claim.owner.clone(),
@@ -465,9 +550,38 @@ pub fn record_claim_runtime_projection(
 /// marker must be removed. A reported release keeps its durable receipt visible
 /// as `☑️`, so callers must not clear it.
 pub fn project_claim_runtime_state_with_effects(
-    effects: &impl QueueCommandEffects,
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
     cleared_item: Option<&str>,
+) -> Result<bool> {
+    project_runtime_state_with_effects(
+        effects,
+        file,
+        cleared_item,
+        RuntimeProjectionRows::All,
+    )
+}
+
+/// Repaint only rows that are blocked now or still carry a stale blocked
+/// projection. Tracked-work closeout uses this narrower effect so blocker-list
+/// changes converge immediately without painting unrelated pending rows.
+pub fn project_blocker_runtime_state_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<bool> {
+    project_runtime_state_with_effects(
+        effects,
+        file,
+        None,
+        RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
+    )
+}
+
+fn project_runtime_state_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    cleared_item: Option<&str>,
+    rows: RuntimeProjectionRows,
 ) -> Result<bool> {
     let mut wrote_successor = false;
     for attempt in 1..=CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS {
@@ -476,9 +590,20 @@ pub fn project_claim_runtime_state_with_effects(
         // marker overlay below is then rederived by stable work identity.
         let current = effects.current_document_content(file, "queue_claim_runtime_projection")?;
         // A completion cell is durable attempt-scoped evidence. Reconcile it
-        // into the ledger before deriving markers, including after restart.
-        crate::queue_claim::reconcile_completion_evidence(file, &current)?;
-        let projection = derive_claim_runtime_projection(file, &current, cleared_item)?;
+        // into the ledger before deriving claim markers, including after
+        // restart. Blocker-only refresh is a document projection and must not
+        // acquire that ledger side effect.
+        if rows == RuntimeProjectionRows::All {
+            crate::queue_claim::reconcile_completion_evidence(file, &current)?;
+        }
+        let projection = match rows {
+            RuntimeProjectionRows::All => {
+                derive_claim_runtime_projection(file, &current, cleared_item)?
+            }
+            RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
+                derive_blocker_runtime_projection(file, &current)?
+            }
+        };
         if projection.changed {
             effects.converge_document_or_disk(
                 file,
@@ -494,7 +619,14 @@ pub fn project_claim_runtime_state_with_effects(
         // authoritative cut, not of the write call returning `Ok(())`.
         let authoritative =
             effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
-        let settled = derive_claim_runtime_projection(file, &authoritative, cleared_item)?;
+        let settled = match rows {
+            RuntimeProjectionRows::All => {
+                derive_claim_runtime_projection(file, &authoritative, cleared_item)?
+            }
+            RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
+                derive_blocker_runtime_projection(file, &authoritative)?
+            }
+        };
         if !settled.changed {
             let accepted = ClaimRuntimeProjection {
                 target_content: authoritative,

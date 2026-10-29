@@ -364,6 +364,38 @@ fn queue_consume_writeback_effects(force_disk: bool) -> &'static dyn QueueConsum
     }
 }
 
+struct RuntimeQueueProjectionEffects {
+    force_disk: bool,
+}
+
+impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
+    for RuntimeQueueProjectionEffects
+{
+    fn current_document_content(&self, file: &Path, source: &str) -> Result<String> {
+        if self.force_disk {
+            agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)
+        } else {
+            agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+        }
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )
+    }
+}
+
 fn queue_skip_diagnostic_for_current_document(
     file: &Path,
     force_disk: bool,
@@ -1851,14 +1883,27 @@ fn apply_pending_and_status_mutations(
     has_pending_ops: bool,
     reap_done_in_same_write: bool,
 ) -> Result<PendingStatusMutationOutcome> {
-    apply_pending_and_status_mutations_with_mode(
+    let outcome = apply_pending_and_status_mutations_with_mode(
         file,
         options,
         pending_kept_open_ids,
         has_pending_ops,
         reap_done_in_same_write,
         TrackedWorkMutationMode::Apply,
-    )
+    )?;
+    if has_pending_ops {
+        // `#queueblocked-closeout-refresh`: blocker state is a projection of
+        // open tracked work. Repaint it from the same authoritative successor
+        // that applied this mutation, rather than leaving a stale `⛔` until a
+        // later preflight or relay event happens to run.
+        agent_doc_queue_io::queue_cmd::project_blocker_runtime_state_with_effects(
+            &RuntimeQueueProjectionEffects {
+                force_disk: options.force_disk,
+            },
+            file,
+        )?;
+    }
+    Ok(outcome)
 }
 
 /// `#prmergeguardpr`: dry-run the same envelope the closeout will apply. Any
@@ -8395,6 +8440,72 @@ mod retained_closeout_reap {
         assert!(
             after.contains("- [ ] [#rrtb]"),
             "an untouched neighbour must be left alone:\n{after}"
+        );
+    }
+
+    /// `#queueblocked-closeout-refresh`: the sdk-demo failure was not in the
+    /// pure blocker derivation. Closing `#bossroom-sbx-provision` changed the
+    /// tracked-work components, but the dependent queue row kept its old
+    /// `⛔ ⟦blocked by ...⟧` projection until a later preflight happened to run.
+    #[test]
+    fn completing_the_last_blocker_repaints_the_dependent_in_the_same_mutation() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("sdk-demo.md");
+        let content = concat!(
+            "---\nagent_doc_session: queue-unblock\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: prior \u{2014} gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ⛔ ⟦blocked by bossroom-sbx-provision⟧ do [#bossroom-stg-provision]\n",
+            "- ⛔ ⟦blocked by bossroom-sbx-provision, sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#bossroom-sbx-provision] Provision SBX.\n",
+            "- [ ] [#sbx-handoff-infra-prep] Prepare the SBX handoff infrastructure.\n",
+            "- [ ] [#bossroom-stg-provision] Provision STG. (stays open: blocked behind #bossroom-sbx-provision)\n",
+            "- [ ] [#bossroom-sbx-gh-build] Build SBX. (stays open: blocked behind #bossroom-sbx-provision and #sbx-handoff-infra-prep)\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let mut options =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                &doc,
+                agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
+            );
+        options.is_template = true;
+        options.force_disk = true;
+        options.pending_done = vec!["bossroom-sbx-provision".to_string()];
+
+        apply_pending_and_status_mutations(&doc, &options, &[], true, true)
+            .expect("the tracked-work mutation and dependent projection must converge");
+
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains("- do [#bossroom-stg-provision]"),
+            "the dependent must lose its blocked projection in the same closeout cycle:\n{after}"
+        );
+        assert!(
+            !after.contains("blocked by bossroom-sbx-provision"),
+            "the stale blocker annotation must be removed with its marker:\n{after}"
+        );
+        assert!(
+            after.contains(
+                "- ⛔ ⟦blocked by sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]"
+            ),
+            "a multi-blocker row must retain only the blocker that is still open:\n{after}"
+        );
+        assert!(
+            !after.contains("blocked by bossroom-sbx-provision, sbx-handoff-infra-prep"),
+            "the completed blocker must be removed from a partially blocked row:\n{after}"
+        );
+        assert!(
+            !after.contains("- [ ] [#bossroom-sbx-provision]"),
+            "the blocker must no longer be open:\n{after}"
         );
     }
 }

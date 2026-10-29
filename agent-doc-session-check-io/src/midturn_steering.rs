@@ -4553,6 +4553,164 @@ mod tests {
         );
     }
 
+    /// A reported worker cannot receive more steering. The first direct child
+    /// added after report-complete must therefore become dispatchable, both on
+    /// a top-level claimed row and one nesting level deeper (`#nestedclaimsteer`).
+    #[test]
+    fn reported_nested_claim_routes_the_first_later_child_at_every_depth() {
+        let parent = "https://github.com/haiven-dev/haiven-contracts/pull/169";
+        let follow_up = "Add backlog items into fpe.md.";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("api.md");
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n  - ~~{parent} #review~~\n<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some(parent),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pr169", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            parent,
+            "subagent:pr169",
+            "worker-pr169",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(
+            &file,
+            parent,
+            Some(claim.generation),
+        )
+        .unwrap();
+        let edited = baseline.replace(
+            &format!("  - ~~{parent} #review~~\n"),
+            &format!("  - ~~{parent} #review~~\n  - {follow_up}\n"),
+        );
+        std::fs::write(&file, &edited).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("reported parent follow-up steering");
+        let routed = hook
+            .items
+            .iter()
+            .find(|item| item.verbatim.contains(follow_up))
+            .unwrap_or_else(|| panic!("reported parent follow-up missing: {hook:?}"));
+        assert_eq!(routed.change, core::SteeringChange::Added);
+        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
+        assert_eq!(routed.owner, None);
+        let dispatch =
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &file, &edited,
+            )
+            .unwrap();
+        assert!(dispatch.iter().any(|head| head == follow_up), "{dispatch:?}");
+
+        let parent = "https://github.com/haiven-dev/haiven-contracts/pull/174";
+        let first = "Review the pull request.";
+        let addressed = "#address";
+        let response = "respond to the review in the PR";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("api.md");
+        let baseline = format!(
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some(parent),
+            Vec::new(),
+        )
+        .unwrap();
+        let (_, parent_claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pr174", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            parent,
+            "subagent:pr174",
+            "worker-pr174",
+            3600,
+            parent_claim.generation,
+        )
+        .unwrap();
+        let with_children = baseline.replace(
+            &format!("- {parent}\n"),
+            &format!("- {parent}\n  - {first}\n  - {addressed}\n"),
+        );
+        std::fs::write(&file, &with_children).unwrap();
+        backdate(&file);
+        observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("nested address head");
+        let (_, address_claim) = agent_doc_queue_io::queue_claim::claim(
+            &file,
+            addressed,
+            "subagent:pr174-address",
+            3600,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            addressed,
+            "subagent:pr174-address",
+            "worker-pr174-address",
+            3600,
+            address_claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(
+            &file,
+            addressed,
+            Some(address_claim.generation),
+        )
+        .unwrap();
+        let with_grandchild = with_children.replace(
+            &format!("  - {addressed}\n"),
+            &format!("  - {addressed}\n    - {response}\n"),
+        );
+        std::fs::write(&file, &with_grandchild).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("reported nested follow-up steering");
+        let routed = hook
+            .items
+            .iter()
+            .find(|item| item.verbatim.contains(response))
+            .unwrap_or_else(|| panic!("reported nested follow-up missing: {hook:?}"));
+        assert_eq!(routed.change, core::SteeringChange::Added);
+        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
+        assert_eq!(routed.owner, None);
+        let dispatch =
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &file,
+                &with_grandchild,
+            )
+            .unwrap();
+        assert!(dispatch.iter().any(|head| head == response), "{dispatch:?}");
+    }
+
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator
     /// annotates a CLAIMED `#gh-fix` head while the coordinator is idle. The
     /// claim follows the edit, the idle wake fires for it, the woken cycle's

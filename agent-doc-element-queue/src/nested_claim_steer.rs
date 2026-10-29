@@ -97,6 +97,20 @@ fn finish_child(
 /// are [`NestedClaimSplit::routable`]. No routable child returns `current`
 /// unchanged.
 pub fn split_nested_claim_steer<'a>(current: &'a str, claim_time: &str) -> NestedClaimSplit<'a> {
+    split_nested_claim_steer_with_limit(current, claim_time, 1)
+}
+
+/// [`split_nested_claim_steer`] with an explicit allowance for newly added
+/// children that still steer the existing attempt.
+///
+/// Running attempts use one slot. Reported attempts use zero: their worker has
+/// finished, so every new direct child is independent work instead of
+/// writeback debt on a worker that can no longer receive steering.
+pub fn split_nested_claim_steer_with_limit<'a>(
+    current: &'a str,
+    claim_time: &str,
+    steering_addition_limit: usize,
+) -> NestedClaimSplit<'a> {
     let unchanged = NestedClaimSplit {
         steering: Cow::Borrowed(current),
         routable: Vec::new(),
@@ -135,10 +149,10 @@ pub fn split_nested_claim_steer<'a>(current: &'a str, claim_time: &str) -> Neste
         .collect();
     let edits = unmatched_claim.min(unmatched_current.len());
     let additions = &unmatched_current[edits..];
-    if additions.len() <= 1 {
+    if additions.len() <= steering_addition_limit {
         return unchanged;
     }
-    let routable_at: Vec<usize> = additions[1..].to_vec();
+    let routable_at: Vec<usize> = additions[steering_addition_limit..].to_vec();
     let (parent, _) = split_subprompt_block(current);
     let mut steering = String::with_capacity(current.len());
     steering.push_str(parent);
@@ -248,6 +262,16 @@ mod tests {
         assert_eq!(split.steering, "Parent\n  - alpha");
         assert_eq!(split.routable.len(), 1);
         assert_eq!(split.routable[0].head_text, "beta");
+        assert_eq!(split.routable[0].indent, 2);
+    }
+
+    #[test]
+    fn a_finished_attempt_routes_its_first_added_child() {
+        let current = "Parent\n  - follow-up";
+        let split = split_nested_claim_steer_with_limit(current, "Parent", 0);
+        assert_eq!(split.steering, "Parent");
+        assert_eq!(split.routable.len(), 1);
+        assert_eq!(split.routable[0].head_text, "follow-up");
         assert_eq!(split.routable[0].indent, 2);
     }
 

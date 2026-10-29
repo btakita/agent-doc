@@ -679,6 +679,15 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 > **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 
 **Deferred:** `origin/fix/realtime-steering-parity` and the local HEAD are both `eac6892dc30d2e80dea901fe19260b354851226b`. `make check` on that rebase exited 0: 12180 passed, 187 skipped. Integration onto main stays with the coordinator after review. Generation 2 remains `subagent:rtsteeringparity`.
+
+### Re: allow is already pushed — grok-4.7 · 2026-10-29T02:01-04:00
+
+> **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
+
+> **Operator note:** allow
+
+**Deferred:** The allow choice is already applied. `origin/fix/realtime-steering-parity` and the local HEAD are both `eac6892dc30d2e80dea901fe19260b354851226b`. `make check` on that rebase exited 0: 12180 passed, 187 skipped. Integration onto main remains after review. Generation 2 stays with `subagent:rtsteeringparity`.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -686,12 +695,8 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
 - 📥 do [#grok-live-editor]
-  - 🚧 [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]
-- ~~api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.~~ — auto-struck: answered this cycle (#ftstrike)
+  - 🚧 [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
-- ~~Will #subagent:contractprsstall allow all 3 agent:run elements to be processed, even if an earlier agent:run is PAUSED? If not, it should...and implement fix in a subagent.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -3302,6 +3302,26 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     })
 }
 
+/// Work text submitted when the selected continuation row is a group parent.
+///
+/// Group parents are not executable nested leaves, so the ordinary
+/// [`submitted_prompt_at`] lookup deliberately excludes them. A direct queue
+/// continuation can nevertheless select a tracked top-level directive that
+/// owns nested operator answers. Submit that directive with the parsed prompt
+/// tree so those answers reach the agent while the directive remains the work
+/// identity.
+pub fn submitted_group_prompt_at(entries: &[QueueEntry], index: usize) -> Option<String> {
+    let prompt = match entries.get(index)? {
+        QueueEntry::Prompt(prompt) if entry_is_group_parent(entries, index) => prompt,
+        _ => return None,
+    };
+    let identity = strip_in_progress_marker(prompt.text.trim());
+    if identity.trim().is_empty() {
+        return None;
+    }
+    Some(with_prompt_tree(entries, index, &identity))
+}
+
 const PROMPT_TREE_HEADER: &str =
     "Prompt tree (`#nestsubmit`, context only; run the lineage above):";
 

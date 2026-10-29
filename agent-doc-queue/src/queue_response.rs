@@ -787,6 +787,34 @@ fn first_submitted_in_document(
     None
 }
 
+/// Submit a selected group parent with its nested authorization/context rows.
+///
+/// This is continuation-only: ordinary queue submission still treats a
+/// top-level row as its literal text. Direct continuations can select a
+/// top-level tracked directive whose children carry operator-request answers;
+/// omitting its tree loses the scope the operator supplied.
+fn first_submitted_group_in_document(
+    content: &str,
+    head_text: &str,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    for entries in parsed_queue_bodies(content) {
+        for (index, entry) in entries.iter().enumerate() {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if !crate::document_queue::entry_is_group_parent(&entries, index)
+                || !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                || skip(&prompt.text)
+            {
+                continue;
+            }
+            return crate::document_queue::submitted_group_prompt_at(&entries, index);
+        }
+    }
+    None
+}
+
 /// Prompt text to submit for `head_text` (`#nestsubmit`).
 ///
 /// A nested leaf becomes its nest vector plus the entire prompt tree of the
@@ -836,6 +864,12 @@ pub fn submitted_continuation_prompt(
             )
     };
     if let Some(found) = first_submitted_in_document(content, head_text, &prefer) {
+        return found;
+    }
+    if let Some(found) = first_submitted_group_in_document(content, head_text, &prefer) {
+        return found;
+    }
+    if let Some(found) = first_submitted_group_in_document(content, head_text, &skip) {
         return found;
     }
     submitted_queue_prompt_skipping(content, head_text, skip)
@@ -3216,6 +3250,41 @@ queue_active: true
             submitted_continuation_prompt(content, "#rebase", |_| false),
             submitted
         );
+    }
+
+    /// A selected tracked directive can own the operator's answers to a prior
+    /// request for push scope. The continuation must carry those answers even
+    /// though the top-level directive remains its queue identity.
+    #[test]
+    fn submitted_continuation_group_parent_carries_operator_answer_lineage() {
+        let content = "\
+---
+queue_active: true
+---
+
+<!-- agent:queue go -->
+- do [#push] [#subagent-operator-request-push-target]
+  - ~~agent/api-pr-752 49820f68~~
+  - [#subagent-operator-request-pr759-fix-ci-push]: Publish from dev, pin dev, rebase 758 and 759 [#subagent-operator-request-pr759-dev-ruleset]
+    - ~~[#subagent-operator-request-pr759-dev-ruleset]: Open a pin PR~~
+- https://github.com/haiven-dev/haiven-api/pull/762
+  - ~~#review~~
+<!-- /agent:queue -->
+";
+        let head = "do [#push] [#subagent-operator-request-push-target]";
+
+        assert_eq!(submitted_queue_prompt(content, head), head);
+        let submitted = submitted_continuation_prompt(content, head, |_| false);
+        assert!(
+            submitted.starts_with(&format!("{head}\nPrompt tree (`#nestsubmit`")),
+            "{submitted}"
+        );
+        assert!(
+            submitted.contains("Publish from dev, pin dev, rebase 758 and 759"),
+            "{submitted}"
+        );
+        assert!(submitted.contains("(this leaf)"), "{submitted}");
+        assert!(submitted.contains("pull/762"), "{submitted}");
     }
 
     /// `#nestlistlineage`: a nest-vector head binds the queue that owns that

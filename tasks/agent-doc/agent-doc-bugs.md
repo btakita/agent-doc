@@ -26,7 +26,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. The installed binary is 0.35.560. JetBrains pluginVersions on that release commit stay 0.2.877, 0.2.878, and 0.2.879. Main is 44210183cc. That commit submits a nested run leaf as its nest vector, so the api.md case is submitted as `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. The worker make check exited 0 (nextest 12126 passed, 187 skipped). make install of 44210183cc exited 0. JetBrains packages on main stay 0.2.880, 0.2.881, and 0.2.882, and VS Code stays 0.2.90. That install found those JetBrains bytes already current. 493731820e, now an ancestor of main, treats a live nested push or publish under a claimed rebase or review as operator authorization. ce46068a9f composes ancestor .agent-doc/project.md rules, farthest ancestor first, and a nested .git does not hide the ancestor file. The worker make check for that rules commit exited 0 (nextest 12119 passed, 187 skipped). make install of ce46068a9f exited 0, and make install of 493731820e exited 0. CI for 5291b1f93c failed in the check job (run 40774734370). CI for 8862b2f9b5 was cancelled (run 40781176636). CI for ce46068a9f succeeded (run 40784757953); Book and Pages for that commit succeeded. CI for 493731820e is in progress (run 40786474632); Book (run 40786474587) and Pages (run 40786474657) succeeded. CI for 44210183cc is in progress (run 40789165872); Book (run 40789165877) and Pages (run 40789165836) succeeded. Those main commits are outside tag v0.35.560.
+Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. The installed binary is 0.35.560. JetBrains pluginVersions on that release commit stay 0.2.877, 0.2.878, and 0.2.879. Main is 9653bffdb4. 04fe6be064 keeps an operator-request id on its nested run item by matching the parent-line work identity and the brief's collapsed origin. Coordinator make check on 04fe6be064 exited 0 (nextest 12128 passed, 187 skipped). 9653bffdb4 keeps a release row queued while an included subagent is open. Its regression starts from the unstruck release + publish rows. Focused tests on that merged tree passed (3 tests). make install of 9653bffdb4 exited 0. JetBrains packages on main stay 0.2.880, 0.2.881, and 0.2.882, and VS Code stays 0.2.90. That install found those JetBrains bytes already current. 44210183cc, now an ancestor of main, submits a nested run leaf as its nest vector, so the api.md case is submitted as `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. The worker make check for that commit exited 0 (nextest 12126 passed, 187 skipped). make install of 44210183cc exited 0. 493731820e treats a live nested push or publish under a claimed rebase or review as operator authorization. ce46068a9f composes ancestor .agent-doc/project.md rules, farthest ancestor first, and a nested .git does not hide the ancestor file. The worker make check for that rules commit exited 0 (nextest 12119 passed, 187 skipped). make install of ce46068a9f exited 0, and make install of 493731820e exited 0. CI for 5291b1f93c failed in the check job (run 40774734370). CI for 8862b2f9b5 was cancelled (run 40781176636). CI for ce46068a9f succeeded (run 40784757953); Book and Pages for that commit succeeded. CI for 493731820e succeeded (run 40786474632); Book (run 40786474587) and Pages (run 40786474657) succeeded. CI for 44210183cc is in progress (run 40789165872); Book (run 40789165877) and Pages (run 40789165836) succeeded. CI for 04fe6be064 is in progress (run 40793014287); Book (run 40793014229) and Pages (run 40793014276) succeeded. CI for 9653bffdb4 is in progress (run 40793118223); Book (run 40793118283) succeeded and Pages (run 40793118210) is in progress. Those main commits are outside tag v0.35.560.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -367,6 +367,24 @@ The entire-tree claim stays with worker `01a184e6`. That worktree is still dirty
 
 No additional backlog follow-up is needed because both commits are on main.
 
+### Re: local install after each landed commit — grok-4.7 · 2026-10-28T20:34-04:00
+
+> **Chat prompt (#chatprompt):** Are you installing locally after each bulid?
+
+Yes. After each commit lands on the integration checkout `/home/brian/worktrees/agent-doc-release` (branch `feat/release-readiness`, tracking `origin/main`), I run one local `make install` there. The latest install is main `9653bffdb4`, and it exited 0. `agent-doc --version` is 0.35.560 because those commits kept the package version. JetBrains packages on that install stayed 0.2.880, 0.2.881, and 0.2.882, and VS Code stayed 0.2.90.
+
+A worker builds and tests in its own worktree. I install that work from the integration checkout after the branch is reviewed and fast-forwarded onto main. Worker `01a18511-43fc-7c63-880c-24293e538339` is still building the nested-tree fix, so this cycle has not installed that branch.
+
+> **Queue prompt:** In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.
+
+**Deferred:** Worker `01a18511-43fc-7c63-880c-24293e538339` (`subagent:keeptree`, generation 1) is running in `/home/brian/worktrees/agent-doc-keeptree` on `fix/keep-nested-tree-item`. The nested free-text child stays in the parent run tree. If an id is created, it replaces the free text in that same place, and one child is one dispatch.
+
+The entire-tree `make check` on `fix/entire-prompt-tree` exited 2. Nextest ran 12128 tests: 12128 passed, 187 skipped. `audit-docs` then failed with `Error: stale Grok bundled runbooks/respond.md`. Resumed worker `01a18513-e86d-7a81-9f76-2e63960d8e24` continues claim generation 1 (`subagent:entiretree`) to sync that bundled copy, rebase onto current `origin/main` (the branch is 2 commits behind), commit, and push only `fix/entire-prompt-tree`. Install of that tree waits until it is on main.
+
+`do [#grok-live-editor]` stays open. Worker `01a184da-4035-74d0-b8a1-6e4a03fd9928` still holds the nested parity line, and its `make check` is still running.
+
+No additional backlog follow-up is needed because the nested-tree fix is the claimed running item, and the install question is answered here.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 
@@ -381,6 +399,7 @@ No additional backlog follow-up is needed because both commits are on main.
 - ~~api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
+- 🚧 [#subagent:keeptree#1] In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -13,8 +13,10 @@
 //! "New" is judged against the previous cycle's seed so an item gets one
 //! dispatch-intent window: once claimed it is excluded by the claim, and once
 //! a later cycle has seeded with it present it drains through the normal
-//! queue (a released claim means the subagent reported back and the
-//! in-session loop now closes the item).
+//! queue (a reported release means the subagent finished and the in-session
+//! loop now closes the item). A retained `Lost` attempt is the exception: it
+//! proves the previous dispatch no longer owns the row, so an eligible
+//! per-line subagent row is offered again even though it predates the seed.
 //!
 //! The seed record lives in `state.db` `project_runtime_state`; the key format
 //! is shared with `agent-doc-session-check-io::midturn_steering`.
@@ -135,14 +137,35 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
             .collect());
     }
     let reference = reference_queue_for_dispatch(file)?;
-    let heads =
+    let fresh =
         core::subagent_dispatch_heads_with_presets(content, reference.as_deref(), &prompt_presets);
-    if heads.is_empty() {
-        return Ok(heads);
+    let fresh_identities = fresh
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<Vec<_>>();
+    let lost_identities = crate::queue_claim::claim_states_for_content(file, content)?
+        .into_iter()
+        .filter(|claim| {
+            claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+        })
+        .map(|claim| claim.identity)
+        .collect::<Vec<_>>();
+    if fresh_identities.is_empty() && lost_identities.is_empty() {
+        return Ok(Vec::new());
     }
+    // Start from the full eligible list so a recovered old row keeps document
+    // order relative to genuinely new rows. Identity comparison also preserves
+    // nested lineage semantics and de-duplicates a row that is both new and
+    // backed by a retained Lost attempt.
+    let heads = core::subagent_dispatch_heads_with_presets(content, None, &prompt_presets)
+        .into_iter()
+        .filter(|head| {
+            let identity = agent_doc_queue::queue_claim::claim_identity(head);
+            fresh_identities.iter().any(|fresh| fresh == &identity)
+                || lost_identities.iter().any(|lost| lost == &identity)
+        });
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
     Ok(heads
-        .into_iter()
         .filter(|head| !claimed.claims(head) && !reported.claims(head))
         .map(|head| visible_dispatch_head(&keys, &head))
         .collect())
@@ -583,6 +606,103 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a claimed item is already dispatched"
+        );
+    }
+
+    /// `#lostsubagentrestart`: Run Agent Doc must not strand an old nested
+    /// subagent row after its prior worker becomes unavailable. A retained
+    /// Lost attempt is offered again by the queue-level subagent run, while
+    /// the active attempt before abandonment and the replacement claim after
+    /// redispatch each continue to fence duplicates.
+    #[test]
+    fn expired_nested_subagent_run_item_is_offered_for_replacement_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Run\n\n<!-- agent:run subagents go -->\n",
+            "- do [#grok-live-editor]\n",
+            "  - re: [#grok-live-editor]: Also validate real-time steering parity\n",
+            "<!-- /agent:run -->\n",
+        )
+        .to_string();
+        std::fs::write(&file, &content).unwrap();
+        seed(&file, "cycle-prev", &content);
+
+        let pinned = 1_000_000;
+        let _claimed_at = crate::queue_claim::pin_claim_clock_for_current_thread(pinned);
+        let (_, prior) =
+            crate::queue_claim::claim(&file, item, "subagent:rtsteeringparity", 10).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:rtsteeringparity",
+            "/root/rtsteeringparity",
+            10,
+            prior.generation,
+        )
+        .unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty(),
+            "an active prior worker remains fenced"
+        );
+
+        let _expired = crate::queue_claim::pin_claim_clock_for_current_thread(pinned + 10);
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![item.to_string()],
+            "the retained Lost nested attempt returns to the run's dispatch set"
+        );
+
+        let (_, replacement) =
+            crate::queue_claim::claim(&file, item, "subagent:replacement", 600).unwrap();
+        assert!(replacement.generation > prior.generation);
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty(),
+            "the fresh replacement generation fences duplicate dispatch"
+        );
+    }
+
+    #[test]
+    fn abandoned_old_per_line_subagent_item_bypasses_new_since_seed_gate() {
+        use crate::claim_release_receipt::{ReleaseKind, release_attempt};
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let item = "#subagents retry unavailable worker";
+        let content = doc(&[item]);
+        std::fs::write(&file, &content).unwrap();
+        seed(&file, "cycle-prev", &content);
+
+        let (_, prior) =
+            crate::queue_claim::claim(&file, item, "subagent:prior", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            item,
+            "subagent:prior",
+            "/root/prior",
+            600,
+            prior.generation,
+        )
+        .unwrap();
+        release_attempt(
+            &file,
+            item,
+            ReleaseKind::Requeue,
+            Some(prior.generation),
+        )
+        .unwrap();
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![item.to_string()]
         );
     }
 

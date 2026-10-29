@@ -960,11 +960,26 @@ pub struct QueueSubagentDispatch {
     /// Resolved harness reasoning-effort override. Omitted to inherit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Prior Lost attempt that caused this otherwise-old row to be offered
+    /// again. This makes replacement dispatch explicit instead of leaving the
+    /// visible warning marker without a cause or predecessor identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<QueueSubagentRecovery>,
     /// The operator's authorization for this item, resolved from the document
     /// (`#waypostauthorization`): the verbatim item, the backlog text an id
     /// head names, and the queue/item preset bodies. Its
     /// `subagent_prompt_preamble` is pasted verbatim into the subagent prompt.
     pub authorization: agent_doc_queue::subagent_brief::SubagentAuthorization,
+}
+
+/// Durable predecessor evidence for a replacement subagent dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSubagentRecovery {
+    pub reason: String,
+    pub prior_owner: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_worker_id: Option<String>,
+    pub prior_generation: u64,
 }
 
 /// Build the `queue_subagent_dispatch` contract entries for `file`, resolving
@@ -977,6 +992,13 @@ pub fn queue_subagent_dispatch_entries(
 ) -> anyhow::Result<Vec<QueueSubagentDispatch>> {
     let _guard = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, content);
     let document = file.display().to_string();
+    // Recovery context is diagnostic enrichment. Some pure contract callers
+    // build entries before persisting their fixture/document; absence or an
+    // unreadable ledger must retain the pre-existing dispatch contract rather
+    // than fail a newly eligible item closed.
+    let claim_reports =
+        agent_doc_queue_io::queue_claim::claim_reports_for_content(file, content)
+            .unwrap_or_default();
     let submitted_prompts =
         agent_doc_queue::queue_response::submitted_prompts_for_heads(content, items);
     items
@@ -989,6 +1011,29 @@ pub fn queue_subagent_dispatch_entries(
                 item,
                 submitted,
             )?;
+            let identity = agent_doc_queue::queue_claim::claim_identity(item);
+            let recovery = claim_reports
+                .iter()
+                .find(|report| {
+                    report.claim.identity == identity
+                        && report.claim.state
+                            == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                })
+                .and_then(|report| {
+                    report
+                        .lost_recovery
+                        .as_ref()
+                        .map(|lost| QueueSubagentRecovery {
+                            reason: lost.reason.to_string(),
+                            prior_owner: report.claim.owner.clone(),
+                            prior_worker_id: report
+                                .claim
+                                .worker
+                                .as_ref()
+                                .map(|worker| worker.worker_id.clone()),
+                            prior_generation: report.claim.generation,
+                        })
+                });
             Ok(QueueSubagentDispatch {
                 item: item.clone(),
                 claim_command: agent_doc_queue_io::subagent_dispatch::claim_command(
@@ -1002,6 +1047,7 @@ pub fn queue_subagent_dispatch_entries(
                 ),
                 model: authorization.model.clone(),
                 effort: authorization.effort.clone(),
+                recovery,
                 authorization,
             })
         })
@@ -1021,7 +1067,9 @@ backlog text, preset body) and the coordinator rules; never paraphrase it, and w
 `authorization.status` is `unresolved_preset` do not add authorization it lacks. \
 Pass an entry's optional `model` and `effort` to the harness subagent launch (Claude Code Agent \
 `model` / `effort`; Codex `spawn_agent` `model` / `reasoning_effort`). Omitted fields inherit the \
-harness defaults. Do NOT execute \
+harness defaults. When an entry carries `recovery`, this is a replacement for the named prior \
+Lost attempt; report its `reason` and prior worker/generation rather than implying that old worker \
+is still active. Do NOT execute \
 them inline in queue order; they are excluded from `selected_queue_prompts`. An inline answer \
 never closes one: closeout keeps an echoed dispatch item queued and offers it for dispatch again \
 (`#subagentinlineveto`). If this harness cannot spawn a subagent, do not run the item inline: \
@@ -11322,6 +11370,81 @@ mod tests {
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_or_warn(&doc, &live)
                 .is_empty(),
             "a claimed item is already dispatched"
+        );
+    }
+
+    /// `#lostsubagentrestart`: an old row re-offered because its predecessor
+    /// was abandoned carries the reason and exact prior attempt identity in
+    /// the Run Agent Doc dispatch contract.
+    #[test]
+    fn replacement_subagent_dispatch_names_lost_reason_and_prior_worker() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
+        let content = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent: codex\n---\n\n\
+             <!-- agent:run subagents go -->\n- do [#grok-live-editor]\n  - {item}\n<!-- /agent:run -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &agent_doc_queue_io::subagent_dispatch::midturn_steering_state_key("base", &doc),
+            &serde_json::json!({
+                "cycle_id": "cycle-previous",
+                "baseline": content,
+                "acknowledged_queue": ["do [#grok-live-editor]", item],
+            })
+            .to_string(),
+            1,
+        )
+        .unwrap();
+        let (_, prior) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            item,
+            "subagent:rtsteeringparity",
+            600,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            item,
+            "subagent:rtsteeringparity",
+            "/root/rtsteeringparity",
+            600,
+            prior.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            item,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(prior.generation),
+        )
+        .unwrap();
+
+        let live = std::fs::read_to_string(&doc).unwrap();
+        let dispatch =
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &doc, &live,
+            )
+            .unwrap();
+        assert_eq!(dispatch, vec![item.to_string()]);
+        let entries = queue_subagent_dispatch_entries(&doc, &live, &dispatch).unwrap();
+        let recovery = entries[0].recovery.as_ref().unwrap();
+        assert_eq!(recovery.reason, "attempt_abandoned_for_requeue");
+        assert_eq!(recovery.prior_owner, "subagent:rtsteeringparity");
+        assert_eq!(
+            recovery.prior_worker_id.as_deref(),
+            Some("/root/rtsteeringparity")
+        );
+        assert_eq!(recovery.prior_generation, prior.generation);
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("replacement"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("prior worker/generation"));
+        let json = serde_json::to_value(&entries[0]).unwrap();
+        assert_eq!(
+            json["recovery"]["reason"],
+            "attempt_abandoned_for_requeue"
         );
     }
 

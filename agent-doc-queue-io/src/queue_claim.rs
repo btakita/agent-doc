@@ -1626,7 +1626,7 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
     }
 }
 
-fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
+fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRecovery {
     let document = shell_single_quote(&file.display().to_string());
     let item = shell_single_quote(&agent_doc_queue::queue_claim::claim_item_handle(
         &claim.item_text,
@@ -1638,7 +1638,11 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim) -> LostClaimRecovery {
         .map(|binding| binding.worker_id.as_str())
         .unwrap_or("the prior worker");
     LostClaimRecovery {
-        reason: "claim_ttl_expired",
+        reason: if claim.is_expired(now) {
+            "claim_ttl_expired"
+        } else {
+            "attempt_abandoned_for_requeue"
+        },
         recover_completed_worker_result: format!(
             "Check {worker} for a completed result. If it completed, integrate that exact result and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text)."
         ),
@@ -1709,7 +1713,7 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
                     .as_ref()
                     .map(|worker| now.saturating_sub(worker.started_at_secs)),
                 lost_recovery: (claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
-                    .then(|| lost_claim_recovery(file, &claim)),
+                    .then(|| lost_claim_recovery(file, &claim, now)),
                 claim,
                 owner_session_state: state,
                 owner_session_end_reason: reason,
@@ -2178,6 +2182,34 @@ mod tests {
                     .contains("--owner 'subagent:lostdiag'"),
             "{}",
             recovery.reclaim_command
+        );
+    }
+
+    #[test]
+    fn claim_reports_distinguish_expiry_from_explicit_requeue_abandonment() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#lostdiag]"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let pinned = 1_000_000;
+        let _clock = pin_claim_clock_for_current_thread(pinned);
+        let (_, claim) = claim(&doc, "#lostdiag", "subagent:lostdiag", 600).unwrap();
+        start_attempt(
+            &doc,
+            "#lostdiag",
+            "subagent:lostdiag",
+            "/root/lostdiag",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        abandon_attempt(&doc, "#lostdiag", Some(claim.generation)).unwrap();
+
+        let reports = claim_reports_for_content(&doc, &content).unwrap();
+        assert_eq!(reports.len(), 1, "{reports:#?}");
+        assert_eq!(reports[0].assessment, "lost");
+        assert_eq!(
+            reports[0].lost_recovery.as_ref().unwrap().reason,
+            "attempt_abandoned_for_requeue"
         );
     }
 

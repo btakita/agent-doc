@@ -518,36 +518,6 @@ queue_worker_binding: subagent:nestedsteer
 
 No additional backlog follow-up is needed because both finished commits are on main and the parity commit is already finished.
 
-### Re: Subagent completed: `subagent:runtemplatenogo` returned work for queue item “In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.” — agent-doc
-<!-- agent-doc-subagent-response sha256=e15962f3629cc480049cb5d989c287c4ffc0a5a7779c53f288db2d444b7cda3f -->
-> **Subagent response:**
->
-> The default `agent:run` scaffold stays without `go`, and that contract is now explicit in the spec and tests. Go-mode is already the default when a queue has no control.
->
-> - **Branch:** `fix/run-template-no-go`
-> - **SHA:** `cf2469c43b7b5b29b025552ec2cd3cea425a817b`
-> - **Push:** fast-forward to `origin/fix/run-template-no-go` only. `origin/main` was unchanged at `83e423d98d513074744547d351dc01d2fbd335d3`. `main` was not pushed.
-> - **Denylist:** no hits on added lines.
-> - **`make check`:** exit code 0. Nextest summary: `12155 tests run: 12155 passed, 187 skipped` (166.443s). Log and exit code are `target/make-check-runtemplatenogo.log` and `target/make-check-runtemplatenogo.exit`.
->
-> The scaffold string was already `<!-- agent:run priority subagents clear -->`. Claim, sync, and extract still emit that marker and do not write `queue:`. The spec, runbook, and tests now say `go`, `start`, `pause`, and `stop` are omitted because go-mode is the default.
->
-> **Files changed:**
-> - `agent-doc-document/src/claim_scaffold.rs`
-> - `src/extract.rs`
-> - `specs/02-document-format.md`
-> - `specs/07-focused-extract.md`
-> - `specs/07-session-tmux-commands.md`
-> - `runbooks/document-format.md`
-> - `.claude/skills/agent-doc/runbooks/document-format.md`
-> - `.codex/skills/agent-doc/runbooks/document-format.md`
-> - `.cursor/rules/runbooks/document-format.md`
-> - `.grok/skills/agent-doc/runbooks/document-format.md`
-> - `.opencode/skills/agent-doc/runbooks/document-format.md`
->
-> No follow-up queue items.
-<!-- agent-doc-subagent-completion key=02a02b146b97724bba4c8bab4b0b695851d998a9e0df279d6b1a6cd23a86f2ef -->
-
 > **Queue prompt:** In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.
 
 The default scaffold stays `<!-- agent:run priority subagents clear -->`. Go-mode is already the default when a queue has no control, so the marker omits `go`, `start`, `pause`, and `stop`, and the scaffold writes no `queue:` field. Commit `cf2469c43b7b5b29b025552ec2cd3cea425a817b` is on `main`. Worker `make check` exited 0: 12155 passed, 187 skipped. The coordinator fast-forwarded `83e423d98d..cf2469c43b` and `make install` exited 0. Installed sha256 `bbbfc5bfb9e11cbfd7ed2dc58f6e7a6e9ab404824d2f065efc4a0d7df13c497d` matches the release-local binary and `~/.cargo/bin/agent-doc`. `agent-doc --version` is `agent-doc 0.35.560`. JetBrains plugin bytes were unchanged, so no JetBrains restart is required. `reload_library` delivered 1/1 editor endpoints. CI `40809926777`, Book `40809926784`, and Pages `40809927282` were in progress at closeout.
@@ -565,7 +535,6 @@ queue_worker_binding: subagent:contractprsstall generation 1 worker 01a1859b-4eb
 queue_worker_binding: subagent:routesyncsteer generation 1 worker 01a1859b-9e3d-74d3-bc62-fe3ce4b782ff
 
 The nested parse-cause line on the unclosed `agent:run` row is with owner `subagent:apiparse` (worker `01a18593-096a-7c00-b5b4-cb5dc88036f3`). This harness has no mid-run message channel, so that line is in `/home/brian/worktrees/agent-doc-apiparse/OPERATOR-STEERING.md`, which the worker must not commit. `subagent:apirunclaims` (worker `01a18588-b7a3-7250-91f2-cc1e7196aabb`) is still running.
-
 <!-- agent:boundary:5f3385ef -->
 <!-- /agent:exchange -->
 
@@ -575,7 +544,7 @@ The nested parse-cause line on the unclosed `agent:run` row is with owner `subag
 - 📥 do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 - 🚧 [#subagent:apirunclaims#1] In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.
-- ☑️ [#subagent:runtemplatenogo#1] In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.
+- ~~In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:apiparse#1] api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`
   - The issue was no close `/agent:run`. agent-doc should print the specific cause of the parse error.
 - 🚧 [#subagent:nestlistlineage#1] api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.

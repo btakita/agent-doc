@@ -672,6 +672,21 @@ pub fn locate_response_heading_offset(
 
 /// Queue bodies to search for a nest vector: the selected queue, then every
 /// other `queue` component. A parse failure in one body skips that body.
+/// Tree elements whose nested leaves keep parent lineage (`#nestsubmit`).
+///
+/// Runnable spellings (`agent:run`, `agent:loop`, legacy `agent:queue`) are
+/// already the `queue` component. Checklist trees and the proposal tracker
+/// markers share that nest vector. This is not tracker sync.
+fn component_carries_tree_lineage(name: &str) -> bool {
+    name == "queue"
+        || agent_doc_element::element::is_backlog_component(name)
+        || agent_doc_element::element::is_review_component(name)
+        || agent_doc_element::element::is_icebox_component(name)
+        || matches!(name, "github" | "gitlab" | "jira")
+}
+
+/// Queue bodies first, then every other tree element, so a queue row still
+/// wins when the same leaf text also sits under a checklist or tracker marker.
 fn queue_bodies_for_nest(content: &str) -> Vec<&str> {
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return Vec::new();
@@ -680,19 +695,21 @@ fn queue_bodies_for_nest(content: &str) -> Vec<&str> {
     if let Ok(Some(selected)) = crate::queue_set::selected_component(content, &components) {
         bodies.push(selected.content(content));
     }
-    for component in components
-        .iter()
-        .filter(|component| component.name == "queue")
-    {
-        let body = component.content(content);
-        if !bodies.contains(&body) {
-            bodies.push(body);
+    for want_queue in [true, false] {
+        for component in components.iter().filter(|component| {
+            component_carries_tree_lineage(&component.name)
+                && (component.name == "queue") == want_queue
+        }) {
+            let body = component.content(content);
+            if !bodies.contains(&body) {
+                bodies.push(body);
+            }
         }
     }
     bodies
 }
 
-/// The first queue that contains `prompt_text`, with that row's index.
+/// The first tree body that contains `prompt_text`, with that row's index.
 fn located_prompt(
     content: &str,
     prompt_text: &str,
@@ -710,6 +727,10 @@ fn located_prompt(
 
 /// Display nest vector of `prompt_text` (`#nestvector`), or `None` when the row
 /// is top-level, folded into its parent (`#nestedsubprompts`), or absent.
+///
+/// The row is sought in every tree element (`agent:run` / `agent:loop`,
+/// `agent:review`, `agent:backlog`, `agent:icebox`, `agent:github`,
+/// `agent:gitlab`, `agent:jira`), queue bodies first.
 pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<String> {
     let (entries, index) = located_prompt(content, prompt_text)?;
     crate::document_queue::nest_vector_at(&entries, index, prompt_text)
@@ -3041,5 +3062,85 @@ queue_active: true
             submitted_continuation_prompt(content, "#rebase", |_| false),
             submitted
         );
+    }
+
+    /// `#nestsubmit`: every tree marker submits a nested leaf with the same
+    /// parent lineage a nested `agent:run` leaf gets. A queue row still wins
+    /// when the same leaf text is also nested elsewhere.
+    #[test]
+    fn nested_leaf_under_every_tree_marker_keeps_parent_lineage() {
+        let expected = "root parent: parent: #rebase";
+        for marker in [
+            "run", "loop", "review", "backlog", "icebox", "github", "gitlab", "jira",
+        ] {
+            let content = format!(
+                "<!-- agent:{marker} -->\n- root parent\n  - parent\n    - #rebase\n<!-- /agent:{marker} -->\n"
+            );
+            assert_eq!(
+                nest_vector_in_document(&content, "#rebase").as_deref(),
+                Some(expected),
+                "{marker}"
+            );
+            let submitted = submitted_queue_prompt(&content, "#rebase");
+            assert!(
+                submitted.starts_with(&format!("{expected}\n")),
+                "{marker}: {submitted}"
+            );
+            assert!(
+                submitted.contains(
+                    "Prompt tree (`#nestsubmit`, context only; run the lineage above):\n"
+                ),
+                "{marker}: {submitted}"
+            );
+            assert_ne!(submitted.trim(), expected, "{marker}");
+            assert_eq!(
+                submitted_queue_prompt(&content, "root parent"),
+                "root parent",
+                "{marker} top-level row stays its own text"
+            );
+            assert_eq!(
+                nest_vector_in_document(&content, "root parent"),
+                None,
+                "{marker}"
+            );
+        }
+
+        for marker in ["review", "backlog", "icebox"] {
+            let content = format!(
+                "<!-- agent:{marker} -->\n- [ ] [#alpha] parent epic\n  - [ ] [#beta] child work\n<!-- /agent:{marker} -->\n"
+            );
+            let leaf = "[ ] [#beta] child work";
+            let lineage = format!("#alpha: {leaf}");
+            let submitted = submitted_queue_prompt(&content, leaf);
+            assert_eq!(
+                nest_vector_in_document(&content, leaf).as_deref(),
+                Some(lineage.as_str()),
+                "{marker} checklist"
+            );
+            assert!(
+                submitted.starts_with(&format!("{lineage}\n")),
+                "{marker} checklist: {submitted}"
+            );
+            assert!(
+                submitted.contains(
+                    "Prompt tree (`#nestsubmit`, context only; run the lineage above):\n"
+                ),
+                "{marker} checklist: {submitted}"
+            );
+        }
+
+        let queued = "\
+<!-- agent:backlog -->
+- root parent
+  - parent
+    - #rebase
+<!-- /agent:backlog -->
+
+<!-- agent:run -->
+- #rebase
+<!-- /agent:run -->
+";
+        assert_eq!(submitted_queue_prompt(queued, "#rebase"), "#rebase");
+        assert_eq!(nest_vector_in_document(queued, "#rebase"), None);
     }
 }

@@ -3007,15 +3007,56 @@ fn same_prompt(left: &str, right: &str) -> bool {
     !left.is_empty() && left == right
 }
 
+/// Work after a leading checklist box, when `line` is one.
+///
+/// `[ ] [#alpha] title` and `[/release] [#alpha] title` yield the text after
+/// the box so an id-backed ancestor can collapse to `#id`. Anything else is
+/// `None` and the row's own line stays the label.
+fn checkbox_ancestor_work(line: &str) -> Option<&str> {
+    let rest = line.trim_start();
+    let after = if let Some(rest) = rest
+        .strip_prefix("[ ]")
+        .or_else(|| rest.strip_prefix("[x]"))
+        .or_else(|| rest.strip_prefix("[X]"))
+        .or_else(|| rest.strip_prefix("[/]"))
+        .or_else(|| rest.strip_prefix("[~]"))
+    {
+        rest
+    } else {
+        let inner = rest.strip_prefix("[/")?;
+        let close = inner.find(']')?;
+        let gate = &inner[..close];
+        if gate.is_empty()
+            || !gate
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        {
+            return None;
+        }
+        &inner[close + 1..]
+    };
+    let after = after.trim_start();
+    (!after.is_empty()).then_some(after)
+}
+
 /// Label of one ancestor row in a nest vector (`#nestvector`).
 ///
-/// An id-backed row (`[#vscodecodersmoke]`, `do [#id]`) contributes `#id`.
-/// A free-text row contributes its own first line, not a lowercased key.
+/// An id-backed row (`[#vscodecodersmoke]`, `do [#id]`, or the same id behind
+/// a checklist box) contributes `#id`. A free-text row contributes its own
+/// first line, not a lowercased key.
 fn ancestor_label(prompt: &QueuePrompt) -> String {
     let work = nest_row_work_text(&prompt.text);
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
     let first = head.lines().next().unwrap_or("").trim();
-    match agent_doc_element_queue::queue_head_identity(first) {
+    let identity_line = checkbox_ancestor_work(first)
+        .filter(|work| {
+            matches!(
+                agent_doc_element_queue::queue_head_identity(work),
+                agent_doc_element_queue::QueueItemIdentity::Id(_)
+            )
+        })
+        .unwrap_or(first);
+    match agent_doc_element_queue::queue_head_identity(identity_line) {
         agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("#{id}"),
         agent_doc_element_queue::QueueItemIdentity::FreeText(_) => first.to_string(),
     }
@@ -8382,6 +8423,31 @@ mod tests {
         assert_eq!(
             nest_vector_for_prompt_text(&entries, child).as_deref(),
             Some("#vscodecodersmoke: Where does this file live? My Coder agent is asking.")
+        );
+    }
+
+    /// A checklist id behind the box is still `#id`. The leaf keeps its box.
+    #[test]
+    fn nest_vector_labels_a_checkbox_id_ancestor_as_its_id() {
+        let open = "- [ ] [#alpha] parent epic\n  - [ ] [#beta] child work\n";
+        let entries = parse(open).unwrap();
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "[ ] [#beta] child work").as_deref(),
+            Some("#alpha: [ ] [#beta] child work")
+        );
+
+        let gated = "- [/release] [#alpha] parent epic\n  - do [#beta]\n";
+        let entries = parse(gated).unwrap();
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "do [#beta]").as_deref(),
+            Some("#alpha: do [#beta]")
+        );
+
+        let prose = "- [ ] parent epic\n  - [ ] child work\n";
+        let entries = parse(prose).unwrap();
+        assert_eq!(
+            nest_vector_for_prompt_text(&entries, "[ ] child work").as_deref(),
+            Some("[ ] parent epic: [ ] child work")
         );
     }
 

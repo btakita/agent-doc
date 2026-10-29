@@ -28,6 +28,13 @@ The nested-list part of the request is already implemented, in general form,
 as nested sub-prompts (`#nestedsubprompts`, `specs/02-document-format.md`). This
 proposal builds the tracker components on top of it.
 
+A nested child under `agent:github`, `agent:gitlab`, or `agent:jira` that is
+its own leaf is submitted with the same parent lineage as a nested `agent:run`
+leaf (`#nestsubmit`, `specs/pending-system.md`). The shared path also attaches
+that body's prompt tree as context. That is the existing nest vector, not this
+proposal's fetch, auth, or write product. Nothing in those phases is
+implemented here.
+
 ## Goals
 
 1. A document element shows the live state of the PRs, MRs and tickets that

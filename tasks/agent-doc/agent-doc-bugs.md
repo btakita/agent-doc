@@ -936,7 +936,14 @@ The cross-parent case remains `#reviewrebase-repeat`: a plan, with the fix left 
 The row asks how a long `agent:run` list shows what a turn just worked. The worker owns the spec, the tests, and a push of that branch. A timestamp annotation and an editor highlight that clears when the cursor reaches the row are both open. If more than one lawful design remains, the worker returns that choice instead of guessing. Install stays with the coordinator after the branch integrates.
 
 `subagent:promptsurface` generation 1 keeps worker `01a1884f-1e4f-71f2-89f9-ce913af9f4c7`. `subagent:reviewpublish` generation 1 stays an operator action. The marker choices already in the exchange are `⟦local⟧` / `⟦published⟧`, or `✎` / `⬆`.
-<!-- agent:boundary:8c335c48 -->
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+**Deferred:** The nested lines stay on this row. You added Annotation, worker-reported, and the icon question is answered in the exchange: `✎` for changed locally and `⬆` for published. Implementation has not been requested. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+### Re: Marker row stays open — grok-4.7 · 2026-10-29T13:04-04:00
+
+`subagent:reviewpublish` generation 1 keeps its operator action. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited, so this edit is not handed to a new worker.
+<!-- agent:boundary:6dae2960 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->

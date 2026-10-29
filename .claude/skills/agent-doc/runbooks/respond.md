@@ -379,7 +379,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      a new worker, steering routes it `dispatch=persist_reported`, and the
      Codex Stop hook blocks until it is persisted, so release only when
      integration must finish before you can answer, and persist before the
-     turn ends. For abandoned, failed, or requeued work run
+     turn ends. When the closeout response itself prints a subagent report, it
+     still prints the consolidated report in that same `agent:exchange`
+     response, and the subagent report stays in it. A closeout that prints
+     only the subagent report is refused (`#consolidatedreport`). For abandoned, failed, or requeued work run
      `agent-doc queue release <FILE> --item <...> --generation <N> --requeue`: no report is
      recorded and the line is dispatchable to a new worker again.
   Harnesses without an in-session Agent tool (Codex, OpenCode, Cursor) claim

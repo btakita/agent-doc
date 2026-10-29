@@ -1015,6 +1015,109 @@ pub fn duplicate_blocking_operator_request_id(
         .find(|id| !seen.insert(*id))
 }
 
+/// Synthetic heading inserted when a strict closeout's first line is not a
+/// markdown heading. It is not the coordinator's consolidated report.
+const SYNTHETIC_RESPONSE_HEADING: &str = "### Re: Response";
+
+/// A closeout response prints a subagent report and omits the consolidated
+/// report the end of the turn must still print (`#consolidatedreport`).
+///
+/// A subagent report is a blocking `[#subagent-operator-request-<unique-id>]`
+/// packet or a binary-attested completion cell. The consolidated report is
+/// coordinator prose before the first of those reports, a real `### Re:`
+/// heading other than [`SYNTHETIC_RESPONSE_HEADING`] and other than a
+/// completion heading, or a `queue_worker_binding:` line. Detail that only
+/// follows a report opening the response is the worker handback. A response
+/// with no subagent report does not omit anything.
+pub fn response_omits_consolidated_report(response: &str) -> bool {
+    let packets = blocking_operator_request_packets(response);
+    let packet_ids: std::collections::HashSet<&str> =
+        packets.iter().map(|packet| packet.id.as_str()).collect();
+    let completion_headings: std::collections::HashSet<usize> =
+        agent_doc_document::subagent_completion::completion_cell_heading_lines(response)
+            .into_iter()
+            .collect();
+    let lines: Vec<&str> = response.lines().collect();
+    let mut fence: Option<(char, usize)> = None;
+    let mut saw_report = false;
+    let mut prose_before_report = false;
+    let mut consolidated_marker = false;
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed_start = line.trim_start();
+        if let Some(open) = fence {
+            if is_closing_fence(trimmed_start, open) {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(open) = opening_fence(trimmed_start) {
+            fence = Some(open);
+            continue;
+        }
+        if trimmed_start.starts_with('>') {
+            continue;
+        }
+        let indent = line.len() - trimmed_start.len();
+        if is_subagent_report_line(line, indent, index, &packet_ids, &completion_headings) {
+            saw_report = true;
+            continue;
+        }
+        if is_consolidated_report_heading(line) || is_queue_worker_binding_line(trimmed_start) {
+            consolidated_marker = true;
+        }
+        if !saw_report && is_coordinator_prose_line(line) {
+            prose_before_report = true;
+        }
+    }
+    saw_report && !consolidated_marker && !prose_before_report
+}
+
+fn is_subagent_report_line(
+    line: &str,
+    indent: usize,
+    index: usize,
+    packet_ids: &std::collections::HashSet<&str>,
+    completion_headings: &std::collections::HashSet<usize>,
+) -> bool {
+    if completion_headings.contains(&index) {
+        return true;
+    }
+    indent <= 3
+        && agent_doc_queue::subagent_brief::subagent_operator_request_id(line)
+            .is_some_and(|id| packet_ids.contains(id))
+}
+
+fn is_synthetic_response_heading(line: &str) -> bool {
+    let line = line.trim().strip_suffix(" (HEAD)").unwrap_or(line.trim());
+    line == SYNTHETIC_RESPONSE_HEADING
+}
+
+fn is_consolidated_report_heading(line: &str) -> bool {
+    let line = line.trim().strip_suffix(" (HEAD)").unwrap_or(line.trim());
+    line.starts_with("### Re:")
+        && !is_synthetic_response_heading(line)
+        && !agent_doc_document::subagent_completion::is_completion_heading(line)
+}
+
+fn is_queue_worker_binding_line(trimmed_start: &str) -> bool {
+    let mut line = trimmed_start.trim();
+    if let Some(rest) = line.strip_prefix('-').or_else(|| line.strip_prefix('*')) {
+        line = rest.trim();
+    }
+    let line = line.trim_start_matches('*').trim();
+    line.get(.."queue_worker_binding:".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("queue_worker_binding:"))
+}
+
+fn is_html_comment_line(trimmed: &str) -> bool {
+    trimmed.starts_with("<!--") && trimmed.ends_with("-->")
+}
+
+fn is_coordinator_prose_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    !trimmed.is_empty() && !is_html_comment_line(trimmed) && !is_synthetic_response_heading(trimmed)
+}
+
 fn opening_fence(trimmed_start: &str) -> Option<(char, usize)> {
     let ch = trimmed_start.chars().next()?;
     if ch != '`' && ch != '~' {
@@ -2188,5 +2291,113 @@ mod tests {
             Some("subagent-operator-request"),
             "the fixed marker duplicated in older api/sdk documents is rejected at closeout"
         );
+    }
+
+    /// The api.md turn: the response opens on the subagent packet, then the
+    /// worker's own publication, commands, and tests. That is not the
+    /// consolidated report (`#consolidatedreport`).
+    fn packet_only_subagent_report() -> String {
+        let marker = "[#subagent-operator-request-pr759-dev-ruleset] subagent operator request";
+        format!(
+            "{marker}\n\
+- *queue_item:*\n\
+\x20\x20- publish the ruleset\n\
+- *kind:* permission\n\
+- *blocking:* true\n\
+- *request:*\n\
+\x20\x20- Open the pin PR?\n\
+- *context:*\n\
+\x20\x20- The worker finished publication.\n\
+- *choices:*\n\
+\x20\x20- **Open a pin PR**: open it\n\
+\x20\x20- **Stop**: stop\n\
+\n\
+Publication and pin details are in the worker handback.\n\
+Commands: contracts-propose.sh\n\
+Tests that passed: the focused suite.\n"
+        )
+    }
+
+    #[test]
+    fn turn_with_subagent_report_omits_consolidated_report() {
+        let packet_only = packet_only_subagent_report();
+        assert!(
+            response_omits_consolidated_report(&packet_only),
+            "a packet that opens the response omits the consolidated report"
+        );
+        let synthetic = format!("### Re: Response\n\n{packet_only}");
+        assert!(
+            response_omits_consolidated_report(&synthetic),
+            "the synthetic heading is not the consolidated report"
+        );
+        let headed_synthetic = format!("### Re: Response (HEAD)\n\n{packet_only}");
+        assert!(response_omits_consolidated_report(&headed_synthetic));
+
+        let cell = agent_doc_document::subagent_completion::cell(
+            "subagent:pr767-parent",
+            "publish the ruleset",
+            "abc123",
+        );
+        assert!(
+            response_omits_consolidated_report(&cell),
+            "a completion cell alone is the subagent report without the consolidated report"
+        );
+    }
+
+    #[test]
+    fn turn_with_subagent_report_and_consolidated_report_keeps_both() {
+        let packet_only = packet_only_subagent_report();
+        let both = format!(
+            "### Re: pull request 767\n\
+\n\
+The worker report stays in this exchange, and this turn still prints the consolidated closeout.\n\
+\n\
+{packet_only}\n\
+queue_worker_binding: subagent:pr759-choice\n"
+        );
+        assert!(
+            !response_omits_consolidated_report(&both),
+            "a real heading, the packet, and the binding are both reports"
+        );
+        assert!(
+            both.contains("[#subagent-operator-request-pr759-dev-ruleset]"),
+            "the subagent report stays in the response that also carries the consolidated report"
+        );
+        assert!(both.contains("### Re: pull request 767"));
+
+        assert!(
+            !response_omits_consolidated_report(BLOCKING_PACKET_RESPONSE),
+            "coordinator prose before the packet is the consolidated report"
+        );
+        assert!(
+            !response_omits_consolidated_report(LEGACY_FLAT_PACKET_RESPONSE),
+            "historical packets with prose before them still land"
+        );
+
+        let cell = agent_doc_document::subagent_completion::cell(
+            "subagent:pr767-parent",
+            "publish the ruleset",
+            "abc123",
+        );
+        let beside = format!(
+            "{cell}\n\n### Re: pull request 767\n\nIntegrated. The subagent report above stays.\n"
+        );
+        assert!(!response_omits_consolidated_report(&beside));
+        assert!(beside.contains("### Re: Subagent completed:"));
+        assert!(beside.contains("### Re: pull request 767"));
+
+        assert!(!response_omits_consolidated_report(
+            "### Re: Response\n\nFixed and verified.\n"
+        ));
+        let fenced = format!("Example:\n\n```text\n{packet_only}```\n");
+        assert!(!response_omits_consolidated_report(&fenced));
+        let quoted = packet_only
+            .lines()
+            .map(|line| format!("> {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!response_omits_consolidated_report(&quoted));
+        let nonblocking = packet_only.replace("*blocking:* true", "*blocking:* false");
+        assert!(!response_omits_consolidated_report(&nonblocking));
     }
 }

@@ -697,6 +697,23 @@ fn try_add_response_cell_via_realtime_backbone(
 /// strict-stream capture, so the caller gets the structural reason while it
 /// can still re-send a corrected response.
 pub(crate) fn refuse_unlandable_response_before_capture(file: &Path, response: &str) -> Result<()> {
+    // `#consolidatedreport`: a subagent report that opens the turn is not the
+    // consolidated report. Refuse before capture so the turn stays open until
+    // a response prints both, and the subagent report stays in that response.
+    if agent_doc_turn::response_text::response_omits_consolidated_report(response) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "write_refused_subagent_report_without_consolidated_report file={} response_sha256={} captured=false (#consolidatedreport)",
+                file.display(),
+                agent_doc_hash::content_hash(response),
+            ),
+        );
+        anyhow::bail!(
+            "refusing to capture a response for {} that prints a subagent report and omits the consolidated report. The end of the turn must still print the consolidated report, and the subagent report stays. Both belong in agent:exchange. Nothing was captured or written (#consolidatedreport).",
+            file.display(),
+        );
+    }
     let Some(reason) =
         agent_doc_template::response_materialization::response_landability_refusal(response)
     else {

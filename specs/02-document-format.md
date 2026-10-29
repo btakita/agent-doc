@@ -906,6 +906,8 @@ the local request/answer evidence. Explicit todo completion has the same
 unblocking projection. This request-linked rule supersedes the older
 tracked-id/surrogate layering described above for newly emitted packets.
 
+**Turn-end consolidated report (`#consolidatedreport`).** A turn that prints a subagent report still prints the consolidated report when the turn ends. Both belong in `agent:exchange`, and the subagent report stays. A subagent report is a blocking `[#subagent-operator-request-<unique-id>]` packet or a binary-attested subagent completion cell (`#subagentcompletionfeedback`). The consolidated report is coordinator prose before the first of those reports, a real `### Re:` heading other than the synthetic `### Re: Response` heading and other than a completion heading, or a `queue_worker_binding:` line. Detail that only follows a report opening the response is the worker handback, not the consolidated report. Closeout refuses that response before capture ([§7](07-closeout-commands.md)). A response that contains both is written in full. A response with no subagent report is unchanged.
+
 **Todo-done advisory.** When a closeout resolves tracked work (`--done`,
 `--review-resolve`) and an OPEN `agent:todo` item still cites it (an item that
 owns the id was already checked off by the `#todoids` closeout check; a todo

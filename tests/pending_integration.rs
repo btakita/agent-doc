@@ -3068,6 +3068,93 @@ fn write_blocking_operator_request_packet_records_layered_todo_without_todo_add(
     }
 }
 
+/// The api.md turn opened on the worker packet and its publication notes.
+/// That closeout omits the consolidated report (`#consolidatedreport`).
+const PACKET_ONLY_SUBAGENT_REPORT: &str = "<!-- patch:exchange -->\n\
+[#subagent-operator-request-pr759-dev-ruleset] subagent operator request\n\
+- *queue_item:*\n\
+\x20\x20- publish the ruleset\n\
+- *kind:* permission\n\
+- *blocking:* true\n\
+- *request:*\n\
+\x20\x20- Open the pin PR?\n\
+- *context:*\n\
+\x20\x20- The worker finished publication.\n\
+- *choices:*\n\
+\x20\x20- **Open a pin PR**: open it\n\
+\x20\x20- **Stop**: stop\n\
+\n\
+Publication and pin details are in the worker handback.\n\
+Commands: contracts-propose.sh\n\
+Tests that passed: the focused suite.\n\
+<!-- /patch:exchange -->\n";
+
+/// The same packet beside the coordinator's consolidated report.
+const CONSOLIDATED_WITH_SUBAGENT_REPORT: &str = "<!-- patch:exchange -->\n\
+### Re: pull request 767\n\
+\n\
+The worker report stays in this exchange, and this turn still prints the consolidated closeout.\n\
+\n\
+[#subagent-operator-request-pr759-dev-ruleset] subagent operator request\n\
+- *queue_item:*\n\
+\x20\x20- publish the ruleset\n\
+- *kind:* permission\n\
+- *blocking:* true\n\
+- *request:*\n\
+\x20\x20- Open the pin PR?\n\
+- *context:*\n\
+\x20\x20- The worker finished publication.\n\
+- *choices:*\n\
+\x20\x20- **Open a pin PR**: open it\n\
+\x20\x20- **Stop**: stop\n\
+\n\
+queue_worker_binding: subagent:pr759-choice\n\
+<!-- /patch:exchange -->\n";
+
+/// `#consolidatedreport`: a turn that has a subagent report and omits the
+/// consolidated report is refused. A turn that prints both keeps both in
+/// `agent:exchange`.
+#[test]
+fn write_turn_with_subagent_report_requires_consolidated_report() {
+    let (_tmp, doc) = setup_doc("- [ ] [#open] work");
+    let failed = agent_doc()
+        .args(["write", doc.to_str().unwrap(), "--force-disk"])
+        .write_stdin(PACKET_ONLY_SUBAGENT_REPORT)
+        .assert()
+        .failure();
+    let output = failed.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("omits the consolidated report")
+            || stdout.contains("omits the consolidated report"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        !content.contains("subagent-operator-request-pr759-dev-ruleset"),
+        "the packet-only closeout must not land: {content}"
+    );
+
+    let (_tmp, doc) = setup_doc("- [ ] [#open] work");
+    write_packet_closeout(&doc, &[], CONSOLIDATED_WITH_SUBAGENT_REPORT);
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(
+        content.contains(
+            "[#subagent-operator-request-pr759-dev-ruleset] subagent operator request"
+        ),
+        "the subagent report stays: {content}"
+    );
+    assert!(
+        content.contains("### Re: pull request 767"),
+        "the consolidated report is printed: {content}"
+    );
+    assert!(
+        content.contains("queue_worker_binding:"),
+        "the binding stays with both reports: {content}"
+    );
+}
+
 fn assert_layered_packet_todo(response: &str) {
     let (_tmp, doc) = setup_doc("- [ ] [#apipendingorphans] stuck pending chat messages");
     let stderr = write_packet_closeout(

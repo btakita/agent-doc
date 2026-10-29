@@ -3649,9 +3649,13 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(file, &content);
     let selection_out_of_loop_items =
         agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &content);
+    let queue_control = agent_doc_queue::queue_continuation::document_queue_control(&content);
     let comp = match agent_doc_queue::queue_set::QueueSet::parse(&content, &components) {
         Ok(queues) => match queues
-            .selected_reaching_inline_work(&owner_selection)
+            .selected_reaching_inline_work_with_control(
+                &owner_selection,
+                queue_control.as_deref(),
+            )
             // When every queue is held, keep exposing the ordinary selected
             // queue's blocked facts instead of degrading to an empty probe.
             .or_else(|| queues.selected())
@@ -4929,10 +4933,15 @@ pub fn run_queue_maintenance_with_coin_gate(
         file,
         &current_content,
     );
+    let queue_control =
+        agent_doc_queue::queue_continuation::document_queue_control(&current_content);
     let selected_queue_id =
         match agent_doc_queue::queue_set::QueueSet::parse(&current_content, &components) {
             Ok(queues) => match queues
-                .selected_reaching_inline_work(&owner_selection)
+                .selected_reaching_inline_work_with_control(
+                    &owner_selection,
+                    queue_control.as_deref(),
+                )
                 .or_else(|| queues.selected())
                 .or_else(|| queues.blocks().first())
             {

@@ -118,9 +118,10 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
 /// attribute dispatches every eligible head of that queue. Sibling
 /// `subagents` queues are offered in the same cycle; an `after=` queue waits
 /// until every predecessor is empty, and an earlier inline queue that still
-/// has owner-available work gates later queues. `None` when no non-empty
-/// queue has a valid attribute, so the per-line "new since seed" path still
-/// runs.
+/// has owner-available work gates later queues. A paused earlier queue does
+/// not: a `pause` control (a legacy marker `stop` included) leaves the other
+/// runs in that turn. `None` when no non-empty queue has a valid attribute,
+/// so the per-line "new since seed" path still runs.
 pub fn queue_attr_subagent_plan(
     file: &Path,
     content: &str,
@@ -176,6 +177,7 @@ fn queue_attr_subagent_plan_with_presets(
         claimed = claimed.with_heads(&matched);
     }
     let after_deps = agent_doc_queue::backlog_sync::collect_after_deps(&components, content);
+    let queue_control = agent_doc_queue::queue_continuation::document_queue_control(content);
     let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
     let mut saw_attr = false;
     for block in graph.blocks() {
@@ -187,14 +189,16 @@ fn queue_attr_subagent_plan_with_presets(
         if predecessor_live {
             continue;
         }
+        let owner_state = block.state_excluding_claimed_with_control(
+            &claimed,
+            queue_control.as_deref(),
+        );
         let Some((mode, eligible, live)) =
             core::queue_component_subagent_heads(content, block.component, prompt_presets)
         else {
             // Inline owner work gates later queues. A paused or empty inline
             // queue does not.
-            if block.state_excluding_claimed(&claimed)
-                == agent_doc_queue::queue_set::QueueNodeState::Ready
-            {
+            if owner_state == agent_doc_queue::queue_set::QueueNodeState::Ready {
                 break;
             }
             continue;
@@ -202,6 +206,17 @@ fn queue_attr_subagent_plan_with_presets(
         // A drained `subagents` queue must not suppress the per-line path on
         // a later queue that has no attribute of its own.
         if block.state() == agent_doc_queue::queue_set::QueueNodeState::Empty {
+            continue;
+        }
+        // A control-paused queue stays live for `after=` and does not dispatch
+        // its own heads. It still owns the attribute path, so those heads do
+        // not fall through to per-line dispatch. Later runs are still offered.
+        // Claimed, reported, and operator-gated heads keep the existing plan.
+        if agent_doc_queue::control_binding::explicit_queue_pause_mode(
+            &block.component.attrs,
+            queue_control.as_deref(),
+        ) {
+            saw_attr = true;
             continue;
         }
         saw_attr = true;
@@ -1012,6 +1027,89 @@ mod tests {
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             vec!["https://github.com/haiven-dev/haiven-api/pull/759".to_string()],
             "a paused inline queue does not hide the later subagents queue"
+        );
+    }
+
+    fn three_runs(first_attr: &str, first_body: &str, second_attr: &str, second_body: &str) -> String {
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:run id=first {first_attr} -->\n{first_body}\
+             <!-- /agent:run -->\n\n\
+             <!-- agent:run id=second {second_attr} -->\n{second_body}\
+             <!-- /agent:run -->\n\n\
+             <!-- agent:run id=third subagents -->\n- third work\n\
+             <!-- /agent:run -->\n"
+        )
+    }
+
+    fn offered_heads(content: &str) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        std::fs::write(&file, content).unwrap();
+        pending_subagent_dispatch_for_content(&file, content).unwrap()
+    }
+
+    #[test]
+    fn paused_earlier_runs_still_offer_the_other_two() {
+        let listed = offered_heads(&three_runs(
+            "pause subagents",
+            "- paused-work\n",
+            "subagents",
+            "- second work\n",
+        ));
+        assert_eq!(
+            listed,
+            vec!["second work".to_string(), "third work".to_string()],
+            "a pause control on the first run does not hide the other two: {listed:?}"
+        );
+
+        let stopped = offered_heads(&three_runs(
+            "stop subagents",
+            "- paused-work\n",
+            "subagents",
+            "- second work\n",
+        ));
+        assert_eq!(
+            stopped,
+            vec!["second work".to_string(), "third work".to_string()],
+            "a legacy stop marker does not hide the other two: {stopped:?}"
+        );
+
+        let inline = offered_heads(&three_runs(
+            "",
+            "- finish the inline work\n",
+            "subagents",
+            "- second work\n",
+        ));
+        assert!(
+            inline.is_empty(),
+            "owner-available inline work gates the later runs: {inline:?}"
+        );
+
+        let dependent = offered_heads(&three_runs(
+            "pause subagents",
+            "- paused-work\n",
+            "after=first subagents",
+            "- dependent work\n",
+        ));
+        assert_eq!(
+            dependent,
+            vec!["third work".to_string()],
+            "after= still waits on a paused predecessor: {dependent:?}"
+        );
+
+        let frontmatter = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue: pause\n---\n\n",
+            "<!-- agent:run id=first subagents -->\n- paused-work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=second subagents go -->\n- second work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=third subagents go -->\n- third work\n<!-- /agent:run -->\n",
+        );
+        let held = offered_heads(frontmatter);
+        assert_eq!(
+            held,
+            vec!["second work".to_string(), "third work".to_string()],
+            "frontmatter pause holds the first run and still offers the others: {held:?}"
         );
     }
 

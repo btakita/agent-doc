@@ -231,8 +231,29 @@ impl QueueBlock<'_> {
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> QueueNodeState {
+        self.state_excluding_claimed_with_control(claimed, None)
+    }
+
+    /// [`Self::state_excluding_claimed`] that also honors a `pause` control.
+    ///
+    /// A marker `pause` or legacy `stop` holds the queue. Frontmatter
+    /// `queue: pause` holds it when the marker has no token; a marker `go`
+    /// or `start` overrides that. An empty queue stays `Empty`, so `after=`
+    /// does not wait on a drained predecessor. A held queue with live heads
+    /// stays `Paused`, not `Empty`.
+    pub fn state_excluding_claimed_with_control(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
+    ) -> QueueNodeState {
         if self.is_drained() {
             return QueueNodeState::Empty;
+        }
+        if crate::control_binding::explicit_queue_pause_mode(
+            &self.component.attrs,
+            frontmatter_queue,
+        ) {
+            return QueueNodeState::Paused;
         }
         // `#nestedclaimsteer`: a child split out of a claimed parent is its own
         // head. Judge availability on that view when a steer guard is installed.
@@ -380,15 +401,26 @@ impl<'a> QueueGraph<'a> {
 
     /// Select the first queue with work available to this drain owner.
     ///
-    /// A queue whose every executable head is claimed, operator-gated (`🙋`),
-    /// or only a non-executable group label is paused, not empty: independent
-    /// later queues remain selectable, while an `after=` dependent still waits
-    /// for the externally owned work to finish.
+    /// A queue whose control is `pause` (a legacy marker `stop` included), or
+    /// whose every executable head is claimed, operator-gated (`🙋`), or only
+    /// a non-executable group label, is paused, not empty: independent later
+    /// queues remain selectable, while an `after=` dependent still waits for
+    /// the externally owned work to finish.
     pub fn selected_excluding_claimed(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> Option<&QueueBlock<'a>> {
-        match self.schedule_excluding_claimed(claimed) {
+        self.selected_excluding_claimed_with_control(claimed, None)
+    }
+
+    /// [`Self::selected_excluding_claimed`] with the document's frontmatter
+    /// `queue:` control. A marker token still overrides that control.
+    pub fn selected_excluding_claimed_with_control(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
+    ) -> Option<&QueueBlock<'a>> {
+        match self.schedule_excluding_claimed_with_control(claimed, frontmatter_queue) {
             QueueScheduleDecision::Ready { queue_id, .. } => self.block(&queue_id),
             QueueScheduleDecision::Idle
             | QueueScheduleDecision::Blocked { .. }
@@ -400,10 +432,23 @@ impl<'a> QueueGraph<'a> {
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> QueueScheduleDecision {
+        self.schedule_excluding_claimed_with_control(claimed, None)
+    }
+
+    pub fn schedule_excluding_claimed_with_control(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
+    ) -> QueueScheduleDecision {
         let runtime_states = self
             .blocks
             .iter()
-            .map(|block| (block.id.clone(), block.state_excluding_claimed(claimed)))
+            .map(|block| {
+                (
+                    block.id.clone(),
+                    block.state_excluding_claimed_with_control(claimed, frontmatter_queue),
+                )
+            })
             .collect();
         self.schedule_with_states(&runtime_states)
     }
@@ -418,7 +463,17 @@ impl<'a> QueueGraph<'a> {
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> Option<&QueueBlock<'a>> {
-        match self.schedule_reaching_inline_work(claimed) {
+        self.selected_reaching_inline_work_with_control(claimed, None)
+    }
+
+    /// [`Self::selected_reaching_inline_work`] with the document's frontmatter
+    /// `queue:` control. A marker token still overrides that control.
+    pub fn selected_reaching_inline_work_with_control(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
+    ) -> Option<&QueueBlock<'a>> {
+        match self.schedule_reaching_inline_work_with_control(claimed, frontmatter_queue) {
             QueueScheduleDecision::Ready { queue_id, .. } => self.block(&queue_id),
             QueueScheduleDecision::Idle
             | QueueScheduleDecision::Blocked { .. }
@@ -430,18 +485,28 @@ impl<'a> QueueGraph<'a> {
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> QueueScheduleDecision {
-        self.schedule_with_states(&self.inline_work_states(claimed))
+        self.schedule_reaching_inline_work_with_control(claimed, None)
+    }
+
+    pub fn schedule_reaching_inline_work_with_control(
+        &self,
+        claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
+    ) -> QueueScheduleDecision {
+        self.schedule_with_states(&self.inline_work_states(claimed, frontmatter_queue))
     }
 
     fn inline_work_states(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
+        frontmatter_queue: Option<&str>,
     ) -> HashMap<String, QueueNodeState> {
         let annotated = self
             .blocks
             .iter()
             .map(|block| {
-                let state = block.state_excluding_claimed(claimed);
+                let state =
+                    block.state_excluding_claimed_with_control(claimed, frontmatter_queue);
                 let delegated = state == QueueNodeState::Ready && block.is_delegated_only(claimed);
                 (block.id.clone(), state, delegated)
             })
@@ -1583,6 +1648,83 @@ mod tests {
             dependent_graph.schedule_reaching_inline_work(&none),
             QueueScheduleDecision::Blocked { .. }
         ));
+    }
+
+    /// A `pause` control (legacy marker `stop` included) holds that run and
+    /// leaves the other runs selectable. The held run is not empty, so an
+    /// `after=` dependent still waits. Frontmatter `queue: pause` holds every
+    /// queue whose marker does not override it.
+    #[test]
+    fn paused_control_does_not_hide_later_runs() {
+        let doc = concat!(
+            "<!-- agent:run id=first pause -->\n- held work\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=second -->\n- second work\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=third -->\n- third work\n<!-- /agent:run -->\n",
+        );
+        let components = element::parse(doc).unwrap();
+        let graph = QueueGraph::parse(doc, &components).unwrap();
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+        assert_eq!(
+            graph.block("first").unwrap().state_excluding_claimed(&none),
+            QueueNodeState::Paused
+        );
+        assert_ne!(
+            graph.block("first").unwrap().state(),
+            QueueNodeState::Empty
+        );
+        assert_eq!(
+            graph.schedule_excluding_claimed(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "second".into(),
+                occurrence: 1,
+            }
+        );
+        assert_eq!(
+            graph.schedule_reaching_inline_work(&none),
+            QueueScheduleDecision::Ready {
+                queue_id: "second".into(),
+                occurrence: 1,
+            }
+        );
+
+        let stopped = doc.replace("id=first pause", "id=first stop");
+        let stopped_components = element::parse(&stopped).unwrap();
+        let stopped_graph = QueueGraph::parse(&stopped, &stopped_components).unwrap();
+        assert_eq!(
+            stopped_graph
+                .block("first")
+                .unwrap()
+                .state_excluding_claimed(&none),
+            QueueNodeState::Paused
+        );
+
+        let waiting = concat!(
+            "<!-- agent:run id=first pause -->\n- held work\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=only after=first -->\n- dependent\n<!-- /agent:run -->\n",
+        );
+        let waiting_components = element::parse(waiting).unwrap();
+        let waiting_graph = QueueGraph::parse(waiting, &waiting_components).unwrap();
+        assert!(matches!(
+            waiting_graph.schedule_excluding_claimed(&none),
+            QueueScheduleDecision::Blocked { .. }
+        ));
+
+        let frontmatter = concat!(
+            "---\nqueue: pause\n---\n",
+            "<!-- agent:run id=first -->\n- held work\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=second go -->\n- second work\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=third -->\n- third held\n<!-- /agent:run -->\n",
+        );
+        let frontmatter_components = element::parse(frontmatter).unwrap();
+        let frontmatter_graph =
+            QueueGraph::parse(frontmatter, &frontmatter_components).unwrap();
+        assert_eq!(
+            frontmatter_graph.schedule_reaching_inline_work_with_control(&none, Some("pause")),
+            QueueScheduleDecision::Ready {
+                queue_id: "second".into(),
+                occurrence: 1,
+            }
+        );
     }
 
     #[test]

@@ -1228,8 +1228,9 @@ pub fn dispatchable_head_prompt_text_for_owner(
     }
     let components = element::parse(content).ok()?;
     let queues = crate::queue_set::QueueSet::parse(content, &components).ok()?;
+    let control = document_queue_control(content);
     let block = queues
-        .selected_reaching_inline_work(selection)
+        .selected_reaching_inline_work_with_control(selection, control.as_deref())
         .or_else(|| queues.selected())?;
     let entries = document_queue::parse(block.component.content(content)).ok()?;
     let entries = crate::nested_claim_steer::expand_if_installed(entries);
@@ -1437,6 +1438,12 @@ struct QueueFacts {
     preset_supplies_directive: bool,
 }
 
+/// Frontmatter `queue:` value the control binding reads, when one is present.
+pub fn document_queue_control(content: &str) -> Option<String> {
+    let (fm, _) = frontmatter::parse(content).ok()?;
+    crate::control_binding::frontmatter_queue_control(&fm).map(str::to_string)
+}
+
 fn queue_component_entries(content: &str) -> Option<(QueueFacts, Vec<QueueEntry>)> {
     queue_component_entries_excluding_claimed(content, &ClaimedQueueItems::none())
 }
@@ -1465,10 +1472,11 @@ fn queue_component_entries_from(
 ) -> Option<(QueueFacts, Vec<QueueEntry>)> {
     let components = element::parse(content).ok()?;
     let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
+    let control = document_queue_control(content);
     let selected = if reaching_inline {
-        queue_set.selected_reaching_inline_work(claimed)
+        queue_set.selected_reaching_inline_work_with_control(claimed, control.as_deref())
     } else {
-        queue_set.selected_excluding_claimed(claimed)
+        queue_set.selected_excluding_claimed_with_control(claimed, control.as_deref())
     };
     let queue_component = selected
         // Preserve the selected queue's blocked/claimed facts when no sibling
@@ -3768,6 +3776,30 @@ mod tests {
                 .unwrap()
                 .is_some(),
             "the continuation detector must agree"
+        );
+    }
+
+    #[test]
+    fn paused_first_run_leaves_the_next_run_drainable() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:run id=first pause -->\n- held work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=second -->\n- second work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=third pause -->\n- third held\n<!-- /agent:run -->\n",
+        );
+        assert_eq!(
+            live_drainable_head_prompt_text(doc, DrainScope::InSessionLoop).as_deref(),
+            Some("second work")
+        );
+        let frontmatter = concat!(
+            "---\nagent_doc_format: template\nqueue: pause\n---\n\n",
+            "<!-- agent:run id=first -->\n- held work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=second go -->\n- second work\n<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=third -->\n- third held\n<!-- /agent:run -->\n",
+        );
+        assert_eq!(
+            live_drainable_head_prompt_text(frontmatter, DrainScope::InSessionLoop).as_deref(),
+            Some("second work")
         );
     }
 

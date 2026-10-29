@@ -4,6 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.560
 
+- **A paused earlier `agent:run` does not hide the other runs.** A queue held by `pause` (a legacy marker `stop` included) stays live for `after=` and is skipped. The other `agent:run`, `agent:loop`, and legacy `agent:queue` elements are still processed in that turn, including when three runs are present and the first is paused. An earlier inline queue that still has owner-available work gates later queues.
 - **A claimed `agent:run` queue no longer hides a later ready `agent:run` from subagent dispatch.** Each `subagents` queue offers its own unclaimed heads every cycle, including on Grok `agent_doc_plan`. Sibling `subagents` queues are offered together. An `after=` queue still waits until its predecessors are empty, and an earlier inline queue that still has owner-available work gates later queues.
 - **`agent:rules` is part of every admitted turn.** Every `agent:rules` body in every `.agent-doc/project.md`, farthest ancestor first, is composed in file order, then every body in the session document. A nested `.git` does not hide an ancestor project file. A list item is one rule. Free text is one rule as written. Preflight puts the list on the cycle contract as `agent_rules`. A content-only edit does not start a turn.
 - **Operator answers nest under the request they answer.** An answer row nested under its request id is accepted, and row splitting ignores binary markers.

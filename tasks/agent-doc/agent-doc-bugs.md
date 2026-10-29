@@ -1263,6 +1263,51 @@ The worker prompt ended at "or Does this mean the subprompt is in a bad state?" 
 `subagent:checkedsubprompt` (`01a188de-5bf6-7fb0-be78-cf27940e3ced`), `subagent:leafcontext` (`01a188e5-ad81-70d0-8926-43381e563159`), and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work. No second worker is started for them.
 
 Changed paths: none. Commands: `queue report-complete` generation 1 exited 0; `repair-projection` was already synchronized. Verification: the branch has no new commit, so `make check` was not run. Confidence: the choice is recorded and not built. Escalation: pick one reading before any implementation.
+
+### Re: Parent leaves stay a choice — grok-4.7 · 2026-10-29T14:49-04:00
+
+The two notes in this plan stay open. Annotation, worker-reported remains the recorded local-vs-published choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Choice (6) on `#recent-run-affordance` remains the recorded recency note. Say when to build either one.
+
+`subagent:leafcontext` generation 1 reported back. A live subprompt now counts as the answer on a `🙋☑️` parent, and that part is committed. Whether the parent becomes non-executable context is still a choice. Worker `01a188e5-ad81-70d0-8926-43381e563159` pushed `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. `make check` logged `EXIT:0` (12183 passed, 187 skipped). `make install` was not run. `main` was not pushed.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records timestamp annotation plus highlights for the newest three, or a numeric recency glyph that carries that order. Say when to build it.
+
+[#subagent-operator-request-parent-leaf-context] subagent operator request
+- *queue_item:*
+  - In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Should a parent that has subprompts stay one executable head (`#nestedsubprompts`), or become non-executable prefixed context so only the leaves run and a blocker on the parent does not stop those leaves?
+- *context:*
+  - On `origin/main` `7b44d8bb28`, a `🙋☑️` work row whose answer is only an unmarked subprompt is wedged until `: <answer>` is appended on the parent line.
+  - That recognition is committed on `fix/parent-is-leaf-context` as `90cf29ae63668f53168938364d26ad25faf87837`. A live subprompt checks off the request todo and drops `🙋`. The work row is not struck.
+  - `#nestedsubprompts` still makes the parent plus its free-text subprompts one executable head. `entry_is_group_parent` is false when that block exists.
+  - A `🙋` or `⛔` on that one head still holds the subprompts, because they are not separate work. Tracked `#queuenest` leaves are already separate, and `blockers_for_row` does not copy a parent's blockers onto them.
+- *choices:*
+  - **Keep one head**: Leave `#nestedsubprompts` as it is. The parent with free-text subprompts stays the executable prompt. A blocker on that head holds the whole unit. The subprompt-answer rule already landed stays.
+  - **Leaf-only**: Once a parent has subprompts, the parent is prefixed context and is not executable. Only leaves run. A blocker on the parent does not stop those leaves. This replaces the one-head rule for free-text rows.
+
+> **Queue prompt:** In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+
+**Deferred:** Worker `01a188e5-ad81-70d0-8926-43381e563159` returned a blocking choice. The live-subprompt answer is already on `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. Pick **Keep one head** or **Leaf-only** before that second part is built.
+
+`subagent:planrange` generation 1 is running as worker `01a188fe-f39b-7f00-b821-812d845e6c8a` on `fix/plan-ranges-all-queues` in `/home/brian/worktrees/agent-doc-planrange`.
+
+> **Queue prompt:** agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
+
+**Deferred:** `subagent:planrange` generation 1 is running as worker `01a188fe-f39b-7f00-b821-812d845e6c8a`.
+
+`subagent:checkedsubprompt` (`01a188de-5bf6-7fb0-be78-cf27940e3ced`) and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work. No second worker is started for them.
+
+Changed paths: none in this checkout. The leaf worker changed `SPEC.md`, `agent-doc-document/src/queue_projection.rs`, `agent-doc-element-backlog-io/src/backlog_cmd.rs`, `agent-doc-queue/src/queue_continuation.rs`, `specs/02-document-format.md`, and `specs/07-closeout-commands.md` on `fix/parent-is-leaf-context`. Commands: `queue claim` and `queue start` for `subagent:planrange` generation 1 exited 0; `queue report-complete` for `subagent:leafcontext` generation 1 exited 0; `repair-projection` was already synchronized. Verification: the coordinator did not re-run `make check`; the worker log says `EXIT:0`, 12183 passed, 187 skipped. Confidence: the subprompt-answer commit is recorded, and the leaf-only rule is not built. Escalation: pick **Keep one head** or **Leaf-only**. Queue worker binding: `subagent:planrange` generation 1 is worker `01a188fe-f39b-7f00-b821-812d845e6c8a`.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
@@ -1279,8 +1324,9 @@ Changed paths: none. Commands: `queue report-complete` generation 1 exited 0; `r
 - 🙋☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
 - 🚧 [#subagent:checkedsubprompt#1] In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.
 - ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
-- 🚧 [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+- ☑️ [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
 - 🚧 [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
+- 🚧 [#subagent:planrange#1] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -1314,6 +1360,7 @@ Changed paths: none. Commands: `queue report-complete` generation 1 exited 0; `r
 - [ ] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance. (6) Timestamp annotation plus editor highlights for the newest three, or a numeric recency glyph that carries that order.
 - [ ] [#subagent-operator-request-recent-run-affordance] Answer the blocking subagent question for tracked work reviewrebase-repeat for queue item ‘If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn?…’ in agent:exchange: Which affordance should mark an `agent:run` row addressed by a recent turn? (choices: Editor highlight, clear on caret, Timestamp annotation, Recency glyph, no clock, Status digest only, No new affordance)
 - [ ] [#subagent-operator-request-decision-annotation-syntax] Pick how a made decision id annotates prompts and whether that restarts them. Worker 01a188dc-ebd3-7711-87c6-67034f7b9536 made no commit. (1) Blocker-close stamp: ⟦decision:<id>⟧ on live do [#id] rows when a stays-open or after= blocker leaves the open set; the last blocker returns the row from ⛔ to 📥. (2) Request-answer stamp and requeue: only [#subagent-operator-request-…] ids, token ⟦decision:<id>=<answer>⟧, every citing row returns to 📥 and its claim is released. (3) Cited-id answer stamp and requeue: any [#id] naming an open todo or operator request, made when that todo is checked or any instance has a nested answer; every unstruck citing row is stamped, loses ☑️ ⛔ 🙋, and returns to 📥. (4) Stamp only: same detection and token as (3), with no lifecycle change and no release. (5) Other.
+- [ ] [#subagent-operator-request-inbox-terminal-reading] Which reading should a closeout adopt when a nested #address or #rebase: #address row would stay at 📥? Worker 01a188df-8bd1-7bf1-938a-d7bb1d907c05 made no commit. Branch fix/inbox-not-terminal stays at 7b44d8bb28. (1) Start a new turn: the nested row stays its own pending head, 📥 means ready to run, and another row's closeout may commit while this row is still 📥. (2) The subprompt is in a bad state: do not commit that 📥; treat the row as a sub-prompt or failed work and remove the pending marker in the same turn. The worker prompt ended before the later sentences about a reliable error emoji, making 📥 unambiguous, and not ending a turn while prompts are 📥.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

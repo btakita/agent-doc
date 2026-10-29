@@ -117,7 +117,9 @@ After a successful compact commit, the binary writes the VCS refresh signal when
 
 ## Plugin-Side Notes
 
-The JetBrains plugin refuses to mutate an open document while IntelliJ has a pending File Cache Conflict for that file. Conflict detection is terminal for that IPC payload:
+The JetBrains plugin refuses to mutate an open document while IntelliJ has a pending File Cache Conflict for that file. Current IntelliJ exposes that queue as `MemoryDiskConflictResolver.isInConflictQueue`; older platforms expose it as `hasConflict`. The platform's own `conflict queued for <file>` line does not contain the phrase `File Cache Conflict`, a dialog button, or a production stack. When a VFS content change observes a newly queued conflict on an owned markdown document, the plugin writes one `idea.log` warning with the exact phrase `File Cache Conflict`, the file path, the probe name, `documentStamp`, and `oldFileStamp`. That line is the correlation record. It does not claim which dialog button was chosen.
+
+Conflict detection is terminal for that IPC payload:
 
 - socket IPC returns failure so the binary can retain the response and retry through the normal closeout path;
 - file-watch IPC records `file_cache_conflict_pending`, deletes the queued patch file, and leaves the response for binary-owned retry rather than replaying the old payload later;

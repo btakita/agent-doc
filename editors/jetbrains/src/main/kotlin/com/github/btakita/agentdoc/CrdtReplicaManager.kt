@@ -1363,13 +1363,21 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             VirtualFileManager.VFS_CHANGES,
             object : BulkFileListener {
                 override fun after(events: List<VFileEvent>) {
-                    events
+                    val contentChanges = events.filterIsInstance<VFileContentChangeEvent>()
+                    contentChanges
                         .asSequence()
-                        .filterIsInstance<VFileContentChangeEvent>()
                         .map { it.file.path }
                         .filter { it.endsWith(".md") && managerForFilePath(it) === this@CrdtReplicaManager }
                         .distinct()
                         .forEach(::projectNativeSaveReceipt)
+                    contentChanges
+                        .asSequence()
+                        .filter { event ->
+                            val path = event.file.path
+                            path.endsWith(".md") && managerForFilePath(path) === this@CrdtReplicaManager
+                        }
+                        .distinctBy { it.file.path }
+                        .forEach(::noteQueuedFileCacheConflict)
                 }
             },
             this,
@@ -3546,6 +3554,39 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } catch (_: RejectedExecutionException) {
             // Disposal owns the lane; no stale receipt may escape afterward.
         }
+    }
+
+    /**
+     * The resolver queues a conflict before the dialog and logs that queue
+     * without the phrase `File Cache Conflict`. Record the phrase once per
+     * newly queued edge so an idea.log search can find it. The stack is the
+     * observation site, not a dialog choice the platform did not record.
+     */
+    private fun noteQueuedFileCacheConflict(event: VFileContentChangeEvent) {
+        val file = event.file
+        val probed = IntelliJFileCacheConflictGuard.probe(file) { message, error ->
+            log.warn("[crdt-replica] $message", error)
+        }
+        val decision = fileCacheConflicts.observe(
+            file.path,
+            pending = probed.pending,
+            diskWitness = file.modificationStamp,
+        )
+        if (!decision.newlyPendingEdge) return
+        val documentStamp = try {
+            FileDocumentManager.getInstance().getCachedDocument(file)?.modificationStamp
+        } catch (_: RuntimeException) {
+            null
+        }
+        log.warn(
+            fileCacheConflictQueuedIdeaLogLine(
+                filePath = file.path,
+                probe = probed.method ?: "unresolved",
+                documentStamp = documentStamp,
+                oldFileStamp = event.oldModificationStamp,
+            ),
+            Throwable("File Cache Conflict queued"),
+        )
     }
 
     private fun reconcileRemotePersistence(

@@ -9,25 +9,43 @@ import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Shared IntelliJ memory↔disk conflict inspection for every editor mutation lane. */
+internal data class FileCacheConflictProbe(
+    val pending: Boolean,
+    val method: String?,
+)
+
+/**
+ * Shared IntelliJ memory↔disk conflict inspection for every editor mutation lane.
+ *
+ * Current platforms queue the conflict on `MemoryDiskConflictResolver.isInConflictQueue`
+ * and log `conflict queued for <file>` without the phrase `File Cache Conflict`.
+ * Older platforms expose the same queue as `hasConflict`. Either method is pending.
+ */
 internal object IntelliJFileCacheConflictGuard {
+    internal val conflictProbeMethodNames: List<String> = listOf("isInConflictQueue", "hasConflict")
+
     private val reflectionWarned = AtomicBoolean(false)
 
     fun hasPending(
         targetFile: VirtualFile,
         warn: (String, Throwable) -> Unit,
-    ): Boolean {
+    ): Boolean = probe(targetFile, warn).pending
+
+    fun probe(
+        targetFile: VirtualFile,
+        warn: (String, Throwable) -> Unit,
+    ): FileCacheConflictProbe {
         val fdm = FileDocumentManager.getInstance()
         return try {
             val resolverField = findFieldInHierarchy(fdm.javaClass, "myConflictResolver")
-                ?: return false
+                ?: return FileCacheConflictProbe(false, null)
             resolverField.isAccessible = true
-            val resolver = resolverField.get(fdm) ?: return false
-            val hasConflict =
-                findMethodInHierarchy(resolver.javaClass, "hasConflict", VirtualFile::class.java)
-                    ?: return false
-            hasConflict.isAccessible = true
-            hasConflict.invoke(resolver, targetFile) as? Boolean ?: false
+            val resolver = resolverField.get(fdm) ?: return FileCacheConflictProbe(false, null)
+            val method = findConflictProbe(resolver.javaClass)
+                ?: return FileCacheConflictProbe(false, null)
+            method.isAccessible = true
+            val pending = method.invoke(resolver, targetFile) as? Boolean ?: false
+            FileCacheConflictProbe(pending, method.name)
         } catch (error: Exception) {
             if (reflectionWarned.compareAndSet(false, true)) {
                 warn(
@@ -35,8 +53,15 @@ internal object IntelliJFileCacheConflictGuard {
                     error,
                 )
             }
-            false
+            FileCacheConflictProbe(false, null)
         }
+    }
+
+    internal fun findConflictProbe(type: Class<*>): Method? {
+        for (name in conflictProbeMethodNames) {
+            findMethodInHierarchy(type, name, VirtualFile::class.java)?.let { return it }
+        }
+        return null
     }
 
     private fun findFieldInHierarchy(type: Class<*>, name: String): Field? {
@@ -121,4 +146,20 @@ internal class FileCacheConflictPlane(private val context: ThreadSafeContext) {
     fun clear() {
         context.set(observations, emptyMap())
     }
+}
+
+/**
+ * `idea.log` correlation line for a conflict the resolver has queued.
+ * The platform line does not contain `File Cache Conflict`, a dialog button,
+ * or a production stack. This line does not invent the button.
+ */
+internal fun fileCacheConflictQueuedIdeaLogLine(
+    filePath: String,
+    probe: String,
+    documentStamp: Long?,
+    oldFileStamp: Long?,
+): String {
+    val document = documentStamp?.let { " documentStamp=$it" }.orEmpty()
+    val oldFile = oldFileStamp?.let { " oldFileStamp=$it" }.orEmpty()
+    return "[agent-doc] File Cache Conflict queued for $filePath; resolver=$probe$document$oldFile"
 }

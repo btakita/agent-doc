@@ -23,9 +23,12 @@ use agent_doc_queue::queue_claim::{
     ClaimFollowOutcome, ClaimHeadSource, ClaimOutcome, ClaimOwnerLiveness, ClaimOwnerSession,
     ClaimQueueView, ClaimedQueueItems, OwnerSessionObservation, QueueClaim,
     QueueClaimCancellationReceipt, QueueClaimLedger, QueueClaimMiss, QueueClaimRefreshRefused,
-    claim_identity, owner_session_liveness, resolve_claim_target_in_views,
+    claim_identity, nest_leaf_matches, owner_session_liveness, resolve_claim_target_in_views,
 };
-use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
+use agent_doc_queue::queue_continuation::{
+    all_executable_row_keys, all_queue_head_texts, live_queue_head_identities,
+    live_queue_head_texts,
+};
 use anyhow::{Context, Result, bail};
 
 use agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND;
@@ -337,7 +340,7 @@ fn snapshots_from_ledger(
 fn nested_claim_row_at_claim(file: &Path, target: &str) -> Option<String> {
     let content = std::fs::read_to_string(file).ok()?;
     let _guard = steer_guard(nested_claim_steer_snapshots(file, &content));
-    agent_doc_queue::queue_continuation::live_executable_row_keys(&content)?
+    all_executable_row_keys(&content)?
         .into_iter()
         .find_map(|(display, lineage)| (lineage == target && display != target).then_some(display))
 }
@@ -426,8 +429,8 @@ fn resolve_expanded_claim_target(
     authority_text: Option<&str>,
 ) -> Option<(String, agent_doc_queue::queue_claim::ClaimHeadSource)> {
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content))?;
-    let disk_heads = live_queue_head_texts(content).unwrap_or_default();
-    let authority_heads = authority_text.and_then(live_queue_head_texts);
+    let disk_heads = all_queue_head_texts(content).unwrap_or_default();
+    let authority_heads = authority_text.and_then(all_queue_head_texts);
     agent_doc_queue::queue_claim::resolve_claim_target_in_views(
         item,
         &disk_heads,
@@ -457,13 +460,14 @@ fn resolve_live_claim_target(
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
     let disk_view = ClaimQueueView::from_content(&content).unwrap_or_default();
     // Claim keys are nest vectors for a nested non-tracked leaf
-    // (`#nestlistlineage`). Display rows stay on the anchor via `disk_view`.
-    let disk_heads = live_queue_head_texts(&content).unwrap_or_default();
+    // (`#nestlistlineage`), from every queue. Display rows stay on the anchor
+    // via `disk_view`.
+    let disk_heads = all_queue_head_texts(&content).unwrap_or_default();
     // The editor/CRDT authority's current text, the view preflight computes
     // `queue_subagent_dispatch` from. `None` when no editor owns the document
     // (disk is the authority) or no current cut is available.
     let authority_text = editor_authority_text(file, source);
-    let authority_heads = authority_text.as_deref().and_then(live_queue_head_texts);
+    let authority_heads = authority_text.as_deref().and_then(all_queue_head_texts);
     let authority_view = authority_heads.as_ref().map(|_| {
         authority_text
             .as_deref()
@@ -547,6 +551,163 @@ fn followed_claim_target(
     None
 }
 
+/// Parents of a short leaf that names more than one live row, in queue order.
+///
+/// `None` when the item is an exact head or names fewer than two nest vectors.
+/// The authoritative text is the editor cut when one exists, otherwise disk.
+fn shared_leaf_claim_candidates(
+    file: &Path,
+    item: &str,
+) -> Result<Option<(Vec<String>, ClaimQueueView)>> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
+    let authority = editor_authority_text(file, "queue_claim");
+    let text = authority.as_deref().unwrap_or(content.as_str());
+    let heads = all_queue_head_texts(text).unwrap_or_default();
+    let matches = nest_leaf_matches(item, &heads);
+    if matches.len() < 2 {
+        return Ok(None);
+    }
+    Ok(Some((
+        matches,
+        ClaimQueueView::from_content(text).unwrap_or_default(),
+    )))
+}
+
+struct PreparedSharedLeaf {
+    target: String,
+    identity: agent_doc_element_queue::QueueItemIdentity,
+    claim_time_row: Option<String>,
+    tracked_item_aliases: Vec<String>,
+    dispatch_policy: Option<agent_doc_queue::queue_claim::SubagentDispatchPolicy>,
+    lineage_generation_floor: u64,
+}
+
+/// Bind the first unclaimed parent of a shared leaf. A later claim of the same
+/// leaf takes the next parent. Every row stays in the document.
+fn claim_next_shared_leaf(
+    file: &Path,
+    candidates: Vec<String>,
+    queues: ClaimQueueView,
+    owner: &str,
+    ttl_secs: u64,
+    owner_session: Option<ClaimOwnerSession>,
+) -> Result<(ClaimOutcome, QueueClaim)> {
+    let mut prepared = Vec::with_capacity(candidates.len());
+    for target in &candidates {
+        let identity = claim_identity(target);
+        let authorization =
+            crate::subagent_dispatch::subagent_authorization_for_item(file, target)?;
+        let tracked_item_aliases = if identity.is_id_backed() {
+            authorization
+                .tracked_items
+                .iter()
+                .map(|item| item.text.trim().to_string())
+                .filter(|text| !text.is_empty())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let dispatch_policy = (authorization.model.is_some() || authorization.effort.is_some())
+            .then_some(agent_doc_queue::queue_claim::SubagentDispatchPolicy {
+                model: authorization.model,
+                effort: authorization.effort,
+            });
+        prepared.push(PreparedSharedLeaf {
+            target: target.clone(),
+            identity,
+            claim_time_row: nested_claim_row_at_claim(file, target),
+            tracked_item_aliases,
+            dispatch_policy,
+            lineage_generation_floor: crate::queue_lineage::max_generation(file, target)?,
+        });
+    }
+    let claim_keys = queues.claim_keys();
+    let now = now_secs();
+    let owner_session_for_claim = owner_session.clone();
+    let result = mutate_ledger(file, |ledger| {
+        let chosen = prepared
+            .iter()
+            .find(|item| {
+                !ledger
+                    .claims
+                    .iter()
+                    .any(|claim| claim.identity == item.identity && claim.blocks_dispatch(now))
+            })
+            .unwrap_or(&prepared[0]);
+        let outcome = ledger.claim_in_session_with_generation_floor(
+            &chosen.target,
+            owner,
+            now,
+            ttl_secs,
+            owner_session_for_claim.clone(),
+            chosen.lineage_generation_floor,
+        );
+        log_followed(file, &ledger.follow_edits_in_view(now, &queues));
+        let stored = ledger
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == chosen.identity)
+            .context("claimed item missing from the ledger after claim")?;
+        if matches!(outcome, ClaimOutcome::Created | ClaimOutcome::Reassigned)
+            && stored.claim_time_row.is_none()
+        {
+            stored.claim_time_row = chosen.claim_time_row.clone();
+        }
+        stored.dispatch_policy = chosen.dispatch_policy.clone();
+        stored.tracked_item_aliases = chosen.tracked_item_aliases.clone();
+        Ok((outcome, stored.clone()))
+    })?;
+    let occurrences = claim_keys
+        .iter()
+        .filter(|head| claim_identity(head) == result.1.identity)
+        .count();
+    persist_claim_result(file, result, occurrences)
+}
+
+fn persist_claim_result(
+    file: &Path,
+    result: (ClaimOutcome, QueueClaim),
+    occurrences: usize,
+) -> Result<(ClaimOutcome, QueueClaim)> {
+    if result.0 == ClaimOutcome::HeldByOther {
+        bail!(
+            "queue head {:?} is already held by {} generation {}; release/expire that attempt before redispatch",
+            result.1.item_text,
+            result.1.owner,
+            result.1.generation
+        );
+    }
+    crate::queue_lineage::record_claim(file, &result.1)
+        .context("persist durable queue worktree lineage claim receipt")?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={} model={} effort={}",
+            result.0,
+            result.1.owner,
+            result.1.generation,
+            result.1.state,
+            result.1.expires_at_secs,
+            result.1.item_text.len(),
+            owner_session_log_token(result.1.owner_session.as_ref()),
+            result
+                .1
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.model.as_deref())
+                .unwrap_or("-"),
+            result
+                .1
+                .dispatch_policy
+                .as_ref()
+                .and_then(|policy| policy.effort.as_deref())
+                .unwrap_or("-"),
+        ),
+    );
+    Ok(result)
+}
+
 /// Claim the live queue head `item` for `owner` for `ttl_secs`.
 ///
 /// Refuses an item that is not a live head of the document's queue: a claim on
@@ -575,6 +736,12 @@ pub fn claim_with_session(
     }
     if owner.trim().is_empty() {
         bail!("queue claim needs a non-empty --owner (e.g. `subagent:<label>`)");
+    }
+    // A short leaf under several parents is not a miss (`#nestlistlineage`).
+    // Bind the first of those rows that no live claim holds. The others stay
+    // live and are claimed by their own nest vector.
+    if let Some((candidates, queues)) = shared_leaf_claim_candidates(file, item)? {
+        return claim_next_shared_leaf(file, candidates, queues, owner, ttl_secs, owner_session);
     }
     // A miss is a typed usage error (`QueueClaimMiss`) naming the live heads,
     // never a bare string: the CLI reports it as-is instead of wrapping it in
@@ -641,42 +808,7 @@ pub fn claim_with_session(
         stored.tracked_item_aliases = tracked_item_aliases.clone();
         Ok((outcome, stored.clone()))
     })?;
-    if result.0 == ClaimOutcome::HeldByOther {
-        bail!(
-            "queue head {:?} is already held by {} generation {}; release/expire that attempt before redispatch",
-            result.1.item_text,
-            result.1.owner,
-            result.1.generation
-        );
-    }
-    crate::queue_lineage::record_claim(file, &result.1)
-        .context("persist durable queue worktree lineage claim receipt")?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "queue_claim outcome={:?} owner={} generation={} state={:?} expires_at={} item_bytes={} occurrences={occurrences} owner_session={} model={} effort={}",
-            result.0,
-            result.1.owner,
-            result.1.generation,
-            result.1.state,
-            result.1.expires_at_secs,
-            result.1.item_text.len(),
-            owner_session_log_token(result.1.owner_session.as_ref()),
-            result
-                .1
-                .dispatch_policy
-                .as_ref()
-                .and_then(|policy| policy.model.as_deref())
-                .unwrap_or("-"),
-            result
-                .1
-                .dispatch_policy
-                .as_ref()
-                .and_then(|policy| policy.effort.as_deref())
-                .unwrap_or("-"),
-        ),
-    );
-    Ok(result)
+    persist_claim_result(file, result, occurrences)
 }
 
 /// Positively acknowledge that the harness successfully dispatched one

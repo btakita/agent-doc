@@ -435,7 +435,11 @@ the lineage path. An example lineage is
 `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` use that vector when the leaf is not a tracked directive,
 so the same bare `#tag` under another parent is different work
 (`#nestlistlineage`). The dispatch list shows the leaf when its text is unique,
-and the vector when the same leaf is live under another parent. The subagent
+and the vector when the same leaf is live under another parent. A short
+`--item` leaf that names one live row still claims that row. A short leaf that
+names several rows is not a refusal and does not drop any row: `queue claim`
+binds the first unclaimed row by its parent lineage, and each other row stays
+live for its own `root: …: item`. The subagent
 authorization carries the vector either way.
 A quote of either the vector or the leaf still answers that leaf. The selected
 queue prompt stays the leaf. Do not quote the tree as the queue

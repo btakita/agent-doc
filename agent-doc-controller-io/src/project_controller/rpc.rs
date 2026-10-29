@@ -28959,18 +28959,35 @@ fn focus_outside_gated_documents(
     .then_some(focus)
 }
 
-fn first_agent_doc_in_layout_column(project_root: &Path, column: &str) -> Option<String> {
-    column.split(',').find_map(|raw| {
+fn agent_doc_in_layout_column(
+    project_root: &Path,
+    column: &str,
+    preferred: Option<&str>,
+) -> Option<String> {
+    let preferred = preferred.map(|file| canonical_layout_document_id(project_root, file));
+    let mut first = None;
+    for raw in column.split(',') {
         let raw = raw.trim();
         if raw.is_empty() {
-            return None;
+            continue;
         }
         let document_id = canonical_layout_document_id(project_root, raw);
-        let content = std::fs::read_to_string(&document_id).ok()?;
-        let (frontmatter, _) = agent_doc_frontmatter::frontmatter::parse(&content).ok()?;
-        frontmatter.session.as_ref()?;
-        Some(document_id)
-    })
+        let Some(content) = std::fs::read_to_string(&document_id).ok() else {
+            continue;
+        };
+        let Some((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(&content).ok()
+        else {
+            continue;
+        };
+        if frontmatter.session.is_none() {
+            continue;
+        }
+        if preferred.as_deref() == Some(document_id.as_str()) {
+            return Some(document_id);
+        }
+        first.get_or_insert(document_id);
+    }
+    first
 }
 
 fn layout_sync_state_expected_documents(
@@ -28979,11 +28996,11 @@ fn layout_sync_state_expected_documents(
 ) -> Vec<String> {
     let saved_layout = load_layout_state(project_root).unwrap_or_default();
     let classified = agent_doc_tmux::classify_sync_layout_columns(&invocation.columns, |column| {
-        first_agent_doc_in_layout_column(project_root, column)
+        agent_doc_in_layout_column(project_root, column, invocation.focus.as_deref())
     });
     let effective = agent_doc_tmux::apply_column_memory(&classified, &saved_layout);
     agent_doc_tmux::classify_sync_layout_columns(&effective.columns, |column| {
-        first_agent_doc_in_layout_column(project_root, column)
+        agent_doc_in_layout_column(project_root, column, invocation.focus.as_deref())
     })
     .into_iter()
     .filter_map(|column| column.agent_doc)
@@ -42536,6 +42553,40 @@ mod tests {
         assert_eq!(pane_layout_order_authority(runtime.as_ref()), vec![c, b, a]);
     }
 
+    /// A frontend column is a comma-joined tab stack. The selected tab is the
+    /// pane representative even when an older background session tab precedes
+    /// it; otherwise both Sync Tmux Pane and Run Agent Doc reject a valid focus
+    /// as absent from the desired columns before publishing anything.
+    #[test]
+    fn manual_sync_selects_the_focused_session_from_a_stacked_column() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let background = session_document(&dir, "tasks/agent-doc/agent-doc-bugs.md");
+        let focused = session_document(&dir, "tasks/sdk/sdk-demo.md");
+        let right = session_document(&dir, "tasks/api.md");
+        let stacked = format!("{background},{focused}");
+
+        let mut invocation =
+            plugin_unknown_order_publication(&[stacked.as_str(), &right], &focused);
+        invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Editor;
+        invocation.caller_kind = "manual".to_string();
+        let (desired, published) = publish_pane_layout_desired_invocation(
+            &bootstrap,
+            runtime.as_ref(),
+            invocation,
+            None,
+            PaneLayoutPublication::FreshCommandIntent,
+            PaneLayoutPublisher::Command,
+        )
+        .unwrap();
+
+        assert_eq!(published.columns, vec![focused.clone(), right.clone()]);
+        assert_eq!(desired.invocation.columns, vec![focused.clone(), right]);
+        assert_eq!(desired.invocation.focus.as_deref(), Some(focused.as_str()));
+    }
+
     /// GH #343: a manual click with unknown order is not structural evidence. It preserves the
     /// retained vector; recovery requires the connected frontend's positive column snapshot.
     #[test]
@@ -49981,7 +50032,10 @@ mod tests {
     #[test]
     fn cross_root_editor_route_publishes_layout_on_the_main_window_owner_only() {
         let fx = CrossRootLayoutFixture::new();
-        let request = fx.route_request(&fx.contracts, &[&fx.bugs, &fx.contracts]);
+        // The routed document is the selected second tab in the right-hand
+        // column, matching the sdk-demo.md failure that reached this owner RPC.
+        let stacked = format!("{},{}", fx.api, fx.contracts);
+        let request = fx.route_request(&fx.contracts, &[&fx.bugs, stacked.as_str()]);
         let result = handle_editor_route_rpc_with_layout_delegate(
             &fx.inner_bootstrap,
             fx.inner_runtime.as_ref(),

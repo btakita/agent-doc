@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1195,7 +1195,31 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 > **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 
 **Deferred:** Choice (6) on `#recent-run-affordance` already records this. Say when to build it.
-<!-- agent:boundary:88a54d14 -->
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+**Deferred:** Striking this row would remove the nested lines Annotation, worker-reported and the icon question. Those stay until you say to build the annotation, the icons, or both. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+
+**Deferred:** Striking this row would remove the timestamp and numeric-glyph note. Choice (6) on `#recent-run-affordance` already records it. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+
+**Deferred:** The five choices are already recorded under Decision annotation is a choice. Striking this row would drop that open choice. Worker `01a188dc-ebd3-7711-87c6-67034f7b9536` has exited. No commit was made.
+
+### Re: Reported choice rows stay open — grok-4.7 · 2026-10-29T14:24-04:00
+
+`subagent:reviewpublish`, `subagent:recentrun`, and `subagent:decisionannotate` stay on their operator choices. Their workers have exited. No new worker is dispatched for them.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` / `⬆`. Say when to build it.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records this. Say when to build it.
+<!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -1208,7 +1232,7 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
-- ☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+- 🙋☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
 - 🚧 [#subagent:checkedsubprompt#1] In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.
 - 🚧 [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
 - 🚧 [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
@@ -1245,6 +1269,7 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 - [ ] [#subagent-operator-request-review-publish-marker] Answer the blocking subagent question for queue item ‘I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context…’ in agent:exchange: Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"? (choices: Annotation, worker-reported, Icons, worker-reported, Observe git and GitHub, Other)
 - [ ] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance. (6) Timestamp annotation plus editor highlights for the newest three, or a numeric recency glyph that carries that order.
 - [ ] [#subagent-operator-request-recent-run-affordance] Answer the blocking subagent question for tracked work reviewrebase-repeat for queue item ‘If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn?…’ in agent:exchange: Which affordance should mark an `agent:run` row addressed by a recent turn? (choices: Editor highlight, clear on caret, Timestamp annotation, Recency glyph, no clock, Status digest only, No new affordance)
+- [ ] [#subagent-operator-request-decision-annotation-syntax] Pick how a made decision id annotates prompts and whether that restarts them. Worker 01a188dc-ebd3-7711-87c6-67034f7b9536 made no commit. (1) Blocker-close stamp: ⟦decision:<id>⟧ on live do [#id] rows when a stays-open or after= blocker leaves the open set; the last blocker returns the row from ⛔ to 📥. (2) Request-answer stamp and requeue: only [#subagent-operator-request-…] ids, token ⟦decision:<id>=<answer>⟧, every citing row returns to 📥 and its claim is released. (3) Cited-id answer stamp and requeue: any [#id] naming an open todo or operator request, made when that todo is checked or any instance has a nested answer; every unstruck citing row is stamped, loses ☑️ ⛔ 🙋, and returns to 📥. (4) Stamp only: same detection and token as (3), with no lifecycle change and no release. (5) Other.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

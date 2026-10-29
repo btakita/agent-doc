@@ -718,6 +718,28 @@ The routine steering-delivery dialog is removed. Handing an update to the turn a
 
 **Deferred:** Both named commits are on origin/main (`9c09d2aadc` and `1bbc28a6a9`). The release checkout `feat/release-readiness` is two commits ahead of origin/main: `d6cf730618` and `8b79aa1601`. The `0.35.561` version projection is uncommitted. `v0.35.561` is not tagged. origin/main is `1bbc28a6a9`. Publication has not run. The never-refused worker `01a187cf-45ec-7340-862c-a8ffb442e2db` is running, so the tag stays uncut.
 
+### Re: shared leaf claims and the uncut tag — grok-4.7 · 2026-10-29T09:59-04:00
+
+> **Queue prompt:** agent:run items should never be refused. From api.md session:
+> ```
+> Yes. The queue claim for a shared #rebase row is refused when several pull requests use that same      9:12 AM   █
+> text. Nine live rows match it, on pull requests 717, 758, 763, and 767, so those claims exited 1 and             █
+> no worker started. Pull request 767's section has rebase rows and no #review row. The short #review              █
+> claim is held by pull request 763. GitHub showed 0 reviews and 0 review comments on https://                     █
+> github.com/haiven-dev/haiven-api/pull/767. The head was 958dbf52dfca2a499f47320db72d86a62d77622d on
+> agent/studio-integration-redirects-20261026, base sdk-dev. mergeable came back UNKNOWN.
+> ```
+
+A short `#rebase` leaf that names several pull requests is claimed by its parent lineage. `queue claim` binds the first unclaimed parent and leaves every other row live. That fix is `db30348845` on `feat/release-readiness`, cherry-picked from `7b7938467b` on `fix/shared-leaf-claim-by-lineage`.
+
+> **Queue prompt:** In api.md, a turn shows `All 18 plan claims exited 1, so no worker started. I am recording the three chat prompts and the current PR 767 git state in the closeout.`: I believe this is related to the stranded 📥. Why are the claims exiting 1? Can we discern a reason and use certain reasons to update the state so we don't have stranded items with 📥 only to exit 1 during every turn? Also I added https://github.com/haiven-dev/haiven-api/pull/762 > #rebase, but agent-doc did nothing...presumably because it had an exit 1.
+
+Those eighteen plan claims exited 1 because each command used `--item '#rebase'` while many parents were live. `queue claim` returned before any ledger write, so no worker started and the leaf stayed pending. After `db30348845`, each parent is its own nest vector. `https://github.com/haiven-dev/haiven-api/pull/762` with a nested `#rebase` claims as `https://github.com/haiven-dev/haiven-api/pull/762: #rebase`. The worker left the tree at `2918cf46d7` with a clean worktree. `shared_rebase_heads_keep_each_parent_lineage` and `shared_rebase_claim_binds_each_parent_and_keeps_every_row` passed. `f058fa029d` only removes the useless `format!` wrappers Clippy rejected in those fixtures.
+
+> **Queue prompt:** release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
+
+**Deferred:** Both named commits are on origin/main (`9c09d2aadc` and `1bbc28a6a9`). `feat/release-readiness` is five commits ahead of origin/main, ending at `f058fa029d`. The `0.35.561` version projection is uncommitted. `make check` is running. `v0.35.561` is not tagged, and publication has not run.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -729,7 +751,7 @@ The routine steering-delivery dialog is removed. Handing an update to the turn a
 - ☑️ [#subagent:releaseinclude#2] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 - ~~Why are there many agent:run items with 📥 in api.md? Is the state out of sync or do we need another emoji to represent another state?~~ — auto-struck: answered this cycle (#ftstrike)
 ---
-🚧 [#subagent:runnorefuse#1] agent:run items should never be refused. From api.md session:
+☑️ [#subagent:runnorefuse#1] agent:run items should never be refused. From api.md session:
 ```
 Yes. The queue claim for a shared #rebase row is refused when several pull requests use that same      9:12 AM   █
 text. Nine live rows match it, on pull requests 717, 758, 763, and 767, so those claims exited 1 and             █
@@ -741,6 +763,7 @@ agent/studio-integration-redirects-20261026, base sdk-dev. mergeable came back U
 ---
 - ~~Does a "refusal" strand the state of a agent:run item? Is this why there are so many run items that are stuck iwth 📥 in api.md?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Remove Editor Plugin dialog since this is a normal/routine operation: [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
+- ☑️ [#subagent:claimexit1#1] In api.md, a turn shows `All 18 plan claims exited 1, so no worker started. I am recording the three chat prompts and the current PR 767 git state in the closeout.`: I believe this is related to the stranded 📥. Why are the claims exiting 1? Can we discern a reason and use certain reasons to update the state so we don't have stranded items with 📥 only to exit 1 during every turn? Also I added https://github.com/haiven-dev/haiven-api/pull/762 > #rebase, but agent-doc did nothing...presumably because it had an exit 1.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

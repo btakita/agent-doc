@@ -7,7 +7,8 @@
 //!   snapshot via `diff::compute(file)`.
 //! - Produces an ordered record with prompt targets, execution scope, repo
 //!   actions, required binary commands, pending mutations that must be
-//!   resolved this cycle, a handoff target, concrete blockers, and a compact
+//!   resolved this cycle, a handoff target, concrete blockers, nested answers
+//!   under blocking operator-request rows (`#answersinplan`), and a compact
 //!   selected-path operation tree.
 //! - Does not fail closed solely on session-accretion heuristics; accretion
 //!   remains advisory while planning still derives prompt targets and actions.
@@ -110,6 +111,11 @@ pub struct DispatchPlan {
     pub blockers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
+    /// `#answersinplan`: live nested rows under a blocking operator-request
+    /// work row. Document state, so a later plan still reports an answer that
+    /// the diff classifier never selected as a prompt.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operator_request_answers: Vec<agent_doc_document::queue_projection::OperatorRequestAnswer>,
     /// Binary-owned execution order for this plan. The tree contains only the
     /// selected path through each decision so harness agents do not spend
     /// context proposing speculative alternatives to the same contract.
@@ -211,6 +217,17 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         "plan_command_document",
     )
     .with_context(|| format!("failed to resolve {}", file.display()))?;
+    // `#answersinplan`: nested lines under a blocking request row are the
+    // operator's answer even when this plan has no document diff.
+    let operator_request_answers =
+        agent_doc_queue::queue_continuation::blocking_operator_request_answers(&content)?;
+    let mut operator_answer_targets = Vec::new();
+    agent_doc_prompt_contract::push_unique_strings(
+        &mut operator_answer_targets,
+        operator_request_answers
+            .iter()
+            .map(|answer| answer.answer.clone()),
+    );
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file(&content, file)
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
     let effective_prompt_presets =
@@ -345,9 +362,18 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         .or(chat_diff)
     else {
         let has_queue_lifecycle_work = !queue_lifecycle_required_commands.is_empty();
+        let has_operator_answers = !operator_answer_targets.is_empty();
         let (task_class, blockers, warnings) = if has_queue_lifecycle_work {
             (
                 "queue_subagent_dispatch".to_string(),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if has_operator_answers && sealed_turn.is_none() {
+            // The nested answer is the turn. A no-changes blocker would stop
+            // the skill before it read the answer.
+            (
+                "operator_request_answers".to_string(),
                 Vec::new(),
                 Vec::new(),
             )
@@ -370,22 +396,32 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         let parallelizable = queue_subagent_dispatch.len() > 1;
         let blockers_for_tree = blockers.clone();
         let operation_tree = build_operation_tree(
-            &[],
+            &operator_answer_targets,
             &[],
             &required_commands,
             &[],
             HandoffTarget::None,
             &blockers_for_tree,
         );
+        let context_budget_tokens = if has_queue_lifecycle_work || has_operator_answers {
+            6000
+        } else {
+            0
+        };
+        let job_packet_budget_tokens = if has_queue_lifecycle_work || has_operator_answers {
+            4000
+        } else {
+            0
+        };
         return Ok(DispatchPlan {
             queue_subagent_dispatch,
             queue_subagent_dispatch_guidance,
             queue_dispatch_acknowledgement_required,
-            prompt_targets: Vec::new(),
+            prompt_targets: operator_answer_targets,
             graph_evidence: None,
             dispatch_candidate: has_queue_lifecycle_work,
             task_class,
-            risk: if has_queue_lifecycle_work {
+            risk: if has_queue_lifecycle_work || has_operator_answers {
                 "medium".to_string()
             } else {
                 "low".to_string()
@@ -395,8 +431,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             model_tier: "low".to_string(),
             dispatch_mode: dispatch_mode(&fm),
             manual_packet_only: false,
-            context_budget_tokens: if has_queue_lifecycle_work { 6000 } else { 0 },
-            job_packet_budget_tokens: if has_queue_lifecycle_work { 4000 } else { 0 },
+            context_budget_tokens,
+            job_packet_budget_tokens,
             write_scope: Vec::new(),
             required_proof: if has_queue_lifecycle_work {
                 vec!["queue_worker_binding".to_string()]
@@ -412,6 +448,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             blockers,
             warnings,
             operation_tree,
+            operator_request_answers: operator_request_answers.clone(),
         });
     };
 
@@ -443,6 +480,12 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         );
     }
     agent_doc_prompt_contract::push_unique_strings(&mut prompt_targets, chat_prompts.clone());
+    // `#answersinplan`: the answer stays in the execution contract when the
+    // diff classifier did not select the nested rows as their own prompt.
+    agent_doc_prompt_contract::push_unique_strings(
+        &mut prompt_targets,
+        operator_answer_targets.iter().cloned(),
+    );
     let added_diff_lines = agent_doc_prompt_contract::collect_added_diff_lines(&prompt_diff_text);
 
     let execution_scope = execution_scope_for_prompt_targets(
@@ -667,6 +710,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         blockers: std::mem::take(&mut blockers),
         warnings,
         operation_tree,
+        operator_request_answers,
     })
 }
 
@@ -1885,6 +1929,103 @@ Done.
             plan.prompt_targets
         );
         assert!(plan.repo_actions.is_empty(), "{:?}", plan.repo_actions);
+    }
+
+    /// `#answersinplan`: the next plan reports nested lines under a blocking
+    /// operator-request row as that request's answer. A snapshot that already
+    /// contains the lines is not "no changes" — the answer is the turn.
+    #[test]
+    fn plan_reports_nested_answers_under_blocking_operator_request_rows() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Run <!-- agent:run priority go -->
+- 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
+  - Annotation, worker-reported
+  - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+- 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+  - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+<!-- /agent:run -->
+
+## Todo <!-- agent:todo -->
+- [ ] [#subagent-operator-request-review-publish-marker] pick a marker
+- [ ] [#subagent-operator-request-recent-run-affordance] pick an affordance
+<!-- /agent:todo -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+        let json = serde_json::to_string(&plan).unwrap();
+
+        assert_eq!(plan.task_class, "operator_request_answers");
+        assert!(
+            plan.blockers.is_empty(),
+            "an operator answer is not a no-changes stop: {:?}",
+            plan.blockers
+        );
+        assert_eq!(plan.operator_request_answers.len(), 2, "{json}");
+        assert_eq!(
+            plan.operator_request_answers[0].request_id,
+            "subagent-operator-request-review-publish-marker"
+        );
+        assert_eq!(
+            plan.operator_request_answers[0].answer,
+            concat!(
+                "Annotation, worker-reported\n",
+                "If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.",
+            )
+        );
+        assert_eq!(
+            plan.operator_request_answers[1].request_id,
+            "subagent-operator-request-recent-run-affordance"
+        );
+        assert_eq!(
+            plan.operator_request_answers[1].answer,
+            "If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided."
+        );
+        assert!(
+            plan.prompt_targets
+                .iter()
+                .any(|target| target.contains("Annotation, worker-reported")),
+            "{:?}",
+            plan.prompt_targets
+        );
+        assert!(
+            plan.prompt_targets.iter().any(|target| target
+                .contains("If there's a way to make the Recency glyph numeric")),
+            "{:?}",
+            plan.prompt_targets
+        );
+        assert!(json.contains("Annotation, worker-reported"), "{json}");
+        assert!(
+            json.contains("the 2nd most recent, the 3rd most recent"),
+            "{json}"
+        );
+        assert!(
+            plan.queue_subagent_dispatch.is_empty(),
+            "a blocking request row is not a fresh dispatch: {:?}",
+            plan.queue_subagent_dispatch
+        );
     }
 
     #[test]

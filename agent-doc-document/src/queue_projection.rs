@@ -734,7 +734,15 @@ pub fn nested_operator_answer(text: &str) -> Option<(&str, String)> {
     if !is_reserved_operator_action_id(id) || !(after.is_empty() || after == ":") {
         return None;
     }
-    let answer = subprompts::subprompt_rows(text)
+    let answer = live_subprompt_answer(text);
+    (!answer.is_empty()).then_some((id, answer))
+}
+
+/// Live nested rows under `text`, projection prefixes stripped, joined by
+/// newlines. A struck child is closed and is not part of the answer.
+fn live_subprompt_answer(text: &str) -> String {
+    use agent_doc_element_queue::subprompts;
+    subprompts::subprompt_rows(text)
         .into_iter()
         .filter(|row| !subprompts::subprompt_row_is_struck(row))
         .map(|row| {
@@ -744,8 +752,83 @@ pub fn nested_operator_answer(text: &str) -> Option<(&str, String)> {
         })
         .filter(|row| !row.is_empty())
         .collect::<Vec<_>>()
-        .join("\n");
-    (!answer.is_empty()).then_some((id, answer))
+        .join("\n")
+}
+
+/// `#answersinplan`: one operator answer nested under a blocking request row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OperatorRequestAnswer {
+    /// Lowercased reserved request id.
+    pub request_id: String,
+    /// Parent work text. Attempt projection and a trailing request annotation
+    /// are removed; the request id stays on [`Self::request_id`].
+    pub queue_item: String,
+    /// Live nested rows, in document order, joined by newlines.
+    pub answer: String,
+}
+
+/// `#answersinplan`: live nested rows under a blocking operator-request work
+/// row are that request's answer.
+///
+/// The parent still carries its work text and a trailing
+/// `[#subagent-operator-request-...]` annotation. It is blocking while it
+/// shows `🙋` or while one of those request ids is an open todo. An
+/// answer-only row (`[#request-id]` with the answer nested beneath it, or
+/// `[#request-id]: <answer>`) is not this shape. A struck child is omitted.
+/// One record per request id on the parent, in annotation order.
+pub fn operator_request_answers_on_row(
+    text: &str,
+    open_todo_ids: &HashSet<String>,
+) -> Vec<OperatorRequestAnswer> {
+    if operator_answer_row_request_id(text).is_some() {
+        return Vec::new();
+    }
+    let request_ids = operator_request_annotation_ids(text);
+    if request_ids.is_empty() {
+        return Vec::new();
+    }
+    let blocking =
+        operator_action_marked(text) || request_ids.iter().any(|id| open_todo_ids.contains(id));
+    if !blocking {
+        return Vec::new();
+    }
+    let answer = live_subprompt_answer(text);
+    if answer.is_empty() {
+        return Vec::new();
+    }
+    let queue_item = queue_item_without_request_annotation(
+        agent_doc_element_queue::subprompts::head_without_subprompts(text),
+    );
+    request_ids
+        .into_iter()
+        .map(|request_id| OperatorRequestAnswer {
+            request_id,
+            queue_item: queue_item.clone(),
+            answer: answer.clone(),
+        })
+        .collect()
+}
+
+/// Parent work text without a trailing reserved request annotation.
+fn queue_item_without_request_annotation(head: &str) -> String {
+    let mut question = agent_doc_element_queue::strip_attempt_projection_prefix(head)
+        .trim()
+        .to_string();
+    loop {
+        let trimmed = question.trim_end();
+        let Some((id, after, start)) = trailing_operator_action_annotation(trimmed) else {
+            break;
+        };
+        if !is_reserved_operator_action_id(id) {
+            break;
+        }
+        let rest = after.trim();
+        if !(rest.is_empty() || rest == ":") {
+            break;
+        }
+        question = trimmed[..start].trim_end().to_string();
+    }
+    question
 }
 
 /// Whether an operator request still holds this queue row open
@@ -1730,9 +1813,72 @@ mod tests {
         let work = format!("fix the replay [#{id}]");
         assert_eq!(operator_answer_row_request_id(&work), None);
         assert_eq!(operator_request_annotation_ids(&work), vec![id.to_string()]);
+        assert!(
+            operator_request_answers_on_row(&answer, &HashSet::new()).is_empty(),
+            "an answer-only row is not a work row with a nested answer"
+        );
         assert_eq!(
             operator_answer_row_request_id(&format!("[#{id}]: resync")),
             Some(id.to_string())
+        );
+    }
+
+    /// `#answersinplan`: the operator answers a blocking request by nesting
+    /// lines under the work row that carries the request annotation.
+    #[test]
+    fn nested_lines_under_a_blocking_request_row_are_the_answer() {
+        let review_id = "subagent-operator-request-review-publish-marker";
+        let review = "\
+🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
+  - Annotation, worker-reported
+  - ~~skip this~~
+  - 📥 If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.";
+        let answers = operator_request_answers_on_row(review, &HashSet::new());
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0].request_id, review_id);
+        assert!(
+            answers[0]
+                .queue_item
+                .starts_with("I'm running into confusion over whether a `#review` is posted."),
+            "{}",
+            answers[0].queue_item
+        );
+        assert!(
+            !answers[0].queue_item.contains(review_id),
+            "{}",
+            answers[0].queue_item
+        );
+        assert_eq!(
+            answers[0].answer,
+            "Annotation, worker-reported\nIf we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear."
+        );
+
+        let recent_id = "subagent-operator-request-recent-run-affordance";
+        let recent = "\
+[#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. [#subagent-operator-request-recent-run-affordance]
+  - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.";
+        assert!(
+            operator_request_answers_on_row(recent, &HashSet::new()).is_empty(),
+            "no marker and no open todo is not a blocking request"
+        );
+        let mut open = HashSet::new();
+        open.insert(recent_id.to_string());
+        let answers = operator_request_answers_on_row(recent, &open);
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        assert_eq!(answers[0].request_id, recent_id);
+        assert_eq!(
+            answers[0].answer,
+            "If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided."
+        );
+
+        let instructions = "Sync the document.\n  - Start with the remote.";
+        assert!(operator_request_answers_on_row(instructions, &open).is_empty());
+        assert!(
+            operator_request_answers_on_row(
+                &format!("🙋 unanswered question [#{review_id}]"),
+                &HashSet::new()
+            )
+            .is_empty()
         );
     }
 
@@ -1875,11 +2021,20 @@ mod tests {
             QueueLifecycleMarker::Blocked,
             &blockers,
         );
-        assert_eq!(blocked, "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]");
-        assert_eq!(lifecycle_marker(&blocked), Some(QueueLifecycleMarker::Blocked));
+        assert_eq!(
+            blocked,
+            "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]"
+        );
+        assert_eq!(
+            lifecycle_marker(&blocked),
+            Some(QueueLifecycleMarker::Blocked)
+        );
         assert_eq!(blocked_marker_ids(&blocked), vec!["sbx", "deploy"]);
         assert_eq!(strip_priority_markers(&blocked), "do [#stg]");
-        assert_eq!(strip_in_progress_marker(&blocked), ":round_pushpin: do [#stg]");
+        assert_eq!(
+            strip_in_progress_marker(&blocked),
+            ":round_pushpin: do [#stg]"
+        );
         // Repaint replaces the token, including a changed blocker list.
         assert_eq!(
             apply_lifecycle_marker_with_blockers(
@@ -1901,7 +2056,10 @@ mod tests {
             "🙋⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg] [#subagent-operator-request-x]"
         );
         // A bare annotation left behind by a hand edit is still projection.
-        assert_eq!(strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"), "do [#stg]");
+        assert_eq!(
+            strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"),
+            "do [#stg]"
+        );
         // An operator's own prose is never read as the annotation.
         assert_eq!(
             strip_priority_markers("⟦blocked by sbx do [#stg]"),

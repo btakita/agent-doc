@@ -40,6 +40,7 @@ This file covers binary-owned planning/orchestration and the queue surface that 
   - `graph_evidence` when a materialized `.tsift/graph.db` exists and the prompt targets include queued `do #id` / `do [#id]` work
   - `handoff`
   - `blockers`
+  - `operator_request_answers` (`#answersinplan`): live nested rows under a blocking operator-request work row. Each record is `request_id`, `queue_item` (the parent work text with attempt projection and the trailing request annotation removed), and `answer` (the live nested rows, newline-joined). The field is document state, so a later plan reports an answer the diff classifier never selected. On a plan with no other diff, `task_class` is `operator_request_answers`, `prompt_targets` repeats each answer, and there is no `no_changes` blocker. The field does not add the row to `queue_subagent_dispatch`, does not check the request's todo, and does not implement the choice. See [§2](02-document-format.md).
 - The implementation reuses the same prompt/diff classifiers that power `preflight`.
 - `pending_mutations.resolve_existing` signals that a matching open backlog/icebox item will need `--done <id>` if completed this cycle.
 - For explicit `do #id` / `do [#id]` directives that resolve an existing tracked-work item, the planned finalize command includes the matching `--done <id>` argument so the harness closeout path does not rely on the agent remembering that flag manually.

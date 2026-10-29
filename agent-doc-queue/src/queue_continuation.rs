@@ -677,6 +677,40 @@ impl AnswerRowRouting {
     }
 }
 
+/// `#answersinplan`: nested operator answers under blocking request rows, in
+/// document order. The first row for a request id wins. Queue bodies that do
+/// not parse are skipped; a document that does not parse returns the error.
+pub fn blocking_operator_request_answers(
+    content: &str,
+) -> Result<Vec<agent_doc_document::queue_projection::OperatorRequestAnswer>> {
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    let components = element::parse(content).context("parse session components")?;
+    let mut answers = Vec::<agent_doc_document::queue_projection::OperatorRequestAnswer>::new();
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let Ok(entries) = document_queue::parse(component.content(content)) else {
+            continue;
+        };
+        for prompt in document_queue::prompts(&entries) {
+            for answer in agent_doc_document::queue_projection::operator_request_answers_on_row(
+                &prompt.text,
+                &open_todo_ids,
+            ) {
+                if answers
+                    .iter()
+                    .any(|seen| seen.request_id == answer.request_id)
+                {
+                    continue;
+                }
+                answers.push(answer);
+            }
+        }
+    }
+    Ok(answers)
+}
+
 /// Lowercased ids of active queue heads carrying an operator verdict
 /// (`#opverifyanswered`).
 pub fn operator_answered_head_ids(content: &str) -> HashSet<String> {
@@ -2465,6 +2499,59 @@ mod tests {
             "fixture must actually carry an operator verdict: {answered:?}"
         );
         assert_eq!(deferred_head_count(&doc), 0);
+    }
+
+    /// `#answersinplan`: nested lines under a blocking request row are that
+    /// request's answer. The parser must keep them on the work row, and a
+    /// plain nested instruction is not an answer.
+    #[test]
+    fn blocking_operator_request_answers_report_nested_lines_under_the_work_row() {
+        let doc = concat!(
+            "<!-- agent:run priority go -->\n",
+            "- 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]\n",
+            "  - Annotation, worker-reported\n",
+            "  - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.\n",
+            "- 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]\n",
+            "  - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.\n",
+            "- Sync the document.\n",
+            "  - Start with the remote.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let answers = blocking_operator_request_answers(doc).unwrap();
+        assert_eq!(answers.len(), 2, "{answers:#?}");
+        assert_eq!(
+            answers[0].request_id,
+            "subagent-operator-request-review-publish-marker"
+        );
+        assert!(
+            answers[0]
+                .queue_item
+                .starts_with("I'm running into confusion over whether a `#review` is posted."),
+            "{}",
+            answers[0].queue_item
+        );
+        assert!(
+            !answers[0]
+                .queue_item
+                .contains("subagent-operator-request-review-publish-marker"),
+            "{}",
+            answers[0].queue_item
+        );
+        assert_eq!(
+            answers[0].answer,
+            concat!(
+                "Annotation, worker-reported\n",
+                "If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.",
+            )
+        );
+        assert_eq!(
+            answers[1].request_id,
+            "subagent-operator-request-recent-run-affordance"
+        );
+        assert_eq!(
+            answers[1].answer,
+            "If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided."
+        );
     }
 
     /// The scan is scoped to `agent:review` specifically, not "any gated row".

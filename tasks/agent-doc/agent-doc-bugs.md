@@ -536,25 +536,6 @@ queue_worker_binding: subagent:routesyncsteer generation 1 worker 01a1859b-9e3d-
 
 The nested parse-cause line on the unclosed `agent:run` row is with owner `subagent:apiparse` (worker `01a18593-096a-7c00-b5b4-cb5dc88036f3`). This harness has no mid-run message channel, so that line is in `/home/brian/worktrees/agent-doc-apiparse/OPERATOR-STEERING.md`, which the worker must not commit. `subagent:apirunclaims` (worker `01a18588-b7a3-7250-91f2-cc1e7196aabb`) is still running.
 
-### Re: Subagent completed: `subagent:apiparse` returned work for queue item “api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue - recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`” — agent-doc
-<!-- agent-doc-subagent-response sha256=41ddd923c942b8ef6a818a410597dea32e4cf0060b63d2346a87e5bb0a1a4405 -->
-> **Subagent response:**
->
-> Branch `fix/api-run-unclosed` is pushed. Commit `10c88c343d186f9509a535d1154b90c740420c23` (`fix(parse): name the missing close on an unclosed component`). Rebased cleanly onto `origin/main` at `cf2469c43b7b5b29b025552ec2cd3cea425a817b` before the push. Fast-forward only; `main` was not pushed.
->
-> Files:
-> - `agent-doc-element/src/element.rs`
-> - `specs/02-document-format.md`
->
-> An unclosed opener now reports `unclosed component: the component has no close `/agent:NAME` (opening marker at line N)`. A later bare `<!-- agent:NAME -->` stays another opener. `OPERATOR-STEERING.md` is still untracked.
->
-> Denylist scan of the 27 staged added lines: no hits for equityfundingsource, Equity Funding Source, EFS, monsterrodholders, Monster Rod Holders, MRH, or boost-client.
->
-> `make check` exit 0. Log: `/home/brian/worktrees/agent-doc-apiparse/target/make-check-api-run-unclosed.log`. Nextest: `Summary [ 181.271s] 12156 tests run: 12156 passed, 187 skipped`. JetBrains 262 `BUILD SUCCESSFUL in 45s`. Python bootstrap `Ran 8 tests in 0.007s` / `OK`. TLA skipped on a matching receipt. Last lines: `full-check receipt: /home/brian/worktrees/agent-doc-apiparse/target/.agent-doc-full-check.json` and `EXIT:0`. That run was on the pre-rebase tree; the rebase did not change this commit's diff.
->
-> No follow-up queue heads.
-<!-- agent-doc-subagent-completion key=da55b6bbfc51d264b5184184e72ac69d13a80e53447124f4a5ed09623a41c580 -->
-
 > **Queue prompt:** api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`
 >   - The issue was no close `/agent:run`. agent-doc should print the specific cause of the parse error.
 
@@ -565,7 +546,6 @@ An unclosed opener now reports `unclosed component: the component has no close `
 > **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 
 **Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `10c88c343d` before integration. The same owner keeps that result.
-
 <!-- agent:boundary:a57f5721 -->
 <!-- /agent:exchange -->
 
@@ -576,8 +556,8 @@ An unclosed opener now reports `unclosed component: the component has no close `
   - ⚠️ [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 - 🚧 [#subagent:apirunclaims#1] In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.
 - ~~In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.~~ — auto-struck: answered this cycle (#ftstrike)
-- ☑️ [#subagent:apiparse#1] api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`
-  - The issue was no close `/agent:run`. agent-doc should print the specific cause of the parse error.
+- ~~api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`~~
+  - ~~The issue was no close `/agent:run`. agent-doc should print the specific cause of the parse error.~~
 - 🚧 [#subagent:nestlistlineage#1] api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.
 - 🚧 [#subagent:contractprsstall#1] Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.
 - 🚧 [#subagent:routesyncsteer#1] Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering

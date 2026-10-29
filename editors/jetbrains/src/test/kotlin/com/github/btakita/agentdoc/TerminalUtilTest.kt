@@ -835,7 +835,7 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `explicit steering delivery is informational and distinct from queued work`() {
+    fun `explicit steering delivery is silent success and distinct from queued work`() {
         val relativePath = "tasks/agent-doc/agent-doc-bugs.md"
         val output = """
             Error: [route] Sent 1 update to the agent already running for /repo/$relativePath; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
@@ -850,6 +850,21 @@ class TerminalUtilTest {
         assertTrue(message.contains("no second turn was started"))
         assertFalse(message.contains("Error"))
         assertFalse(message.contains("session-check"))
+
+        val source = Paths.get(
+            "src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"
+        ).toFile().readText()
+        val branch = source.substringAfter("failureKind == RunAgentDocRouteFailureKind.STEERING_DELIVERED) {")
+            .substringBefore("failureKind == RunAgentDocRouteFailureKind.QUEUED_PENDING")
+        assertFalse(source.contains("notifyRunAgentDocSteeringDelivered"))
+        assertFalse(source.contains("Copied steering delivery details"))
+        assertFalse(branch.contains("notify"))
+        assertFalse(branch.contains("showHint"))
+        assertFalse(branch.contains("showDialog"))
+        assertFalse(branch.contains("Messages."))
+        assertTrue(branch.contains("clearPersistedRouteFailureOutput"))
+        assertTrue(branch.contains("recordRouteDispatchProven"))
+        assertTrue(branch.contains("route_steering_delivered"))
     }
 
     @Test

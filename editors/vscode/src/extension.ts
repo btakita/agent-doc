@@ -1390,7 +1390,8 @@ routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
                 + `epoch=${native.mirrorEpochForFile(filePath) ?? '-'} file=${rel}`,
             );
         }
-        showHint(buildEditorRouteSuccessHint(rel, output));
+        const hint = buildEditorRouteSuccessHint(rel, output);
+        if (hint) showHint(hint);
     } catch (err: any) {
         if (isCliCancelled(err)) {
             showHint(`Run cancelled for ${rel}`);
@@ -1398,7 +1399,6 @@ routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         }
         if (routeGeneration !== null && isEditorRouteSteeringDelivered(err.message)) {
             native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}:steering-delivered`, cwd);
-            showHint(buildEditorRouteSuccessHint(rel, err.message));
             return;
         }
         native.recordRouteBlocked(filePath, routeGeneration, err.message, cwd);

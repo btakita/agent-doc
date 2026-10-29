@@ -596,9 +596,8 @@ mod tests {
         let file = dir.path().join("api.md");
         let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase";
         let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
-        let content = format!(
-            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
-        );
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
+            .to_string();
         std::fs::write(&file, &content).unwrap();
         let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
         assert_eq!(listed, vec![api.to_string(), contracts.to_string()]);
@@ -622,9 +621,8 @@ mod tests {
         let unique_dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(unique_dir.path().join(".agent-doc")).unwrap();
         let unique_file = unique_dir.path().join("api.md");
-        let unique = format!(
-            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n"
-        );
+        let unique = "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n"
+            .to_string();
         std::fs::write(&unique_file, &unique).unwrap();
         let listed = pending_subagent_dispatch_for_content(&unique_file, &unique).unwrap();
         assert_eq!(listed, vec!["#rebase".to_string()]);
@@ -645,9 +643,8 @@ mod tests {
         assert_eq!(other.item_text, api);
         assert_eq!(std::fs::read_to_string(&exact_file).unwrap(), content);
 
-        let sibling = format!(
-            "---\nsession: sid\nagent_doc_format: template\n---\n\n## API\n\n<!-- agent:queue id=api-prs subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n\n## Contracts\n\n<!-- agent:queue id=contracts-prs subagents -->\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
-        );
+        let sibling = "---\nsession: sid\nagent_doc_format: template\n---\n\n## API\n\n<!-- agent:queue id=api-prs subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n\n## Contracts\n\n<!-- agent:queue id=contracts-prs subagents -->\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
+            .to_string();
         let sibling_dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(sibling_dir.path().join(".agent-doc")).unwrap();
         let sibling_file = sibling_dir.path().join("api.md");

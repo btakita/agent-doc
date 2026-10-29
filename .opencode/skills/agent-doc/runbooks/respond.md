@@ -131,7 +131,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     approve. Never dispatch a new subagent for it and never re-claim it:
     the claim follows its line through an in-place edit, whether an appended
     note or a corrected URL or wording (`#claimfollowedit`), and the worker
-    can still `--refresh` / `release` by the text it was handed. An edit of a
+    can still `--refresh` / `release` by the text it was handed. If the harness
+    reports that the exact worker is unavailable or exited, the handoff did not
+    happen (`#staleownersteer`): preserve the verbatim operator answer/edit in
+    the queue and run the rendered generation-fenced `queue release ...
+    --generation <N> --requeue` command. That abandons only the stale attempt
+    and makes the edited row dispatchable under a fresh generation; do not drop
+    the answer, report it forwarded, or keep routing only to the unreachable
+    owner. An edit of a
     claimed head also wakes an idle coordinator. A different row typed over a
     claimed one is not an edit: it arrives as `cancel_claimed` for the old row
     plus ordinary new work for the new one (`#krwr`).

@@ -1665,8 +1665,41 @@ fn action_for(document: &str, item: &SteeringItem) -> String {
                 item.owner.as_deref().unwrap_or("its worker"),
             )
         }
+        SteeringDispatch::ForwardToOwner if item.change != SteeringChange::Deleted => {
+            forward_to_owner_instruction(document, item)
+        }
         _ => instruction_for(item).to_string(),
     }
+}
+
+/// Render the worker handoff together with its generation-fenced unavailable-owner
+/// recovery (`#staleownersteer`).
+///
+/// Agent-doc can name the bound harness worker but cannot observe that external
+/// worker's lifecycle. The harness handoff result is therefore the boundary fact:
+/// a successful handoff keeps the attempt, while an explicit unavailable/exited
+/// result abandons exactly this generation and leaves the operator's edited row in
+/// place for a fresh dispatch generation.
+fn forward_to_owner_instruction(document: &str, item: &SteeringItem) -> String {
+    let generation = item
+        .generation
+        .map(|generation| generation.to_string())
+        .unwrap_or_else(|| "<generation-above>".to_string());
+    let requeue = format!(
+        "agent-doc queue release {} --item {} --generation {} --requeue",
+        shell_single_quote(document),
+        shell_single_quote(&item.verbatim),
+        generation,
+    );
+    format!(
+        "{} If the harness reports that the exact worker is unavailable or has exited, the \
+         handoff did NOT happen: do not drop this operator answer/edit, claim it was forwarded, \
+         or keep routing only to the unreachable owner. Preserve `verbatim` in the queue and run \
+         `{requeue}`. That generation-fenced transition abandons only the stale attempt and makes \
+         the edited row redispatchable; let the normal queue dispatcher start its replacement \
+         under a fresh generation.",
+        instruction_for(item),
+    )
 }
 
 fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
@@ -3881,6 +3914,45 @@ mod tests {
             assert!(!text.contains("DISPATCH NOW"), "{text}");
             assert!(!text.contains("dispatch this item NOW"), "{text}");
         }
+    }
+
+    /// `#staleownersteer`: the leaf-only operator answer remains durable when
+    /// its bound worker already exited. The coordinator gets an exact
+    /// generation-fenced requeue transition instead of a dead-end handoff.
+    #[test]
+    fn unavailable_owner_recovery_preserves_leafcontext_leaf_only_answer() {
+        let item = SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Edited,
+            dispatch: SteeringDispatch::ForwardToOwner,
+            verbatim: "Leaf-only answer".to_string(),
+            previous: Some("Leaf-only question".to_string()),
+            owner: Some("subagent:leafcontext".to_string()),
+            generation: Some(7),
+            worker_id: Some("/root/leafcontext".to_string()),
+            current_item: false,
+            possibly_partial: false,
+            explicit: false,
+            presets: Vec::new(),
+        };
+
+        let rendered = render_steering_context("tasks/leaf context.md", &[item], 0).unwrap();
+        assert!(rendered.contains("worker=/root/leafcontext"), "{rendered}");
+        assert!(
+            rendered.contains("the handoff did NOT happen"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("do not drop this operator answer/edit"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "agent-doc queue release 'tasks/leaf context.md' --item 'Leaf-only answer' --generation 7 --requeue"
+            ),
+            "{rendered}"
+        );
+        assert!(rendered.contains("fresh generation"), "{rendered}");
     }
 
     /// `#krwr`: a different row added in a claimed row's slot is a deletion

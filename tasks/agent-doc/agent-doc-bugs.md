@@ -687,6 +687,11 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 > **Operator note:** allow
 
 **Deferred:** The allow choice is already applied. `origin/fix/realtime-steering-parity` and the local HEAD are both `eac6892dc30d2e80dea901fe19260b354851226b`. `make check` on that rebase exited 0: 12180 passed, 187 skipped. Integration onto main remains after review. Generation 2 stays with `subagent:rtsteeringparity`.
+
+### Re: e5d6 CI succeeded — grok-4.7 · 2026-10-29T02:06-04:00
+
+Main is `1bbc28a6a9`. The installed binary sha256 is `03b775ac10f60cf6c6c11dc32c8d42ce3eeab1a69e45d6e6ce209220be4f4b7f`. `agent-doc --version` is `agent-doc 0.35.560`. CI run `40821941589` for `e5d6bb0f6a` completed with success. CI run `40823503416` for `1bbc28a6a9` is in progress. CI run `40819362750` for `9c09d2aadc` remains a failure. The status block records that result. The published release remains `v0.35.560`.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -696,6 +701,7 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
+- In api.md agent:run id=api-prs, there are many 📥 items. Have we installed the expected fix or is the install pending?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

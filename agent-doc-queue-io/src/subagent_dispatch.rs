@@ -112,10 +112,15 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
 }
 
 /// The queue-level subagents attribute (`<!-- agent:queue subagents=N -->`)
-/// planned over the current queue against the raw claim ledger: which heads
-/// to dispatch now and which to hold (an explicit `=N` cap is full, or an
-/// `after=` predecessor is still queued). A bare attribute dispatches every
-/// eligible head. `None` when the attribute is absent or invalid.
+/// planned over every independent `subagents` queue against the raw claim
+/// ledger: which heads to dispatch now and which to hold (an explicit `=N`
+/// cap is full, or an item `after=` predecessor is still queued). A bare
+/// attribute dispatches every eligible head of that queue. Sibling
+/// `subagents` queues are offered in the same cycle; an `after=` queue waits
+/// until every predecessor is empty, and an earlier inline queue that still
+/// has owner-available work gates later queues. `None` when no non-empty
+/// queue has a valid attribute, so the per-line "new since seed" path still
+/// runs.
 pub fn queue_attr_subagent_plan(
     file: &Path,
     content: &str,
@@ -130,25 +135,73 @@ fn queue_attr_subagent_plan_with_presets(
     content: &str,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
-    let (mode, eligible, live) =
-        core::queue_attr_subagent_heads_with_presets(content, prompt_presets)?;
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components).ok()?;
     // `#queueschedule`: a closed schedule window dispatches nothing.
+    // Do not call `claimed_items_for_content` here: it folds this plan's held
+    // heads back in and would recurse.
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
-    let claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
+    let mut claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
         .with_heads(&crate::queue_claim::completion_evidence_head_texts(content));
-    let after_deps = agent_doc_element::element::parse(content)
-        .map(|components| agent_doc_queue::backlog_sync::collect_after_deps(&components, content))
-        .unwrap_or_default();
-    Some(
-        agent_doc_queue::subagent_intent::plan_queue_subagent_dispatch(
+    let evidence_items = agent_doc_document::subagent_completion::completion_evidence(content)
+        .into_iter()
+        .map(|evidence| evidence.item)
+        .collect::<Vec<_>>();
+    if !evidence_items.is_empty() {
+        let mut matched = Vec::new();
+        for block in graph.blocks() {
+            for head in core::queue_component_live_heads(content, block.component) {
+                if evidence_items.iter().any(|item| {
+                    agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &head)
+                }) {
+                    matched.push(head);
+                }
+            }
+        }
+        claimed = claimed.with_heads(&matched);
+    }
+    let after_deps = agent_doc_queue::backlog_sync::collect_after_deps(&components, content);
+    let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
+    let mut saw_attr = false;
+    for block in graph.blocks() {
+        let predecessor_live = block.dependencies.iter().any(|dependency| {
+            graph.block(dependency).is_some_and(|predecessor| {
+                predecessor.state() != agent_doc_queue::queue_set::QueueNodeState::Empty
+            })
+        });
+        if predecessor_live {
+            continue;
+        }
+        let Some((mode, eligible, live)) =
+            core::queue_component_subagent_heads(content, block.component, prompt_presets)
+        else {
+            // Inline owner work gates later queues. A paused or empty inline
+            // queue does not.
+            if block.state_excluding_claimed(&claimed)
+                == agent_doc_queue::queue_set::QueueNodeState::Ready
+            {
+                break;
+            }
+            continue;
+        };
+        // A drained `subagents` queue must not suppress the per-line path on
+        // a later queue that has no attribute of its own.
+        if block.state() == agent_doc_queue::queue_set::QueueNodeState::Empty {
+            continue;
+        }
+        saw_attr = true;
+        let plan = agent_doc_queue::subagent_intent::plan_queue_subagent_dispatch(
             mode,
             &eligible,
             &live,
             &claimed,
             &after_deps,
-        ),
-    )
+        );
+        combined.dispatch.extend(plan.dispatch);
+        combined.held.extend(plan.held);
+    }
+    saw_attr.then_some(combined)
 }
 
 /// [`pending_subagent_dispatch_for_content`] that reports a failure and
@@ -798,6 +851,172 @@ mod tests {
         );
         let plan = queue_attr_subagent_plan(&file, &content).unwrap();
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
+    }
+
+    fn two_runs(main_attr: &str, main_body: &str, prs_attr: &str, prs_body: &str) -> String {
+        format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             ## Run\n\n<!-- agent:run id=main {main_attr} go -->\n{main_body}\
+             <!-- /agent:run -->\n\n\
+             ## Run PRs\n\n<!-- agent:run id=prs {prs_attr} go -->\n{prs_body}\
+             <!-- /agent:run -->\n"
+        )
+    }
+
+    /// A claimed earlier `agent:run subagents` queue stays the claim-blind
+    /// selection. A nested row under `do [#id]` is its own live head (the
+    /// directive is not a free-text parent). Neither that head nor the claim
+    /// hides a later independent `subagents` queue. Each queue keeps its own cap.
+    #[test]
+    fn claimed_subagents_queue_does_not_hide_a_later_independent_run() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = two_runs(
+            "subagents",
+            "- do [#owned]\n- do [#still-open]\n- do [#parent]\n  - merge-794-then-requeue-759\n",
+            "subagents=1",
+            "- https://github.com/haiven-dev/haiven-api/pull/759\n\
+             - https://github.com/haiven-dev/haiven-api/pull/763\n",
+        );
+        std::fs::write(&file, &content).unwrap();
+        crate::queue_claim::claim(&file, "do [#owned]", "subagent:owned", 600).unwrap();
+
+        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert!(
+            listed.iter().any(|head| head.contains("do [#still-open]")),
+            "an unclaimed head on the claimed queue stays dispatchable: {listed:?}"
+        );
+        assert!(
+            listed
+                .iter()
+                .any(|head| head == "merge-794-then-requeue-759"),
+            "a nested row under do [#id] is its own unclaimed head: {listed:?}"
+        );
+        assert!(
+            listed
+                .iter()
+                .any(|head| head.contains("haiven-api/pull/759")),
+            "the later run's first head is offered with the nested row: {listed:?}"
+        );
+        assert!(
+            listed
+                .iter()
+                .all(|head| !head.contains("haiven-api/pull/763")),
+            "the later queue's own cap holds its second head: {listed:?}"
+        );
+        assert!(
+            listed.iter().all(|head| !head.contains("do [#owned]")),
+            "the claimed head stays off the list: {listed:?}"
+        );
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        assert!(
+            plan.held
+                .iter()
+                .any(|head| head.contains("haiven-api/pull/763")),
+            "the held head stays on its own queue's plan: {plan:?}"
+        );
+    }
+
+    #[test]
+    fn sibling_subagents_queues_keep_independent_caps() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = two_runs(
+            "subagents=1",
+            "- do [#a]\n- do [#b]\n",
+            "subagents=1",
+            "- do [#c]\n- do [#d]\n",
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["do [#a]".to_string(), "do [#c]".to_string()]
+        );
+        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        assert_eq!(
+            plan.held,
+            vec!["do [#b]".to_string(), "do [#d]".to_string()]
+        );
+    }
+
+    #[test]
+    fn after_dependency_blocks_while_a_claimed_predecessor_is_live() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let waiting = two_runs(
+            "subagents",
+            "- do [#owned]\n",
+            "after=main subagents",
+            "- https://github.com/haiven-dev/haiven-api/pull/759\n",
+        );
+        std::fs::write(&file, &waiting).unwrap();
+        crate::queue_claim::claim(&file, "do [#owned]", "subagent:owned", 600).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &waiting)
+                .unwrap()
+                .is_empty(),
+            "a claimed predecessor is not empty, so the dependent run waits"
+        );
+
+        let drained = two_runs(
+            "subagents",
+            "~~- do [#owned]~~\n",
+            "after=main subagents",
+            "- https://github.com/haiven-dev/haiven-api/pull/759\n",
+        );
+        std::fs::write(&file, &drained).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &drained).unwrap(),
+            vec!["https://github.com/haiven-dev/haiven-api/pull/759".to_string()]
+        );
+    }
+
+    #[test]
+    fn inline_ready_queue_gates_a_later_subagents_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = two_runs(
+            "",
+            "- finish the inline work\n",
+            "subagents",
+            "- https://github.com/haiven-dev/haiven-api/pull/759\n",
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty(),
+            "owner-available inline work gates the later subagents queue"
+        );
+
+        crate::queue_claim::claim(&file, "finish the inline work", "subagent:inline", 600).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["https://github.com/haiven-dev/haiven-api/pull/759".to_string()],
+            "a paused inline queue does not hide the later subagents queue"
+        );
+    }
+
+    #[test]
+    fn drained_subagents_queue_leaves_the_per_line_path_for_a_later_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = two_runs(
+            "subagents",
+            "~~- shipped~~\n",
+            "",
+            "- #subagents do [#fresh]\n",
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec!["#subagents do [#fresh]".to_string()]
+        );
     }
 
     /// `#reportedrelease` (haiven-dev tasks/docs.md, 2026-10-15): under the

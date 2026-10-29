@@ -1118,16 +1118,44 @@ impl PresetContext {
         session_presets: &[String],
         prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
     ) -> Self {
+        if let Ok(components) = agent_doc_element::element::parse(current)
+            && let Ok(Some(queue)) =
+                agent_doc_queue::queue_set::selected_component(current, &components)
+        {
+            return Self::from_queue_component(
+                current,
+                session_presets,
+                prompt_presets,
+                Some(queue),
+            );
+        }
+        Self::from_queue_component(current, session_presets, prompt_presets, None)
+    }
+
+    /// Presets and the `subagents` flag of one queue block, not the claim-blind
+    /// selected queue. Exchange defaults still come from the document.
+    fn for_queue_component(
+        current: &str,
+        component: &agent_doc_element::element::Component,
+        session_presets: &[String],
+        prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+    ) -> Self {
+        Self::from_queue_component(current, session_presets, prompt_presets, Some(component))
+    }
+
+    fn from_queue_component(
+        current: &str,
+        session_presets: &[String],
+        prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+        queue: Option<&agent_doc_element::element::Component>,
+    ) -> Self {
         let mut cycle: Vec<PresetIntent> = Vec::new();
         let mut queue_intents: Vec<PresetIntent> = Vec::new();
         let mut exchange_intents: Vec<PresetIntent> = Vec::new();
         let mut queue_attrs =
             agent_doc_queue::prompt_component_attrs::PromptComponentAttrs::default();
         let mut queue_names = Vec::new();
-        if let Ok(components) = agent_doc_element::element::parse(current)
-            && let Ok(Some(queue)) =
-                agent_doc_queue::queue_set::selected_component(current, &components)
-        {
+        if let Some(queue) = queue {
             queue_attrs =
                 agent_doc_queue::prompt_component_attrs::prompt_component_attrs_for(queue, "queue");
             queue_names.extend(queue_attrs.preset_names().map(str::to_string));
@@ -1961,10 +1989,78 @@ pub fn render_closeout_steering_context(
     Some(out)
 }
 
-/// The queue-level subagents attribute applied to the current queue:
-/// `(mode, eligible heads, live heads)`, or `None` when the queue marker has
-/// no valid `subagents` / `fan-out` attribute. Eligible heads are every live
-/// line classified `subagent` (no "new since seed" filter), in queue order.
+/// Live executable heads of one queue block, in queue order. Group-parent
+/// labels are excluded, matching `agent-doc queue claim`.
+pub fn queue_component_live_heads(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+) -> Vec<String> {
+    queue_component_items(content, component)
+        .into_iter()
+        .map(|item| item.norm)
+        .collect()
+}
+
+fn queue_component_items(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+) -> Vec<QueueItem> {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(component.content(content)) else {
+        return Vec::new();
+    };
+    let entries = agent_doc_queue::nested_claim_steer::expand_if_installed(entries);
+    agent_doc_queue::document_queue::prompts(&entries)
+        .into_iter()
+        .filter_map(|prompt| {
+            let raw =
+                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim());
+            let norm = normalize_queue_text(&raw);
+            (!norm.is_empty()).then_some(QueueItem { raw, norm })
+        })
+        .collect()
+}
+
+/// The queue-level subagents attribute applied to one queue block:
+/// `(mode, eligible heads, live heads)`, or `None` when that block's marker
+/// has no valid `subagents` / `fan-out` attribute. Eligible heads are every
+/// live line classified `subagent` against that block (no "new since seed"
+/// filter), in queue order.
+pub fn queue_component_subagent_heads(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+    prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
+) -> Option<(
+    agent_doc_queue::subagent_intent::QueueSubagentsMode,
+    Vec<String>,
+    Vec<String>,
+)> {
+    let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&component.attrs)?;
+    let presets = PresetContext::for_queue_component(content, component, &[], prompt_presets);
+    let items = queue_component_items(content, component);
+    let awaiting_operator =
+        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
+    // `#queueblocked`: a row whose tracked item waits on open blockers is not
+    // dispatchable, so it never fills a subagent slot.
+    let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
+    let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
+    let eligible = items
+        .iter()
+        .filter(|item| {
+            presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
+        })
+        .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
+        .filter(|item| !blockers.blocks_row(&item.norm))
+        // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
+        .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
+        .map(|item| item.norm.clone())
+        .collect();
+    let live = items.into_iter().map(|item| item.norm).collect();
+    Some((mode, eligible, live))
+}
+
+/// The queue-level subagents attribute applied to the claim-blind selected
+/// queue: `(mode, eligible heads, live heads)`, or `None` when that queue's
+/// marker has no valid `subagents` / `fan-out` attribute.
 pub fn queue_attr_subagent_heads(
     content: &str,
 ) -> Option<(
@@ -1990,28 +2086,7 @@ pub fn queue_attr_subagent_heads_with_presets(
     let queue = agent_doc_queue::queue_set::selected_component(content, &components)
         .ok()
         .flatten()?;
-    let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&queue.attrs)?;
-    let presets = PresetContext::new_with_presets(content, &[], prompt_presets);
-    let items = executable_queue_items(content);
-    let awaiting_operator =
-        agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
-    // `#queueblocked`: a row whose tracked item waits on open blockers is not
-    // dispatchable, so it never fills a subagent slot.
-    let blockers = agent_doc_queue::queue_blocked::queue_blockers(content);
-    let answer_rows = agent_doc_queue::queue_continuation::AnswerRowRouting::for_content(content);
-    let eligible = items
-        .iter()
-        .filter(|item| {
-            presets.classify(&item.raw, SteeringSource::Queue).0 == SteeringDispatch::Subagent
-        })
-        .filter(|item| !head_awaits_operator(&item.norm, &awaiting_operator))
-        .filter(|item| !blockers.blocks_row(&item.norm))
-        // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
-        .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
-        .map(|item| item.norm.clone())
-        .collect();
-    let live = items.into_iter().map(|item| item.norm).collect();
-    Some((mode, eligible, live))
+    queue_component_subagent_heads(content, queue, prompt_presets)
 }
 
 /// Live queue heads with item- or queue-scoped subagent intent that are NEW

@@ -224,7 +224,10 @@ impl QueueBlock<'_> {
         }
     }
 
-    fn state_excluding_claimed(
+    /// Owner-relative readiness. A claimed prompt does not keep the queue
+    /// ready; a non-noise freeform line does. `Paused` still has live work,
+    /// so it is not `Empty` and an `after=` dependent keeps waiting.
+    pub fn state_excluding_claimed(
         &self,
         claimed: &crate::queue_claim::ClaimedQueueItems,
     ) -> QueueNodeState {

@@ -928,6 +928,14 @@ A repeated bare `#rebase` or `#review` nested under the same parent is kept as i
 The check log at `target/check-repeatsamepreset.log` ends `EXIT:0`: 12183 passed, 187 skipped. The private-name scan of added lines was clean. This closeout did not re-run `make check` or `make install`. The branch is not merged. `WORKER_BRIEF.txt` stays untracked.
 
 The cross-parent case remains `#reviewrebase-repeat`: a plan, with the fix left unimplemented.
+
+### Re: Recent-run row is running — grok-4.7 · 2026-10-29T13:03-04:00
+
+`subagent:recentrun` generation 1 is running as worker `01a1889d-af6d-7001-b854-63cc83c662b7` on branch `fix/recent-run-affordance` in `/home/brian/worktrees/agent-doc-recentrun` (base `7b44d8bb28`).
+
+The row asks how a long `agent:run` list shows what a turn just worked. The worker owns the spec, the tests, and a push of that branch. A timestamp annotation and an editor highlight that clears when the cursor reaches the row are both open. If more than one lawful design remains, the worker returns that choice instead of guessing. Install stays with the coordinator after the branch integrates.
+
+`subagent:promptsurface` generation 1 keeps worker `01a1884f-1e4f-71f2-89f9-ce913af9f4c7`. `subagent:reviewpublish` generation 1 stays an operator action. The marker choices already in the exchange are `⟦local⟧` / `⟦published⟧`, or `✎` / `⬆`.
 <!-- agent:boundary:8c335c48 -->
 <!-- /agent:exchange -->
 
@@ -953,6 +961,7 @@ The cross-parent case remains `#reviewrebase-repeat`: a plan, with the fix left 
 ```
 ---
 - ~~do [#repeatsamepreset]~~
+- 🚧 [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

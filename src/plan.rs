@@ -315,9 +315,9 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             .as_ref()
             .and_then(|cycle| cycle.selected_free_text_queue_heads.first().cloned())
     });
-    // `#nestsubmit`: the leaf stays `queue_prompt` (slash detection and the
-    // orchestrate source). The diff the agent receives carries parent lineage
-    // and the entire prompt tree.
+    // `#nestsubmit`: the leaf/group parent stays `queue_prompt` (slash detection
+    // and the orchestrate source). The diff the agent receives carries nested
+    // leaf lineage or group-parent authorization context and the prompt tree.
     let submitted_queue_prompt = queue_prompt.as_ref().map(|prompt| {
         if queue_head_slash_command.is_some() {
             prompt.clone()

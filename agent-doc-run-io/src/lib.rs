@@ -1888,9 +1888,10 @@ pub fn active_queue_prompt_diff(file: &Path) -> Result<Option<String>> {
         );
         return Ok(None);
     }
-    // `#nestsubmit`: the typed ledger head stays the leaf. The diff submitted
-    // to the child carries that leaf's parent lineage and the entire prompt
-    // tree when the document has them.
+    // `#nestsubmit`: the typed ledger head stays the leaf/group-parent identity.
+    // The diff submitted to the child carries a nested leaf's parent lineage,
+    // or a selected group parent's nested operator context, plus the entire
+    // prompt tree when the document has them.
     let prompt = match agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "active_queue_prompt_diff",

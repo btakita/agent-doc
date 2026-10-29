@@ -1460,8 +1460,9 @@ fn run_with_options_to_writer_in_pass(
     {
         let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
         // `#nestsubmit`: slash stays the command. A nested leaf is submitted as
-        // its lineage plus the entire prompt tree. `selected_queue_prompts`
-        // stays the leaf.
+        // its lineage plus the entire prompt tree; a selected group parent is
+        // submitted with that tree so nested operator answers remain in scope.
+        // `selected_queue_prompts` stays the leaf/parent work identity.
         let prompt_source = if let Some(command) = slash_command.as_deref() {
             command.to_string()
         } else {

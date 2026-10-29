@@ -1064,7 +1064,18 @@ That combination is now choice (6) on `#recent-run-affordance`. `subagent:recent
 `subagent:answersinplan` generation 1 is running as worker `01a188b4-c00c-74b3-9d2a-e32b387dfb6b` on branch `fix/operator-answers-in-plan` in `/home/brian/worktrees/agent-doc-answersinplan` (base `7b44d8bb28`).
 
 The row is that nested answers under the marker prompt and the recency prompt did not enter the plan. The worker owns the spec, the tests, and a push of that branch. It does not implement the marker or the recency highlight. Install stays with the coordinator after the branch integrates.
-<!-- agent:boundary:d8bc4803 -->
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+**Deferred:** The nested answer stays: Annotation, worker-reported. The icon pair `✎` / `⬆` is recorded. `subagent:answersinplan` generation 1 is the row that puts these answers into the plan. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+
+**Deferred:** The nested answer stays: a timestamp annotation can drive highlights for the newest three, or a numeric recency glyph can carry that order. Choice (6) is on `#recent-run-affordance`. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+
+### Re: Nested answers stay on their rows — grok-4.7 · 2026-10-29T13:29-04:00
+
+`subagent:reviewpublish` generation 1 and `subagent:recentrun` generation 1 stay operator actions. Their workers have exited. The plan-ingestion fix is the running `subagent:answersinplan` row.
+<!-- agent:boundary:e388bfa6 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->

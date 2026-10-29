@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1127,7 +1127,75 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 > **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 
 **Deferred:** Choice (6) on `#recent-run-affordance` already records numbered highlights for the newest three rows, or a numeric recency glyph that carries that order.
-<!-- agent:boundary:3ac59bec -->
+### Re: Subagent completed: `subagent:decisionannotate` returned work for queue item “If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.” — agent-doc
+<!-- agent-doc-subagent-response sha256=810b48df67cc4fe6e5e48d9d625362a9caa97027a52d704e56fa5a814630caa9 -->
+> **Subagent response:**
+>
+> [#subagent-operator-request-decision-annotation-syntax] subagent operator request
+> - *queue_item:*
+>   - If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+> - *kind:* question
+> - *blocking:* true
+> - *request:*
+>   - Which decision id, made-decision event, stripped annotation token, and restart rule should this feature use? `origin/main` `7b44d8bb28` has no decision-id annotation. `⟦response:…⟧` is not in the tree. No commit was made.
+> - *context:*
+>   - The stripped metadata family that exists is `[#<owner>#<N>]`, `⟦blocked by <id>, <id>⟧`, `⟦effect:N⟧`, and the legacy `⟦<owner>#<N>⟧` spelling. All of those are removed before work identity is computed.
+>   - `#queueblocked` blocks only a `do [#id]` row while a `(stays open: blocked …)` id or an `after=` id is still open in backlog, todo, or review. When the last blocker leaves that open set, projection drops `⛔ ⟦blocked by …⟧` and the row returns to `📥`. It does not store a choice, and a free-text row that merely cites an id is never blocked.
+>   - A reserved `[#subagent-operator-request-…]` id is a different hold: `🙋` while its todo is open, cleared by `[#id]: <answer>`, a nested answer row, or checking that todo. That path does not copy the answer onto other rows that cite the same id.
+>   - In `game-sessions.md`, `[#game-credential-visibility-gap]` is on two `☑️` rows, only one of which also carries `[#subagent-operator-request-game-credential-visibility]`. Both have a struck nested `allow` and neither shows `🙋`. Those rows are reported, not `⛔`.
+>   - No branch was pushed. The empty worktree and `fix/decision-id-annotation` were removed so the path stays free.
+> - *choices:*
+>   - **Blocker-close stamp**: When an open backlog, todo, or review id named by a stays-open blocker clause or an `after=` edge leaves the open set, stamp every live `do [#id]` row that listed it with a trailing `⟦decision:<id>⟧`. If that was its last blocker, the existing projection returns it from `⛔` to `📥` and the drain restarts it. Free-text citations, nested answers such as `allow`, and `☑️` rows are left unchanged.
+>   - **Request-answer stamp and requeue**: A decision id is only `[#subagent-operator-request-…]`. It is made by the existing local answer or by checking that request's todo. Every queue row carrying that id, including duplicates, gets a trailing `⟦decision:<id>=<answer>⟧`. Each of those rows returns to `📥`, and its claim or report is released so work restarts. A row that cites only a non-request id, such as `[#game-credential-visibility-gap]` alone, is not annotated.
+>   - **Cited-id answer stamp and requeue**: A decision id is any `[#id]` on a queue row that names an open todo or an operator request. It is made when that todo is checked or any instance has a nested answer, live or struck. The answer is that nested text, otherwise the checked item's text. Every unstruck queue row containing the id gets `⟦decision:<id>=<answer>⟧`, loses `☑️`, `⛔`, and `🙋`, and is released back to `📥`. One made decision restarts every instance. There is no extra wait for other copies to be answered.
+>   - **Stamp only**: Use the detection and `⟦decision:<id>=<answer>⟧` token from **Cited-id answer stamp and requeue**, but do not change the lifecycle marker and do not release a claim or report. Restart stays a later explicit `do`.
+>   - **Other**: You specify the token, which ids count as decisions, what event makes one, and whether restart requeues.
+<!-- agent-doc-subagent-completion key=083c740508ae84a5522140c64189bcd8963a82fa8b65a928ae08814fc297f754 -->
+> **Queue prompt:** If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+
+**Deferred:** Worker `01a188dc-ebd3-7711-87c6-67034f7b9536` returned a blocking choice. No commit was made. `fix/decision-id-annotation` and its worktree were removed. Pick one choice below.
+
+### Re: Decision annotation is a choice — grok-4.7 · 2026-10-29T14:22-04:00
+
+`subagent:decisionannotate` generation 1 found no decision-id annotation on `origin/main` at `7b44d8bb28`. `⟦response:…⟧` is not in that tree. The stripped tokens that exist are `[#<owner>#<N>]`, `⟦blocked by <id>, <id>⟧`, `⟦effect:N⟧`, and the legacy `⟦<owner>#<N>⟧` spelling.
+
+[#subagent-operator-request-decision-annotation-syntax] subagent operator request
+- *queue_item:*
+  - If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Which decision id, made-decision event, stripped annotation token, and restart rule should this feature use? `origin/main` `7b44d8bb28` has no decision-id annotation. `⟦response:…⟧` is not in the tree. No commit was made.
+- *context:*
+  - The stripped metadata family that exists is `[#<owner>#<N>]`, `⟦blocked by <id>, <id>⟧`, `⟦effect:N⟧`, and the legacy `⟦<owner>#<N>⟧` spelling. All of those are removed before work identity is computed.
+  - `#queueblocked` blocks only a `do [#id]` row while a `(stays open: blocked …)` id or an `after=` id is still open in backlog, todo, or review. When the last blocker leaves that open set, projection drops `⛔ ⟦blocked by …⟧` and the row returns to `📥`. It does not store a choice, and a free-text row that merely cites an id is never blocked.
+  - A reserved `[#subagent-operator-request-…]` id is a different hold: `🙋` while its todo is open, cleared by `[#id]: <answer>`, a nested answer row, or checking that todo. That path does not copy the answer onto other rows that cite the same id.
+  - In `game-sessions.md`, `[#game-credential-visibility-gap]` is on two `☑️` rows, only one of which also carries `[#subagent-operator-request-game-credential-visibility]`. Both have a struck nested `allow` and neither shows `🙋`. Those rows are reported, not `⛔`.
+  - No branch was pushed. The empty worktree and `fix/decision-id-annotation` were removed so the path stays free.
+- *choices:*
+  - **Blocker-close stamp**: When an open backlog, todo, or review id named by a stays-open blocker clause or an `after=` edge leaves the open set, stamp every live `do [#id]` row that listed it with a trailing `⟦decision:<id>⟧`. If that was its last blocker, the existing projection returns it from `⛔` to `📥` and the drain restarts it. Free-text citations, nested answers such as `allow`, and `☑️` rows are left unchanged.
+  - **Request-answer stamp and requeue**: A decision id is only `[#subagent-operator-request-…]`. It is made by the existing local answer or by checking that request's todo. Every queue row carrying that id, including duplicates, gets a trailing `⟦decision:<id>=<answer>⟧`. Each of those rows returns to `📥`, and its claim or report is released so work restarts. A row that cites only a non-request id, such as `[#game-credential-visibility-gap]` alone, is not annotated.
+  - **Cited-id answer stamp and requeue**: A decision id is any `[#id]` on a queue row that names an open todo or an operator request. It is made when that todo is checked or any instance has a nested answer, live or struck. The answer is that nested text, otherwise the checked item's text. Every unstruck queue row containing the id gets `⟦decision:<id>=<answer>⟧`, loses `☑️`, `⛔`, and `🙋`, and is released back to `📥`. One made decision restarts every instance. There is no extra wait for other copies to be answered.
+  - **Stamp only**: Use the detection and `⟦decision:<id>=<answer>⟧` token from **Cited-id answer stamp and requeue**, but do not change the lifecycle marker and do not release a claim or report. Restart stays a later explicit `do`.
+  - **Other**: You specify the token, which ids count as decisions, what event makes one, and whether restart requeues.
+
+> **Queue prompt:** In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+
+**Deferred:** `subagent:leafcontext` generation 1 is running as worker `01a188e5-ad81-70d0-8926-43381e563159` on `fix/parent-is-leaf-context` in `/home/brian/worktrees/agent-doc-leafcontext`.
+
+> **Queue prompt:** `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
+
+**Deferred:** `subagent:lostrestart` generation 1 is running as worker `01a188e5-ad81-70d0-8926-43443988ca39` on `fix/lost-claim-restarts` in `/home/brian/worktrees/agent-doc-lostrestart`. The expired `subagent:rtsteeringparity` generation 2 claim is not revived.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` / `⬆`. Say when to build it.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records this. Say when to build it.
+<!-- agent:boundary:88a54d14 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -1140,8 +1208,11 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
-- ~~I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.~~
-  - ~~Run `make install` so we can test locally.~~
+- ☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.
+- 🚧 [#subagent:checkedsubprompt#1] In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.
+- 🚧 [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
+- 🚧 [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
+- 🚧 [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

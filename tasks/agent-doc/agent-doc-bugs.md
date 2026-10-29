@@ -692,6 +692,12 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 
 Main is `1bbc28a6a9`. The installed binary sha256 is `03b775ac10f60cf6c6c11dc32c8d42ce3eeab1a69e45d6e6ce209220be4f4b7f`. `agent-doc --version` is `agent-doc 0.35.560`. CI run `40821941589` for `e5d6bb0f6a` completed with success. CI run `40823503416` for `1bbc28a6a9` is in progress. CI run `40819362750` for `9c09d2aadc` remains a failure. The status block records that result. The published release remains `v0.35.560`.
 
+### Re: api-prs fix is installed — grok-4.7 · 2026-10-29T02:12-04:00
+
+> **Queue prompt:** In api.md agent:run id=api-prs, there are many 📥 items. Have we installed the expected fix or is the install pending?
+
+The expected fix is installed. `agent:run id="api-prs"` has 17 inbox rows. Bare `#rebase` matches nine live heads, and bare `#fix-ci` matches more than one row, so those claims stay ambiguous until each head is named by its nest vector. That matcher is `1bbc28a6a980994cc9d5332746ab1ee82ad606bd`, which is `origin/main` and the installed binary. The installed sha256 is `03b775ac10f60cf6c6c11dc32c8d42ce3eeab1a69e45d6e6ce209220be4f4b7f`. `agent-doc --version` is `agent-doc 0.35.560`. No newer fix for these rows is on main. No product change was made.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -701,7 +707,7 @@ Main is `1bbc28a6a9`. The installed binary sha256 is `03b775ac10f60cf6c6c11dc32c
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
-- In api.md agent:run id=api-prs, there are many 📥 items. Have we installed the expected fix or is the install pending?
+- ~~In api.md agent:run id=api-prs, there are many 📥 items. Have we installed the expected fix or is the install pending?~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

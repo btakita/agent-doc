@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -943,7 +943,102 @@ The row asks how a long `agent:run` list shows what a turn just worked. The work
 ### Re: Marker row stays open — grok-4.7 · 2026-10-29T13:04-04:00
 
 `subagent:reviewpublish` generation 1 keeps its operator action. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited, so this edit is not handed to a new worker.
-<!-- agent:boundary:6dae2960 -->
+
+### Re: Subagent completed: `subagent:promptsurface` returned work for queue item “agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered: ``` > **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review **Deferred:** this cycle's plan did not dispatch that pending row. It stays queued. ``` ``` - https://github.com/haiven-dev/haiven-api/pull/767 ... - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~ ```” — agent-doc
+<!-- agent-doc-subagent-response sha256=41269ab74dddf0a2447a363a301338c964448e96ea046dcec81741e17c50d4e7 -->
+> **Subagent response:**
+>
+> Branch `fix/surface-prompt-errors` is pushed. The session document has not integrated this result.
+>
+> - **Commit:** `1f473f9b4197ed981cb9b682d08d2ac314073267`
+> - **Message:** `fix(queue): keep an unanswered prompt visible with its reason`
+> - **Push:** `git push -u origin HEAD` succeeded (`PUSH_RC:0`). New remote branch `origin/fix/surface-prompt-errors`. No force-push. `v0.35.560`, `v0.35.561`, and `origin/main` are still `bd971e9b` / `7b44d8bb` / `7b44d8bb`.
+>
+> A nested `#review` or `#rebase` is keyed by its parent, so one parent's struck or reopened copy cannot drop the other. `queue_subagent_dispatch` lists that nest vector even when the leaf text is unique. A quoted head the response defers stays live, and the row carries `⟦unanswered: …⟧` naming why.
+>
+> **Files (22):** `SPEC.md`, `VERSIONS.md`, `specs/02-document-format.md`, `specs/07-orchestration-commands.md`, `runbooks/respond.md` and the five bundled copies, `agent-doc-element-queue/src/lib.rs`, `agent-doc-document/src/queue_projection.rs`, `agent-doc-queue/src/document_queue.rs`, `agent-doc-queue/src/queue_consume.rs`, `agent-doc-queue/src/queue_heads.rs`, `agent-doc-queue/src/queue_response.rs`, `agent-doc-queue-io/src/queue_consume.rs`, `agent-doc-queue-io/src/subagent_dispatch.rs`, `agent-doc-controller-io/src/project_controller.rs`, `agent-doc-session-check-io/src/midturn_steering.rs`, `tests/finalize_integration.rs`, `tests/nested_subprompts_cli.rs`.
+>
+> **Verification:**
+> - `make check` with the required `env -u` list: **exit 0**, `MAKE_RC:0`. Nextest: `12184 tests run: 12184 passed, 187 skipped`.
+> - Earlier checks this turn exited 2: the deferred `☑️ [#subagent:cellrepair#1]` assertion, then the unique nested-leaf dispatch assertion, then `audit-docs` (`stale Grok bundled runbooks/respond.md`) after the suite itself had passed. Those are fixed in this commit.
+> - Denylist scan of added diff lines: clean.
+> - No follow-up queue heads.
+<!-- agent-doc-subagent-completion key=efd81b6ec589124bb0818dfc95593c6a3849768fe83e8426f9833d1e3293ce8a -->
+
+### Re: Subagent completed: `subagent:recentrun` returned work for queue item “If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?” — agent-doc
+<!-- agent-doc-subagent-response sha256=d14b6ee35e782e0f3344b6c9b40970c333b7270d3665fd9f9434e2e3f3386cee -->
+> **Subagent response:**
+>
+> [#subagent-operator-request-recent-run-affordance] subagent operator request
+> - *queue_item:*
+>   - If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+> - *kind:* question
+> - *blocking:* true
+> - *request:*
+>   - Which affordance should mark an `agent:run` row addressed by a recent turn? No single existing mechanism answers this, so spec and tests were not changed.
+> - *context:*
+>   - Queue projection paints lifecycle only: `📥` `⛔` `🟡` `🚧` `☑️` `⚠️` `🔄` `❔` `⏭️` `⏳`, plus `🙋`, pins, `[#owner#N]`, `⟦blocked by …⟧`, and `⟦effect:N⟧`. A row that stays open after a turn returns to `📥` and looks untouched.
+>   - Claim records store `claimed_at_secs`, but that time is not projected. The orchestration spec forbids using a timestamp to mint queue identity. The `timestamp` attribute belongs to `agent:log`, not a queue row.
+>   - Editor highlighting is structural visual tokens only (JetBrains `RangeHighlighter`, VS Code `setDecorations`). Nothing clears a highlight when the caret enters a row.
+>   - The diff gutter shows a turn only until closeout commits, then it clears for the whole document.
+>   - Lazily 0.61 has ephemeral presence and cursors. It has no row highlight that dismisses on caret visit.
+> - *choices:*
+>   - **Editor highlight, clear on caret**: Paint rows the latest committed turn addressed. Remove that row's highlight when the caret enters it. Editor-only. Not in the markdown. Gone on restart unless the plugin stores it.
+>   - **Timestamp annotation**: Project a stripped metadata token, same class as `⟦blocked by …⟧`, with the wall time the row was last addressed. Visible in the document and git. It does not clear when the cursor visits, and it stays until a later projection replaces it.
+>   - **Recency glyph, no clock**: Paint one orthogonal marker for rows the latest closeout addressed. Clear it on the next turn's projection or when the row is struck. No caret dismiss.
+>   - **Status digest only**: One `agent:status` line naming the heads the latest turn addressed. No per-row paint and no caret dismiss.
+>   - **No new affordance**: Keep lifecycle markers, strikethrough, owner annotations, and the until-commit diff gutter.
+>
+> Branch `fix/recent-run-affordance` is unchanged at `7b44d8bb2890fb636b4579862ff64a5bd15d5e28`. No files changed. No commit. No tests run. No follow-up queue heads.
+<!-- agent-doc-subagent-completion key=e96435afaaeaba19af989702f1af3bce5359cacafc8939c22c77981ae7791518 -->
+> **Queue prompt:** agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
+> ```
+> > **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review
+>
+> **Deferred:** this cycle's plan did not dispatch that pending row. It stays queued.
+> ```
+> ```
+> - https://github.com/haiven-dev/haiven-api/pull/767
+>   ...
+>   - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
+> ```
+
+### Re: Unanswered prompts stay visible — grok-4.7 · 2026-10-29T13:07-04:00
+
+`subagent:promptsurface` generation 1, worker `01a1884f-1e4f-71f2-89f9-ce913af9f4c7`, finished. Branch `fix/surface-prompt-errors` is `1f473f9b4197ed981cb9b682d08d2ac314073267` and matches origin. Main stays at `7b44d8bb28`.
+
+A nested `#review` or `#rebase` is keyed by its parent, so one parent's struck copy does not drop the other. Dispatch lists that nest vector even when the leaf text is unique. A head this response does not finish carries `⟦unanswered: …⟧` with the reason.
+
+The private-name scan of added lines was clean. The worker reported `make check` exit 0: 12184 passed, 187 skipped. The full-check receipt is `target/.agent-doc-full-check.json`. This closeout did not re-run `make check` or `make install`. The branch is not merged. `WORKER_BRIEF.txt` and `.review-diff.txt` stay untracked.
+
+`#reviewrebase-repeat` remains the plan-only item.
+
+### Re: Recent-run affordance is a choice — grok-4.7 · 2026-10-29T13:08-04:00
+
+`subagent:recentrun` generation 1 returned a blocking design choice. Branch `fix/recent-run-affordance` is unchanged at `7b44d8bb28`. No spec or tests were changed.
+
+[#subagent-operator-request-recent-run-affordance] subagent operator request
+- *queue_item:*
+  - If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Which affordance should mark an `agent:run` row addressed by a recent turn? No single existing mechanism answers this, so spec and tests were not changed.
+- *context:*
+  - Queue projection paints lifecycle only: `📥` `⛔` `🟡` `🚧` `☑️` `⚠️` `🔄` `❔` `⏭️` `⏳`, plus `🙋`, pins, `[#owner#N]`, `⟦blocked by …⟧`, and `⟦effect:N⟧`. A row that stays open after a turn returns to `📥` and looks untouched.
+  - Claim records store `claimed_at_secs`, but that time is not projected. The orchestration spec forbids using a timestamp to mint queue identity. The `timestamp` attribute belongs to `agent:log`, not a queue row.
+  - Editor highlighting is structural visual tokens only (JetBrains `RangeHighlighter`, VS Code `setDecorations`). Nothing clears a highlight when the caret enters a row.
+  - The diff gutter shows a turn only until closeout commits, then it clears for the whole document.
+  - Lazily 0.61 has ephemeral presence and cursors. It has no row highlight that dismisses on caret visit.
+- *choices:*
+  - **Editor highlight, clear on caret**: Paint rows the latest committed turn addressed. Remove that row's highlight when the caret enters it. Editor-only. Not in the markdown. Gone on restart unless the plugin stores it.
+  - **Timestamp annotation**: Project a stripped metadata token, same class as `⟦blocked by …⟧`, with the wall time the row was last addressed. Visible in the document and git. It does not clear when the cursor visits, and it stays until a later projection replaces it.
+  - **Recency glyph, no clock**: Paint one orthogonal marker for rows the latest closeout addressed. Clear it on the next turn's projection or when the row is struck. No caret dismiss.
+  - **Status digest only**: One `agent:status` line naming the heads the latest turn addressed. No per-row paint and no caret dismiss.
+  - **No new affordance**: Keep lifecycle markers, strikethrough, owner annotations, and the until-commit diff gutter.
+
+Branch `fix/recent-run-affordance` is unchanged at `7b44d8bb2890fb636b4579862ff64a5bd15d5e28`. No files changed. No commit. No tests run. No follow-up queue heads.
+<!-- agent:boundary:7860a38c -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -954,8 +1049,8 @@ The row asks how a long `agent:run` list shows what a turn just worked. The work
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
   - Annotation, worker-reported
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
----
-🚧 [#subagent:promptsurface#1] agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
+~~~done
+agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
 ```
 > **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review
 
@@ -966,9 +1061,9 @@ The row asks how a long `agent:run` list shows what a turn just worked. The work
   ...
   - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
 ```
----
+~~~
 - ~~do [#repeatsamepreset]~~
-- 🚧 [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+- 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -999,6 +1094,8 @@ The row asks how a long `agent:run` list shows what a turn just worked. The work
 - [x] [#subagent-operator-request-rtsteering-force-lease] Answer the blocking subagent permission request for tracked work grok-live-editor for queue item ‘re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering’ in agent:exchange: permission to run `git push --force-with-lease` on `fix/realtime-steering-parity` only (choices: allow, deny) (source: agent:backlog [#grok-live-editor])
 - [ ] [#reviewpublish-marker] Pick the local-vs-published marker for a #review or code-change row. Worker 01a18839-8b85-7601-9741-6333916b1f50 left branch fix/local-vs-published-marker unchanged at 7b44d8bb28. (1) Annotation, worker-reported: ⟦local⟧ and ⟦published⟧, alone or together, only when queue report-complete records that state. (2) Icons, worker-reported: same rule, and you name both glyphs first. (3) Observe git and GitHub on projection for a pull-request row whose preset is #review, #rebase, #push, #fix-ci, or #address. (4) Other: you specify the tokens, the row rule, and the source of truth.
 - [ ] [#subagent-operator-request-review-publish-marker] Answer the blocking subagent question for queue item ‘I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context…’ in agent:exchange: Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"? (choices: Annotation, worker-reported, Icons, worker-reported, Observe git and GitHub, Other)
+- [ ] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance.
+- [ ] [#subagent-operator-request-recent-run-affordance] Answer the blocking subagent question for tracked work reviewrebase-repeat for queue item ‘If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn?…’ in agent:exchange: Which affordance should mark an `agent:run` row addressed by a recent turn? (choices: Editor highlight, clear on caret, Timestamp annotation, Recency glyph, no clock, Status digest only, No new affordance)
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

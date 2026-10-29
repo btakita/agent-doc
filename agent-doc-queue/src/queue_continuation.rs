@@ -1271,8 +1271,13 @@ pub fn live_queue_head_identities(
         queue_set
             .blocks()
             .iter()
-            .flat_map(|block| document_queue::prompts(&block.entries))
-            .map(|prompt| crate::queue_claim::claim_identity(&prompt.text))
+            .flat_map(|block| {
+                let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+                document_queue::prompts(entries.as_ref())
+                    .into_iter()
+                    .map(|prompt| crate::queue_claim::claim_identity(&prompt.text))
+                    .collect::<Vec<_>>()
+            })
             .collect(),
     )
 }
@@ -1358,6 +1363,7 @@ fn queue_component_entries_excluding_claimed(
         .component;
     let body = &content[queue_component.open_end..queue_component.close_start];
     let entries = document_queue::parse(body).ok()?;
+    let entries = crate::nested_claim_steer::expand_if_installed(entries);
     Some((
         QueueFacts {
             has_auto: document_queue::has_auto_attr(&queue_component.attrs),

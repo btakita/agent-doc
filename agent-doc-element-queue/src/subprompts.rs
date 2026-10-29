@@ -15,6 +15,10 @@
 //! verbatim; the children are never independent heads, never dispatched on
 //! their own, and never carry a lifecycle projection of their own.
 //!
+//! A later direct sibling can still surface as its own head after the parent
+//! is claimed (`#nestedclaimsteer`). That is a claim-ledger view over this
+//! fold, not a second segmentation: this module keeps the block intact.
+//!
 //! This module owns the text-level contract every layer shares:
 //!
 //! * [`split_subprompt_block`] separates a head's text into the parent part

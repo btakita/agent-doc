@@ -7,6 +7,7 @@ use agent_doc_element::{
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod nested_claim_steer;
 pub mod queue_identity;
 pub mod subprompts;
 

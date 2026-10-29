@@ -307,6 +307,54 @@ pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLed
     Ok(ledger)
 }
 
+/// Active-claim baselines for `#nestedclaimsteer`. Follow runs on the folded
+/// rows; the oldest `followed_from` text is the claim-time row.
+pub fn nested_claim_steer_snapshots(
+    file: &Path,
+    content: &str,
+) -> Vec<agent_doc_queue::nested_claim_steer::ClaimTimeSnapshot> {
+    let Ok(ledger) = load_ledger_following(file, content) else {
+        return Vec::new();
+    };
+    snapshots_from_ledger(&ledger)
+}
+
+fn snapshots_from_ledger(
+    ledger: &QueueClaimLedger,
+) -> Vec<agent_doc_queue::nested_claim_steer::ClaimTimeSnapshot> {
+    let now = now_secs();
+    ledger
+        .claims
+        .iter()
+        .filter(|claim| claim.blocks_dispatch(now))
+        .map(agent_doc_queue::nested_claim_steer::ClaimTimeSnapshot::from_claim)
+        .collect()
+}
+
+fn steer_guard(
+    snapshots: Vec<agent_doc_queue::nested_claim_steer::ClaimTimeSnapshot>,
+) -> Option<agent_doc_queue::nested_claim_steer::NestedClaimSteerGuard> {
+    agent_doc_queue::nested_claim_steer::NestedClaimSteerGuard::install_if_nonempty(snapshots)
+}
+
+pub fn steer_guard_for(
+    file: &Path,
+    content: &str,
+) -> Option<agent_doc_queue::nested_claim_steer::NestedClaimSteerGuard> {
+    steer_guard(nested_claim_steer_snapshots(file, content))
+}
+
+/// [`steer_guard_for`] under a name the preflight hot path can call.
+///
+/// `agent-doc-preflight-io` budgets the `guard_` token. This alias keeps that
+/// source free of it.
+pub fn nested_claim_steer_for(
+    file: &Path,
+    content: &str,
+) -> Option<agent_doc_queue::nested_claim_steer::NestedClaimSteerGuard> {
+    steer_guard_for(file, content)
+}
+
 /// Owner of every active claim on a live head of `content`, by identity
 /// (`#claimedsteerwake`). An unreadable ledger is reported and empty.
 pub fn claim_owners_for_content(
@@ -316,6 +364,7 @@ pub fn claim_owners_for_content(
     match load_ledger_following(file, content) {
         Ok(ledger) if ledger.claims.is_empty() => Default::default(),
         Ok(ledger) => {
+            let _guard = steer_guard(snapshots_from_ledger(&ledger));
             let live = live_queue_head_identities(content);
             ledger.owners(now_secs(), live.as_ref())
         }
@@ -356,6 +405,28 @@ pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String>
     }
 }
 
+/// Folded resolve missed. Try the `#nestedclaimsteer` view so a routed sibling
+/// is claimable by its own line. The parent line still resolves on the folded
+/// head first, which is what the initial claim stores.
+fn resolve_expanded_claim_target(
+    file: &Path,
+    item: &str,
+    content: &str,
+    authority_text: Option<&str>,
+) -> Option<(String, agent_doc_queue::queue_claim::ClaimHeadSource)> {
+    let _guard = steer_guard(nested_claim_steer_snapshots(file, content))?;
+    let disk_rows = live_queue_head_rows(content).unwrap_or_default();
+    let disk_heads = row_head_texts(&disk_rows);
+    let authority_rows = authority_text.and_then(live_queue_head_rows);
+    let authority = authority_rows.as_deref().map(row_head_texts);
+    agent_doc_queue::queue_claim::resolve_claim_target_in_views(
+        item,
+        &disk_heads,
+        authority.as_deref(),
+    )
+    .ok()
+}
+
 /// Resolve a claim `--item` against the live editor authority when available,
 /// otherwise against the on-disk document (GH #124 ask 5, GH #296): dispatch
 /// and claim must agree on what a live head is even while an editor save to
@@ -394,21 +465,27 @@ fn resolve_live_claim_target(
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
-            let authority = authority_rows.as_deref().zip(authority_view.as_ref());
-            match followed_claim_target(file, item, (&disk_rows, &disk_view), authority) {
-                Some(resolved) => {
-                    agent_doc_ops_log_io::log_op(
-                        file,
-                        &format!(
-                            "{source}_resolved_followed_edit source={} item_bytes={} target_bytes={} (#claimfollowedit)",
-                            resolved.1.as_str(),
-                            item.trim().len(),
-                            resolved.0.trim().len()
-                        ),
-                    );
-                    resolved
+            let expanded =
+                resolve_expanded_claim_target(file, item, &content, authority_text.as_deref());
+            if let Some(resolved) = expanded {
+                resolved
+            } else {
+                let authority = authority_rows.as_deref().zip(authority_view.as_ref());
+                match followed_claim_target(file, item, (&disk_rows, &disk_view), authority) {
+                    Some(resolved) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "{source}_resolved_followed_edit source={} item_bytes={} target_bytes={} (#claimfollowedit)",
+                                resolved.1.as_str(),
+                                item.trim().len(),
+                                resolved.0.trim().len()
+                            ),
+                        );
+                        resolved
+                    }
+                    None => return Err(miss.into()),
                 }
-                None => return Err(miss.into()),
             }
         }
         Err(miss) => return Err(miss.into()),
@@ -1181,6 +1258,7 @@ pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<Queue
     if ledger.claims.is_empty() {
         return Ok(Vec::new());
     }
+    let _guard = steer_guard(snapshots_from_ledger(&ledger));
     let live = live_queue_head_identities(content);
     Ok(ledger
         .active(now_secs(), live.as_ref())
@@ -1486,6 +1564,7 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
 /// failure direction is the pre-claim behaviour (the head stays drainable),
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
+    let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
     claimed_items_with_non_ledger_holds(
         file,
         content,
@@ -1504,6 +1583,7 @@ pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItem
 pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
     use agent_doc_queue::queue_claim::QueueClaimState;
 
+    let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
     let in_flight = match active_claims_for_content(file, content) {
         Ok(claims) => ClaimedQueueItems::from_identities(
             claims
@@ -1642,8 +1722,9 @@ pub fn claim_attempt_head_texts_for_content(file: &Path, content: &str) -> Vec<S
     match load_ledger_following(file, content) {
         Ok(ledger) if ledger.claims.is_empty() => Vec::new(),
         Ok(ledger) => {
+            let _guard = steer_guard(snapshots_from_ledger(&ledger));
             let attempts = ClaimedQueueItems::from_identities(
-                ledger.claims.into_iter().map(|claim| claim.identity),
+                ledger.claims.iter().map(|claim| claim.identity.clone()),
             );
             live_queue_head_texts(content)
                 .unwrap_or_default()
@@ -1667,6 +1748,7 @@ pub fn ledger_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQu
     match load_ledger_following(file, content) {
         Ok(ledger) if ledger.claims.is_empty() => ClaimedQueueItems::none(),
         Ok(ledger) => {
+            let _guard = steer_guard(snapshots_from_ledger(&ledger));
             let live = live_queue_head_identities(content);
             ledger.claimed_items(now_secs(), live.as_ref())
         }
@@ -1686,6 +1768,7 @@ pub fn prune_closed_claims(file: &Path, content: &str) -> Result<usize> {
     if load_ledger(file)?.claims.is_empty() {
         return Ok(0);
     }
+    let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
     let live = live_queue_head_identities(content);
     let heads = ClaimQueueView::from_content(content);
     let now = now_secs();

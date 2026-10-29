@@ -2959,6 +2959,14 @@ pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
 /// A flat queue has every `indent == 0`, so no entry is ever a parent and this
 /// is a no-op — the pre-nesting behaviour is preserved exactly.
 pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
+    // `#nestedclaimsteer`: a row that already owns a sub-prompt block stays
+    // executable when a later, deeper routable head is visible. A `#queuenest`
+    // label has no folded block, so the indent scan below still applies.
+    if let Some(QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)) = entries.get(idx)
+        && agent_doc_element_queue::subprompts::has_subprompts(&prompt.text)
+    {
+        return false;
+    }
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
     };

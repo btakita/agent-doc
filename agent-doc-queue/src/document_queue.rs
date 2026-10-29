@@ -1850,6 +1850,8 @@ pub fn project_prompt_runtime_projections(
 /// identity or the mutually-exclusive worker lifecycle marker. `actions` holds
 /// `(queue_item, request_id)` pairs captured with the closeout; an existing
 /// annotation is retained only while its same-id `agent:todo` row is open.
+/// A nested run item matches the brief's collapsed origin as well as its
+/// parent-line work identity (`operator_request_item_matches_row`).
 pub fn project_prompt_operator_actions(
     body: &str,
     actions: &[(String, String)],
@@ -1898,11 +1900,13 @@ pub fn set_prompt_operator_actions(
             .filter(|id| open_todo_ids.contains(id))
             .collect::<Vec<_>>();
         if live {
-            let identity = crate::queue_claim::claim_identity(&prompt.text);
             for (queue_item, request_id) in actions {
                 let request_id = request_id.to_ascii_lowercase();
                 if open_todo_ids.contains(&request_id)
-                    && crate::queue_claim::claim_identity(queue_item) == identity
+                    && agent_doc_document::queue_projection::operator_request_item_matches_row(
+                        &prompt.text,
+                        queue_item,
+                    )
                     && !ids.contains(&request_id)
                 {
                     ids.push(request_id);
@@ -10031,6 +10035,58 @@ mod tests {
         assert_eq!(
             cleared,
             "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+        );
+    }
+
+    /// The brief collapses a nested run item, parent and sub-prompts, into the
+    /// packet `queue_item`. That string is not the row's work identity. The
+    /// request id still lands on the run row.
+    #[test]
+    fn operator_request_on_a_nested_run_item_stays_on_the_row() {
+        let row = concat!(
+            "☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759\n",
+            "  - #fix-ci https://example.com/pull/759\n",
+            "  - Why do we need the PR?",
+        );
+        let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(row);
+        assert!(queue_item.contains("#fix-ci"), "{queue_item}");
+        assert_ne!(
+            crate::queue_claim::claim_identity(row),
+            crate::queue_claim::claim_identity(&queue_item),
+            "collapsing the nested run item is not its work identity"
+        );
+        let id = "subagent-operator-request-pr759-fix-ci-push".to_string();
+        let body = format!("- {row}\n- another task\n");
+        let actions = vec![(queue_item, id.clone())];
+        let open = std::collections::HashSet::from([id.clone()]);
+        let (projected, _) = project_prompt_operator_actions(&body, &actions, &open)
+            .unwrap()
+            .expect("the nested run item keeps its operator-request id");
+        let expected = concat!(
+            "- 🙋☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
+            "  - #fix-ci https://example.com/pull/759\n",
+            "  - Why do we need the PR?\n",
+            "- another task\n",
+        );
+        assert_eq!(projected, expected);
+        assert!(
+            project_prompt_operator_actions(&projected, &actions, &open)
+                .unwrap()
+                .is_none(),
+            "re-projection leaves the annotated nested row unchanged"
+        );
+        let (cleared, _) =
+            project_prompt_operator_actions(&projected, &[], &std::collections::HashSet::new())
+                .unwrap()
+                .expect("a closed todo clears the operator-action marker");
+        assert_eq!(
+            cleared,
+            concat!(
+                "- ☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
+                "  - #fix-ci https://example.com/pull/759\n",
+                "  - Why do we need the PR?\n",
+                "- another task\n",
+            )
         );
     }
 

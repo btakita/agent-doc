@@ -959,10 +959,17 @@ a closeout whose response presents a blocking packet without its own
 [§2](02-document-format.md)).
 
 For current packets, `queue_item` is copied unchanged from the dispatch brief.
-The derived todo owns the packet id. While it remains open, the same live queue
-row carries `🙋` beside its lifecycle state (`🙋🚧` while running) and appends
-`[#request-id]` beside the secondary request rather than before the primary
-work. These projections are stripped from queue identity and make the row
+The brief builds that value from the submitted run item by stripping projection
+prefixes and collapsing internal whitespace, nested sub-prompts included
+(`operator_request_origin_item`). Closeout links the packet to the live run row
+when the row's work identity equals the packet's, and when the row's collapsed
+origin equals that `queue_item` (`operator_request_item_matches_row`). Work
+identity is the parent line. The collapsed origin keeps the nested sub-prompts,
+so a nested run item keeps its `[#subagent-operator-request-...]` id on that
+row. The derived todo owns the packet id. While it remains open, the same live
+queue row carries `🙋` beside its lifecycle state (`🙋🚧` while running) and
+appends `[#request-id]` beside the secondary request rather than before the
+primary work. These projections are stripped from queue identity and make the row
 non-drainable. `--todo-done <request-id>` clears `🙋`; equivalently, an operator
 may append a local answer as `[#request-id]: <answer>`, which the next closeout
 folds into that same todo-done transition while retaining the local evidence.

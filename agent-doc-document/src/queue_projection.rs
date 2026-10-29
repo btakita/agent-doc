@@ -1256,6 +1256,51 @@ pub fn strip_priority_markers(text: &str) -> String {
     bare.to_string()
 }
 
+/// The dispatch brief's `<origin-queue-item>`: projection prefixes stripped,
+/// then internal whitespace collapsed, nested sub-prompts included.
+pub fn operator_request_origin_item(item: &str) -> String {
+    strip_priority_markers(item)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether packet `queue_item` names live run row `row_text`.
+///
+/// Work identity is the parent line. The brief names that same row by
+/// collapsing the parent and its sub-prompts into one line, and the packet
+/// copies that line. The collapsed origin is a second key so the request id
+/// stays on the nested run item.
+pub fn operator_request_item_matches_row(row_text: &str, queue_item: &str) -> bool {
+    let row_text = row_text.trim();
+    let queue_item = queue_item.trim();
+    if row_text.is_empty() || queue_item.is_empty() {
+        return false;
+    }
+    if agent_doc_element_queue::queue_head_identity(row_text)
+        == agent_doc_element_queue::queue_head_identity(queue_item)
+    {
+        return true;
+    }
+    let origin = operator_request_row_origin(row_text);
+    !origin.is_empty() && origin == operator_request_origin_item(queue_item)
+}
+
+/// Collapsed origin of a row after its parent-line request annotation is
+/// removed. The brief's [`operator_request_origin_item`] leaves a request id
+/// that sits on the parent, ahead of the sub-prompts, in place.
+fn operator_request_row_origin(row_text: &str) -> String {
+    let (head, block) = agent_doc_element_queue::subprompts::split_subprompt_block(row_text);
+    let mut origin = strip_priority_markers(head);
+    if let Some(block) = block {
+        if !origin.is_empty() {
+            origin.push('\n');
+        }
+        origin.push_str(block);
+    }
+    origin.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// True when the operator moved the `🚧` marker onto a head the binary would
 /// not have selected. `binary_projected` holds the heads (marker-stripped text)
 /// the binary itself last projected `🚧` onto (`#stalemarkerretarget`): a marker
@@ -1567,6 +1612,43 @@ mod tests {
             "  /clear  ",
             "a no-op projection preserves literal prompt whitespace"
         );
+    }
+
+    /// A `[#subagent-operator-request-...]` packet copies the brief's collapsed
+    /// nested run item. That line is not the row's parent-line work identity,
+    /// and the annotated parent still matches the pre-annotation origin.
+    #[test]
+    fn nested_run_item_operator_request_matches_its_collapsed_origin() {
+        let row = "☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759\n  - #fix-ci https://example.com/pull/759\n  - Why do we need the PR?";
+        let origin = operator_request_origin_item(row);
+        assert_eq!(
+            origin,
+            "https://example.com/pull/759 - #fix-ci https://example.com/pull/759 - Why do we need the PR?"
+        );
+        assert_ne!(
+            agent_doc_element_queue::queue_head_identity(row),
+            agent_doc_element_queue::queue_head_identity(&origin)
+        );
+        assert!(operator_request_item_matches_row(row, &origin));
+        assert!(operator_request_item_matches_row(
+            row,
+            "https://example.com/pull/759"
+        ));
+        let annotated = apply_operator_action_ids(
+            row,
+            &["subagent-operator-request-pr759-fix-ci-push".to_string()],
+        );
+        assert!(
+            annotated.contains("[#subagent-operator-request-pr759-fix-ci-push]\n  - #fix-ci"),
+            "{annotated}"
+        );
+        assert!(operator_request_item_matches_row(&annotated, &origin));
+        assert!(!operator_request_item_matches_row(
+            "https://example.com/pull/760\n  - other work",
+            &origin
+        ));
+        assert!(!operator_request_item_matches_row(row, " "));
+        assert!(!operator_request_item_matches_row(" ", &origin));
     }
 
     /// `#answeredrequeststrike`: an answered request whose todo closed no

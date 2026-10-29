@@ -711,10 +711,7 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization, submitted: &str
          - Report back: branch, commit SHA, files changed, and exact test results.\n",
     );
     out.push('\n');
-    let queue_item = agent_doc_document::queue_projection::strip_priority_markers(&auth.item)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
     out.push_str(&SUBAGENT_OPERATOR_REQUEST_PROTOCOL.replace("<origin-queue-item>", &queue_item));
     out
 }

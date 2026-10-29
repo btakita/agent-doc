@@ -3134,8 +3134,11 @@ pub fn entry_is_ancestor_of(entries: &[QueueEntry], ancestor_idx: usize, leaf_id
 
 /// Work text submitted for the live executable row at `index` (`#nestsubmit`).
 ///
-/// A nested leaf is [`nest_vector_at`] (`root parent: parent: item`). A
-/// top-level row is the marker-stripped line, pins kept. Group parents and
+/// A nested leaf is its lineage ([`nest_vector_at`], `root parent: parent: item`)
+/// plus the entire prompt tree of `entries`, rendered from the parsed AST.
+/// A sibling branch is in that tree even though it is not on the lineage.
+/// The tree is context for the leaf, not a second task. A top-level row is
+/// the marker-stripped line, pins kept, with no tree. Group parents and
 /// non-prompts return `None`. Slash commands are not special-cased here;
 /// callers keep a slash head literal.
 pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<String> {
@@ -3147,7 +3150,78 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     if identity.trim().is_empty() {
         return None;
     }
-    Some(nest_vector_at(entries, index, &identity).unwrap_or(identity))
+    Some(match nest_vector_at(entries, index, &identity) {
+        Some(lineage) => with_prompt_tree(entries, index, &lineage),
+        None => identity,
+    })
+}
+
+const PROMPT_TREE_HEADER: &str =
+    "Prompt tree (`#nestsubmit`, context only; run the lineage above):";
+
+/// Lineage plus the prompt tree. Quoted tree lines are context: scanners that
+/// skip blockquotes do not treat a sibling `do [#id]` or question as more work.
+fn with_prompt_tree(entries: &[QueueEntry], leaf_idx: usize, lineage: &str) -> String {
+    let tree = prompt_tree_outline(entries, leaf_idx);
+    if tree.is_empty() {
+        return lineage.to_string();
+    }
+    format!("{lineage}\n{PROMPT_TREE_HEADER}\n{tree}")
+}
+
+/// Indented prompt and completed rows from the parsed queue AST.
+///
+/// `leaf_idx` is marked `(this leaf)`. Completed rows are struck. Projection
+/// markers are not part of the outline. Each line is a blockquote so it stays
+/// context; a line that would end in `?` gains ` [context]` so it is not a
+/// second prompt target.
+fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
+    let mut lines = Vec::new();
+    for (idx, entry) in entries.iter().enumerate() {
+        let (prompt, completed) = match entry {
+            QueueEntry::Prompt(prompt) => (prompt, false),
+            QueueEntry::Completed(prompt) => (prompt, true),
+            _ => continue,
+        };
+        lines.extend(outline_row(prompt, completed, idx == leaf_idx));
+    }
+    lines.join("\n")
+}
+
+fn outline_work_text(text: &str) -> String {
+    let projected = agent_doc_element_queue::strip_attempt_projection_prefix(text.trim());
+    strip_priority_markers(projected.trim())
+}
+
+fn outline_row(prompt: &QueuePrompt, completed: bool, running: bool) -> Vec<String> {
+    let work = outline_work_text(&prompt.text);
+    if work.trim().is_empty() {
+        return Vec::new();
+    }
+    let marker = prompt.ordered_marker.as_deref().unwrap_or("-");
+    let pad = " ".repeat(prompt.indent);
+    let mut body_lines = work.lines();
+    let mut first = body_lines.next().unwrap_or("").to_string();
+    if completed && !first.contains("~~") {
+        first = format!("~~{first}~~");
+    }
+    if running {
+        first.push_str(" (this leaf)");
+    }
+    let mut lines = vec![context_quote(&format!("{pad}{marker} {first}"))];
+    let cont_pad = " ".repeat(prompt.indent + marker.chars().count() + 1);
+    for line in body_lines {
+        lines.push(context_quote(&format!("{cont_pad}{line}")));
+    }
+    lines
+}
+
+fn context_quote(outline: &str) -> String {
+    let mut line = format!("> {outline}");
+    if line.trim_end().ends_with('?') {
+        line.push_str(" [context]");
+    }
+    line
 }
 
 /// The `nth` live executable row (0-based) whose work text matches `head_text`,
@@ -8322,7 +8396,20 @@ mod tests {
         assert_eq!(nest_vector_for_prompt_text(&folded, &head), None);
     }
 
-    /// `#nestsubmit`: the prompt handed to a worker is the nest vector.
+    fn assert_nest_submission(submitted: &str, lineage: &str) {
+        assert!(
+            submitted.starts_with(&format!("{lineage}\n")),
+            "expected lineage {lineage:?} at the start of {submitted}"
+        );
+        assert!(
+            submitted
+                .contains("Prompt tree (`#nestsubmit`, context only; run the lineage above):\n"),
+            "{submitted}"
+        );
+        assert_ne!(submitted.trim(), lineage);
+    }
+
+    /// `#nestsubmit`: the prompt handed to a worker is the lineage plus the tree.
     #[test]
     fn submitted_prompt_uses_the_nest_vector_for_a_nested_leaf() {
         let body = "\
@@ -8332,13 +8419,18 @@ mod tests {
   - do [#first]
 ";
         let entries = parse(body).unwrap();
-        assert_eq!(
-            submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false),
-            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        let rebase = submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false);
+        assert_nest_submission(
+            &rebase,
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase",
         );
-        assert_eq!(
-            submitted_prompt_for_nth(&entries, "do [#first]", 0, |_| false),
-            "parent epic: do [#first]"
+        assert!(rebase.contains("parent epic"), "{rebase}");
+        assert!(rebase.contains("do [#first]"), "{rebase}");
+        let first = submitted_prompt_for_nth(&entries, "do [#first]", 0, |_| false);
+        assert_nest_submission(&first, "parent epic: do [#first]");
+        assert!(
+            first.contains("https://github.com/haiven-dev/haiven-api/pull/758"),
+            "{first}"
         );
         assert_eq!(
             submitted_prompt_for_nth(&entries, "/clear", 0, |_| false),
@@ -8358,11 +8450,51 @@ mod tests {
             nest_row("root parent", 0),
             nest_row("first line of the item\ncontinued", 2),
         ];
-        assert_eq!(
+        let submitted =
             submitted_prompt_for_nth(&multiline, "first line of the item\ncontinued", 0, |_| {
                 false
-            }),
-            "root parent: first line of the item\ncontinued"
+            });
+        assert_nest_submission(&submitted, "root parent: first line of the item\ncontinued");
+        assert!(submitted.contains("continued"), "{submitted}");
+    }
+
+    /// `#nestsubmit`: a leaf runs with its lineage and the other branch.
+    #[test]
+    fn submitted_prompt_includes_the_sibling_branch_with_the_lineage() {
+        let entries = vec![
+            nest_row("root", 0),
+            nest_row("other", 2),
+            nest_row("buried?", 4),
+            nest_row("parent2", 2),
+            nest_row("item", 4),
+        ];
+        let submitted = submitted_prompt_for_nth(&entries, "item", 0, |_| false);
+        assert_nest_submission(&submitted, "root: parent2: item");
+        assert!(submitted.contains(">   - other\n"), "{submitted}");
+        assert!(
+            submitted
+                .lines()
+                .any(|line| line.contains("buried?") && line.ends_with("[context]")),
+            "{submitted}"
+        );
+        assert!(
+            submitted.contains(">     - item (this leaf)"),
+            "{submitted}"
+        );
+        assert!(
+            !submitted.contains(">     - buried? (this leaf)"),
+            "{submitted}"
+        );
+        let ids = crate::queue_directive::do_directive_target_ids(&[submitted]);
+        assert!(
+            ids.is_empty(),
+            "sibling context is not a directive: {ids:?}"
+        );
+        assert_eq!(
+            submitted_prompt_for_nth(&entries, "item", 0, |_| false)
+                .lines()
+                .next(),
+            Some("root: parent2: item")
         );
     }
 
@@ -8377,9 +8509,14 @@ mod tests {
   - #rebase
 ";
         let entries = parse(struck_first).unwrap();
-        assert_eq!(
-            submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false),
-            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        let submitted = submitted_prompt_for_nth(&entries, "#rebase", 0, |_| false);
+        assert_nest_submission(
+            &submitted,
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase",
+        );
+        assert!(
+            submitted.contains("https://github.com/haiven-dev/haiven-api/pull/736"),
+            "{submitted}"
         );
 
         let both_live = "\
@@ -8389,17 +8526,29 @@ mod tests {
   - #rebase
 ";
         let entries = parse(both_live).unwrap();
-        assert_eq!(
-            submitted_prompt_for_nth(&entries, "#rebase", 0, |row| row.contains("pr736-rebase")),
-            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        let skipped =
+            submitted_prompt_for_nth(&entries, "#rebase", 0, |row| row.contains("pr736-rebase"));
+        assert_nest_submission(
+            &skipped,
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase",
         );
         let heads = vec!["#rebase".to_string(), "#rebase".to_string()];
-        assert_eq!(
-            submitted_prompts_in_order(&entries, &heads, |_| false),
-            vec![
-                "https://github.com/haiven-dev/haiven-api/pull/736: #rebase".to_string(),
-                "https://github.com/haiven-dev/haiven-api/pull/758: #rebase".to_string(),
-            ]
+        let submitted = submitted_prompts_in_order(&entries, &heads, |_| false);
+        assert_eq!(submitted.len(), 2);
+        assert_nest_submission(
+            &submitted[0],
+            "https://github.com/haiven-dev/haiven-api/pull/736: #rebase",
+        );
+        assert_nest_submission(
+            &submitted[1],
+            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase",
+        );
+        assert!(submitted[0].contains("pull/758"), "{}", submitted[0]);
+        assert!(submitted[1].contains("pull/736"), "{}", submitted[1]);
+        assert!(
+            !submitted[0].contains("pull/758: #rebase"),
+            "the first leaf's lineage stays its own parent: {}",
+            submitted[0]
         );
     }
 

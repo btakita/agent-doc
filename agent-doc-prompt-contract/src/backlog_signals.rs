@@ -66,6 +66,12 @@ fn prose_words(text: &str) -> Vec<Option<String>> {
 
     for line in normalized.lines() {
         let trimmed = line.trim_start();
+        // A blockquoted prompt-tree line is context for a nested leaf, not a
+        // request (`#nestsubmit`).
+        if trimmed.starts_with('>') {
+            words.push(None);
+            continue;
+        }
         let fence_marker = trimmed
             .chars()
             .next()
@@ -223,6 +229,8 @@ mod tests {
             "call `add to backlog` in the helper",
             "```\nadd these to the backlog\n```\nwhy did it fail?",
             "~~~~\nwhat's next\n~~~~\n",
+            "> add these to the backlog",
+            "do the leaf\n> What's next?",
         ] {
             assert!(!arms(text), "code must not arm: {text}");
         }

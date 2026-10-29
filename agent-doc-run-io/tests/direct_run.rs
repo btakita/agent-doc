@@ -272,7 +272,7 @@ mod tests {
         );
     }
 
-    /// `#nestsubmit`: direct run submits the nest vector, not the bare leaf.
+    /// `#nestsubmit`: direct run submits the lineage and the other branch.
     #[test]
     fn active_queue_prompt_diff_submits_nested_leaf_lineage() {
         let dir = TempDir::new().unwrap();
@@ -291,6 +291,8 @@ mod tests {
             "<!-- agent:queue auto go -->\n",
             "- 📥 https://github.com/haiven-dev/haiven-api/pull/758\n",
             "  - #rebase\n",
+            "- other branch\n",
+            "  - do [#notthis]\n",
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
@@ -310,7 +312,10 @@ mod tests {
             diff.contains("+https://github.com/haiven-dev/haiven-api/pull/758: #rebase\n"),
             "{diff}"
         );
+        assert!(diff.contains("+> - other branch\n"), "{diff}");
+        assert!(diff.contains("do [#notthis]"), "{diff}");
         assert!(!diff.contains("+#rebase\n"), "{diff}");
+        assert!(!diff.contains("+do [#notthis]\n"), "{diff}");
     }
 
     #[test]

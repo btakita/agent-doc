@@ -452,11 +452,50 @@ fn extract_hashtag_tokens(text: &str) -> Vec<String> {
 }
 
 fn text_requests_plan_work(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
+    let lower = without_quoted_context(text).to_ascii_lowercase();
     lower.contains("create a plan") || lower.contains("write a plan")
 }
 
+/// Drop fenced regions and blockquote lines.
+///
+/// `#nestsubmit` quotes the rest of the prompt tree under the lineage. That
+/// context must not read as a plan request or a backlog path.
+fn without_quoted_context(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 0usize;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if !in_fence {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if (fc == '`' || fc == '~') && trimmed.chars().take_while(|ch| *ch == fc).count() >= 3 {
+                let count = trimmed.chars().take_while(|ch| *ch == fc).count();
+                in_fence = true;
+                fence_char = fc;
+                fence_len = count;
+                continue;
+            }
+        } else {
+            let fc = trimmed.chars().next().unwrap_or('\0');
+            if fc == fence_char {
+                let count = trimmed.chars().take_while(|ch| *ch == fc).count();
+                if count >= fence_len && trimmed[count..].trim().is_empty() {
+                    in_fence = false;
+                }
+            }
+            continue;
+        }
+        if trimmed.starts_with('>') {
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n")
+}
+
 fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Option<PathBuf>> {
+    let text = without_quoted_context(text);
     let lower = text.to_ascii_lowercase();
     let references_backlog_target = lower.contains("add to the backlog of")
         || lower.contains("add to backlog of")
@@ -464,7 +503,7 @@ fn explicit_backlog_target_in_text(current_file: &Path, text: &str) -> Result<Op
     if !references_backlog_target {
         return Ok(None);
     }
-    agent_doc_fs::referenced_markdown_path_checked(current_file, text)
+    agent_doc_fs::referenced_markdown_path_checked(current_file, &text)
 }
 
 fn ordered_issue_units_from_changes(
@@ -620,6 +659,31 @@ mod tests {
     fn backlog_request_detected_from_direct_prompt_text() {
         assert!(prompt_requests_backlog_work(
             &["What should we do next? Any recommendations?".to_string()],
+            &[],
+            &IndexMap::new()
+        ));
+    }
+
+    #[test]
+    fn quoted_prompt_tree_is_not_a_plan_or_backlog_request() {
+        let text = "\
+https://example.test/pull/1: #rebase
+Prompt tree (`#nestsubmit`, context only; run the lineage above):
+> - other branch
+>   - create a plan and add these to the backlog of tasks/bugs.md
+>   - #rebase (this leaf)";
+        assert!(!prompt_requests_backlog_work(
+            &[text.to_string()],
+            &[],
+            &IndexMap::new()
+        ));
+        assert!(!prompt_requests_plan_work(
+            &[text.to_string()],
+            &[],
+            &IndexMap::new()
+        ));
+        assert!(prompt_requests_plan_work(
+            &["create a plan\n> add these to the backlog".to_string()],
             &[],
             &IndexMap::new()
         ));

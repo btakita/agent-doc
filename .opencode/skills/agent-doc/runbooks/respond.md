@@ -421,12 +421,15 @@ is that row's line; the leaf stays the item text, including a `do [#id]` line.
 A free-text head that owns nested sub-prompts stays the multiline quote
 (`> **Queue prompt:** parent` then `>   - child`), not a colon vector. The vector
 answers the leaf, not its ancestors. Closeout rewrites a bare leaf quote into
-the vector. The prompt submitted for that leaf is the same vector
-(`#nestsubmit`): a synthetic queue diff, a plan queue prompt, a direct run's
-active-queue diff, and a subagent's submitted prompt. An example is
+the vector. The prompt submitted for that leaf is that vector plus the entire prompt
+tree (`#nestsubmit`): a synthetic queue diff, a plan queue prompt, a direct
+run's active-queue diff, and a subagent's submitted prompt. The tree is
+context from the parsed queue AST, including a sibling branch that is not on
+the lineage path. An example lineage is
 `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Identity, claims,
 `--item`, and the selected queue prompt stay the leaf, so a quote of either
-the vector or the leaf answers that leaf. A nested child that begins with
+the vector or the leaf answers that leaf. Do not quote the tree as the queue
+prompt. A nested child that begins with
 `Include #subagent:` is release context for that quote, not a sub-prompt: the
 quote does not strike the row while any named include is still an open queue
 row (`#ftstrike`, `#nestedechostrike`).

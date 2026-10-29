@@ -582,7 +582,7 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization, submitted: &str
     let submitted = submitted.trim();
     if !submitted.is_empty() && submitted != auth.item.trim() {
         out.push_str(&format!(
-            "\nSubmitted prompt (`#nestsubmit`), including parent lineage:\n{}\n",
+            "\nSubmitted prompt (`#nestsubmit`), including parent lineage and the prompt tree:\n{}\n",
             quote(submitted)
         ));
     }
@@ -796,13 +796,21 @@ agent_doc_format: template
 ";
         let heads = vec!["#rebase".to_string(), "#rebase".to_string()];
         let submitted = crate::queue_response::submitted_prompts_for_heads(content, &heads);
-        assert_eq!(
-            submitted,
-            vec![
-                "https://github.com/haiven-dev/haiven-api/pull/736: #rebase".to_string(),
-                "https://github.com/haiven-dev/haiven-api/pull/758: #rebase".to_string(),
-            ]
+        assert_eq!(submitted.len(), 2);
+        assert!(
+            submitted[0]
+                .starts_with("https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"),
+            "{}",
+            submitted[0]
         );
+        assert!(
+            submitted[1]
+                .starts_with("https://github.com/haiven-dev/haiven-api/pull/758: #rebase\n"),
+            "{}",
+            submitted[1]
+        );
+        assert!(submitted[0].contains("pull/758"), "{}", submitted[0]);
+        assert!(submitted[1].contains("pull/736"), "{}", submitted[1]);
         let first = subagent_authorization("api.md", content, "#rebase");
         assert_eq!(first.item, "#rebase");
         let preamble = &first.subagent_prompt_preamble;
@@ -812,8 +820,12 @@ agent_doc_format: template
         );
         assert!(
             preamble.contains(
-                "Submitted prompt (`#nestsubmit`), including parent lineage:\n> https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"
+                "Submitted prompt (`#nestsubmit`), including parent lineage and the prompt tree:\n> https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"
             ),
+            "{preamble}"
+        );
+        assert!(
+            preamble.contains("https://github.com/haiven-dev/haiven-api/pull/758"),
             "{preamble}"
         );
         assert!(preamble.contains("\n  - #rebase\n"), "{preamble}");

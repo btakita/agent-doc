@@ -1264,7 +1264,14 @@ const COMPLETION_MARKERS: &[&str] = &[
 ];
 
 pub fn explicit_done_signal_ids(text: &str) -> Vec<String> {
-    let normalized = normalize_done_signal_text(text);
+    // Blockquoted prompt-tree lines are context (`#nestsubmit`), not a done
+    // signal for every id they mention.
+    let live: String = text
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('>'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let normalized = normalize_done_signal_text(&live);
     if normalized.is_empty() {
         return Vec::new();
     }
@@ -2350,6 +2357,11 @@ Closes #lostid.
         assert!(plain_done_signal("❯ done."));
         assert!(!plain_done_signal("done #abc"));
         assert!(explicit_done_signal_ids("look at #abc").is_empty());
+        assert_eq!(
+            explicit_done_signal_ids("done #abc\n> complete #quoted"),
+            vec!["abc"]
+        );
+        assert!(explicit_done_signal_ids("> complete #quoted").is_empty());
     }
 
     #[test]

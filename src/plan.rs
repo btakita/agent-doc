@@ -309,7 +309,8 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             .and_then(|cycle| cycle.selected_free_text_queue_heads.first().cloned())
     });
     // `#nestsubmit`: the leaf stays `queue_prompt` (slash detection and the
-    // orchestrate source). The diff the agent receives carries parent lineage.
+    // orchestrate source). The diff the agent receives carries parent lineage
+    // and the entire prompt tree.
     let submitted_queue_prompt = queue_prompt.as_ref().map(|prompt| {
         if queue_head_slash_command.is_some() {
             prompt.clone()
@@ -422,9 +423,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
 
     let prompt_bearing_changes = diff::classify_prompt_bearing_changes(&prompt_diff_text);
     let mut prompt_targets = prompt_targets_from_changes(&prompt_bearing_changes);
-    // `#nestsubmit`: a nested leaf's vector is the prompt even when the
-    // classifier does not recognize `parent: #id` as an imperative or question.
-    // Top-level submission equals the leaf, so this adds nothing there.
+    // `#nestsubmit`: a nested leaf's lineage plus its prompt tree is the prompt
+    // even when the classifier does not recognize `parent: #id` as an
+    // imperative or question. Top-level submission equals the leaf, so this
+    // adds nothing there.
     if let Some(submitted) = submitted_queue_prompt.as_deref().filter(|submitted| {
         queue_head_slash_command.is_none() && queue_prompt.as_deref() != Some(*submitted)
     }) {
@@ -2336,8 +2338,8 @@ Done.
         );
     }
 
-    /// `#nestsubmit`: plan's queue diff carries the parent lineage. The leaf
-    /// `#rebase` is not the prompt the agent is handed.
+    /// `#nestsubmit`: plan's queue prompt carries the parent lineage and the
+    /// other branch. The leaf `#rebase` alone is not the prompt.
     #[test]
     fn build_plan_submits_a_nested_run_leaf_with_its_parent() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
@@ -2361,6 +2363,8 @@ Done.
 <!-- agent:queue auto -->
 - 📥 https://github.com/haiven-dev/haiven-api/pull/758
   - #rebase
+- other branch
+  - do [#notthis]
 <!-- /agent:queue -->
 "#;
         std::fs::write(&doc, content).unwrap();
@@ -2379,10 +2383,25 @@ Done.
         );
         assert!(
             plan.prompt_targets.iter().any(|target| {
-                target == "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+                target.starts_with("https://github.com/haiven-dev/haiven-api/pull/758: #rebase\n")
+                    && target.contains("other branch")
+                    && target.contains("do [#notthis]")
+                    && target.contains("(this leaf)")
             }),
-            "submitted prompt should carry the parent: {:?}",
+            "submitted prompt should carry the lineage and the other branch: {:?}",
             plan.prompt_targets
+        );
+        assert!(
+            plan.prompt_targets.iter().all(|target| target != "#rebase"),
+            "the bare leaf is not the prompt: {:?}",
+            plan.prompt_targets
+        );
+        assert!(
+            plan.repo_actions
+                .iter()
+                .all(|action| !action.contains("notthis")),
+            "the sibling branch is context, not a directive: {:?}",
+            plan.repo_actions
         );
     }
 

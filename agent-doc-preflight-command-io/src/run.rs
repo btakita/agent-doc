@@ -1460,7 +1460,8 @@ fn run_with_options_to_writer_in_pass(
     {
         let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
         // `#nestsubmit`: slash stays the command. A nested leaf is submitted as
-        // its nest vector. `selected_queue_prompts` stays the leaf.
+        // its lineage plus the entire prompt tree. `selected_queue_prompts`
+        // stays the leaf.
         let prompt_source = if let Some(command) = slash_command.as_deref() {
             command.to_string()
         } else {
@@ -2407,10 +2408,8 @@ fn run_with_options_to_writer_in_pass(
         .map(|change| change.text.clone())
         .collect::<Vec<_>>();
     if !options.probe && !active_exchange_prompt_targets.is_empty() {
-            let projection = match resolve_current_preflight_document(
-                file,
-                "active_exchange_prompt_marker",
-            ) {
+        let projection =
+            match resolve_current_preflight_document(file, "active_exchange_prompt_marker") {
                 Ok(authoritative) => {
                     let marked =
                         agent_doc_element_exchange::mark_active_exchange_prompts_in_progress(
@@ -2433,40 +2432,40 @@ fn run_with_options_to_writer_in_pass(
                 }
                 Err(err) => ActivePromptMarkerProjection::SkippedError(err.to_string()),
             };
-            let status = match &projection {
-                ActivePromptMarkerProjection::Unchanged => "unchanged",
-                ActivePromptMarkerProjection::Applied {
-                    delivery_converged: true,
-                } => "applied_acknowledged",
-                ActivePromptMarkerProjection::Applied {
-                    delivery_converged: false,
-                } => "applied_ack_pending",
-                ActivePromptMarkerProjection::SkippedDetached => "skipped_detached",
-                ActivePromptMarkerProjection::SkippedError(_) => "skipped_error",
-            };
-            let error = match &projection {
-                ActivePromptMarkerProjection::SkippedError(error) => {
-                    format!(" error={error:?}")
-                }
-                _ => String::new(),
-            };
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "active_exchange_prompt_marker_projection file={} targets={} marker=🚧 prefix=❯ status={status} durable_intent=false{error}",
-                    file.display(),
-                    active_exchange_prompt_targets.len()
-                ),
-            );
-            if matches!(
-                projection,
-                ActivePromptMarkerProjection::SkippedDetached
-                    | ActivePromptMarkerProjection::SkippedError(_)
-            ) {
-                eprintln!(
-                    "[preflight] warning: active exchange prompt marker projection {status}; continuing because the marker is transient"
-                );
+        let status = match &projection {
+            ActivePromptMarkerProjection::Unchanged => "unchanged",
+            ActivePromptMarkerProjection::Applied {
+                delivery_converged: true,
+            } => "applied_acknowledged",
+            ActivePromptMarkerProjection::Applied {
+                delivery_converged: false,
+            } => "applied_ack_pending",
+            ActivePromptMarkerProjection::SkippedDetached => "skipped_detached",
+            ActivePromptMarkerProjection::SkippedError(_) => "skipped_error",
+        };
+        let error = match &projection {
+            ActivePromptMarkerProjection::SkippedError(error) => {
+                format!(" error={error:?}")
             }
+            _ => String::new(),
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "active_exchange_prompt_marker_projection file={} targets={} marker=🚧 prefix=❯ status={status} durable_intent=false{error}",
+                file.display(),
+                active_exchange_prompt_targets.len()
+            ),
+        );
+        if matches!(
+            projection,
+            ActivePromptMarkerProjection::SkippedDetached
+                | ActivePromptMarkerProjection::SkippedError(_)
+        ) {
+            eprintln!(
+                "[preflight] warning: active exchange prompt marker projection {status}; continuing because the marker is transient"
+            );
+        }
     }
     // `#qgoalstall`: only a prompt authored OUTSIDE the active queue preempts the
     // drain. An operator adding a directive to `agent:queue` under go mode is
@@ -7887,7 +7886,10 @@ mod tests {
         assert!(current.contains("Did you pick up the inline exchange prompt?"));
         assert!(current.contains("Did you pick up the exchange prompt?"));
         let next_cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(next_cycle.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+        assert_eq!(
+            next_cycle.phase,
+            agent_doc_turn::CyclePhase::PreflightStarted
+        );
         assert_ne!(next_cycle.cycle_id, committed_cycle.cycle_id);
     }
 
@@ -10170,9 +10172,8 @@ mod tests {
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let cycle =
-            agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
-                .unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline))
+            .unwrap();
         let response_sha = agent_doc_hash::content_hash(captured_response);
         agent_doc_cycle_state_io::append_response_captured_body(
             &doc,
@@ -10544,10 +10545,9 @@ mod tests {
         );
         std::fs::write(&doc, session).unwrap();
 
-        let presets = agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(
-            session, &doc,
-        )
-        .unwrap();
+        let presets =
+            agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(session, &doc)
+                .unwrap();
         assert_eq!(
             presets.get("#ancestor-only").map(String::as_str),
             Some("Ancestor preset body.")

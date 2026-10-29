@@ -739,10 +739,12 @@ fn first_submitted_in_document(
 
 /// Prompt text to submit for `head_text` (`#nestsubmit`).
 ///
-/// A nested leaf becomes its nest vector. A top-level row, a folded
-/// `#nestedsubprompts` head, a slash command, and text that is not a live row
-/// stay `head_text` (slash and absent rows are unchanged; a top-level row is
-/// its marker-stripped line when that differs). Completed rows do not match.
+/// A nested leaf becomes its nest vector plus the entire prompt tree of the
+/// queue that contains it (parsed AST, sibling branches included). A top-level
+/// row, a folded `#nestedsubprompts` head, a slash command, and text that is
+/// not a live row stay `head_text` (slash and absent rows are unchanged; a
+/// top-level row is its marker-stripped line when that differs). Completed
+/// rows do not match.
 pub fn submitted_queue_prompt(content: &str, head_text: &str) -> String {
     submitted_queue_prompt_skipping(content, head_text, |_| false)
 }
@@ -3021,14 +3023,23 @@ queue_active: true
   - #rebase
 <!-- /agent:queue -->
 ";
-        assert_eq!(
-            submitted_queue_prompt(content, "#rebase"),
-            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+        let submitted = submitted_queue_prompt(content, "#rebase");
+        assert!(
+            submitted.starts_with("https://github.com/haiven-dev/haiven-api/pull/758: #rebase\n"),
+            "{submitted}"
+        );
+        assert!(
+            submitted.contains("https://github.com/haiven-dev/haiven-api/pull/736"),
+            "{submitted}"
+        );
+        assert!(
+            submitted.contains("Prompt tree (`#nestsubmit`"),
+            "{submitted}"
         );
         assert_eq!(submitted_queue_prompt(content, "/clear"), "/clear");
         assert_eq!(
             submitted_continuation_prompt(content, "#rebase", |_| false),
-            "https://github.com/haiven-dev/haiven-api/pull/758: #rebase"
+            submitted
         );
     }
 }

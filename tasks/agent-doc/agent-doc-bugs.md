@@ -918,6 +918,16 @@ I checked the commit against `7b44d8bb28`. The private-name scan of added lines 
 `⟦local⟧` and `⟦published⟧` remain the clearer form, and they match the annotation line you added. The same rule applies: worker-reported, alone or together, only when `queue report-complete` records that state.
 
 `subagent:reviewpublish` generation 1 has exited, so this answer is recorded here. Worker `01a18839-8b85-7601-9741-6333916b1f50` is not running, and this edit stays on that claim. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`. No marker is implemented.
+
+### Re: Repeated nested presets stay — grok-4.7 · 2026-10-29T12:42-04:00
+
+`do [#repeatsamepreset]` is done. `subagent:repeatsamepreset` generation 1, worker `01a18857-f82b-70d2-af77-6bec593812e6`, finished. Branch `fix/repeat-same-preset` is `fb40df1450c4d1d708329b5362760c37b445f86a` and matches origin. Main stays at `7b44d8bb28`.
+
+A repeated bare `#rebase` or `#review` nested under the same parent is kept as its own submission. Convergence appends `⟦effect:N⟧`. A bare `#rebase` binds the next unclaimed occurrence, and `#rebase ⟦effect:N⟧` names that occurrence. A top-level duplicate bare `#tag`, ordinary free text, and `do [#id]` stay capped.
+
+The check log at `target/check-repeatsamepreset.log` ends `EXIT:0`: 12183 passed, 187 skipped. The private-name scan of added lines was clean. This closeout did not re-run `make check` or `make install`. The branch is not merged. `WORKER_BRIEF.txt` stays untracked.
+
+The cross-parent case remains `#reviewrebase-repeat`: a plan, with the fix left unimplemented.
 <!-- agent:boundary:8c335c48 -->
 <!-- /agent:exchange -->
 
@@ -942,7 +952,7 @@ I checked the commit against `7b44d8bb28`. The private-name scan of added lines 
   - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
 ```
 ---
-- 🚧 [#subagent:repeatsamepreset#1] do [#repeatsamepreset]
+- ~~do [#repeatsamepreset]~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -977,7 +987,6 @@ I checked the commit against `7b44d8bb28`. The private-name scan of added lines 
 
 ## Backlog <!-- agent:backlog priority queue -->
 - [ ] [#reviewrebase-repeat] Each copy of a nested review or rebase preset in one prompt tree must run again, including when the same words already ran under another parent. A short claim binds one remaining head, and the closeout that answers one leaf removes the same text under a different parent. On 2026-10-29, /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md commit 46525385 still had an inbox review child under https://github.com/haiven-dev/haiven-api/pull/767. Commit 477a8d7e removed that child while recording the review for https://github.com/haiven-dev/haiven-api/pull/763. Create a plan. Do not implement the fix in that plan.
-- [ ] [#repeatsamepreset] I may prompt `#rebase` or `#review` multiple times under the same parent item in the nested list. This would lead to a duplicate prompt. I want the "duplicate" prompt to be acted on every single time I submit it. I don't want duplicate prompts to be rejected.
 - [ ] [#grok-live-editor] Grok Build should see live agent-doc editor changes. A Grok session reads the CRDT document only when it calls agent_doc_admit, agent_doc_plan, agent_doc_read, or agent_doc_finalize, or when it pulls agent-doc steering. The Read tool sees disk, which trails the editor replica. Queue rows the operator adds during a turn stay invisible until the next pull, so the coordinator dispatches only the rows the last plan listed and the operator sees idle inbox rows. Expected: while a Grok pane owns a session, converged editor ops (new queue rows, strikes, claim projection) are pushed into that session, and the next plan includes the newly runnable rows without waiting for another user message. Observed 2026-10-28 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md: the operator asked why only two subagents were running while more queue rows were visible. The prior plan queue_subagent_dispatch listed only those two.
 <!-- /agent:backlog -->
 

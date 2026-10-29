@@ -1047,7 +1047,18 @@ A numeric recency glyph can carry that order. Three stripped metadata tokens, th
 A timestamp annotation can drive the same three editor highlights. The time stays in the markdown. The plugin ranks those times and paints the newest three. The highlight is editor-only.
 
 That combination is now choice (6) on `#recent-run-affordance`. `subagent:recentrun` generation 1 has exited, so this note is recorded here. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`. Nothing is implemented.
-<!-- agent:boundary:59cd7ea3 -->
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+❯ **Deferred:** The nested lines stay. Annotation, worker-reported, and the icon pair `✎` / `⬆` are already in the exchange. Implementation has not been requested. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+
+❯ **Deferred:** Choice (6) is recorded: a timestamp annotation can drive editor highlights for the newest three, or a numeric recency glyph can carry that order. The pick is open. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+
+### Re: Both marker choices stay open — grok-4.7 · 2026-10-29T13:23-04:00
+
+`subagent:reviewpublish` generation 1 and `subagent:recentrun` generation 1 are operator actions. Both workers have exited. Nothing is implemented.
+<!-- agent:boundary:d8bc4803 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -1060,6 +1071,7 @@ That combination is now choice (6) on `#recent-run-affordance`. `subagent:recent
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+- I made answers to the prompts, but agent-doc did not add them to the plan.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

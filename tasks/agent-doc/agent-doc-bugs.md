@@ -842,8 +842,18 @@ The ancestor preset in `/home/brian/work/btakita/agent-loop/.agent-doc/project.m
 Haiven sessions use the nearer map in `/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/project.md`. Its `#review` is `Write a review of the current head and post it as a plain comment. Do not approve unless the line says approve. Review using ~/.agents/skills/pr-review/SKILL.md`. That override hides the ancestor older-commit sentence. That file has `#rebase-conflicts` as `rebase + fix merge conflicts` and no `#rebase` key.
 
 Those sentences cannot keep two identical leaves as two claims. A short claim binds one remaining head. A closeout that answers one leaf can remove the same words under another parent. Commit `46525385` of `tasks/api.md` still had the inbox `#review` under pull 767. Commit `477a8d7e` removed that child while recording the review for pull 763. That split is backlog `#reviewrebase-repeat`: a plan, with the fix left unimplemented. The same-parent rejection is `do [#repeatsamepreset]`, running as worker `01a18857-f82b-70d2-af77-6bec593812e6` on `fix/repeat-same-preset`.
+> **Queue prompt:** Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
 
-<!-- agent:boundary:c5cd2054 -->
+### Re: Response ids are findable — grok-4.7 · 2026-10-29T12:19-04:00
+
+`subagent:responseid` generation 1, worker `01a18839-c53c-7141-ab40-b2a9128881b8`, finished. Branch `fix/response-surrogate-id` is `ab92736a43de910a8bf9166af5142fd383d30f55` and matches origin. Main is still `7b44d8bb28`.
+
+Each new `### Re:` response gets `⟦response:<12 lowercase hex>⟧`. The same token is on the heading, on the exchange prompt that heading answers, and on the struck run, loop, or queue row. Find in the editor locates the response from the prompt. Older responses stay as they are. The token stays outside queue-work, response-cell, prompt-node, claim, and `(HEAD)` identity.
+
+I checked the commit against `7b44d8bb28`. The private-name scan of added lines was clean. The worker reported `cargo test --lib` on the twelve touched crates: 3549 passed, 0 failed, 1 ignored. This closeout did not re-run that suite, `make check`, or `make install`. The branch is not merged.
+
+`WORKER_BRIEF.txt` stays untracked.
+<!-- agent:boundary:0ee619e8 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -854,7 +864,7 @@ Those sentences cannot keep two identical leaves as two claims. A short claim bi
 - ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
 - ~~As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [#subagent:responseid#1] Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
+- ~~Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.~~ — auto-struck: answered this cycle (#ftstrike)
 ---
 🚧 [#subagent:promptsurface#1] agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
 ```

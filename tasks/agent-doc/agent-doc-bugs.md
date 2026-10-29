@@ -26,7 +26,7 @@ queue: go
 
 
 <!-- status:sync -->
-Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. The installed binary is 0.35.560. JetBrains pluginVersions on that release commit stay 0.2.877, 0.2.878, and 0.2.879. Main is 9653bffdb4. 04fe6be064 keeps an operator-request id on its nested run item by matching the parent-line work identity and the brief's collapsed origin. Coordinator make check on 04fe6be064 exited 0 (nextest 12128 passed, 187 skipped). 9653bffdb4 keeps a release row queued while an included subagent is open. Its regression starts from the unstruck release + publish rows. Focused tests on that merged tree passed (3 tests). make install of 9653bffdb4 exited 0. JetBrains packages on main stay 0.2.880, 0.2.881, and 0.2.882, and VS Code stays 0.2.90. That install found those JetBrains bytes already current. 44210183cc, now an ancestor of main, submits a nested run leaf as its nest vector, so the api.md case is submitted as `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. The worker make check for that commit exited 0 (nextest 12126 passed, 187 skipped). make install of 44210183cc exited 0. 493731820e treats a live nested push or publish under a claimed rebase or review as operator authorization. ce46068a9f composes ancestor .agent-doc/project.md rules, farthest ancestor first, and a nested .git does not hide the ancestor file. The worker make check for that rules commit exited 0 (nextest 12119 passed, 187 skipped). make install of ce46068a9f exited 0, and make install of 493731820e exited 0. CI for 5291b1f93c failed in the check job (run 40774734370). CI for 8862b2f9b5 was cancelled (run 40781176636). CI for ce46068a9f succeeded (run 40784757953); Book and Pages for that commit succeeded. CI for 493731820e succeeded (run 40786474632); Book (run 40786474587) and Pages (run 40786474657) succeeded. CI for 44210183cc is in progress (run 40789165872); Book (run 40789165877) and Pages (run 40789165836) succeeded. CI for 04fe6be064 is in progress (run 40793014287); Book (run 40793014229) and Pages (run 40793014276) succeeded. CI for 9653bffdb4 is in progress (run 40793118223); Book (run 40793118283) and Pages (run 40793118210) succeeded. Those main commits are outside tag v0.35.560.
+Latest release: agent-doc v0.35.560 (release commit bd971e9b87, tag v0.35.560). The GitHub Release has 24 assets and was published 2026-10-28T20:11:42Z. PyPI agent-doc is 0.35.560. The installed binary is 0.35.560. JetBrains pluginVersions on that release commit stay 0.2.877, 0.2.878, and 0.2.879. Main is 9653bffdb4. 04fe6be064 keeps an operator-request id on its nested run item by matching the parent-line work identity and the brief's collapsed origin. Coordinator make check on 04fe6be064 exited 0 (nextest 12128 passed, 187 skipped). 9653bffdb4 keeps a release row queued while an included subagent is open. Its regression starts from the unstruck release + publish rows. Focused tests on that merged tree passed (3 tests). make install of 9653bffdb4 exited 0. JetBrains packages on main stay 0.2.880, 0.2.881, and 0.2.882, and VS Code stays 0.2.90. That install found those JetBrains bytes already current. 44210183cc, now an ancestor of main, submits a nested run leaf as its nest vector, so the api.md case is submitted as `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. The worker make check for that commit exited 0 (nextest 12126 passed, 187 skipped). make install of 44210183cc exited 0. 493731820e treats a live nested push or publish under a claimed rebase or review as operator authorization. ce46068a9f composes ancestor .agent-doc/project.md rules, farthest ancestor first, and a nested .git does not hide the ancestor file. The worker make check for that rules commit exited 0 (nextest 12119 passed, 187 skipped). make install of ce46068a9f exited 0, and make install of 493731820e exited 0. CI for 5291b1f93c failed in the check job (run 40774734370). CI for 8862b2f9b5 was cancelled (run 40781176636). CI for ce46068a9f succeeded (run 40784757953); Book and Pages for that commit succeeded. CI for 493731820e succeeded (run 40786474632); Book (run 40786474587) and Pages (run 40786474657) succeeded. CI for 44210183cc succeeded (run 40789165872); Book (run 40789165877) and Pages (run 40789165836) succeeded. CI for 04fe6be064 is in progress (run 40793014287); Book (run 40793014229) and Pages (run 40793014276) succeeded. CI for 9653bffdb4 is in progress (run 40793118223); Book (run 40793118283) and Pages (run 40793118210) succeeded. Those main commits are outside tag v0.35.560.
 <!-- /status:sync -->
 
 Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))
@@ -397,14 +397,37 @@ No additional backlog follow-up is needed because the nested-tree fix is the cla
 
 No additional backlog follow-up is needed because the cross-section lineage work is already running on the worker named above.
 
+### Re: entire prompt tree is on main — grok-4.7 · 2026-10-28T20:52-04:00
+
+> **Queue prompt:** The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
+>   - Use the AST to guide the agent.
+
+Main is `397d559aec`. A nested leaf is submitted as its lineage plus the parsed prompt tree, and a sibling branch is context. Focused tests on that commit passed (3). The worker `make check` exited 0 (nextest 12128 passed, 187 skipped). The added diff had 0 denylist hits. `make install` exited 0. `agent-doc --version` is 0.35.560.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/382
+
+**Deferred:** Worker `01a18521-6b4c-7463-8621-f85ad6dd5302` (`subagent:ghfix382`, generation 1) is running in `/home/brian/worktrees/agent-doc-ghfix382` on `fix/gh-issue-382`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/383
+
+**Deferred:** Worker `01a18521-6b4c-7463-8621-f86834d55221` (`subagent:ghfix383`, generation 1) is running in `/home/brian/worktrees/agent-doc-ghfix383` on `fix/gh-issue-383`.
+
+> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/384
+
+**Deferred:** Worker `01a18521-6b4c-7463-8621-f87eae4fac06` (`subagent:ghfix384`, generation 1) is running in `/home/brian/worktrees/agent-doc-ghfix384` on `fix/gh-issue-384`.
+
+The new run row that begins "If a subagent or agent claims a tree item" is still being typed, so this cycle did not claim it.
+
+No additional backlog follow-up is needed because the entire-tree commit is on main and the three issue rows are already running on their workers.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
-- 🚧 [#subagent:entiretree#1] The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
-  - Use the AST to guide the agent.
+- ~~The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.~~
+  - ~~Use the AST to guide the agent.~~
 - ~~release + publish~~
   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
   - ~~Include #subagent:nestedlineage~~
@@ -412,6 +435,10 @@ No additional backlog follow-up is needed because the cross-section lineage work
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 - 🚧 [#subagent:keeptree#1] In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.
+- 🚧 [#subagent:ghfix382#1] #gh-fix https://github.com/btakita/agent-doc/issues/382
+- 🚧 [#subagent:ghfix383#1] #gh-fix https://github.com/btakita/agent-doc/issues/383
+- 🚧 [#subagent:ghfix384#1] #gh-fix https://github.com/btakita/agent-doc/issues/384
+- If a subagent or agent claims a tree item (in run or queue or loop), then the operator adds a nested list item, the first list item should steer the existing subagent or task. Subsequently added nested list items should be routed potentially to another subagent with the lineage. This logic should apply no matter how deep the nested
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

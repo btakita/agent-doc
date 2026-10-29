@@ -15,6 +15,12 @@ pub enum VisualTokenKind {
     ResponseHeading,
     TrackedId,
     LabelTag,
+    /// Newest, second-newest, and third-newest queue rows by their durable
+    /// `⟦addressed-at:...⟧` annotations. Editors derive rank glyphs and
+    /// transient row highlights from these tokens.
+    Recent1,
+    Recent2,
+    Recent3,
     /// Markdown **strong** emphasis span (`**text**` or `__text__`), rendered
     /// bold in the editor (`#editor-bold-markdown-rendering`).
     Bold,
@@ -40,9 +46,76 @@ pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
     collect_label_tags(doc, &code_ranges, &mut tokens);
     collect_tracked_ids(doc, &code_ranges, &mut tokens);
     collect_emphasis_tokens(doc, &code_ranges, &mut tokens);
+    collect_recent_queue_rows(doc, &mut tokens);
 
     tokens.sort_by_key(|token| (token.start, token.end));
     tokens
+}
+
+fn collect_recent_queue_rows(doc: &str, out: &mut Vec<VisualToken>) {
+    const PREFIX: &str = "⟦addressed-at:";
+    const SUFFIX: char = '⟧';
+
+    let Ok(components) = agent_doc_element::element::parse(doc) else {
+        return;
+    };
+    let mut rows = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = &doc[component.open_end..component.close_start];
+        let mut relative_start = 0usize;
+        for line in body.split_inclusive('\n') {
+            let line_without_newline = line.strip_suffix('\n').unwrap_or(line);
+            let start = component.open_end + relative_start;
+            relative_start += line.len();
+            let trimmed = line_without_newline.trim_start();
+            if !trimmed.starts_with("- ") {
+                continue;
+            }
+            let Some(prefix) = line_without_newline.find(PREFIX) else {
+                continue;
+            };
+            let value_start = prefix + PREFIX.len();
+            let Some(suffix) = line_without_newline[value_start..].find(SUFFIX) else {
+                continue;
+            };
+            let stamp = &line_without_newline[value_start..value_start + suffix];
+            if !is_canonical_addressed_at(stamp) {
+                continue;
+            }
+            rows.push((stamp.to_string(), start, start + line_without_newline.len()));
+        }
+    }
+
+    rows.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    for (rank, (_, start, end)) in rows.into_iter().take(3).enumerate() {
+        out.push(VisualToken {
+            kind: match rank {
+                0 => VisualTokenKind::Recent1,
+                1 => VisualTokenKind::Recent2,
+                _ => VisualTokenKind::Recent3,
+            },
+            start,
+            end,
+        });
+    }
+}
+
+fn is_canonical_addressed_at(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 24
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes[10] == b'T'
+        && bytes[13] == b':'
+        && bytes[16] == b':'
+        && bytes[19] == b'.'
+        && bytes[23] == b'Z'
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19 | 23) || byte.is_ascii_digit()
+        })
 }
 
 /// Collect markdown emphasis spans (`#editor-bold-markdown-rendering`): `**…**`
@@ -666,5 +739,51 @@ scratch note
         let body_text = &doc[body.start..body.end];
         assert!(body_text.contains("scratch note"));
         assert!(body_text.contains("![img_3.png](img_3.png)"));
+    }
+
+    #[test]
+    fn derives_the_three_newest_addressed_queue_rows() {
+        let doc = "\
+<!-- agent:run id=first -->
+- ~~oldest~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T10:00:00.000Z⟧
+- ~~newest~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T13:00:00.000Z⟧
+<!-- /agent:run -->
+<!-- agent:run id=second -->
+- ~~fourth~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T09:00:00.000Z⟧
+- ~~third~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T11:00:00.000Z⟧
+- ~~second~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T12:00:00.000Z⟧
+<!-- /agent:run -->
+";
+        let tokens = collect_visual_tokens(doc);
+        let recent = tokens
+            .iter()
+            .filter(|token| {
+                matches!(
+                    token.kind,
+                    VisualTokenKind::Recent1 | VisualTokenKind::Recent2 | VisualTokenKind::Recent3
+                )
+            })
+            .map(|token| (token.kind, &doc[token.start..token.end]))
+            .collect::<Vec<_>>();
+
+        assert_eq!(recent.len(), 3);
+        assert!(recent.contains(&(VisualTokenKind::Recent1, "- ~~newest~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T13:00:00.000Z⟧")));
+        assert!(recent.contains(&(VisualTokenKind::Recent2, "- ~~second~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T12:00:00.000Z⟧")));
+        assert!(recent.contains(&(VisualTokenKind::Recent3, "- ~~third~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-29T11:00:00.000Z⟧")));
+        assert!(recent.iter().all(|(_, row)| !row.contains("fourth")));
+    }
+
+    #[test]
+    fn ignores_malformed_or_non_queue_addressed_annotations() {
+        let doc = "\
+⟦addressed-at:2026-10-29T14:00:00.000Z⟧
+<!-- agent:run -->
+- ~~bad~~ — auto-struck: addressed this cycle ⟦addressed-at:yesterday⟧
+<!-- /agent:run -->
+";
+        assert!(collect_visual_tokens(doc).iter().all(|token| !matches!(
+            token.kind,
+            VisualTokenKind::Recent1 | VisualTokenKind::Recent2 | VisualTokenKind::Recent3
+        )));
     }
 }

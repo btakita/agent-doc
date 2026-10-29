@@ -3297,6 +3297,9 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     pub response_sha256: String,
     pub response_body: String,
     pub baseline_content: Option<String>,
+    /// Stable timestamp derived from the cycle id, reused for the live and
+    /// snapshot projections so reactive recomputation cannot mint a new target.
+    pub addressed_at: String,
     pub node_keys: Vec<String>,
     /// Heads an active worker claim held when the target was projected
     /// (`#ftstrikeclaimedmention`); a snapshot projection judges them by the
@@ -5892,6 +5895,7 @@ struct AnsweredFreeTextQueueStrikeProjection {
     response_sha256: String,
     response_body: String,
     baseline_content: Option<String>,
+    addressed_at: String,
     node_keys: Vec<String>,
     claimed_heads: Vec<String>,
     selected_heads: Vec<String>,
@@ -5900,6 +5904,15 @@ struct AnsweredFreeTextQueueStrikeProjection {
     /// `subagents` attribute owns them and no worker attempt backs them.
     inline_vetoed_heads: Vec<String>,
     error: Option<String>,
+}
+
+fn addressed_at_for_cycle_id(cycle_id: &str) -> String {
+    let secs = cycle_id
+        .strip_prefix("cycle-")
+        .and_then(|millis| millis.parse::<u128>().ok())
+        .map(|millis| (millis / 1_000).min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0);
+    agent_doc_turn::turn_status::format_rfc3339_utc_secs(secs)
 }
 
 impl AnsweredFreeTextQueueStrikeProjection {
@@ -7792,6 +7805,22 @@ impl ControllerDocumentGraphs {
                                 ..AnsweredFreeTextQueueStrikeProjection::default()
                             };
                         };
+                        let addressed_at = addressed_at_for_cycle_id(&captured.cycle_id);
+                        let target_content = match agent_doc_queue::queue_recency::annotate_newly_struck_rows(
+                            &observation.content,
+                            &target.target_content,
+                            &addressed_at,
+                        ) {
+                            Ok(content) => content,
+                            Err(error) => {
+                                return AnsweredFreeTextQueueStrikeProjection {
+                                    error: Some(format!(
+                                        "answered free-text recency annotation failed for {key}: {error}"
+                                    )),
+                                    ..AnsweredFreeTextQueueStrikeProjection::default()
+                                };
+                            }
+                        };
                         let projection_id = agent_doc_hash::content_hash(&format!(
                             "{}:{}:{}",
                             captured.response_sha256,
@@ -7801,12 +7830,13 @@ impl ControllerDocumentGraphs {
                         AnsweredFreeTextQueueStrikeProjection {
                             file: Some(observation.file),
                             expected_content: observation.content,
-                            target_content: target.target_content,
+                            target_content,
                             projection_id,
                             capture_id: captured.capture_id,
                             response_sha256: captured.response_sha256,
                             response_body: captured.response_body,
                             baseline_content: captured.baseline_content,
+                            addressed_at,
                             node_keys: target.node_keys,
                             claimed_heads: observation.claimed_heads,
                             selected_heads: observation.selected_heads,
@@ -8214,6 +8244,7 @@ impl ControllerDocumentGraphs {
                 response_sha256: projection.response_sha256.clone(),
                 response_body: projection.response_body.clone(),
                 baseline_content: projection.baseline_content.clone(),
+                addressed_at: projection.addressed_at.clone(),
                 node_keys: projection.node_keys.clone(),
                 claimed_heads: projection.claimed_heads.clone(),
                 selected_heads: projection.selected_heads.clone(),
@@ -26209,6 +26240,7 @@ revised operator request
                 "<!-- /agent:exchange -->\n\n",
                 "<!-- agent:queue go -->\n",
                 "- {}\n",
+                "- do [#next]\n",
                 "<!-- /agent:queue -->\n",
             ),
             response, head
@@ -26271,6 +26303,16 @@ revised operator request
         assert!(
             strike.has_target(),
             "a claimed head answered by the response is struck: {strike:?}"
+        );
+        assert!(
+            strike
+                .target_content
+                .contains("⟦addressed-at:1970-01-01T00:00:00.000Z⟧"),
+            "the reactive target derives a stable timestamp from cycle-1: {strike:?}"
+        );
+        assert_eq!(
+            strike.addressed_at, "1970-01-01T00:00:00.000Z",
+            "live and snapshot projections must reuse the same cycle-derived timestamp"
         );
     }
 

@@ -179,6 +179,8 @@ at the end of its `agent:status` section (hide it with `queue-legend=off` on
 the status marker), and `agent-doc queue --help` prints it. See
 [Queue Markers](docs/guide/queue-markers.md#queue-markers) for the full legend,
 including the `[#owner#N]`, `⟦blocked by …⟧` and `⟦effect:N⟧` annotations.
+Completed queue rows also retain `⟦addressed-at:…⟧`; supported editors rank
+the newest three as `①`/`②`/`③` with graded, caret-dismissible highlights.
 
 ## Learn more
 

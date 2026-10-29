@@ -1110,7 +1110,7 @@ pub fn embed_consumed_prompt_in_response(
 /// the labeled queue-prompt echo, not just anywhere in assistant prose.
 fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &str) -> bool {
     let head_clean = strip_priority_markers(head_text);
-    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(&head_clean));
+    let head_norm = normalize_for_answer_match(&explicit_queue_prompt_head_match_text(&head_clean));
     if head_norm.is_empty() {
         return false;
     }
@@ -1169,11 +1169,34 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
 /// Number of non-empty normalized lines in a head's match prose: how many
 /// quoted echo lines its verbatim echo spans (`#nestedechostrike`).
 fn head_echo_line_count(head_clean: &str) -> usize {
-    free_text_head_match_prose(head_clean)
+    explicit_queue_prompt_head_match_text(head_clean)
         .lines()
         .filter(|line| !normalize_for_answer_match(line).is_empty())
         .count()
         .max(1)
+}
+
+/// Text an explicit labeled queue-prompt echo must reproduce.
+///
+/// The ordinary match key stays the prose prefix so an operator does not have to
+/// reproduce a pasted log after a prose lead (`#ftstrike-fence`). A head that
+/// starts with a fence has no prose prefix, however, so a labeled echo may prove
+/// it only by reproducing the whole head (`#ftstrike-fence-head`). This fallback
+/// is deliberately not part of [`free_text_head_match_prose`]: unlabeled
+/// blockquotes keep the empty weak-match key, and a blockquote-leading head does
+/// not gain an exact-echo fallback.
+fn explicit_queue_prompt_head_match_text(head_clean: &str) -> String {
+    let prose = free_text_head_match_prose(head_clean);
+    if !normalize_for_answer_match(&prose).is_empty() {
+        return prose;
+    }
+
+    let trimmed = head_clean.trim_start();
+    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        head_clean.to_string()
+    } else {
+        prose
+    }
 }
 
 /// True when the last `lines` non-empty entries of `run` (normalized quoted
@@ -1395,7 +1418,7 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
 /// that directive. So a bare singular block is a listing only when the run of
 /// echoes after it ends the response, or goes on to quote an id-backed head.
 fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &str) -> bool {
-    let head_norm = normalize_for_answer_match(&free_text_head_match_prose(head_clean));
+    let head_norm = normalize_for_answer_match(&explicit_queue_prompt_head_match_text(head_clean));
     if head_norm.is_empty() {
         return false;
     }
@@ -2834,6 +2857,82 @@ mod tests {
         // prose prefix and must never match.
         let log_only = "```\nsome pasted log line one\nsome pasted log line two\n```";
         assert!(!free_text_head_answered_by_response(response, log_only));
+    }
+
+    #[test]
+    fn fence_leading_head_requires_a_complete_labeled_echo() {
+        // GH #385 / #ftstrike-fence-head: the opener and closer deliberately
+        // share lines with content, so the whole three-line head is the item.
+        let head = concat!(
+            "```Error: failed to spawn example\n",
+            "  detail: program not on PATH\n",
+            "``` When the document is claimed, this error is in the terminal.",
+        );
+        assert!(free_text_head_match_prose(head).is_empty());
+
+        let same_line_label = concat!(
+            "### Re: spawn claim\n\n",
+            "> **Queue prompt:** ```Error: failed to spawn example\n",
+            ">   detail: program not on PATH\n",
+            "> ``` When the document is claimed, this error is in the terminal.\n\n",
+            "Marked done. The spawn failed because the program was not on PATH.\n",
+        );
+        assert!(free_text_head_answered_by_response(same_line_label, head));
+
+        let next_line_label = concat!(
+            "### Re: spawn claim\n\n",
+            "> **Queue prompt:**\n",
+            ">\n",
+            "> ```Error: failed to spawn example\n",
+            ">   detail: program not on PATH\n",
+            "> ``` When the document is claimed, this error is in the terminal.\n\n",
+            "Marked done. The spawn failed because the program was not on PATH.\n",
+        );
+        assert!(free_text_head_answered_by_response(next_line_label, head));
+
+        let trailing_sentence_only = concat!(
+            "### Re: spawn claim\n\n",
+            "> **Queue prompt:** When the document is claimed, this error is in the terminal.\n\n",
+            "Marked done.\n",
+        );
+        assert!(!free_text_head_answered_by_response(
+            trailing_sentence_only,
+            head
+        ));
+
+        let unlabeled = concat!(
+            "### Re: spawn claim\n\n",
+            "> ```Error: failed to spawn example\n",
+            ">   detail: program not on PATH\n",
+            "> ``` When the document is claimed, this error is in the terminal.\n\n",
+            "Marked done.\n",
+        );
+        assert!(!free_text_head_answered_by_response(unlabeled, head));
+
+        let trailing_bare_echo = concat!(
+            "### Re: spawn claim\n\n",
+            "Did other work.\n\n",
+            "> **Queue prompt:** ```Error: failed to spawn example\n",
+            ">   detail: program not on PATH\n",
+            "> ``` When the document is claimed, this error is in the terminal.\n",
+        );
+        assert!(!free_text_head_answered_by_response(
+            trailing_bare_echo,
+            head
+        ));
+
+        let blockquote_leading = "> prior response context\nFix the remaining problem.";
+        let labeled_blockquote = concat!(
+            "### Re: remaining problem\n\n",
+            "> **Queue prompt:** > prior response context\n",
+            "> Fix the remaining problem.\n\n",
+            "Fixed.\n",
+        );
+        assert!(free_text_head_match_prose(blockquote_leading).is_empty());
+        assert!(!free_text_head_answered_by_response(
+            labeled_blockquote,
+            blockquote_leading
+        ));
     }
 
     #[test]

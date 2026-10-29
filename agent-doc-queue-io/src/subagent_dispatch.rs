@@ -655,6 +655,69 @@ mod tests {
         );
     }
 
+    /// `#repeatsamepreset`: two `#rebase` rows under one parent are both claimed.
+    /// The document stays byte-identical because the claim key is the computed
+    /// lineage, not a rewrite of the row.
+    #[test]
+    fn same_parent_rebase_claim_binds_each_submission() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("api.md");
+        let first = "ship the api: #rebase ⟦effect:1⟧";
+        let second = "ship the api: #rebase ⟦effect:2⟧";
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- ship the api\n  - #rebase\n  - #rebase\n<!-- /agent:queue -->\n"
+            .to_string();
+        std::fs::write(&file, &content).unwrap();
+        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert_eq!(listed, vec![first.to_string(), second.to_string()]);
+
+        let (_, claimed_first) =
+            crate::queue_claim::claim(&file, "#rebase", "subagent:a", 600).unwrap();
+        assert_eq!(claimed_first.item_text, first);
+        let (_, claimed_second) =
+            crate::queue_claim::claim(&file, "#rebase", "subagent:b", 600).unwrap();
+        assert_eq!(claimed_second.item_text, second);
+        let err = crate::queue_claim::claim(&file, "#rebase", "subagent:c", 600).unwrap_err();
+        assert!(
+            err.to_string().contains("already held"),
+            "a third claim waits until a submission is free: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+
+        let list = "- ship the api\n  - #rebase\n  - #rebase\n";
+        let entries = agent_doc_queue::document_queue::parse(list).unwrap();
+        let converged = agent_doc_queue::document_queue::converge_queue_via_lifecycle(
+            &entries,
+            &[],
+            &Default::default(),
+        )
+        .unwrap();
+        let rendered = agent_doc_queue::document_queue::render(&converged);
+        let annotated = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n{rendered}<!-- /agent:queue -->\n"
+        );
+        let annotated_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(annotated_dir.path().join(".agent-doc")).unwrap();
+        let annotated_file = annotated_dir.path().join("api.md");
+        std::fs::write(&annotated_file, &annotated).unwrap();
+        let listed = pending_subagent_dispatch_for_content(&annotated_file, &annotated).unwrap();
+        assert_eq!(
+            listed,
+            vec![
+                "#rebase ⟦effect:1⟧".to_string(),
+                "#rebase ⟦effect:2⟧".to_string()
+            ]
+        );
+        let (_, by_effect) =
+            crate::queue_claim::claim(&annotated_file, "#rebase ⟦effect:2⟧", "subagent:b", 600)
+                .unwrap();
+        assert_eq!(by_effect.item_text, second);
+        let (_, by_bare) =
+            crate::queue_claim::claim(&annotated_file, "#rebase", "subagent:a", 600).unwrap();
+        assert_eq!(by_bare.item_text, first);
+        assert_eq!(std::fs::read_to_string(&annotated_file).unwrap(), annotated);
+    }
+
     #[test]
     fn ancestor_project_preset_uses_nested_project_overrides_without_local_copy() {
         let dir = tempfile::tempdir().unwrap();

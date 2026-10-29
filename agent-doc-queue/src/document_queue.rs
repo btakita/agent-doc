@@ -3218,7 +3218,11 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     if head.is_empty() {
         return Some(bare);
     }
-    Some(nest_vector_at(entries, index, head).unwrap_or(bare))
+    Some(preset_lineage_with_effect(
+        entries,
+        index,
+        &nest_vector_at(entries, index, head).unwrap_or(bare),
+    ))
 }
 
 /// Whether row `index` is the live head named by `head_text`.
@@ -3285,7 +3289,10 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
         return None;
     }
     Some(match nest_vector_at(entries, index, &identity) {
-        Some(lineage) => with_prompt_tree(entries, index, &lineage),
+        Some(lineage) => {
+            let lineage = preset_lineage_with_effect(entries, index, &lineage);
+            with_prompt_tree(entries, index, &lineage)
+        }
         None => identity,
     })
 }
@@ -4342,11 +4349,178 @@ pub fn strip_queue_effect_annotation(text: &str) -> String {
     split_queue_effect_annotation(text).0
 }
 
+/// Effect id already written on `text`, when the trailing suffix parses.
+pub fn queue_effect_id(text: &str) -> Option<usize> {
+    split_queue_effect_annotation(text).1
+}
+
 fn queue_effect_family_identity(
     prompt: &QueuePrompt,
 ) -> agent_doc_element_queue::QueueItemIdentity {
     let (base, _) = split_queue_effect_annotation(&prompt.text);
     agent_doc_element_queue::QueueItemIdentity::from_prompt(&base)
+}
+
+/// A whole-token bare `#tag` (`#rebase`, `#review`). `[#id]`, `do #id`, and
+/// `#tag` plus arguments are not this shape.
+fn is_pure_hash_id(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix('#') else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+/// Ancestor lineage, bare `#tag`, and any effect id already on the row.
+///
+/// `None` for a top-level row, a group parent, a tracked directive, or a
+/// preset invocation that carries arguments (`#repeatsamepreset`).
+fn nested_bare_preset_leaf(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<(String, String, Option<usize>)> {
+    let QueueEntry::Prompt(prompt) = entries.get(index)? else {
+        return None;
+    };
+    if prompt.multiline || prompt.indent == 0 || entry_is_group_parent(entries, index) {
+        return None;
+    }
+    let (base, effect) = split_queue_effect_annotation(prompt.text.trim());
+    let work = nest_row_work_text(&base);
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
+    let head = head.trim();
+    if !is_pure_hash_id(head) {
+        return None;
+    }
+    let vector = nest_vector_at(entries, index, head)?;
+    let (ancestors, leaf) = vector.rsplit_once(": ")?;
+    if ancestors.trim().is_empty() || leaf.trim() != head {
+        return None;
+    }
+    Some((ancestors.to_string(), head.to_string(), effect))
+}
+
+/// Stable `⟦effect:N⟧` ids for nested bare presets that share one parent.
+///
+/// A family of one is absent, so a single `#rebase` under a parent stays
+/// unannotated. Existing positive ids are kept. Numbering matches
+/// [`preset_lineage_with_effect`], so a claim taken before the row text is
+/// rewritten still names the row after annotation.
+fn repeated_preset_effect_assignments(
+    entries: &[QueueEntry],
+) -> std::collections::HashMap<usize, usize> {
+    let mut families =
+        std::collections::HashMap::<(String, String), Vec<(usize, Option<usize>)>>::new();
+    for index in 0..entries.len() {
+        if let Some((ancestors, leaf, effect)) = nested_bare_preset_leaf(entries, index) {
+            families
+                .entry((ancestors, leaf))
+                .or_default()
+                .push((index, effect));
+        }
+    }
+    let mut assigned = std::collections::HashMap::new();
+    for members in families.values().filter(|members| members.len() > 1) {
+        let mut used = std::collections::HashSet::new();
+        let mut effects = Vec::with_capacity(members.len());
+        for (_, existing) in members {
+            effects.push(existing.filter(|effect| *effect > 0 && used.insert(*effect)));
+        }
+        let mut next = 1usize;
+        for effect in &mut effects {
+            if effect.is_some() {
+                continue;
+            }
+            while used.contains(&next) {
+                next = next.saturating_add(1);
+            }
+            *effect = Some(next);
+            used.insert(next);
+        }
+        for ((index, _), effect) in members.iter().zip(effects) {
+            assigned.insert(
+                *index,
+                effect.expect("every repeated nested preset receives an effect id"),
+            );
+        }
+    }
+    assigned
+}
+
+/// Nest vector for row `index`, with `⟦effect:N⟧` when this bare preset is
+/// one of several under the same parent.
+fn preset_lineage_with_effect(entries: &[QueueEntry], index: usize, lineage: &str) -> String {
+    let (base, existing) = split_queue_effect_annotation(lineage);
+    if existing.is_some() {
+        return lineage.to_string();
+    }
+    let Some(effect) = repeated_preset_effect_assignments(entries)
+        .get(&index)
+        .copied()
+    else {
+        return lineage.to_string();
+    };
+    format!(
+        "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+        base.trim_end()
+    )
+}
+
+/// Convergence key of one nested bare preset occurrence.
+///
+/// The key is the effect-distinguished nest vector, so two `#rebase` rows
+/// under one parent do not share the top-level `Id("rebase")` allowance and
+/// do not collapse each other (`#repeatsamepreset`).
+fn preset_occurrence_convergence_key(
+    entries: &[QueueEntry],
+    index: usize,
+    lifecycle: QueueItemLifecycle,
+    effects: &std::collections::HashMap<usize, usize>,
+) -> ConvergenceKey {
+    let (ancestors, leaf, _) =
+        nested_bare_preset_leaf(entries, index).expect("caller checks nested_bare_preset_leaf");
+    let text = match effects.get(&index) {
+        Some(effect) => format!("{ancestors}: {leaf} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧"),
+        None => format!("{ancestors}: {leaf}"),
+    };
+    let identity = agent_doc_element_queue::QueueItemIdentity::FreeText(
+        agent_doc_element_queue::normalize_multiline_dedup_text(&text),
+    );
+    (identity, HeadShape::FreeText, lifecycle)
+}
+
+/// Append `⟦effect:N⟧` to each live bare preset that repeats under one parent.
+///
+/// Same numbering as [`repeated_preset_effect_assignments`]. A lone nested
+/// copy is left unchanged. Id-backed top-level rows and free-text families
+/// stay with [`annotate_duplicate_queue_effects`].
+fn annotate_repeated_nested_presets(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    let assignments = repeated_preset_effect_assignments(entries);
+    if assignments.is_empty() {
+        return None;
+    }
+    let mut annotated = entries.to_vec();
+    let mut changed = false;
+    for (index, effect) in &assignments {
+        let QueueEntry::Prompt(prompt) = &entries[*index] else {
+            continue;
+        };
+        let (base, _) = split_queue_effect_annotation(&prompt.text);
+        let text = format!(
+            "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+            base.trim_end()
+        );
+        if text != prompt.text {
+            changed = true;
+            let QueueEntry::Prompt(target) = &mut annotated[*index] else {
+                continue;
+            };
+            target.text = text;
+        }
+    }
+    changed.then_some(annotated)
 }
 
 /// Give every lawful repeated live free-text queue effect a stable visible id.
@@ -4725,7 +4899,14 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     }
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
-    for entry in entries {
+    for (idx, entry) in entries.iter().enumerate() {
+        // `#repeatsamepreset`: a nested bare preset is a new submission. A struck
+        // `#tag` that shares only the id must not replace or drop it.
+        if matches!(entry, QueueEntry::Prompt(_)) && nested_bare_preset_leaf(entries, idx).is_some()
+        {
+            entries_for_convergence.push(entry.clone());
+            continue;
+        }
         // `#qstruckbaredup`: a concurrent editor/closeout merge can preserve the
         // operator's just-typed bare queue line as tolerant `Freeform` while the
         // queue projection inserts and later strikes the actionable `- ...`
@@ -4781,7 +4962,23 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     // This is exactly `dedup_free_text_heads`'s snapshot-authored-count guard,
     // now applied uniformly to every identity shape.
     let mut authored: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
-    for entry in snapshot_entries {
+    let snapshot_preset_effects = repeated_preset_effect_assignments(snapshot_entries);
+    for (idx, entry) in snapshot_entries.iter().enumerate() {
+        let Some(lifecycle) = entry_lifecycle(entry) else {
+            continue;
+        };
+        // Nested bare presets key per occurrence so they do not inflate the
+        // top-level bare `#tag` allowance (`#repeatsamepreset`).
+        if nested_bare_preset_leaf(snapshot_entries, idx).is_some() {
+            let key = preset_occurrence_convergence_key(
+                snapshot_entries,
+                idx,
+                lifecycle,
+                &snapshot_preset_effects,
+            );
+            *authored.entry(key).or_insert(0) += 1;
+            continue;
+        }
         if let Some(key) = convergence_identity(entry) {
             *authored.entry(key).or_insert(0) += 1;
         }
@@ -4862,6 +5059,7 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     let mut kept_count: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
     let mut converged = Vec::with_capacity(entries.len());
     let mut changed = lifecycle_changed;
+    let preset_effects = repeated_preset_effect_assignments(&entries);
 
     for (idx, entry) in entries.iter().enumerate() {
         let Some(key) = convergence_identity(entry) else {
@@ -4872,6 +5070,16 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
         };
 
         let (identity, shape, lifecycle) = (&key.0, key.1, key.2);
+        // `#repeatsamepreset`: each live nested bare `#tag` is its own occurrence
+        // key. That keeps every same-parent resubmit without spending the
+        // top-level bare-id allowance.
+        let nested_preset = lifecycle == QueueItemLifecycle::Live
+            && nested_bare_preset_leaf(&entries, idx).is_some();
+        let allow_key = if nested_preset {
+            preset_occurrence_convergence_key(&entries, idx, lifecycle, &preset_effects)
+        } else {
+            key.clone()
+        };
 
         // The first sighting of an identity authors/mirrors it; the genesis
         // event for a struck copy is the struck terminal so a re-emit cannot
@@ -4912,7 +5120,7 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
                 HeadShape::BareReference,
                 agent_doc_element_queue::QueueItemIdentity::Id(id),
                 QueueItemLifecycle::Live,
-            ) if directive_ids.contains(id)
+            ) if directive_ids.contains(id) && !nested_preset
         );
         let pin_collapsing = matches!(
             identity,
@@ -4963,14 +5171,14 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
                 authored.get(&key).copied().unwrap_or(0).max(1)
             }
         };
-        let seen = kept_count.entry(key.clone()).or_insert(0);
+        let seen = kept_count.entry(allow_key.clone()).or_insert(0);
 
         if *seen >= allowed {
             // Re-emit beyond the authored multiplicity: drive the existing
             // identity's machine with the re-emit event and observe that it is a
             // HOLD (no state advance) — the structural anti-duplication no-op.
             // The copy is dropped.
-            if let Some(machine) = machines.get(&key) {
+            if let Some(machine) = machines.get(&allow_key) {
                 let before = machine.state();
                 machine.send(genesis_event);
                 debug_assert_eq!(
@@ -4996,7 +5204,7 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
             }
         };
         machines
-            .entry(key.clone())
+            .entry(allow_key.clone())
             .or_insert_with(|| QueueItemMachine::new_in(&scope, initial));
         *seen += 1;
 
@@ -5020,6 +5228,10 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
 
     if let Some(with_effects) = annotate_duplicate_queue_effects(&converged) {
         converged = with_effects;
+        changed = true;
+    }
+    if let Some(with_presets) = annotate_repeated_nested_presets(&converged) {
+        converged = with_presets;
         changed = true;
     }
 
@@ -9336,6 +9548,22 @@ mod tests {
             ordered_marker: None,
         })
     }
+    fn at(text: &str, indent: usize) -> QueueEntry {
+        QueueEntry::Prompt(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+            indent,
+            ordered_marker: None,
+        })
+    }
+    fn at_done(text: &str, indent: usize) -> QueueEntry {
+        QueueEntry::Completed(QueuePrompt {
+            text: text.to_string(),
+            multiline: false,
+            indent,
+            ordered_marker: None,
+        })
+    }
 
     /// Apply convergence, returning the converged entries (or the input unchanged
     /// when the queue is already at its lawful fixpoint).
@@ -9520,6 +9748,146 @@ mod tests {
         let entries = vec![p("[#sqedit-race]"), p("[#sqedit-race]")];
         let out = converge(&entries, &[]);
         assert_eq!(out, vec![p("[#sqedit-race]")], "{out:?}");
+    }
+
+    /// `#repeatsamepreset`: each nested `#rebase` / `#review` under one parent
+    /// is a new submission. Convergence keeps every live copy, annotates
+    /// `⟦effect:N⟧`, and still caps a top-level bare `#tag`.
+    #[test]
+    fn converge_keeps_repeated_nested_presets_under_one_parent() {
+        let entries = vec![
+            at("ship the api", 0),
+            at("#rebase", 2),
+            at("#rebase", 2),
+            at("#review", 2),
+            at("#review", 2),
+        ];
+        let out = converge(&entries, &[]);
+        assert_eq!(
+            out,
+            vec![
+                at("ship the api", 0),
+                at("#rebase ⟦effect:1⟧", 2),
+                at("#rebase ⟦effect:2⟧", 2),
+                at("#review ⟦effect:1⟧", 2),
+                at("#review ⟦effect:2⟧", 2),
+            ],
+            "{out:?}"
+        );
+        assert!(
+            converge_queue_via_lifecycle(&out, &[], &Default::default()).is_none(),
+            "annotated nested presets are a fixpoint"
+        );
+
+        let snapshot = vec![at("ship the api", 0), at("#rebase", 2)];
+        let added = vec![at("ship the api", 0), at("#rebase", 2), at("#rebase", 2)];
+        assert_eq!(
+            converge(&added, &snapshot),
+            vec![
+                at("ship the api", 0),
+                at("#rebase ⟦effect:1⟧", 2),
+                at("#rebase ⟦effect:2⟧", 2),
+            ],
+            "a second nested submission after the snapshot already holds one still runs"
+        );
+
+        let top = vec![p("#rebase"), p("#rebase")];
+        assert_eq!(
+            converge(&top, &[]),
+            vec![p("#rebase")],
+            "a top-level duplicate bare #rebase still collapses"
+        );
+
+        let mixed = vec![
+            at("ship the api", 0),
+            at("#rebase", 2),
+            at("#rebase", 2),
+            p("#rebase"),
+            p("#rebase"),
+        ];
+        let mixed_snapshot = vec![
+            at("ship the api", 0),
+            at("#rebase", 2),
+            at("#rebase", 2),
+            p("#rebase"),
+        ];
+        let mixed_out = converge(&mixed, &mixed_snapshot);
+        let top_level = mixed_out
+            .iter()
+            .filter(|entry| match entry {
+                QueueEntry::Prompt(prompt) => {
+                    prompt.indent == 0 && prompt.text.starts_with("#rebase")
+                }
+                _ => false,
+            })
+            .count();
+        assert_eq!(
+            top_level, 1,
+            "nested copies must not raise the top-level cap: {mixed_out:?}"
+        );
+        assert_eq!(
+            mixed_out
+                .iter()
+                .filter(|entry| match entry {
+                    QueueEntry::Prompt(prompt) => prompt.indent == 2,
+                    _ => false,
+                })
+                .count(),
+            2,
+            "{mixed_out:?}"
+        );
+
+        let distinct_parents = vec![
+            at("api", 0),
+            at("#rebase", 2),
+            at("contracts", 0),
+            at("#rebase", 2),
+        ];
+        assert!(
+            converge_queue_via_lifecycle(&distinct_parents, &[], &Default::default()).is_none(),
+            "one #rebase under each parent stays unannotated"
+        );
+
+        let beside_directive = vec![
+            p("do [#rebase]"),
+            at("ship the api", 0),
+            at("#rebase", 2),
+            at("#rebase", 2),
+        ];
+        let beside = converge(&beside_directive, &[]);
+        assert!(
+            beside.iter().any(|entry| entry == &p("do [#rebase]")),
+            "{beside:?}"
+        );
+        assert_eq!(
+            beside
+                .iter()
+                .filter(|entry| matches!(entry, QueueEntry::Prompt(prompt) if prompt.text.starts_with("#rebase ⟦effect:")))
+                .count(),
+            2,
+            "a live do [#rebase] must not swallow nested preset submissions: {beside:?}"
+        );
+
+        let struck = vec![
+            at("ship the api", 0),
+            at_done("#rebase", 2),
+            at("#rebase", 2),
+        ];
+        let struck_snapshot = vec![at("ship the api", 0), at_done("#rebase", 2)];
+        let struck_out = converge(&struck, &struck_snapshot);
+        assert!(
+            struck_out
+                .iter()
+                .any(|entry| matches!(entry, QueueEntry::Completed(_))),
+            "{struck_out:?}"
+        );
+        assert!(
+            struck_out.iter().any(|entry| matches!(
+                entry,
+                QueueEntry::Prompt(prompt) if prompt.text.starts_with("#rebase")
+            )),
+            "a new live #rebase after a struck copy still runs: {struck_out:?}"
+        );
     }
 
     /// `#qauthorder`: a free-text operator line re-emitted beyond its snapshot

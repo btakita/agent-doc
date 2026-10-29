@@ -2213,18 +2213,30 @@ fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
     if ancestors.is_empty() || leaf.is_empty() {
         return None;
     }
-    let stripped = agent_doc_element_queue::strip_intent_tags(head);
-    let leaf_is_bare_id = leaf.starts_with('#')
-        && !leaf[1..]
+    // `⟦effect:N⟧` stays on the claim key (`#repeatsamepreset`). Judge the bare
+    // `#tag` with that suffix removed so an id parent (`#epic: #rebase
+    // ⟦effect:1⟧`) is still one free-text head. The identity uses the full
+    // head, so effect 1 and effect 2 stay different work.
+    let leaf_base_owned = crate::document_queue::strip_queue_effect_annotation(leaf);
+    let leaf_base = leaf_base_owned.trim();
+    let head_for_structure = if leaf_base == leaf {
+        head.to_string()
+    } else {
+        format!("{ancestors}: {leaf_base}")
+    };
+    let stripped = agent_doc_element_queue::strip_intent_tags(&head_for_structure);
+    let leaf_is_bare_id = leaf_base.starts_with('#')
+        && !leaf_base[1..].is_empty()
+        && !leaf_base[1..]
             .chars()
             .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
-    if stripped != head {
+    if stripped != head_for_structure {
         let keeps_parent = if stripped.contains(": ") {
             // `#parent: child: #rebase` keeps every ancestor. `#gh-fix: see: the
             // bug` is a tagged line whose work contains a colon.
-            head.matches(": ").count() >= 2 && leaf_is_bare_id
+            head_for_structure.matches(": ").count() >= 2 && leaf_is_bare_id
         } else {
-            stripped == leaf && leaf_is_bare_id
+            stripped == leaf_base && leaf_is_bare_id
         };
         if !keeps_parent {
             return None;
@@ -2524,7 +2536,9 @@ impl std::error::Error for QueueClaimMiss {}
 ///
 /// Empty when `item` is itself a live head (an exact claim, including a
 /// top-level bare `#tag`). One match is that parent. Several matches are the
-/// same leaf under different parents (`#nestlistlineage`).
+/// same leaf under different parents, or repeated submissions of that leaf
+/// under one parent (`#nestlistlineage`, `#repeatsamepreset`). A bare `#tag`
+/// matches every occurrence. `#tag ⟦effect:N⟧` matches only that occurrence.
 pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
     let identity = claim_identity(item);
     if live_heads
@@ -2533,11 +2547,22 @@ pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
     {
         return Vec::new();
     }
+    let family = effect_family_identity(item);
+    let item_effect = crate::document_queue::queue_effect_id(item);
     live_heads
         .iter()
         .filter(|head| {
             head.rsplit_once(": ").is_some_and(|(ancestors, leaf)| {
-                !ancestors.is_empty() && !leaf.is_empty() && claim_identity(leaf) == identity
+                if ancestors.is_empty() || leaf.is_empty() {
+                    return false;
+                }
+                if effect_family_identity(leaf) != family {
+                    return false;
+                }
+                match item_effect {
+                    Some(effect) => crate::document_queue::queue_effect_id(leaf) == Some(effect),
+                    None => true,
+                }
             })
         })
         .cloned()
@@ -2805,6 +2830,86 @@ mod tests {
             contracts
         );
         assert_eq!(resolve_claim_target(contracts, &heads).unwrap(), contracts);
+    }
+
+    /// `#repeatsamepreset`: two `#rebase` rows under one parent are two claims.
+    /// A bare `#rebase` names every unclaimed copy. `#rebase ⟦effect:N⟧` names
+    /// that copy. An id parent stays part of the free-text head.
+    #[test]
+    fn repeated_nested_rebase_under_one_parent_is_distinct_work() {
+        use agent_doc_element_queue::QueueItemIdentity;
+
+        let body = "\
+- ship the api
+  - #rebase
+  - #rebase
+  - #review
+- [#epic]
+  - #rebase
+  - #rebase
+- #rebase
+";
+        let entries = crate::document_queue::parse(body).unwrap();
+        let mut keys = Vec::new();
+        for index in crate::document_queue::executable_prompt_indexes(&entries) {
+            let text = crate::document_queue::lineage_claim_text(&entries, index).unwrap();
+            if text.contains("#rebase") || text.contains("#review") {
+                keys.push((text, claim_identity_at(&entries, index).unwrap()));
+            }
+        }
+        let first = "ship the api: #rebase ⟦effect:1⟧";
+        let second = "ship the api: #rebase ⟦effect:2⟧";
+        let review = "ship the api: #review";
+        let epic_first = "#epic: #rebase ⟦effect:1⟧";
+        let epic_second = "#epic: #rebase ⟦effect:2⟧";
+        let identity = |needle: &str| {
+            keys.iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, identity)| identity.clone())
+                .unwrap_or_else(|| panic!("missing {needle}: {keys:?}"))
+        };
+        let first_id = identity(first);
+        let second_id = identity(second);
+        let epic_first_id = identity(epic_first);
+        let epic_second_id = identity(epic_second);
+        assert_ne!(first_id, second_id);
+        assert_ne!(epic_first_id, epic_second_id);
+        assert_ne!(first_id, epic_first_id);
+        assert!(
+            matches!(first_id, QueueItemIdentity::FreeText(ref text) if text.contains("ship the api") && text.contains("effect:1"))
+        );
+        assert!(
+            matches!(epic_second_id, QueueItemIdentity::FreeText(ref text) if text.starts_with("#epic:") && text.contains("effect:2"))
+        );
+        assert!(
+            matches!(identity(review), QueueItemIdentity::FreeText(ref text) if text.contains("#review") && !text.contains("effect:"))
+        );
+        assert_eq!(
+            identity("#rebase"),
+            QueueItemIdentity::Id("rebase".to_string())
+        );
+        let ship = vec![first.to_string(), second.to_string()];
+        assert_eq!(nest_leaf_matches("#rebase", &ship), ship);
+        assert_eq!(
+            nest_leaf_matches("#rebase ⟦effect:2⟧", &ship),
+            vec![second.to_string()]
+        );
+        assert_eq!(resolve_claim_target("#rebase", &ship).unwrap(), first);
+        assert_eq!(
+            resolve_claim_target("#rebase ⟦effect:2⟧", &ship).unwrap(),
+            second
+        );
+        assert_eq!(resolve_claim_target(second, &ship).unwrap(), second);
+        let both_parents = vec![
+            first.to_string(),
+            second.to_string(),
+            epic_first.to_string(),
+            epic_second.to_string(),
+        ];
+        assert_eq!(
+            nest_leaf_matches("#rebase ⟦effect:1⟧", &both_parents),
+            vec![first.to_string(), epic_first.to_string()]
+        );
     }
 
     fn session(harness: &str, id: &str, pane: &str, pid: u32) -> ClaimOwnerSession {

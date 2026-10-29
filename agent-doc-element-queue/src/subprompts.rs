@@ -88,9 +88,10 @@ pub fn is_indented_list_line(line: &str) -> bool {
 /// meaning:
 ///
 /// * a tracked-id directive (`do [#id]`, `do #id`, a bare `[#id]` / `#id`
-///   head), including one behind a stale lifecycle projection or a strike:
-///   tracked work keeps its own lifecycle, `--done` target and backlog mirror
-///   (`#queuenest` / `#f1s3`);
+///   head), including one behind a stale lifecycle projection or a strike,
+///   and a repeated nested preset whose leaf is `#tag ⟦effect:N⟧`
+///   (`#repeatsamepreset`): tracked work keeps its own lifecycle, `--done`
+///   target and backlog mirror (`#queuenest` / `#f1s3`);
 /// * a `preset ...` / `dispatch ...` line.
 ///
 /// A `re [#id]` reference, an `[#id]: note` annotation, a struck child
@@ -99,6 +100,7 @@ pub fn is_indented_list_line(line: &str) -> bool {
 pub fn subprompt_row_is_eligible(content: &str) -> bool {
     let work = strip_attempt_projection_prefix(content).trim();
     let work = strip_strike(work);
+    let work = strip_repeated_preset_effect(work);
     let lower = work.to_ascii_lowercase();
     if lower.starts_with("preset ") || lower.starts_with("dispatch ") {
         return false;
@@ -110,6 +112,23 @@ pub fn subprompt_row_is_eligible(content: &str) -> bool {
         return true;
     }
     !QueueItemIdentity::from_prompt(&strip_intent_tags(work)).is_id_backed()
+}
+
+/// Drop a trailing `⟦effect:N⟧` so a repeated nested `#tag` stays a bare id
+/// for fold decisions (`#repeatsamepreset`). Free-text work keeps the suffix
+/// in its claim identity; this strip is only for eligibility.
+fn strip_repeated_preset_effect(text: &str) -> &str {
+    let trimmed = text.trim_end();
+    let Some(before_close) = trimmed.strip_suffix('⟧') else {
+        return text;
+    };
+    let Some((base, raw)) = before_close.rsplit_once(" ⟦effect:") else {
+        return text;
+    };
+    if raw.parse::<usize>().is_err() || base.trim().is_empty() {
+        return text;
+    }
+    base
 }
 
 fn strip_strike(text: &str) -> &str {
@@ -364,6 +383,10 @@ mod tests {
             "~~do [#a]~~",
             "preset #spec",
             "dispatch #spec",
+            "#rebase",
+            "#rebase ⟦effect:1⟧",
+            "#review ⟦effect:2⟧",
+            "~~#rebase ⟦effect:1⟧~~",
         ] {
             assert!(!subprompt_row_is_eligible(ineligible), "{ineligible}");
         }

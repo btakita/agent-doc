@@ -10422,6 +10422,7 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
         reason: pending.reason.clone(),
         source: pending.source.clone(),
         superseding_stage: superseding_closeout_stage(file, &pending),
+        operator_superseding_hash: None,
         carries_response_payload: payload.is_some(),
         carries_content_delta: !added_lines.is_empty(),
         closeout_committed: agent_doc_cycle_state_io::load_with_closeout_projection(file)

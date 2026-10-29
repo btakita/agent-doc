@@ -8908,6 +8908,43 @@ fn editor_ops_in_flight_over_visible_cut(
     .map(|_| capture.tip_hash.clone())
 }
 
+/// A progressive reconnect intent is an editor snapshot, not an independent
+/// agent mutation. If a later durable editor-op epoch starts from that exact
+/// snapshot and replays to the currently visible cut, the operator has already
+/// superseded it. Re-projecting the older snapshot would undo those edits.
+fn progressive_reconnect_operator_successor_hash(
+    projection: &agent_doc_state_backbone::DocumentStateProjection,
+    intent: &agent_doc_state_backbone::DocumentWriteIntentProjection,
+) -> Option<String> {
+    if intent.source != agent_doc_state_backbone::DocumentWriteSource::EditorReconnect
+        || intent.reason
+            != agent_doc_state_backbone::DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
+    {
+        return None;
+    }
+    [
+        projection.document.editor_op_capture.as_ref(),
+        projection.document.last_editor_op_capture.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|capture| capture.base_hash.eq_ignore_ascii_case(&intent.target_hash))
+    .filter(|capture| !capture.tip_hash.is_empty())
+    .filter_map(|capture| {
+        let ops = serde_json::from_str::<Vec<agent_doc_merge::crdt::EditorOp>>(&capture.ops_json)
+            .ok()?;
+        Some((capture, ops))
+    })
+    .filter(|(_, ops)| !ops.is_empty())
+    .find_map(|(capture, ops)| {
+        agent_doc_merge::crdt::replay_editor_ops(&intent.target_content, &ops)
+            .filter(|tip| {
+                agent_doc_hash::content_hash(tip).eq_ignore_ascii_case(&capture.tip_hash)
+            })
+            .map(|_| capture.tip_hash.clone())
+    })
+}
+
 fn retained_transition_state(
     projection: Option<&agent_doc_state_backbone::DocumentStateProjection>,
     delivery: Option<&RetainedDeliveryObservation>,
@@ -8988,6 +9025,29 @@ fn retained_transition_state(
     ) = derive_pending_retained_resume_signal(projection, delivery, controller_generation)
     {
         return RetainedTransitionState::ReconcileMaterializedCapture(signal);
+    }
+
+    // A newer editor epoch may deliberately undo or repair the progressive
+    // reconnect snapshot while leaving the document equal to the intent's
+    // older expected cut. Check that durable successor proof before the
+    // `delivery == base_content` fast path below; otherwise that shortcut
+    // replays the superseded snapshot and reverses the operator's correction.
+    if progressive_reconnect_operator_successor_hash(projection, intent).is_some_and(|hash| {
+        hash.eq_ignore_ascii_case(&delivery.content_hash)
+    }) {
+        return RetainedTransitionState::TargetVisible {
+            intent_id: intent.intent_id.clone(),
+            target_hash: delivery.content_hash.clone(),
+            delivery_version: delivery.delivery_version,
+            controller_generation,
+            persistence: RetainedPersistenceProjection {
+                file: delivery.file.clone(),
+                content_hash: delivery.content_hash.clone(),
+                content_len: delivery.content.len(),
+                delivery_version: delivery.delivery_version,
+                controller_generation,
+            },
+        };
     }
 
     let Some(base_content) = intent.expected_content.as_deref() else {
@@ -9482,6 +9542,8 @@ fn retained_intent_facts_from_projection(
             // (`#adwritesourceenum`). Settlement itself observes only content
             // planes, so it cannot tell a later stage from an older cycle's.
             superseding_stage: document.document.superseding_closeout_stage(pending),
+            operator_superseding_hash:
+                progressive_reconnect_operator_successor_hash(document, pending),
             carries_response_payload,
             carries_content_delta,
             closeout_committed: document.closeout.phase
@@ -23933,6 +23995,99 @@ agent:queue\n\
             1,
             "the applied target carries exactly one response"
         );
+    }
+
+    /// A reconnect snapshot once captured `codex` and `grok` on one malformed
+    /// frontmatter line. The operator repaired it, and the editor durably
+    /// reported that insertion from the malformed retained target to the
+    /// repaired cut. Because the repaired cut also equaled the intent's older
+    /// base, the base fast path used to replay the malformed snapshot forever.
+    #[test]
+    fn operator_edit_from_progressive_reconnect_target_supersedes_that_snapshot() {
+        let repaired = concat!(
+            "---\n",
+            "resume:\n",
+            "  codex: 01a169ac-d974-7503-b6de-5b2b35822ef3\n",
+            "  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f\n",
+            "queue: go\n",
+            "---\n",
+        );
+        let malformed = concat!(
+            "---\n",
+            "resume:\n",
+            "  codex: 01a16  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f\n",
+            "queue: go\n",
+            "---\n",
+        );
+        let inserted = "9ac-d974-7503-b6de-5b2b35822ef3\n";
+        let offset = malformed.find("  grok:").unwrap();
+        let ops = vec![agent_doc_merge::crdt::EditorOp::Insert {
+            offset,
+            text: inserted.to_string(),
+        }];
+        assert_eq!(
+            agent_doc_merge::crdt::replay_editor_ops(malformed, &ops).as_deref(),
+            Some(repaired),
+            "fixture must reproduce the captured operator correction"
+        );
+
+        let mut projection = retained_resume_projection("resume-frontmatter-correction");
+        let intent = projection.document.pending_write.as_mut().unwrap();
+        intent.expected_content = Some(repaired.to_string());
+        intent.expected_hash = agent_doc_hash::content_hash(repaired);
+        intent.target_content = malformed.to_string();
+        intent.target_hash = agent_doc_hash::content_hash(malformed);
+        intent.source = agent_doc_state_backbone::DocumentWriteSource::EditorReconnect;
+        intent.reason = agent_doc_state_backbone::DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget;
+        intent.continuation = None;
+        projection.closeout.captured_response = None;
+        projection.document.editor_op_capture =
+            Some(agent_doc_state_backbone::EditorOpCaptureProjection {
+                epoch: 4726,
+                canonical_path: "/work/sdk-demo.md".to_string(),
+                base_hash: agent_doc_hash::content_hash(malformed),
+                ops_json: serde_json::to_string(&ops).unwrap(),
+                updated_ms: 1,
+                tip_hash: agent_doc_hash::content_hash(repaired),
+            });
+        let delivery = RetainedDeliveryObservation {
+            file: PathBuf::from("/work/sdk-demo.md"),
+            content: Arc::from(repaired),
+            content_hash: agent_doc_hash::content_hash(repaired),
+            live_editors: 1,
+            delivery_converged: true,
+            delivery_version: 4726,
+        };
+
+        let state = retained_transition_state(Some(&projection), Some(&delivery), 3);
+        assert_eq!(retained_transition_state_tag(&state), "target_visible");
+        let RetainedTransitionState::TargetVisible { target_hash, .. } = state else {
+            unreachable!();
+        };
+        assert_eq!(target_hash, agent_doc_hash::content_hash(repaired));
+        let facts = retained_intent_facts_from_projection(&projection).unwrap();
+        let observation = agent_doc_state_backbone::retained_write::ContentObservation {
+            content_hash: agent_doc_hash::content_hash(repaired),
+            payload_materialized: false,
+            intent_delta_materialized: false,
+        };
+        assert!(matches!(
+            agent_doc_state_backbone::retained_write::settlement_verdict(
+                Some(&facts),
+                Some(&observation),
+                Some(&observation),
+            ),
+            agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
+                proof: agent_doc_state_backbone::retained_write::SatisfiedProof::OperatorSupersededProgressiveReconnect,
+                ..
+            }
+        ));
+
+        // Without exact editor-op lineage, the older expected-cut shortcut is
+        // still an unapplied retained transition and must not be silently lost.
+        projection.document.editor_op_capture = None;
+        let state = retained_transition_state(Some(&projection), Some(&delivery), 3);
+        assert_eq!(retained_transition_state_tag(&state), "apply_target");
     }
 
     #[test]

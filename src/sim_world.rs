@@ -4342,6 +4342,7 @@ mod retained_write_generation_model {
                         reason: pending.reason.clone(),
                         source: pending.source.clone(),
                         superseding_stage: None,
+                        operator_superseding_hash: None,
                         carries_response_payload: false,
                         carries_content_delta: true,
                         closeout_committed: false,

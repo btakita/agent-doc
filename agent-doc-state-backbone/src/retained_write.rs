@@ -66,6 +66,12 @@ pub struct RetainedIntentFacts {
     /// ordinals — which settlement deliberately does not observe.
     #[serde(default)]
     pub superseding_stage: Option<CloseoutStage>,
+    /// Exact visible successor of a progressive editor-reconnect snapshot,
+    /// proven by replaying a durable editor-op epoch whose base is this
+    /// intent's target. Once authority and disk converge on this hash, the
+    /// older snapshot is obsolete and must not be projected again.
+    #[serde(default)]
+    pub operator_superseding_hash: Option<String>,
     /// True when the intent introduces an assistant response, so materializing
     /// that response in the converged document satisfies the intent even at a
     /// different hash. Delivery-only projections have no such payload and must
@@ -212,6 +218,9 @@ pub enum SatisfiedProof {
     /// which `intent_added_lines` deliberately reports as unknown and which
     /// therefore stranded forever.
     SupersededByLaterCloseoutStage,
+    /// A durable editor-op epoch starts from this progressive reconnect
+    /// target and replays exactly to the converged operator cut.
+    OperatorSupersededProgressiveReconnect,
     /// A committed free-text queue strike is already present in canonical
     /// authority, together with its committed response. Its editor-to-disk save
     /// may lag without making the completed queue transition block a new cycle.
@@ -225,6 +234,9 @@ impl SatisfiedProof {
             Self::RebasedPayloadMaterialized => "rebased_payload_materialized",
             Self::SupersededDeltaMaterialized => "superseded_delta_materialized",
             Self::SupersededByLaterCloseoutStage => "superseded_by_later_closeout_stage",
+            Self::OperatorSupersededProgressiveReconnect => {
+                "operator_superseded_progressive_reconnect"
+            }
             Self::CommittedStateOnlyAuthorityMaterialized => {
                 "committed_state_only_authority_materialized"
             }
@@ -462,6 +474,7 @@ enum ObservationState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConvergenceEvidence {
     ExactTarget,
+    OperatorSupersededProgressiveReconnect,
     RebasedPayloadMaterialized,
     SupersededDeltaMaterialized,
     SupersededByLaterCloseoutStage,
@@ -503,6 +516,11 @@ impl StateTable for RetainedSettlementTable {
                 ConvergenceEvidence::ExactTarget,
             )) => SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
             SettlementInput::Retained(ObservationState::Converged(
+                ConvergenceEvidence::OperatorSupersededProgressiveReconnect,
+            )) => SettlementDecision::Satisfied(
+                SatisfiedProof::OperatorSupersededProgressiveReconnect,
+            ),
+            SettlementInput::Retained(ObservationState::Converged(
                 ConvergenceEvidence::RebasedPayloadMaterialized,
             )) => SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
             SettlementInput::Retained(ObservationState::Converged(
@@ -522,7 +540,8 @@ impl StateTable for RetainedSettlementTable {
 impl lazily::FiniteState for SettlementInput {
     fn all() -> Vec<Self> {
         use ConvergenceEvidence::{
-            ExactTarget, PayloadAbsent, RebasedPayloadMaterialized, SupersededByLaterCloseoutStage,
+            ExactTarget, OperatorSupersededProgressiveReconnect, PayloadAbsent,
+            RebasedPayloadMaterialized, SupersededByLaterCloseoutStage,
             SupersededDeltaMaterialized,
         };
 
@@ -533,6 +552,9 @@ impl lazily::FiniteState for SettlementInput {
             Self::Retained(ObservationState::AuthorityMaterializedDiskPending),
             Self::Retained(ObservationState::CommittedStateOnlyAuthorityMaterialized),
             Self::Retained(ObservationState::Converged(ExactTarget)),
+            Self::Retained(ObservationState::Converged(
+                OperatorSupersededProgressiveReconnect,
+            )),
             Self::Retained(ObservationState::Converged(RebasedPayloadMaterialized)),
             Self::Retained(ObservationState::Converged(SupersededDeltaMaterialized)),
             Self::Retained(ObservationState::Converged(SupersededByLaterCloseoutStage)),
@@ -564,6 +586,8 @@ fn settlement_input(
             );
         }
         if authority.content_hash == pending.target_hash
+            || pending.operator_superseding_hash.as_deref()
+                == Some(authority.content_hash.as_str())
             || (pending.carries_response_payload && authority.payload_materialized)
             || (pending.carries_content_delta && authority.intent_delta_materialized)
         {
@@ -577,6 +601,10 @@ fn settlement_input(
     // landed, while the preceding rows prove that this intent's own content did.
     let evidence = if authority.content_hash == pending.target_hash {
         ConvergenceEvidence::ExactTarget
+    } else if pending.operator_superseding_hash.as_deref()
+        == Some(authority.content_hash.as_str())
+    {
+        ConvergenceEvidence::OperatorSupersededProgressiveReconnect
     } else if pending.carries_response_payload && authority.payload_materialized {
         ConvergenceEvidence::RebasedPayloadMaterialized
     } else if pending.carries_content_delta && authority.intent_delta_materialized {
@@ -792,6 +820,7 @@ mod tests {
             reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
+            operator_superseding_hash: None,
             carries_response_payload,
             carries_content_delta: false,
             closeout_committed: false,
@@ -928,7 +957,7 @@ mod tests {
         let coverage = lazily::table_coverage::<RetainedSettlementTable>();
         assert_eq!(
             coverage.len(),
-            10,
+            11,
             "the row set is the finite semantic sum, not a Cartesian product padded with impossible states",
         );
         coverage.assert_decisions_exactly(&[
@@ -938,6 +967,9 @@ mod tests {
             SettlementDecision::Unsettled(UnsettledCause::DiskProjectionPending),
             SettlementDecision::Satisfied(SatisfiedProof::CommittedStateOnlyAuthorityMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::ExactTarget),
+            SettlementDecision::Satisfied(
+                SatisfiedProof::OperatorSupersededProgressiveReconnect,
+            ),
             SettlementDecision::Satisfied(SatisfiedProof::RebasedPayloadMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::SupersededDeltaMaterialized),
             SettlementDecision::Satisfied(SatisfiedProof::SupersededByLaterCloseoutStage),
@@ -1632,6 +1664,7 @@ mod suppression_guard {
             reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
+            operator_superseding_hash: None,
             carries_response_payload: true,
             carries_content_delta: false,
             closeout_committed: false,
@@ -1649,6 +1682,7 @@ mod suppression_guard {
             reason: DocumentWriteDeferredReason::EditorProjectionPending,
             source: DocumentWriteSource::PendingWrite,
             superseding_stage: None,
+            operator_superseding_hash: None,
             carries_response_payload: true,
             carries_content_delta: false,
             closeout_committed: false,

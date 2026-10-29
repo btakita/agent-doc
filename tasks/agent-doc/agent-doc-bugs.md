@@ -432,6 +432,26 @@ JetBrains `0.2.881` and `0.2.882` were already byte-identical, so those plugin f
 
 No additional backlog follow-up is needed because the install check is answered here.
 
+### Re: nested free-text leaf stays in its tree — grok-4.7 · 2026-10-28T21:31-04:00
+
+> **Queue prompt:** In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.
+
+Main is `dc33f4d267` (`fix(queue): keep a nested free-text leaf inside its parent tree`). A nested free-text leaf under a tracked parent is replaced in place with `do [#minted]` at the same indent, and the parent stays a group label. Focused tests on that commit passed: 3 passed, 1014 skipped. The private-name denylist scan of the 245 added lines found 0 hits. `make install` of `dc33f4d267` exited 0. The installed binary is `agent-doc 0.35.560`, sha256 `f84417589d0c94599323057567a4653d2732df1777b285c94f76220e93c90b24`. That install recorded JetBrains 0.2.881 and 0.2.882 and VS Code 0.2.90.
+
+> **Queue prompt:** If a subagent or agent claims a tree item (in run or queue or loop), then the operator adds a nested list item, the first list item should steer the existing subagent or task. Subsequently added nested list items should be routed potentially to another subagent with the lineage. This logic should apply no matter how deep the nested lists go.
+
+**Deferred:** Worker `01a18526-35b3-7022-9407-c0efa0999775` (`subagent:nestedsteer`, generation 1) is running in `/home/brian/worktrees/agent-doc-nestedsteer` on `fix/nested-claim-steering`.
+
+> **Queue prompt:** In the api.md exchange, turn printed the subagent report but did not print the consolidated report when the turn ended.
+
+**Deferred:** Worker `01a18546-7265-7860-9c28-ebd16593e45f` (`subagent:apireport`, generation 1) is running in `/home/brian/worktrees/agent-doc-apireport` on `fix/api-consolidated-report`.
+
+> **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
+
+**Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `dc33f4d267` before integration. The same owner keeps that result. A second worker stays unstarted.
+
+No additional backlog follow-up is needed because the nested free-text fix is on main and the open rows are already running on their workers.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 
@@ -446,11 +466,12 @@ No additional backlog follow-up is needed because the install check is answered 
 - ~~api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
-- 🚧 [#subagent:keeptree#1] In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.
+- ~~In api.md, I prompted `  - Is this tree still blocked? If not, update the head run item.` under `- 🙋📥 do [#push] [#subagent-operator-request-push-target]`. agent-doc then created an backlog that had a queue item item outside of the tree: `- 🟡 [#subagent:treeblocked#1] do [#treeblocked]`. The queue item should remain in the tree. If agent-doc is creating backlog item, that id should have replaced the item in the same place as the free text in the tree. 2 subagents ran, one for the minted backlog item and one for the original free text.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:ghfix382#1] #gh-fix https://github.com/btakita/agent-doc/issues/382
 - 🚧 [#subagent:ghfix383#1] #gh-fix https://github.com/btakita/agent-doc/issues/383
 - 🚧 [#subagent:ghfix384#1] #gh-fix https://github.com/btakita/agent-doc/issues/384
 - 🚧 [#subagent:nestedsteer#1] If a subagent or agent claims a tree item (in run or queue or loop), then the operator adds a nested list item, the first list item should steer the existing subagent or task. Subsequently added nested list items should be routed potentially to another subagent with the lineage. This logic should apply no matter how deep the nested lists go.
+- 🚧 [#subagent:apireport#1] In the api.md exchange, turn printed the subagent report but did not print the consolidated report when the turn ended.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

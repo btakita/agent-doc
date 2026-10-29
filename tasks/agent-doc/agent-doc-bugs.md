@@ -559,7 +559,21 @@ A busy Grok turn now gets one paste of the unified diff since the last successfu
 
 queue_worker_binding: subagent:routesyncsteer generation 1 worker 01a1859b-9e3d-74d3-bc62-fe3ce4b782ff
 
-<!-- agent:boundary:242ea919 -->
+> **Queue prompt:** In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.
+
+A claimed `agent:run` no longer hides a later ready `agent:run`. Each `subagents` queue offers its own unclaimed heads in the same cycle, including on Grok `agent_doc_plan`. An `after=` queue still waits until its predecessors are empty, and an earlier inline queue that still has owner-available work gates later queues. Commit `0552d86df010060f2ca6404af5f9300b69c2743f` is on `main`. Worker `make check` exited 0: 12160 passed, 187 skipped. The coordinator fast-forwarded `3568802068..0552d86df0` and `make install` exited 0. Installed sha256 `a035a1027d8dc4fb0d900f4014ea38ee6a7d89f4a0de3f6652af3602d3ba816f` matches the release-local binary and `~/.cargo/bin/agent-doc`. `agent-doc --version` is `agent-doc 0.35.560`. JetBrains plugin bytes were unchanged, so no JetBrains restart is required. `reload_library` delivered 1/1 editor endpoints. CI `40815027714`, Book `40815027831`, and Pages `40815027835` were in progress at closeout.
+
+### Re: later run queues stay visible — grok-4.7 · 2026-10-28T23:58-04:00
+
+> **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
+
+**Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `0552d86df0` before integration. The same owner keeps that result.
+
+queue_worker_binding: subagent:apirunclaims generation 1 worker 01a18588-b7a3-7250-91f2-cc1e7196aabb
+
+The nested-list `make check` exited 2. `completion_cell_for_a_longer_tracked_line_does_not_reconcile_the_parent` dropped the child from held work. The same worker is fixing that assertion on `fix/nested-list-lineage`. The contract-prs stall worker is still correcting its own failed check.
+
+<!-- agent:boundary:17addd1a -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -567,7 +581,7 @@ queue_worker_binding: subagent:routesyncsteer generation 1 worker 01a1859b-9e3d-
   - ~~Where does this file live? My Coder agent is asking.~~
 - 📥 do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
-- 🚧 [#subagent:apirunclaims#1] In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.
+- ~~In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestlistlineage#1] api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.
 - 🚧 [#subagent:contractprsstall#1] Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.
 - ~~Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)

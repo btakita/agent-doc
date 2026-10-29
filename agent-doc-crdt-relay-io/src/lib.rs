@@ -1248,20 +1248,19 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     let claim_ledger = claim_record
         .as_ref()
         .map(|record| {
-            agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
-                &record.payload_json,
-            )
+            agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(&record.payload_json)
         })
         .transpose();
-    let receipt_ledger = receipt_record
-        .as_ref()
-        .map(|record| {
-            serde_json::from_str::<agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger>(
-                &record.payload_json,
-            )
-            .context("parse durable queue report outbox")
-        })
-        .transpose();
+    let receipt_ledger =
+        receipt_record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+                >(&record.payload_json)
+                .context("parse durable queue report outbox")
+            })
+            .transpose();
     let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
     let mut ledger = claim_ledger.unwrap_or_default().unwrap_or_default();
     let receipts = receipt_ledger
@@ -1272,7 +1271,9 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     let components = agent_doc_element::element::parse(current)?;
     let selected = agent_doc_queue::queue_set::selected_component(current, &components)?;
     let only_queue = || {
-        let mut queues = components.iter().filter(|component| component.name == "queue");
+        let mut queues = components
+            .iter()
+            .filter(|component| component.name == "queue");
         let first = queues.next()?;
         queues.next().is_none().then_some(first)
     };
@@ -1327,28 +1328,30 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
         .map(|receipt| (receipt.identity.clone(), receipt))
         .collect::<HashMap<_, _>>();
     let blockers = agent_doc_queue::queue_blocked::queue_blockers(current);
-    let completion_evidence =
-        agent_doc_document::subagent_completion::completion_evidence(current)
-            .into_iter()
-            .filter(|evidence| {
-                !cancellations
-                    .iter()
-                    .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
-            })
-            .map(|evidence| evidence.item)
-            .collect::<Vec<_>>();
+    let completion_evidence = agent_doc_document::subagent_completion::completion_evidence(current)
+        .into_iter()
+        .filter(|evidence| {
+            !cancellations
+                .iter()
+                .any(|cancelled| cancelled.cancels_completion_key(&evidence.key))
+        })
+        .map(|evidence| evidence.item)
+        .collect::<Vec<_>>();
     // `#queuemirrormarkers`: claims are keyed by work identity, so every queue
     // that displays an identity receives its durable attempt state. Only the
     // scheduler-selected queue may reopen a struck row; a sibling's struck row
     // is its own terminal (or `agent:loop` pass-owned) evidence.
-    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<
+        '_,
+    >| {
         // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
         // queue is an earlier attempt's record, never the claim's row.
         let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         block
             .entries
             .iter()
-            .filter_map(|entry| match entry {
+            .enumerate()
+            .filter_map(|(index, entry)| match entry {
                 agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
                 | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
                     let struck = matches!(
@@ -1358,7 +1361,10 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                     if struck && !block.scheduler_selected {
                         return None;
                     }
-                    let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                    let identity = agent_doc_queue::queue_claim::claim_identity_at(block.entries, index)
+                        .unwrap_or_else(|| {
+                            agent_doc_queue::queue_claim::claim_identity(&prompt.text)
+                        });
                     let claim = claim_states.get(&identity);
                     let receipt = receipts.get(&identity);
                     // `#strikeisterminal`: only a live attempt reopens a struck
@@ -1582,7 +1588,9 @@ pub fn queue_region_observation(file: &Path, text: &str) -> Option<QueueRegionOb
     Some(QueueRegionObservation {
         file: file.to_path_buf(),
         region_hash: hasher.finish(),
-        schedule_hint: region.contains("interval") || region.contains("time=") || region.contains("loop"),
+        schedule_hint: region.contains("interval")
+            || region.contains("time=")
+            || region.contains("loop"),
     })
 }
 
@@ -2966,7 +2974,9 @@ fn retire_superseded_editor_endpoint_elsewhere(file: &Path, identity: &str) {
         let lock = match replica_registration_lock(&document_hash) {
             Ok(lock) => lock,
             Err(error) => {
-                eprintln!("[crdt-relay] could not lock {document_hash} to prune a stale editor id: {error:#}");
+                eprintln!(
+                    "[crdt-relay] could not lock {document_hash} to prune a stale editor id: {error:#}"
+                );
                 continue;
             }
         };
@@ -2982,7 +2992,8 @@ fn retire_superseded_editor_endpoint_elsewhere(file: &Path, identity: &str) {
         let removed = hub_handle(&document_hash).is_some_and(|handle| {
             let mut hub = handle.lock();
             let removed = hub.deregister(client_id);
-            retained_canonical_projections().retain(&document_hash, hub.retained_canonical_projection());
+            retained_canonical_projections()
+                .retain(&document_hash, hub.retained_canonical_projection());
             removed
         });
         if let Err(error) = forget_replica_identity(&document_hash, client_id) {
@@ -4034,8 +4045,9 @@ pub fn relay_replica_update_for_file(
         // re-registration with a retained frontier reseeds the relay from the
         // editor (`crdt_replica_register_retained_reseed`); projecting disk over
         // it is the api.md 2026-09-29 rollback.
-        let signal = signal_crdt_replica_event(file, CrdtReplicaEventReason::EditorReplicaReregister, 0)
-            .map_or_else(|err| format!("failed:{err}"), |()| "requested".to_string());
+        let signal =
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::EditorReplicaReregister, 0)
+                .map_or_else(|err| format!("failed:{err}"), |()| "requested".to_string());
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -4358,8 +4370,9 @@ fn guard_response_cell_target_against_tracked_weld(
     if !outcome.applied || guard(&outcome.content).is_ok() || guard(before).is_err() {
         return Ok(outcome);
     }
-    let repaired = agent_doc_template::repair_response_welded_inside_backlog_item(&outcome.content)?
-        .filter(|repaired| guard(repaired).is_ok());
+    let repaired =
+        agent_doc_template::repair_response_welded_inside_backlog_item(&outcome.content)?
+            .filter(|repaired| guard(repaired).is_ok());
     let Some(repaired) = repaired else {
         anyhow::bail!(
             "response cell add refused for {}: the response target would embed binary conversation content inside a tracked component and the weld repair cannot prove a safe placement; canonical is unchanged",
@@ -6837,11 +6850,9 @@ fn partition_live_editor_registrations(
     Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
     Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>,
 ) {
-    registrations.into_iter().partition(|registration| {
-        u32::try_from(registration.pid)
-            .ok()
-            .is_some_and(&is_live)
-    })
+    registrations
+        .into_iter()
+        .partition(|registration| u32::try_from(registration.pid).ok().is_some_and(&is_live))
 }
 
 fn generation_fenced_native_save_routes(
@@ -7570,8 +7581,16 @@ mod tests {
         let run = "<!-- agent:run interval=1h -->\n- poll\n<!-- /agent:run -->\n";
         let queue = "<!-- agent:queue interval=1h -->\n- poll\n<!-- /agent:queue -->\n";
 
-        assert!(super::queue_region_observation(file, run).unwrap().schedule_hint);
-        assert!(super::queue_region_observation(file, queue).unwrap().schedule_hint);
+        assert!(
+            super::queue_region_observation(file, run)
+                .unwrap()
+                .schedule_hint
+        );
+        assert!(
+            super::queue_region_observation(file, queue)
+                .unwrap()
+                .schedule_hint
+        );
     }
 
     fn rejected_quarantine_test_lock() -> &'static std::sync::Mutex<()> {
@@ -8758,7 +8777,10 @@ mod tests {
         let fence = body
             .find(&["generation_fenced_native_", "save_routes(registrations)"].concat())
             .expect("native save keeps its generation fence");
-        assert!(filter < fence, "liveness filter must precede the generation fence");
+        assert!(
+            filter < fence,
+            "liveness filter must precede the generation fence"
+        );
         assert!(
             body.contains("process_pid_is_live"),
             "the production filter must use real pid liveness"
@@ -9036,8 +9058,9 @@ mod tests {
             &conn,
             &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
                 document_hash,
-                state_kind: agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND
-                    .to_string(),
+                state_kind:
+                    agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND
+                        .to_string(),
                 canonical_path: doc.canonicalize().unwrap().display().to_string(),
                 payload_json: serde_json::to_string(ledger).unwrap(),
                 updated_at_secs: 1,
@@ -9093,9 +9116,18 @@ mod tests {
         persist_queue_claim_ledger(dir.path(), &doc, &ledger);
 
         let projected = durable_queue_attempt_projection(&doc, stale).unwrap();
-        assert!(projected.contains("- 🟡 [#subagent:claimed#1] claimed item\n"), "{projected}");
-        assert!(projected.contains("- 🚧 [#subagent:running#1] running item\n"), "{projected}");
-        assert!(projected.contains("- ☑️ [#subagent:reported#1] reported item\n"), "{projected}");
+        assert!(
+            projected.contains("- 🟡 [#subagent:claimed#1] claimed item\n"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("- 🚧 [#subagent:running#1] running item\n"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("- ☑️ [#subagent:reported#1] reported item\n"),
+            "{projected}"
+        );
         assert!(
             projected.contains("- ⏳ unrelated operator hold\n"),
             "an unrelated row must remain byte-identical:\n{projected}"
@@ -9159,14 +9191,7 @@ mod tests {
         let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
         claims.claim(item, "subagent:sdk", now, 3600);
         claims
-            .start(
-                item,
-                "subagent:sdk",
-                "worker:sdk",
-                now,
-                3600,
-                Some(1),
-            )
+            .start(item, "subagent:sdk", "worker:sdk", now, 3600, Some(1))
             .unwrap();
         let reported = claims.report(item, Some(1)).unwrap();
         let key = agent_doc_queue::queue_claim::completion_attestation_key(
@@ -9188,11 +9213,7 @@ mod tests {
         persist_queue_claim_ledger(dir.path(), &doc, &claims);
         persist_queue_receipt_ledger(dir.path(), &doc, &receipts);
 
-        let completion = agent_doc_document::subagent_completion::cell(
-            &reported.owner,
-            item,
-            &key,
-        );
+        let completion = agent_doc_document::subagent_completion::cell(&reported.owner, item, &key);
         let stale = format!(
             "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n\n\
              <!-- agent:queue -->\n- 📤 [#subagent:sdk#1] {item}\n<!-- /agent:queue -->\n"
@@ -9207,9 +9228,7 @@ mod tests {
         persist_queue_claim_ledger(dir.path(), &doc, &claims);
         let replacement = durable_queue_attempt_projection(&doc, &projected).unwrap();
         assert!(
-            replacement.contains(
-                "- 🟡 [#subagent:sdk-retry#2] finish sdk demo\n"
-            ),
+            replacement.contains("- 🟡 [#subagent:sdk-retry#2] finish sdk demo\n"),
             "{replacement}"
         );
         assert!(!replacement.contains("☑️"), "{replacement}");
@@ -9233,21 +9252,20 @@ mod tests {
         let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
         ledger.claim(item, "subagent:gh299", now, 3600);
         ledger
-            .start(
-                item,
-                "subagent:gh299",
-                "/root/gh299",
-                now,
-                3600,
-                Some(1),
-            )
+            .start(item, "subagent:gh299", "/root/gh299", now, 3600, Some(1))
             .unwrap();
         persist_queue_claim_ledger(dir.path(), &doc, &ledger);
 
         with_hub_seeded_from_file(&doc, |hub| {
             let canonical = hub.canonical_text();
-            assert!(canonical.contains(&format!("- 🚧 [#subagent:gh299#1] {item}\n")), "{canonical}");
-            assert!(canonical.contains("- 📥 unrelated pending work\n"), "{canonical}");
+            assert!(
+                canonical.contains(&format!("- 🚧 [#subagent:gh299#1] {item}\n")),
+                "{canonical}"
+            );
+            assert!(
+                canonical.contains("- 📥 unrelated pending work\n"),
+                "{canonical}"
+            );
         })
         .unwrap();
         // Disk remains a stale recovery cut. The fix repairs canonical authority,
@@ -9259,9 +9277,8 @@ mod tests {
     fn cold_controller_restart_reprojects_a_durable_claim_onto_stale_disk() {
         let (dir, doc) = temp_doc("boss-room-claim-restart.md");
         let item = "verify the Boss Room queue claim survives restart";
-        let stale = format!(
-            "<!-- agent:queue subagents go -->\n- 📥 {item}\n<!-- /agent:queue -->\n"
-        );
+        let stale =
+            format!("<!-- agent:queue subagents go -->\n- 📥 {item}\n<!-- /agent:queue -->\n");
         std::fs::write(&doc, &stale).unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -9507,7 +9524,7 @@ mod tests {
             WELD_CLEAN,
             weld_outcome(welded_target()),
         )
-                .expect("a provable weld is repaired, not refused");
+        .expect("a provable weld is repaired, not refused");
         agent_doc_template::guard_no_conversation_content_inside_tracked_components(
             &guarded.content,
         )
@@ -9569,7 +9586,9 @@ mod tests {
             .expect("editor-attached response add should use the relay");
 
         assert!(
-            pull_replica_updates_for_file(&doc, identity).unwrap().is_none(),
+            pull_replica_updates_for_file(&doc, identity)
+                .unwrap()
+                .is_none(),
             "a pull from a disconnected member must be refused so the editor re-registers"
         );
 
@@ -9701,13 +9720,10 @@ mod tests {
 
         let mut projected = false;
         for update in pull.updates {
-            projected |= observe_replica_projection_for_file(
-                &doc,
-                identity,
-                &update.expected_content_hash,
-            )
-            .unwrap()
-            .unwrap_or(false);
+            projected |=
+                observe_replica_projection_for_file(&doc, identity, &update.expected_content_hash)
+                    .unwrap()
+                    .unwrap_or(false);
         }
         assert!(projected, "the editor must prove the canonical projection");
         assert!(
@@ -10963,14 +10979,7 @@ mod tests {
         let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
         ledger.claim(item, "subagent:gh299", now, 3600);
         ledger
-            .start(
-                item,
-                "subagent:gh299",
-                "/root/gh299",
-                now,
-                3600,
-                Some(1),
-            )
+            .start(item, "subagent:gh299", "/root/gh299", now, 3600, Some(1))
             .unwrap();
         persist_queue_claim_ledger(dir.path(), &doc, &ledger);
 
@@ -10993,9 +11002,7 @@ mod tests {
         let canonical = with_hub(&doc, |hub| {
             let canonical = hub.canonical_text();
             assert!(
-                canonical.contains(&format!(
-                    "- 🚧 [#subagent:gh299#1] {item}\n"
-                )),
+                canonical.contains(&format!("- 🚧 [#subagent:gh299#1] {item}\n")),
                 "the durable Running attempt must dominate the stale retained cut:\n{canonical}"
             );
             assert!(
@@ -12291,13 +12298,9 @@ mod tests {
         };
         let target = format!("{baseline}\ncoordinated transfer\n");
 
-        let error = apply_detached_cp_write_for_file(
-            &doc,
-            &baseline,
-            &target,
-            "test_coordinated_detach",
-        )
-        .unwrap_err();
+        let error =
+            apply_detached_cp_write_for_file(&doc, &baseline, &target, "test_coordinated_detach")
+                .unwrap_err();
         assert!(
             format!("{error:#}").contains("coordinated_detach_lost"),
             "a raced live replica must refuse the canonical mutation: {error:#}"
@@ -12310,14 +12313,10 @@ mod tests {
             assert_eq!(hub.live_count(), 0);
         })
         .unwrap();
-        let first = apply_detached_cp_write_for_file(
-            &doc,
-            &baseline,
-            &target,
-            "test_coordinated_detach",
-        )
-        .unwrap()
-        .expect("the frozen document keeps its controller canonical");
+        let first =
+            apply_detached_cp_write_for_file(&doc, &baseline, &target, "test_coordinated_detach")
+                .unwrap()
+                .expect("the frozen document keeps its controller canonical");
         assert!(first.applied);
         assert_eq!(first.live_editors, 0);
 
@@ -13244,7 +13243,8 @@ mod tests {
             .expect("typing relays");
         with_hub(&doc, |hub| {
             assert!(
-                hub.canonical_text().contains("typed before the receipt ACK"),
+                hub.canonical_text()
+                    .contains("typed before the receipt ACK"),
                 "in-lineage operator typing must not be quarantined"
             );
             assert_eq!(hub.canonical_text(), replacement.text());
@@ -13302,12 +13302,18 @@ mod tests {
     #[test]
     fn cold_start_decision_prefers_the_editor_only_over_the_disk_rung() {
         use ColdStartReplicaUpdateDecision::*;
-        assert_eq!(decide_cold_start_replica_update(true, true, false, false), Relay);
+        assert_eq!(
+            decide_cold_start_replica_update(true, true, false, false),
+            Relay
+        );
         assert_eq!(
             decide_cold_start_replica_update(true, false, false, false),
             ReprojectCanonical
         );
-        assert_eq!(decide_cold_start_replica_update(true, true, true, false), ReprojectCanonical);
+        assert_eq!(
+            decide_cold_start_replica_update(true, true, true, false),
+            ReprojectCanonical
+        );
         assert_eq!(
             decide_cold_start_replica_update(false, false, false, true),
             RequestEditorReseed
@@ -13317,7 +13323,10 @@ mod tests {
             ReprojectCanonical
         );
         // Registered members never reseed: they already joined this lineage.
-        assert_eq!(decide_cold_start_replica_update(true, true, false, true), Relay);
+        assert_eq!(
+            decide_cold_start_replica_update(true, true, false, true),
+            Relay
+        );
     }
 
     #[test]
@@ -13835,10 +13844,9 @@ mod tests {
         let (_dir, doc) = temp_doc("ensure-model-register.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        let (client_id, _bootstrap) =
-            register_replica_for_file(&doc, "intellij:ensure-model")
-                .expect("register should not fail")
-                .expect("editor-attached register should allocate model");
+        let (client_id, _bootstrap) = register_replica_for_file(&doc, "intellij:ensure-model")
+            .expect("register should not fail")
+            .expect("editor-attached register should allocate model");
 
         let current = ensure_document_model(&doc, "test_ensure_model")
             .expect("ensure should observe the registered model");
@@ -14615,11 +14623,10 @@ mod tests {
             }
             let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
             let hash = agent_doc_fs::document_state_hash(&file).unwrap();
-            let health = agent_doc_sqlite::state_store::load_editor_transport_health_from_db(
-                &conn, &hash,
-            )
-            .unwrap()
-            .unwrap();
+            let health =
+                agent_doc_sqlite::state_store::load_editor_transport_health_from_db(&conn, &hash)
+                    .unwrap()
+                    .unwrap();
             assert!(health.degraded, "{transport} must drive degradation");
             assert_eq!(
                 health.consecutive_rejections,

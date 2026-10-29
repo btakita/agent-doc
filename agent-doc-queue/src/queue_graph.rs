@@ -257,11 +257,16 @@ impl QueueBlock<'_> {
         }
         // `#nestedclaimsteer`: a child split out of a claimed parent is its own
         // head. Judge availability on that view when a steer guard is installed.
+        // `#nestlistlineage`: a nested leaf's claim key is its nest vector, so
+        // the match reads the full list before any row is dropped.
         let entries = crate::nested_claim_steer::expand_slice_if_installed(&self.entries);
-        let agent_available = document_queue::prompts(entries.as_ref())
+        let agent_available = document_queue::executable_prompt_indexes(entries.as_ref())
             .into_iter()
-            .any(|prompt| {
-                !claimed.claims(&prompt.text)
+            .any(|index| {
+                let QueueEntry::Prompt(prompt) = &entries[index] else {
+                    return false;
+                };
+                !claimed.claims_at(entries.as_ref(), index)
                     && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
                         .is_empty()
             })
@@ -283,12 +288,19 @@ impl QueueBlock<'_> {
     /// and a queue without subagent intent keep the block inline.
     fn is_delegated_only(&self, claimed: &crate::queue_claim::ClaimedQueueItems) -> bool {
         let entries = crate::nested_claim_steer::expand_slice_if_installed(&self.entries);
-        let available = document_queue::prompts(entries.as_ref())
+        let available = document_queue::executable_prompt_indexes(entries.as_ref())
             .into_iter()
-            .filter(|prompt| {
-                !claimed.claims(&prompt.text)
-                    && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+            .filter_map(|index| {
+                let QueueEntry::Prompt(prompt) = &entries[index] else {
+                    return None;
+                };
+                if claimed.claims_at(entries.as_ref(), index)
+                    || !agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
                         .is_empty()
+                {
+                    return None;
+                }
+                Some(prompt)
             })
             .collect::<Vec<_>>();
         if available.is_empty() {

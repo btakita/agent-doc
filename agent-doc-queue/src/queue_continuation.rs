@@ -394,15 +394,18 @@ fn continuation_head_skipping_answered_residue(
                 crate::queue_heads::free_text_queue_head_is_completed_residue(content, scoped, head)
             })
     };
-    let entries: Vec<QueueEntry> = activation
-        .entries_after
+    let source = activation.entries_after;
+    let claimed_at = claimed_prompt_indexes(&source, claimed);
+    let entries: Vec<QueueEntry> = source
         .into_iter()
-        .filter(|entry| match entry {
+        .enumerate()
+        .filter(|(index, entry)| match entry {
             QueueEntry::Prompt(prompt) => {
-                !claimed.claims(&prompt.text) && !answered_residue(prompt.text.trim())
+                !claimed_at[*index] && !answered_residue(prompt.text.trim())
             }
             _ => true,
         })
+        .map(|(_, entry)| entry)
         .collect();
     eligible_head_prompt_from_entries(
         content,
@@ -868,13 +871,7 @@ pub fn pending_head_prompt_text_excluding_claimed_with_presets(
         return None;
     }
     let (queue_facts, entries) = queue_component_entries_excluding_claimed(content, claimed)?;
-    let entries: Vec<QueueEntry> = entries
-        .into_iter()
-        .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => !claimed.claims(&prompt.text),
-            _ => true,
-        })
-        .collect();
+    let entries = entries_without_claimed_prompts(entries, claimed);
     if document_queue::has_stop_fence_at_head(&entries)
         || document_queue::time_gate_at_head(&entries).is_some()
     {
@@ -1069,14 +1066,7 @@ pub fn live_drainable_head_prompt_text_for_owner(
         matches!(scope, DrainScope::Supervisor),
         selection,
     )?;
-    let entries: Vec<QueueEntry> = activation
-        .entries_after
-        .into_iter()
-        .filter(|entry| match entry {
-            QueueEntry::Prompt(prompt) => !suppressed.claims(&prompt.text),
-            _ => true,
-        })
-        .collect();
+    let entries = entries_without_claimed_prompts(activation.entries_after, suppressed);
     let head = eligible_head_prompt_from_entries(
         content,
         &entries,
@@ -1201,6 +1191,20 @@ pub fn dispatchable_head_prompt_text_excluding_claimed_with_presets(
     if claimed.claims(&head) {
         return None;
     }
+    if let Some((_, entries)) = queue_component_entries(content) {
+        let first = document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .find(|index| {
+                matches!(
+                    &entries[*index],
+                    QueueEntry::Prompt(prompt)
+                        if strip_in_progress_marker(prompt.text.trim()) == head
+                )
+            });
+        if first.is_some_and(|index| claimed.claims_at(&entries, index)) {
+            return None;
+        }
+    }
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
         Some(id) if deferred.defers(&id, false) => None,
@@ -1245,10 +1249,14 @@ pub fn dispatchable_head_prompt_text_for_owner(
     if !activation.active {
         return None;
     }
-    let head = document_queue::prompts(&activation.entries_after)
+    let head = document_queue::executable_prompt_indexes(&activation.entries_after)
         .into_iter()
-        .map(|prompt| strip_in_progress_marker(&prompt.text))
-        .find(|text| !suppressed.claims(text))?;
+        .filter(|index| !suppressed.claims_at(&activation.entries_after, *index))
+        .filter_map(|index| match &activation.entries_after[index] {
+            QueueEntry::Prompt(prompt) => Some(strip_in_progress_marker(&prompt.text)),
+            _ => None,
+        })
+        .next()?;
     let deferred = deferred_backlog_ids_split(content, scope);
     match extract_head_id(&head) {
         Some(id) if deferred.defers(&id, false) => None,
@@ -1304,9 +1312,14 @@ pub fn drainable_head_count_for_owner(
     let deferred_ids = deferred_backlog_ids_split(content, DrainScope::InSessionLoop);
     let after_deps = after_deps_from_content(content);
     let preset_only = preset_only_identity_ids_with_presets(content, presets);
-    document_queue::prompts(&activation.entries_after)
+    let entries = &activation.entries_after;
+    document_queue::executable_prompt_indexes(entries)
         .into_iter()
-        .filter(|prompt| !suppressed.claims(&prompt.text))
+        .filter(|index| !suppressed.claims_at(entries, *index))
+        .filter_map(|index| match &entries[index] {
+            QueueEntry::Prompt(prompt) => Some(prompt),
+            _ => None,
+        })
         .filter(|prompt| {
             head_is_drainable(
                 &prompt.text,
@@ -1331,10 +1344,39 @@ pub fn claimed_head_count(content: &str, claimed: &ClaimedQueueItems) -> usize {
     let Some((_, entries)) = queue_component_entries(content) else {
         return 0;
     };
-    document_queue::prompts(&entries)
+    document_queue::executable_prompt_indexes(&entries)
         .into_iter()
-        .filter(|prompt| claimed.claims(&prompt.text))
+        .filter(|index| claimed.claims_at(&entries, *index))
         .count()
+}
+
+/// Indexes of prompt rows `claimed` holds, computed before any row is dropped.
+///
+/// Nest identity reads parent indents, so a filter must not remove siblings
+/// first (`#nestlistlineage`).
+fn claimed_prompt_indexes(entries: &[QueueEntry], claimed: &ClaimedQueueItems) -> Vec<bool> {
+    (0..entries.len())
+        .map(|index| {
+            matches!(entries.get(index), Some(QueueEntry::Prompt(_)))
+                && claimed.claims_at(entries, index)
+        })
+        .collect()
+}
+
+fn entries_without_claimed_prompts(
+    entries: Vec<QueueEntry>,
+    claimed: &ClaimedQueueItems,
+) -> Vec<QueueEntry> {
+    if claimed.is_empty() {
+        return entries;
+    }
+    let claimed_at = claimed_prompt_indexes(&entries, claimed);
+    entries
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| !claimed_at[*index])
+        .map(|(_, entry)| entry)
+        .collect()
 }
 
 /// Identities of every live (unstruck, executable) row of EVERY queue
@@ -1366,9 +1408,11 @@ pub fn live_queue_head_identities(
             .iter()
             .flat_map(|block| {
                 let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
-                document_queue::prompts(entries.as_ref())
+                document_queue::executable_prompt_indexes(entries.as_ref())
                     .into_iter()
-                    .map(|prompt| crate::queue_claim::claim_identity(&prompt.text))
+                    .filter_map(|index| {
+                        crate::queue_claim::claim_identity_at(entries.as_ref(), index)
+                    })
                     .collect::<Vec<_>>()
             })
             .collect(),
@@ -1379,11 +1423,40 @@ pub fn live_queue_head_identities(
 pub fn live_queue_head_texts(content: &str) -> Option<Vec<String>> {
     let (_, entries) = queue_component_entries(content)?;
     Some(
-        document_queue::prompts(&entries)
+        document_queue::executable_prompt_indexes(&entries)
             .into_iter()
             // Lifecycle glyphs are a binary-owned projection, never part of
             // the operator-authored head stored in a claim or its anchor.
-            .map(|prompt| strip_in_progress_marker(prompt.text.trim()))
+            // A nested non-tracked leaf is stored as its nest vector
+            // (`#nestlistlineage`).
+            .filter_map(|index| document_queue::lineage_claim_text(&entries, index))
+            .collect(),
+    )
+}
+
+/// Executable rows of the selected queue as `(display, lineage)`.
+///
+/// `display` is the marker-stripped row text. `lineage` is that row's claim
+/// key (`#nestlistlineage`): the nest vector for a nested non-tracked leaf,
+/// otherwise the same display text. Completion evidence matches `display`;
+/// the claim set that holds the row uses `lineage`.
+pub fn live_executable_row_keys(content: &str) -> Option<Vec<(String, String)>> {
+    let (_, entries) = queue_component_entries(content)?;
+    Some(
+        document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter_map(|index| {
+                let prompt = match entries.get(index)? {
+                    QueueEntry::Prompt(prompt) => prompt,
+                    _ => return None,
+                };
+                let display = strip_in_progress_marker(prompt.text.trim());
+                if display.trim().is_empty() {
+                    return None;
+                }
+                let lineage = document_queue::lineage_claim_text(&entries, index)?;
+                Some((display, lineage))
+            })
             .collect(),
     )
 }

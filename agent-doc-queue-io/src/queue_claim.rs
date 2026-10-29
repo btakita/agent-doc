@@ -25,9 +25,7 @@ use agent_doc_queue::queue_claim::{
     QueueClaimCancellationReceipt, QueueClaimLedger, QueueClaimMiss, QueueClaimRefreshRefused,
     claim_identity, owner_session_liveness, resolve_claim_target_in_views,
 };
-use agent_doc_queue::queue_continuation::{
-    live_queue_head_identities, live_queue_head_rows, live_queue_head_texts,
-};
+use agent_doc_queue::queue_continuation::{live_queue_head_identities, live_queue_head_texts};
 use anyhow::{Context, Result, bail};
 
 use agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND;
@@ -331,6 +329,19 @@ fn snapshots_from_ledger(
         .collect()
 }
 
+/// Marker-stripped text of the expanded row whose lineage key is `target`.
+///
+/// `None` when that row is already `target` (a top-level head, or a tracked
+/// directive). A nested leaf's key is the nest vector, so the returned text is
+/// the authored row (`#nestlistlineage`).
+fn nested_claim_row_at_claim(file: &Path, target: &str) -> Option<String> {
+    let content = std::fs::read_to_string(file).ok()?;
+    let _guard = steer_guard(nested_claim_steer_snapshots(file, &content));
+    agent_doc_queue::queue_continuation::live_executable_row_keys(&content)?
+        .into_iter()
+        .find_map(|(display, lineage)| (lineage == target && display != target).then_some(display))
+}
+
 fn steer_guard(
     snapshots: Vec<agent_doc_queue::nested_claim_steer::ClaimTimeSnapshot>,
 ) -> Option<agent_doc_queue::nested_claim_steer::NestedClaimSteerGuard> {
@@ -415,14 +426,12 @@ fn resolve_expanded_claim_target(
     authority_text: Option<&str>,
 ) -> Option<(String, agent_doc_queue::queue_claim::ClaimHeadSource)> {
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content))?;
-    let disk_rows = live_queue_head_rows(content).unwrap_or_default();
-    let disk_heads = row_head_texts(&disk_rows);
-    let authority_rows = authority_text.and_then(live_queue_head_rows);
-    let authority = authority_rows.as_deref().map(row_head_texts);
+    let disk_heads = live_queue_head_texts(content).unwrap_or_default();
+    let authority_heads = authority_text.and_then(live_queue_head_texts);
     agent_doc_queue::queue_claim::resolve_claim_target_in_views(
         item,
         &disk_heads,
-        authority.as_deref(),
+        authority_heads.as_deref(),
     )
     .ok()
 }
@@ -446,22 +455,22 @@ fn resolve_live_claim_target(
 ) -> Result<(String, ClaimQueueView)> {
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to resolve queue item {item:?}", file.display()))?;
-    let disk_rows = live_queue_head_rows(&content).unwrap_or_default();
     let disk_view = ClaimQueueView::from_content(&content).unwrap_or_default();
-    let disk_heads = row_head_texts(&disk_rows);
+    // Claim keys are nest vectors for a nested non-tracked leaf
+    // (`#nestlistlineage`). Display rows stay on the anchor via `disk_view`.
+    let disk_heads = live_queue_head_texts(&content).unwrap_or_default();
     // The editor/CRDT authority's current text, the view preflight computes
     // `queue_subagent_dispatch` from. `None` when no editor owns the document
     // (disk is the authority) or no current cut is available.
     let authority_text = editor_authority_text(file, source);
-    let authority_rows = authority_text.as_deref().and_then(live_queue_head_rows);
-    let authority_view = authority_rows.as_ref().map(|_| {
+    let authority_heads = authority_text.as_deref().and_then(live_queue_head_texts);
+    let authority_view = authority_heads.as_ref().map(|_| {
         authority_text
             .as_deref()
             .and_then(ClaimQueueView::from_content)
             .unwrap_or_default()
     });
-    let authority = authority_rows.as_deref().map(row_head_texts);
-    let resolved = resolve_claim_target_in_views(item, &disk_heads, authority.as_deref());
+    let resolved = resolve_claim_target_in_views(item, &disk_heads, authority_heads.as_deref());
     let (target, view) = match resolved {
         Ok(resolved) => resolved,
         Err(miss) if miss.ambiguous.is_empty() => {
@@ -470,8 +479,8 @@ fn resolve_live_claim_target(
             if let Some(resolved) = expanded {
                 resolved
             } else {
-                let authority = authority_rows.as_deref().zip(authority_view.as_ref());
-                match followed_claim_target(file, item, (&disk_rows, &disk_view), authority) {
+                let authority = authority_heads.as_deref().zip(authority_view.as_ref());
+                match followed_claim_target(file, item, (&disk_heads, &disk_view), authority) {
                     Some(resolved) => {
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -571,6 +580,10 @@ pub fn claim_with_session(
     // never a bare string: the CLI reports it as-is instead of wrapping it in
     // the generic turn-failure notice.
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim")?;
+    // The nest vector stored as `item_text` has no sub-prompt block. Keep the
+    // expanded row, children included, so later siblings still split
+    // (`#nestedclaimsteer`, `#nestlistlineage`).
+    let claim_time_row = nested_claim_row_at_claim(file, &target);
     let identity = claim_identity(&target);
     let authorization = crate::subagent_dispatch::subagent_authorization_for_item(file, &target)?;
     let tracked_item_aliases: Vec<String> = if identity.is_id_backed() {
@@ -592,7 +605,8 @@ pub fn claim_with_session(
     // so an exact identity normally names one occurrence. Keep the count in the
     // log as a rolling-upgrade diagnostic: a legacy unannotated claim still
     // anchors every identical copy until preflight projects effect identities.
-    let occurrences = row_head_texts(&heads.rows())
+    let occurrences = heads
+        .claim_keys()
         .iter()
         .filter(|head| claim_identity(head) == identity)
         .count();
@@ -617,6 +631,12 @@ pub fn claim_with_session(
             .iter_mut()
             .find(|claim| claim.identity == identity)
             .context("claimed item missing from the ledger after claim")?;
+        if matches!(outcome, ClaimOutcome::Created | ClaimOutcome::Reassigned)
+            && stored.claim_time_row.is_none()
+            && let Some(row) = claim_time_row
+        {
+            stored.claim_time_row = Some(row);
+        }
         stored.dispatch_policy = dispatch_policy.clone();
         stored.tracked_item_aliases = tracked_item_aliases.clone();
         Ok((outcome, stored.clone()))
@@ -1164,6 +1184,7 @@ pub fn record_released_cancellation(
         anchor: None,
         followed_from: Vec::new(),
         followed_generation: 0,
+        claim_time_row: None,
     };
     let cancelled_at_secs = now_secs();
     let receipt = mutate_ledger(file, |ledger| {
@@ -1491,17 +1512,29 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
         .iter()
         .filter(|component| component.name == "queue")
         .flat_map(|component| {
-            agent_doc_queue::document_queue::parse(component.content(content)).unwrap_or_default()
-        })
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => Some((
-                agent_doc_queue::queue_claim::claim_identity(&prompt.text),
-                agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
-                    .map(|marker| marker.prefix().to_string())
-                    .unwrap_or_else(|| "bare".to_string()),
-            )),
-            _ => None,
+            let entries = agent_doc_queue::document_queue::parse(component.content(content))
+                .unwrap_or_default();
+            entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| match entry {
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+                        let identity =
+                            agent_doc_queue::queue_claim::claim_identity_at(&entries, index)
+                                .unwrap_or_else(|| {
+                                    agent_doc_queue::queue_claim::claim_identity(&prompt.text)
+                                });
+                        Some((
+                            identity,
+                            agent_doc_document::queue_projection::lifecycle_marker(&prompt.text)
+                                .map(|marker| marker.prefix().to_string())
+                                .unwrap_or_else(|| "bare".to_string()),
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
         })
         .collect::<Vec<_>>();
     let now = claim_clock_now_secs();
@@ -1612,7 +1645,7 @@ fn claimed_items_with_non_ledger_holds(
     content: &str,
     claimed: ClaimedQueueItems,
 ) -> ClaimedQueueItems {
-    let claimed = claimed.with_heads(&completion_evidence_head_texts(content));
+    let claimed = claimed.with_heads(&completion_evidence_hold_texts(content));
     claimed_items_with_queue_holds(file, content, claimed)
 }
 
@@ -1669,14 +1702,17 @@ pub fn worker_owned_items_for_content(file: &Path, content: &str) -> ClaimedQueu
             })
             .map(|claim| claim.identity),
     )
-    .with_heads(&completion_evidence_head_texts(content))
+    .with_heads(&completion_evidence_hold_texts(content))
 }
 
-/// Live queue rows for which the document contains a structurally
-/// binary-attested subagent completion cell. This is durable work evidence even
-/// when an older claim was pruned and its generation can no longer be proven.
-/// Such a row is held out of fresh dispatch/drain and projected as reconciling.
-pub fn completion_evidence_head_texts(content: &str) -> Vec<String> {
+/// Rows whose own work has a structurally binary-attested completion cell.
+///
+/// The first string is the marker-stripped row (what a completion heading
+/// quotes). The second is the claim key: the nest vector for a nested
+/// non-tracked leaf, otherwise the same text (`#nestlistlineage`). Matching
+/// the vector alone dropped `unblock the sample` under `do [#alpha]` because
+/// the cell quotes the child, not `#alpha: unblock the sample`.
+fn completion_evidence_rows(content: &str) -> Vec<(String, String)> {
     let items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -1684,14 +1720,43 @@ pub fn completion_evidence_head_texts(content: &str) -> Vec<String> {
     if items.is_empty() {
         return Vec::new();
     }
-    live_queue_head_texts(content)
+    agent_doc_queue::queue_continuation::live_executable_row_keys(content)
         .unwrap_or_default()
         .into_iter()
-        .filter(|head| {
+        .filter(|(display, lineage)| {
             items.iter().any(|item| {
-                agent_doc_queue::queue_claim::completion_evidence_matches_row(item, head)
+                agent_doc_queue::queue_claim::completion_evidence_matches_row(item, display)
+                    || (lineage != display
+                        && agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                            item, lineage,
+                        ))
             })
         })
+        .collect()
+}
+
+/// Live queue rows for which the document contains a structurally
+/// binary-attested subagent completion cell. This is durable work evidence even
+/// when an older claim was pruned and its generation can no longer be proven.
+/// Such a row is held out of fresh dispatch/drain and projected as reconciling.
+///
+/// Each string is the row's own marker-stripped work, not its nest vector, so
+/// a child cell still names the child.
+pub fn completion_evidence_head_texts(content: &str) -> Vec<String> {
+    completion_evidence_rows(content)
+        .into_iter()
+        .map(|(display, _)| display)
+        .collect()
+}
+
+/// Claim keys for [`completion_evidence_head_texts`].
+///
+/// A nested non-tracked leaf is held as its nest vector, so the hold stays on
+/// that row and does not cover the same leaf under another parent.
+pub(crate) fn completion_evidence_hold_texts(content: &str) -> Vec<String> {
+    completion_evidence_rows(content)
+        .into_iter()
+        .map(|(_, lineage)| lineage)
         .collect()
 }
 
@@ -1867,6 +1932,7 @@ pub fn retire_struck_claims(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_queue::queue_continuation::live_queue_head_rows;
 
     fn write_doc(root: &Path, prompts: &[&str]) -> PathBuf {
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();

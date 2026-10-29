@@ -260,22 +260,27 @@ fn classify_view(content: &str, not_drained: &ClaimedQueueItems, sets: &mut View
         classify_outside_queue(content, cursor..queue.open_end, &completion_cells, sets);
         cursor = queue.close_start;
         let body = &content[queue.open_end..queue.close_start];
-        let Ok(entries) = document_queue::parse_spans(body) else {
+        let Ok(spans) = document_queue::parse_spans(body) else {
             // An unparseable queue body cannot prove any line undrained.
             sets.other.extend(line_keys(body));
             continue;
         };
-        for (entry, span) in &entries {
+        // Nest identity needs the whole body: dropping one nested `#rebase`
+        // must not look like dropping every copy (`#nestlistlineage`).
+        let entries: Vec<QueueEntry> = spans.iter().map(|(entry, _)| entry.clone()).collect();
+        for (index, (_, span)) in spans.iter().enumerate() {
             let keys = line_keys(&body[span.clone()]);
-            match entry {
+            match &entries[index] {
                 QueueEntry::Completed(_) => sets.undrained.extend(keys),
-                QueueEntry::Prompt(prompt) if not_drained.claims(&prompt.text) => {
+                QueueEntry::Prompt(_) if not_drained.claims_at(&entries, index) => {
                     sets.undrained.extend(keys)
                 }
                 // A live head this cycle may drain: in scope.
                 QueueEntry::Prompt(prompt) => {
+                    let identity = crate::queue_claim::claim_identity_at(&entries, index)
+                        .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
                     sets.heads
-                        .entry(crate::queue_claim::claim_identity(&prompt.text))
+                        .entry(identity)
                         .or_insert_with(|| DrainableHead {
                             text: prompt.text.clone(),
                             line_keys: HashSet::new(),

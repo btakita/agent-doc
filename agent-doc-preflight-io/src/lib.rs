@@ -29,8 +29,7 @@ use agent_doc_queue::{
     },
     free_text_admission::{
         FreeTextAdmissionExecution, FreeTextAdmissionScope, FreeTextAdmissionTarget,
-        FreeTextCoinGate,
-        append_empty_agent_component, collect_actionable_free_text_prompts,
+        FreeTextCoinGate, append_empty_agent_component, collect_actionable_free_text_prompts,
         gate_free_text_admission_scope, prepare_free_text_admission_for_queue_with_reserved,
         queue_currently_active_for_free_text_admission, queue_free_text_admission_scope,
     },
@@ -404,7 +403,10 @@ fn run_todo_id_maintenance_with_options(
         return Ok(Vec::new());
     }
     let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
-        file, &content, true, &[],
+        file,
+        &content,
+        true,
+        &[],
     ) {
         Ok(links) => links,
         Err(err) => {
@@ -461,11 +463,8 @@ fn run_todo_id_maintenance_with_options(
         )?
     };
     if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
-        && let Some(new_snapshot) = agent_doc_element::todo::carry_todo_body_into_snapshot(
-            &snapshot,
-            &content,
-            &persisted,
-        )
+        && let Some(new_snapshot) =
+            agent_doc_element::todo::carry_todo_body_into_snapshot(&snapshot, &content, &persisted)
         && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &new_snapshot,
@@ -496,7 +495,11 @@ fn run_todo_id_maintenance_with_options(
             .qualified
             .iter()
             .any(|selector| selector == &finding.selector);
-        let status = if migrated { "migrated" } else { "held_by_typing_gate" };
+        let status = if migrated {
+            "migrated"
+        } else {
+            "held_by_typing_gate"
+        };
         eprintln!(
             "[preflight] todo: legacy source audit {} -> agent:{} #{} {status} (#todocontextmigration)",
             finding.selector, finding.component, finding.id
@@ -521,7 +524,10 @@ fn run_todo_id_maintenance_with_options(
 /// mistaken for a verdict.
 pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> {
     let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
-        file, content, true, &[],
+        file,
+        content,
+        true,
+        &[],
     ) {
         Ok(links) => links,
         Err(err) => {
@@ -533,11 +539,15 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
     };
     match agent_doc_element::todo::todo_link_findings(content, &links) {
         Ok(findings) => {
-            let mut signals = findings.iter().map(todo_signal_from_finding).collect::<Vec<_>>();
+            let mut signals = findings
+                .iter()
+                .map(todo_signal_from_finding)
+                .collect::<Vec<_>>();
             // GH #381: project-inherited presets are invocations too; they are
             // never copied into the document, so resolve the effective map here.
-            let presets =
-                agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(content, file);
+            let presets = agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                content, file,
+            );
             let preset_only =
                 agent_doc_queue::queue_continuation::preset_only_identity_ids_with_presets(
                     content, &presets,
@@ -546,7 +556,9 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             signals
         }
         Err(err) => {
-            eprintln!("[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped");
+            eprintln!(
+                "[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped"
+            );
             Vec::new()
         }
     }
@@ -572,7 +584,10 @@ fn append_unlinked_queue_signals(
     let Ok(components) = agent_doc_element::element::parse(content) else {
         return;
     };
-    for component in components.iter().filter(|component| component.name == "queue") {
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
         let Ok(entries) = agent_doc_queue::document_queue::parse(component.content(content)) else {
             continue;
         };
@@ -2337,34 +2352,32 @@ fn run_pending_maintenance_with_options(
     // Project one aggregate line into agent:status; the pane title's existing
     // turn-active marker remains the truthful signal that a coordinator turn is
     // currently executing, so no synthetic actionable queue row is invented.
-    let reported_count = match agent_doc_queue_io::queue_claim::claim_states_for_content(
-        file,
-        &current_content,
-    ) {
-        Ok(claims) => {
-            let mut reported_identities = claims
-                .into_iter()
-                .filter(|claim| {
-                    claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
-                })
-                .map(|claim| claim.identity)
-                .collect::<std::collections::HashSet<_>>();
-            reported_identities.extend(
-                agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
-                    file,
-                    &current_content,
-                )
-                .into_iter()
-                .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
-            );
-            Some(reported_identities.len())
-        }
-        Err(err) => {
-            // An uncertain ledger must never erase a previously projected handoff.
-            eprintln!("[preflight] status: failed to read reported queue claims ({err:#})");
-            None
-        }
-    };
+    let reported_count =
+        match agent_doc_queue_io::queue_claim::claim_states_for_content(file, &current_content) {
+            Ok(claims) => {
+                let mut reported_identities = claims
+                    .into_iter()
+                    .filter(|claim| {
+                        claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                    })
+                    .map(|claim| claim.identity)
+                    .collect::<std::collections::HashSet<_>>();
+                reported_identities.extend(
+                    agent_doc_queue_io::claim_release_receipt::reported_head_texts_for_content(
+                        file,
+                        &current_content,
+                    )
+                    .into_iter()
+                    .map(|head| agent_doc_queue::queue_claim::claim_identity(&head)),
+                );
+                Some(reported_identities.len())
+            }
+            Err(err) => {
+                // An uncertain ledger must never erase a previously projected handoff.
+                eprintln!("[preflight] status: failed to read reported queue claims ({err:#})");
+                None
+            }
+        };
     if let Some(reported_count) = reported_count {
         if let Some(reconciled) =
             agent_doc_document::status_projection::reconcile_reported_queue_status_content(
@@ -2656,7 +2669,10 @@ fn run_pending_maintenance_with_options(
     // 6. `#todoids`: operator todo checks at a cheap, deterministic event.
     let todo_signals = todo_signals_for_document(file, &current_content);
     for signal in &todo_signals {
-        eprintln!("[preflight] todo: {} {}: {}", signal.kind, signal.todo, signal.action);
+        eprintln!(
+            "[preflight] todo: {} {}: {}",
+            signal.kind, signal.todo, signal.action
+        );
     }
 
     Ok(PendingMaintenanceReport {
@@ -3344,9 +3360,10 @@ fn claimed_queue_head_facts(
                 generation: claim.generation,
                 state: claim.state,
                 worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
-                worker_started_at: claim.worker.as_ref().map(|worker| {
-                    agent_doc_log_time::format_log_timestamp(worker.started_at_secs)
-                }),
+                worker_started_at: claim
+                    .worker
+                    .as_ref()
+                    .map(|worker| agent_doc_log_time::format_log_timestamp(worker.started_at_secs)),
                 owner_session_state: owner_session_state.to_string(),
                 expires_at: agent_doc_log_time::format_log_timestamp(claim.expires_at_secs),
                 owner_session_ended,
@@ -3379,9 +3396,7 @@ fn stale_claim_fact(
             "agent-doc queue claim {doc} --item {handle} --owner {} --refresh{generation}",
             quote(&claim.owner),
         ),
-        release_command: format!(
-            "agent-doc queue release {doc} --item {handle}{generation}"
-        ),
+        release_command: format!("agent-doc queue release {doc} --item {handle}{generation}"),
     }
 }
 
@@ -3613,19 +3628,34 @@ fn entries_without_out_of_loop_heads(
     claimed: &agent_doc_queue::queue_claim::ClaimedQueueItems,
     dispatch: &[String],
 ) -> Vec<agent_doc_queue::document_queue::QueueEntry> {
+    let claimed_at: Vec<bool> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                let display = agent_doc_document::queue_projection::strip_in_progress_marker(
+                    prompt.text.trim(),
+                );
+                let lineage =
+                    agent_doc_queue::document_queue::lineage_claim_text(entries, index);
+                claimed.claims_at(entries, index)
+                    || dispatch.iter().any(|item| {
+                        item == &display
+                            || lineage.as_ref() == Some(item)
+                            || agent_doc_queue::queue_claim::claim_identity_at(entries, index)
+                                .is_some_and(|identity| {
+                                    agent_doc_queue::queue_claim::claim_identity(item) == identity
+                                })
+                    })
+            }
+            _ => false,
+        })
+        .collect();
     entries
         .iter()
-        .filter(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                !claimed.claims(&prompt.text)
-                    && !agent_doc_queue_io::subagent_dispatch::is_dispatch_item(
-                        dispatch,
-                        &prompt.text,
-                    )
-            }
-            _ => true,
-        })
-        .cloned()
+        .enumerate()
+        .filter(|(index, _)| !claimed_at[*index])
+        .map(|(_, entry)| entry.clone())
         .collect()
 }
 
@@ -3640,7 +3670,8 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let (content, _) = infer_queue_go_from_prompt_edit(&content, snapshot_content.as_deref())?;
-    let _nested_claim_steer = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
+    let _nested_claim_steer =
+        agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
@@ -4214,7 +4245,10 @@ fn merge_admission_three_way_split(
             "equals_authority"
         } else if let Some(mixed) =
             agent_doc_document::component_exclusivity::merge_mixes_component_versions(
-                baseline, authority, disk, &plan.merged_doc,
+                baseline,
+                authority,
+                disk,
+                &plan.merged_doc,
             )
         {
             // `#queuecutexclusive` fail-closed guard, checked against the
@@ -4877,7 +4911,8 @@ pub fn run_queue_maintenance_with_coin_gate(
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
-    let _nested_claim_steer = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
+    let _nested_claim_steer =
+        agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let mut current_content = content.clone();
     let effective_prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(
@@ -6815,9 +6850,8 @@ pub fn run_queue_maintenance_with_coin_gate(
     // activation predicate normally covers marker `go`/`start`, but the drain
     // invariant must not depend on which activation path populated the cached
     // state: if frontmatter is cleared, marker control is stripped too.
-    let strip_queue_marker_control = need_strip_activation
-        || marker_stop
-        || (need_clear_active && drain_clears_control);
+    let strip_queue_marker_control =
+        need_strip_activation || marker_stop || (need_clear_active && drain_clears_control);
 
     if need_clear_drained_body {
         let comps = agent_doc_element::element::parse(&current_content)?;
@@ -7108,10 +7142,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // coordinator-owned head runs inline instead of the cycle selecting
     // nothing.
     let in_flight_queue_items = if activation.active {
-        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(
-            file,
-            &current_content,
-        )
+        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &current_content)
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
@@ -7124,10 +7155,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         Vec::new()
     };
     let out_of_loop_queue_items = if activation.active {
-        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(
-            file,
-            &current_content,
-        )
+        agent_doc_queue_io::subagent_dispatch::out_of_loop_items_for_content(file, &current_content)
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
@@ -7201,10 +7229,8 @@ pub fn run_queue_maintenance_with_coin_gate(
     // Durable completion cells can restore a matching attempt to Reported
     // after restart; unmatched/older-generation evidence never creates state.
     if activation.active
-        && let Err(err) = agent_doc_queue_io::queue_claim::reconcile_completion_evidence(
-            file,
-            &current_content,
-        )
+        && let Err(err) =
+            agent_doc_queue_io::queue_claim::reconcile_completion_evidence(file, &current_content)
     {
         eprintln!("[preflight] queue: completion evidence recovery failed ({err:#})");
     }
@@ -7223,9 +7249,7 @@ pub fn run_queue_maintenance_with_coin_gate(
         eprintln!("[preflight] queue: failed to read reported outbox ({err:#})");
     }
     let now = agent_doc_queue_io::queue_claim::claim_clock_now_secs();
-    let claim_ledger = claim_ledger
-        .and_then(Result::ok)
-        .unwrap_or_default();
+    let claim_ledger = claim_ledger.and_then(Result::ok).unwrap_or_default();
     let cancellations = claim_ledger.cancellations;
     let claim_states = claim_ledger
         .claims
@@ -7307,13 +7331,16 @@ pub fn run_queue_maintenance_with_coin_gate(
     let lifecycle_targets = activation
         .entries_after
         .iter()
-        .filter_map(|entry| {
+        .enumerate()
+        .filter_map(|(index, entry)| {
             let prompt = match entry {
                 agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
                 | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => prompt,
                 _ => return None,
             };
-            let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+            let identity =
+                agent_doc_queue::queue_claim::claim_identity_at(&activation.entries_after, index)
+                    .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
             let claim = claim_by_identity.get(&identity).copied();
             let receipt = receipt_by_identity.get(&identity).copied();
             // `#strikeisterminal`: only a live attempt reopens a struck row;
@@ -7323,9 +7350,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)
             ) && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
-                claim,
-                &identity,
-                &live_rows,
+                claim, &identity, &live_rows,
             );
             if matches!(
                 entry,
@@ -7354,10 +7379,12 @@ pub fn run_queue_maintenance_with_coin_gate(
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
             };
             let owner = claim
-                .map(|claim| agent_doc_document::queue_projection::QueueOwnerProjection {
-                    owner: claim.owner.clone(),
-                    generation: claim.generation,
-                })
+                .map(
+                    |claim| agent_doc_document::queue_projection::QueueOwnerProjection {
+                        owner: claim.owner.clone(),
+                        generation: claim.generation,
+                    },
+                )
                 .or_else(|| {
                     receipt.map(|receipt| {
                         agent_doc_document::queue_projection::QueueOwnerProjection {
@@ -7397,12 +7424,12 @@ pub fn run_queue_maintenance_with_coin_gate(
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
             )
         })
-        .filter_map(|target| {
-            match agent_doc_queue::queue_claim::claim_identity(&target.text) {
+        .filter_map(
+            |target| match agent_doc_queue::queue_claim::claim_identity(&target.text) {
                 agent_doc_element_queue::QueueItemIdentity::Id(id) => Some((id, target.marker)),
                 agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
-            }
-        })
+            },
+        )
         .collect::<std::collections::HashMap<_, _>>();
     if let Some((new_body, marked_entries)) =
         agent_doc_queue::document_queue::project_prompt_runtime_projections(
@@ -8740,9 +8767,14 @@ mod tests {
 
         content.push_str("\n<!-- parked copy\n- [ ] [#lost1] Drifted out of backlog\n-->\n");
         std::fs::write(&doc, &content).unwrap();
-        let err = enforce_no_shadow_open_backlog(&doc).unwrap_err().to_string();
+        let err = enforce_no_shadow_open_backlog(&doc)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("#lost1"), "{err}");
-        assert!(!err.contains("#td"), "todo ids must never be reported: {err}");
+        assert!(
+            !err.contains("#td"),
+            "todo ids must never be reported: {err}"
+        );
     }
 
     /// `#qheadannotation`: the cycle contract carries operator annotations on
@@ -8818,9 +8850,7 @@ mod tests {
         assert!(
             guidance.contains(agent_doc_queue::subagent_brief::SUBAGENT_SCRATCH_ISOLATION_RULE)
         );
-        assert!(
-            guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE)
-        );
+        assert!(guidance.ends_with(agent_doc_queue::subagent_brief::SUBAGENT_TMUX_ISOLATION_RULE));
     }
 
     // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
@@ -10356,8 +10386,7 @@ mod tests {
         .unwrap();
         // The live document carried a skip for #stg from an earlier cycle.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::set_skipped_queue_head_ids(&doc, &["stg".to_string()])
-            .unwrap();
+        agent_doc_cycle_state_io::set_skipped_queue_head_ids(&doc, &["stg".to_string()]).unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
             .unwrap();
 
@@ -10390,7 +10419,9 @@ mod tests {
             "only the runnable row counts as drainable:\n{updated}"
         );
         // The operator's row text and the tracked items are untouched.
-        assert!(updated.contains("(stays open: blocked behind #sbx and a release containing #749)"));
+        assert!(
+            updated.contains("(stays open: blocked behind #sbx and a release containing #749)")
+        );
 
         // Closing the last open blocker unblocks the row on the next pass.
         let unblocked = updated.replace("- [ ] [#deploy]", "- [x] [#deploy]");
@@ -10471,7 +10502,10 @@ mod tests {
         );
         // Only the operator's row (with its lifecycle projection) remains.
         assert_eq!(
-            loop_body.lines().filter(|line| line.starts_with("- ")).count(),
+            loop_body
+                .lines()
+                .filter(|line| line.starts_with("- "))
+                .count(),
             1,
             "{updated}"
         );
@@ -11135,9 +11169,7 @@ mod tests {
                 && entries[0]
                     .start_command
                     .contains("--generation <generation>")
-                && entries[0]
-                    .start_command
-                    .contains("--worker-id <worker-id>"),
+                && entries[0].start_command.contains("--worker-id <worker-id>"),
             "{entries:?}"
         );
         // `#waypostauthorization`: every entry carries the operator's
@@ -11169,15 +11201,16 @@ mod tests {
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("request, context, and every choice"));
         assert!(
-            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
-                .contains("also record its concrete operator action")
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("also record its concrete operator action")
         );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-add"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--todo-done"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'"));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'")
+        );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("placeholder-only reports are refused"));
         // `#subagentinlineveto`: never run a dispatch item inline, and say so
         // when the harness cannot spawn a subagent.
@@ -11185,8 +11218,14 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`**Deferred:** no subagent available`"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());
-        assert!(json.get("model").is_none(), "unset launch policy must be omitted");
-        assert!(json.get("effort").is_none(), "unset launch policy must be omitted");
+        assert!(
+            json.get("model").is_none(),
+            "unset launch policy must be omitted"
+        );
+        assert!(
+            json.get("effort").is_none(),
+            "unset launch policy must be omitted"
+        );
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`reasoning_effort`"));
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
@@ -11342,12 +11381,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "<!-- agent:queue subagents model=opus effort=high go -->\n",
             "- review docs\n<!-- /agent:queue -->\n",
         );
-        let entries = queue_subagent_dispatch_entries(
-            &doc,
-            content,
-            &["review docs".to_string()],
-        )
-        .unwrap();
+        let entries =
+            queue_subagent_dispatch_entries(&doc, content, &["review docs".to_string()]).unwrap();
         assert_eq!(entries[0].model.as_deref(), Some("opus"));
         assert_eq!(entries[0].effort.as_deref(), Some("high"));
         let json = serde_json::to_value(&entries[0]).unwrap();
@@ -12154,15 +12189,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     fn admission_split_merge_still_merges_disk_work_in_an_untouched_component() {
         let dir = setup_project();
         let doc = dir.path().join("sdk.md");
-        let (baseline, authority, disk_queue_only) = admission_typing_fork_docs(
-            &format!("{TYPING_CUT}\n"),
-            &format!("{TYPING_FULL}\n"),
-        );
+        let (baseline, authority, disk_queue_only) =
+            admission_typing_fork_docs(&format!("{TYPING_CUT}\n"), &format!("{TYPING_FULL}\n"));
         let disk = disk_queue_only.replace(
             "<!-- agent:notes -->\n",
             "<!-- agent:notes -->\n- disk-only note\n",
         );
-        assert_ne!(disk, disk_queue_only, "fixture must carry a notes component");
+        assert_ne!(
+            disk, disk_queue_only,
+            "fixture must carry a notes component"
+        );
         let merged =
             merge_admission_three_way_split(&doc, &baseline, &authority, &disk, &authority, None)
                 .unwrap()
@@ -12816,8 +12852,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         // (the original GH #198 failure); the same-component disk addition is
         // not merged by admission either (see
         // `admission_split_merge_keeps_the_authority_queue_when_disk_adds_beside_a_typing_cut`).
-        let first_projection =
-            disk_edit_newer_than_registered_authority(&doc, &authority).unwrap();
+        let first_projection = disk_edit_newer_than_registered_authority(&doc, &authority).unwrap();
         assert_eq!(first_projection, None);
 
         let observed = observe_queue_authority_after_native_save_with_bounded_retry(
@@ -15831,7 +15866,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- 📥 do [#d]"));
+        assert!(
+            updated
+                .contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- 📥 do [#d]")
+        );
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
 
@@ -15850,7 +15888,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️ [#subagent:d#1] do [#d]"));
+        assert!(updated.contains(
+            "- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️ [#subagent:d#1] do [#d]"
+        ));
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
         assert!(updated.contains("- [ ] ⚠️ [#d] later work"));
     }
@@ -17105,12 +17145,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             claim.generation,
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::report_attempt(
-            &doc,
-            "#reported",
-            Some(claim.generation),
-        )
-        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&doc, "#reported", Some(claim.generation))
+            .unwrap();
         agent_doc_queue_io::claim_release_receipt::release_attempt(
             &doc,
             "#reported",
@@ -19865,9 +19901,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(&format!("- ~~{done}~~")), "{updated}");
         assert!(
-            updated.contains(&format!(
-                "- 🟡 [#subagent:palette#1] {pending}\n"
-            )),
+            updated.contains(&format!("- 🟡 [#subagent:palette#1] {pending}\n")),
             "{updated}"
         );
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
@@ -19882,8 +19916,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     /// Claim, start, and report one worker attempt on `item`, returning its
     /// binary completion cell (the `### Re: Subagent completed` exchange cell).
     fn reported_attempt_with_cell(doc: &std::path::Path, item: &str, owner: &str) -> String {
-        let (_, claimed) =
-            agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
+        let (_, claimed) = agent_doc_queue_io::queue_claim::claim(doc, item, owner, 3600).unwrap();
         let running = agent_doc_queue_io::queue_claim::start_attempt(
             doc,
             item,

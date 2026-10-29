@@ -105,7 +105,18 @@ pub fn split_nested_claim_steer<'a>(current: &'a str, claim_time: &str) -> Neste
     if current_children.is_empty() {
         return unchanged;
     }
-    let claim_keys: Vec<String> = direct_subprompts(claim_time)
+    let claim_children = direct_subprompts(claim_time);
+    // A nest-vector claim key (`parent: #rebase`) has no sub-prompt block.
+    // It must not be read as a parent line whose children were all added
+    // after the claim (`#nestlistlineage`).
+    let (parent_line, _) = split_subprompt_block(current);
+    if claim_children.is_empty()
+        && claim_time.contains(": ")
+        && claim_time.trim() != parent_line.trim()
+    {
+        return unchanged;
+    }
+    let claim_keys: Vec<String> = claim_children
         .iter()
         .map(|child| child_key(&child.head_text))
         .collect();

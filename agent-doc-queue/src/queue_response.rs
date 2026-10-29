@@ -714,16 +714,40 @@ fn located_prompt(
     content: &str,
     prompt_text: &str,
 ) -> Option<(Vec<crate::document_queue::QueueEntry>, usize)> {
+    let mut parsed = Vec::new();
     for body in queue_bodies_for_nest(content) {
         let Ok(entries) = crate::document_queue::parse(body) else {
             continue;
         };
-        let entries = crate::nested_claim_steer::expand_if_installed(entries);
+        parsed.push(crate::nested_claim_steer::expand_if_installed(entries));
+    }
+    // A nest-vector head names the row in the queue that contains that parent,
+    // not the first copy of the leaf (`#nestlistlineage`).
+    for entries in &parsed {
+        if let Some(index) = entries.iter().enumerate().find_map(|(index, entry)| {
+            if !matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
+                || crate::document_queue::entry_is_group_parent(entries, index)
+            {
+                return None;
+            }
+            let lineage = crate::document_queue::lineage_claim_text(entries, index)?;
+            lineage_matches_head(&lineage, prompt_text).then_some(index)
+        }) {
+            return Some((entries.clone(), index));
+        }
+    }
+    for entries in parsed {
         if let Some(index) = crate::document_queue::prompt_index_for_text(&entries, prompt_text) {
             return Some((entries, index));
         }
     }
     None
+}
+
+fn lineage_matches_head(lineage: &str, head_text: &str) -> bool {
+    let lineage = lineage.trim();
+    let head = head_text.trim();
+    !lineage.is_empty() && (lineage == head || lineage.eq_ignore_ascii_case(head))
 }
 
 /// Display nest vector of `prompt_text` (`#nestvector`), or `None` when the row
@@ -822,15 +846,41 @@ pub fn submitted_continuation_prompt(
 /// Heads are a subsequence in queue order. Each identical leaf takes the next
 /// live row's parent (`#nestsubmit`).
 pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<String> {
-    for entries in parsed_queue_bodies(content) {
+    let bodies = parsed_queue_bodies(content);
+    let matches_head = |entries: &[crate::document_queue::QueueEntry]| {
+        heads.iter().any(|head| {
+            entries.iter().enumerate().any(|(index, entry)| {
+                matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
+                    && !crate::document_queue::entry_is_group_parent(entries, index)
+                    && crate::document_queue::row_matches_head_text(entries, index, head)
+            })
+        })
+    };
+    if let Some(entries) = bodies.iter().find(|entries| matches_head(entries)) {
+        return crate::document_queue::submitted_prompts_in_order(entries, heads, |_| false);
+    }
+    for entries in &bodies {
         if entries
             .iter()
             .any(|entry| matches!(entry, crate::document_queue::QueueEntry::Prompt(_)))
         {
-            return crate::document_queue::submitted_prompts_in_order(&entries, heads, |_| false);
+            return crate::document_queue::submitted_prompts_in_order(entries, heads, |_| false);
         }
     }
     heads.to_vec()
+}
+
+/// The live row named by `head_text`, including folded sub-prompts.
+///
+/// A nest-vector head resolves to the row under that parent
+/// (`#nestlistlineage`).
+pub fn queue_row_text_for_head(content: &str, head_text: &str) -> Option<String> {
+    let (entries, index) = located_prompt(content, head_text)?;
+    match entries.get(index)? {
+        crate::document_queue::QueueEntry::Prompt(prompt)
+        | crate::document_queue::QueueEntry::Completed(prompt) => Some(prompt.text.clone()),
+        _ => None,
+    }
 }
 
 /// True when the response carries an explicit `> **Queue prompt:**` echo of
@@ -3066,6 +3116,30 @@ queue_active: true
         assert_eq!(
             submitted_continuation_prompt(content, "#rebase", |_| false),
             submitted
+        );
+    }
+
+    /// `#nestlistlineage`: a nest-vector head binds the queue that owns that
+    /// parent, even when an earlier queue holds the same bare leaf.
+    #[test]
+    fn submitted_prompts_for_heads_binds_the_lineage_queue() {
+        let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
+        let both = "\
+<!-- agent:queue id=api-prs -->
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - #rebase
+<!-- /agent:queue -->
+
+<!-- agent:queue id=contracts-prs -->
+- https://github.com/haiven-dev/haiven-contracts/pull/162
+  - #rebase
+<!-- /agent:queue -->
+";
+        let submitted = submitted_prompts_for_heads(both, &[contracts.to_string()]);
+        assert_eq!(submitted.len(), 1, "{submitted:?}");
+        assert!(
+            submitted[0].starts_with(contracts),
+            "the contracts lineage binds that queue, not the earlier #rebase: {submitted:?}"
         );
     }
 

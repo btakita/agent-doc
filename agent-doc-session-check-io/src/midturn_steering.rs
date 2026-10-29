@@ -279,10 +279,47 @@ fn route_claimed_items(
     // as cancellation/mismatch evidence, but must continue through
     // `apply_release_receipts` to become `persist_reported`.
     if !attempts.is_empty() {
+        // The steering line is the authored row. A nested leaf's claim key is
+        // its nest vector, so the row text alone does not find the attempt
+        // (`#nestlistlineage`).
+        let _steer = agent_doc_queue_io::queue_claim::steer_guard_for(file, content);
+        let row_keys = agent_doc_queue::queue_continuation::live_executable_row_keys(content)
+            .unwrap_or_default();
         let claim_for = |text: &str| {
-            attempts
-                .get(&agent_doc_queue::queue_claim::claim_identity(text))
-                .cloned()
+            let identity = agent_doc_queue::queue_claim::claim_identity(text);
+            if let Some(claim) = attempts.get(&identity) {
+                return Some(claim.clone());
+            }
+            let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+            let head = head.trim();
+            let exact: Vec<_> = row_keys
+                .iter()
+                .filter(|(display, _)| display.trim() == text.trim())
+                .collect();
+            let candidates: Vec<_> = if !exact.is_empty() {
+                exact
+            } else if head.is_empty() {
+                Vec::new()
+            } else {
+                row_keys
+                    .iter()
+                    .filter(|(display, _)| {
+                        agent_doc_element_queue::subprompts::head_without_subprompts(display)
+                            .trim()
+                            == head
+                    })
+                    .collect()
+            };
+            let mut lineage_identity = None;
+            for (_, lineage) in candidates {
+                let id = agent_doc_queue::queue_claim::claim_identity(lineage);
+                match &lineage_identity {
+                    None => lineage_identity = Some(id),
+                    Some(existing) if existing == &id => {}
+                    Some(_) => return None,
+                }
+            }
+            lineage_identity.and_then(|id| attempts.get(&id).cloned())
         };
         core::apply_claim_attempts(items, claim_for);
     }
@@ -327,6 +364,7 @@ fn route_claimed_items(
                 anchor: None,
                 followed_from: Vec::new(),
                 followed_generation: 0,
+                claim_time_row: None,
             }
         });
     }
@@ -395,12 +433,13 @@ fn queue_claim_identities(
     content: &str,
 ) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
-    agent_doc_queue::document_queue::parse(&body)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                Some(agent_doc_queue::queue_claim::claim_identity(&prompt.text))
+    let entries = agent_doc_queue::document_queue::parse(&body).unwrap_or_default();
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(_) => {
+                agent_doc_queue::queue_claim::claim_identity_at(&entries, index)
             }
             _ => None,
         })
@@ -418,29 +457,37 @@ fn removed_queue_claim_identities(
         .collect()
 }
 
-fn completed_queue_items(content: &str) -> Vec<String> {
+fn all_queue_item_identities(
+    content: &str,
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
-    agent_doc_queue::document_queue::parse(&body)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => Some(prompt.text),
+    let entries = agent_doc_queue::document_queue::parse(&body).unwrap_or_default();
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+            | agent_doc_queue::document_queue::QueueEntry::Completed(_) => {
+                agent_doc_queue::queue_claim::claim_identity_at(&entries, index)
+            }
             _ => None,
         })
         .collect()
 }
 
-fn all_queue_item_identities(
+/// Struck rows of `content` with the identity their queue position names.
+fn completed_queue_identities(
     content: &str,
-) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+) -> Vec<(agent_doc_element_queue::QueueItemIdentity, String)> {
     let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
-    agent_doc_queue::document_queue::parse(&body)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-            | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
-                Some(agent_doc_queue::queue_claim::claim_identity(&prompt.text))
+    let entries = agent_doc_queue::document_queue::parse(&body).unwrap_or_default();
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => {
+                let identity = agent_doc_queue::queue_claim::claim_identity_at(&entries, index)?;
+                Some((identity, prompt.text.clone()))
             }
             _ => None,
         })
@@ -471,9 +518,9 @@ fn append_struck_removal_mismatches(
 ) -> Result<BTreeSet<String>> {
     let mut reported = BTreeSet::new();
     let current = all_queue_item_identities(content);
-    let deleted = completed_queue_items(&watermark.baseline)
+    let deleted = completed_queue_identities(&watermark.baseline)
         .into_iter()
-        .filter(|text| !current.contains(&agent_doc_queue::queue_claim::claim_identity(text)))
+        .filter(|(identity, _)| !current.contains(identity))
         .collect::<Vec<_>>();
     if deleted.is_empty() {
         return Ok(reported);
@@ -481,8 +528,7 @@ fn append_struck_removal_mismatches(
     let receipts = agent_doc_queue_io::claim_release_receipt::load(file)
         .with_context(|| format!("read reported receipts while routing {}", file.display()))?;
 
-    for text in deleted {
-        let identity = agent_doc_queue::queue_claim::claim_identity(&text);
+    for (identity, text) in deleted {
         let claim = attempts.get(&identity);
         let receipt = receipts
             .receipts

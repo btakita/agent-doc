@@ -80,6 +80,40 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
     })
 }
 
+fn executable_row_keys(content: &str) -> Vec<(String, String)> {
+    agent_doc_queue::queue_continuation::live_executable_row_keys(content).unwrap_or_default()
+}
+
+/// The string `queue_subagent_dispatch` lists for a lineage claim key.
+///
+/// A unique leaf is listed as that leaf. The same leaf under two parents stays
+/// the nest vector, so the two heads do not collapse (`#nestlistlineage`).
+/// Claim identity and the submitted prompt stay the vector either way.
+fn visible_dispatch_head(keys: &[(String, String)], lineage_head: &str) -> String {
+    let Some((display, _)) = keys.iter().find(|(_, lineage)| lineage == lineage_head) else {
+        return lineage_head.to_string();
+    };
+    let unique = keys.iter().filter(|(other, _)| other == display).count() == 1;
+    if unique {
+        display.clone()
+    } else {
+        lineage_head.to_string()
+    }
+}
+
+/// Lineage claim key for a dispatch string, which may already be that key or
+/// the unique leaf `visible_dispatch_head` listed.
+fn lineage_hold_for_head(keys: &[(String, String)], head: &str) -> String {
+    if let Some((_, lineage)) = keys.iter().find(|(_, lineage)| lineage == head) {
+        return lineage.clone();
+    }
+    let mut matched = keys.iter().filter(|(display, _)| display == head);
+    match (matched.next(), matched.next()) {
+        (Some((_, lineage)), None) => lineage.clone(),
+        _ => head.to_string(),
+    }
+}
+
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
@@ -91,11 +125,13 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
     // worker's: offering it again dispatched a duplicate subagent for an
     // answered question (haiven-dev tasks/docs.md, 2026-10-15).
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
+    let keys = executable_row_keys(content);
     if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets) {
         return Ok(plan
             .dispatch
             .into_iter()
             .filter(|head| !reported.claims(head))
+            .map(|head| visible_dispatch_head(&keys, &head))
             .collect());
     }
     let reference = reference_queue_for_dispatch(file)?;
@@ -108,6 +144,7 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
     Ok(heads
         .into_iter()
         .filter(|head| !claimed.claims(head) && !reported.claims(head))
+        .map(|head| visible_dispatch_head(&keys, &head))
         .collect())
 }
 
@@ -142,7 +179,7 @@ pub fn owner_selection_claims_for_content(
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
     crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
-        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content))
+        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content))
 }
 
 fn queue_attr_subagent_plan_with_presets(
@@ -158,7 +195,7 @@ fn queue_attr_subagent_plan_with_presets(
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
     let mut claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
-        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content));
+        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content));
     let evidence_items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -166,11 +203,36 @@ fn queue_attr_subagent_plan_with_presets(
     if !evidence_items.is_empty() {
         let mut matched = Vec::new();
         for block in graph.blocks() {
-            for head in core::queue_component_live_heads(content, block.component) {
-                if evidence_items.iter().any(|item| {
-                    agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &head)
-                }) {
-                    matched.push(head);
+            let entries =
+                agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+            for index in
+                agent_doc_queue::document_queue::executable_prompt_indexes(entries.as_ref())
+            {
+                let Some(lineage) =
+                    agent_doc_queue::document_queue::lineage_claim_text(entries.as_ref(), index)
+                else {
+                    continue;
+                };
+                let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = &entries[index]
+                else {
+                    continue;
+                };
+                let raw = agent_doc_document::queue_projection::strip_in_progress_marker(
+                    prompt.text.trim(),
+                );
+                let norm = core::normalize_queue_text(&raw);
+                let hits = evidence_items.iter().any(|item| {
+                    agent_doc_queue::queue_claim::completion_evidence_matches_row(item, &norm)
+                        || (lineage != raw
+                            && agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                                item, &lineage,
+                            ))
+                });
+                if hits {
+                    // A top-level row's hold is the normalized head. A nested
+                    // non-tracked leaf is held as its nest vector, so one
+                    // parent's `#rebase` does not cover another's.
+                    matched.push(if lineage != raw { lineage } else { norm });
                 }
             }
         }
@@ -271,13 +333,18 @@ pub fn out_of_loop_items_for_content(
     let claimed = crate::queue_claim::in_flight_claimed_items_for_content(file, content);
     let dispatch = pending_subagent_dispatch_or_warn(file, content);
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
+    let keys = executable_row_keys(content);
+    let dispatch_holds: Vec<String> = dispatch
+        .iter()
+        .map(|head| lineage_hold_for_head(&keys, head))
+        .collect();
     let held = queue_attr_subagent_plan(file, content)
         .map(|plan| plan.held)
         .unwrap_or_default()
         .into_iter()
         .filter(|head| !reported.claims(head))
         .collect::<Vec<_>>();
-    claimed.with_heads(&dispatch).with_heads(&held)
+    claimed.with_heads(&dispatch_holds).with_heads(&held)
 }
 
 /// Live heads a queue-level `subagents` / `fan-out` attribute (or subagent
@@ -295,19 +362,21 @@ pub fn inline_answer_vetoed_heads_for_content(file: &Path, content: &str) -> Vec
     if owned.is_empty() {
         return owned;
     }
+    let keys = executable_row_keys(content);
     let backed = agent_doc_queue::queue_claim::ClaimedQueueItems::none()
         .with_heads(&crate::queue_claim::claim_attempt_head_texts_for_content(
             file, content,
         ))
         .with_heads(&crate::claim_release_receipt::reported_head_texts_for_content(file, content))
-        .with_heads(&crate::queue_claim::completion_evidence_head_texts(content));
+        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content));
     let mut seen = agent_doc_queue::queue_claim::ClaimedQueueItems::none();
     let mut vetoed = Vec::new();
     for head in owned {
-        if backed.claims(&head) || seen.claims(&head) {
+        let hold = lineage_hold_for_head(&keys, &head);
+        if backed.claims(&hold) || seen.claims(&hold) {
             continue;
         }
-        seen = seen.with_heads(std::iter::once(&head));
+        seen = seen.with_heads(std::iter::once(&hold));
         vetoed.push(head);
     }
     vetoed

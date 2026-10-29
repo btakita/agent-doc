@@ -478,7 +478,11 @@ fn tracked_children_keep_the_group_shape() {
         "a tracked child stays its own head (`#f1s3` group): {dispatch:#?}"
     );
     assert!(
-        dispatch.iter().all(|item| !item.starts_with("alpha epic")),
+        dispatch.iter().any(|item| item == "remember the logs"),
+        "a unique nested leaf is dispatched as that leaf; its lineage stays on the submitted prompt: {dispatch:#?}"
+    );
+    assert!(
+        dispatch.iter().all(|item| item != "alpha epic"),
         "a group label is never executable: {dispatch:#?}"
     );
 }

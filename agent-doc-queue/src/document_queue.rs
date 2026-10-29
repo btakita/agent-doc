@@ -2934,14 +2934,28 @@ fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
 }
 
 pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
+    executable_prompt_indexes(entries)
+        .into_iter()
+        .filter_map(|idx| match entries.get(idx) {
+            Some(QueueEntry::Prompt(prompt)) => Some(prompt),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Indexes of live executable rows, in queue order.
+///
+/// Group labels are omitted. The index stays valid in `entries`, so a nested
+/// leaf can still see its parents (`#nestlistlineage`).
+pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
     entries
         .iter()
         .enumerate()
-        .filter_map(|(idx, e)| match e {
+        .filter_map(|(idx, entry)| match entry {
             // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
             // epic/group LABEL and is never executable, so it must not surface
             // as a runnable head.
-            QueueEntry::Prompt(p) if !entry_is_group_parent(entries, idx) => Some(p),
+            QueueEntry::Prompt(_) if !entry_is_group_parent(entries, idx) => Some(idx),
             _ => None,
         })
         .collect()
@@ -3149,6 +3163,67 @@ pub fn nest_vector_for_prompt_text(entries: &[QueueEntry], prompt_text: &str) ->
     nest_vector_at(entries, index, prompt_text)
 }
 
+/// A tracked directive keeps its id when it is nested (`#nestlistlineage`).
+///
+/// `do [#id]`, `[#id]`, and `do #id` (including behind an intent tag) name
+/// tracked work. A bare `#tag` such as `#rebase` does not: under a parent it
+/// is that parent's leaf, not a document-wide id.
+fn row_is_tracked_directive(text: &str) -> bool {
+    let work = nest_row_work_text(text);
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
+    let first = head.lines().next().unwrap_or("").trim();
+    let stripped = agent_doc_element_queue::strip_intent_tags(first);
+    let lower = stripped.to_ascii_lowercase();
+    if let Some(topic) = lower.strip_prefix("do ") {
+        let topic = topic.trim_start();
+        return topic.starts_with("[#") || topic.starts_with('#');
+    }
+    if let Some(rest) = lower.strip_prefix("[#")
+        && let Some((_, tail)) = rest.split_once(']')
+    {
+        return !tail.starts_with(':');
+    }
+    false
+}
+
+/// Claim and dispatch key for the row at `index` (`#nestlistlineage`).
+///
+/// A nested executable leaf that is not a tracked directive keys as the nest
+/// vector of its parent head (`head_without_subprompts`), so the same bare
+/// `#tag` under different parents is different work. Folded sub-prompts stay
+/// out of the key. A tracked directive, a group label, and a top-level row
+/// keep the marker-stripped row text.
+pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String> {
+    let prompt = prompt_of(entries.get(index)?)?;
+    let bare = strip_in_progress_marker(prompt.text.trim());
+    if bare.trim().is_empty() {
+        return None;
+    }
+    if entry_is_group_parent(entries, index) || row_is_tracked_directive(&bare) {
+        return Some(bare);
+    }
+    let work = nest_row_work_text(&bare);
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
+    let head = head.trim();
+    if head.is_empty() {
+        return Some(bare);
+    }
+    Some(nest_vector_at(entries, index, head).unwrap_or(bare))
+}
+
+/// Whether row `index` is the live head named by `head_text`.
+///
+/// `head_text` may be the row's own work text or its nest-vector claim key.
+pub fn row_matches_head_text(entries: &[QueueEntry], index: usize, head_text: &str) -> bool {
+    let Some(prompt) = entries.get(index).and_then(prompt_of) else {
+        return false;
+    };
+    if same_prompt(&prompt.text, head_text) {
+        return true;
+    }
+    lineage_claim_text(entries, index).is_some_and(|lineage| same_prompt(&lineage, head_text))
+}
+
 /// `true` when `ancestor_idx` is on the nest chain above `leaf_idx`.
 pub fn entry_is_ancestor_of(entries: &[QueueEntry], ancestor_idx: usize, leaf_idx: usize) -> bool {
     if ancestor_idx >= leaf_idx {
@@ -3303,7 +3378,7 @@ pub fn locate_submitted_prompt(
         let QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
-        if entry_is_group_parent(entries, idx) || !same_prompt(&prompt.text, head_text) {
+        if entry_is_group_parent(entries, idx) || !row_matches_head_text(entries, idx, head_text) {
             continue;
         }
         if skip(prompt.text.as_str()) {
@@ -3338,7 +3413,8 @@ pub fn submitted_prompts_in_order(
                 let QueueEntry::Prompt(prompt) = entry else {
                     continue;
                 };
-                if entry_is_group_parent(entries, idx) || !same_prompt(&prompt.text, head) {
+                if entry_is_group_parent(entries, idx) || !row_matches_head_text(entries, idx, head)
+                {
                     continue;
                 }
                 if skip(prompt.text.as_str()) {

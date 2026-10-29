@@ -432,9 +432,13 @@ tree (`#nestsubmit`): a synthetic queue diff, a plan queue prompt, a direct
 run's active-queue diff, and a subagent's submitted prompt. The tree is
 context from the parsed queue AST, including a sibling branch that is not on
 the lineage path. An example lineage is
-`https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Identity, claims,
-`--item`, and the selected queue prompt stay the leaf, so a quote of either
-the vector or the leaf answers that leaf. Do not quote the tree as the queue
+`https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` use that vector when the leaf is not a tracked directive,
+so the same bare `#tag` under another parent is different work
+(`#nestlistlineage`). The dispatch list shows the leaf when its text is unique,
+and the vector when the same leaf is live under another parent. The subagent
+authorization carries the vector either way.
+A quote of either the vector or the leaf still answers that leaf. The selected
+queue prompt stays the leaf. Do not quote the tree as the queue
 prompt. A nested child that begins with
 `Include #subagent:` is release context for that quote, not a sub-prompt: the
 quote does not strike the row while any named include is still an open queue

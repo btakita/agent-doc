@@ -264,14 +264,17 @@ pub fn derive_claim_runtime_projection_scoped(
     // for duplicate heads while avoiding a union that could mark an unrelated
     // duplicate twice.
     let mut persisted_heads = Vec::new();
-    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<'_>| {
+    let targets_for = |block: agent_doc_queue::queue_mirror_projection::QueueProjectionBlock<
+        '_,
+    >| {
         // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
         // queue is an earlier attempt's record, never the claim's row.
         let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         let targets = block
             .entries
             .iter()
-            .filter_map(|entry| match entry {
+            .enumerate()
+            .filter_map(|(index, entry)| match entry {
                 QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                     let struck = matches!(entry, QueueEntry::Completed(_));
                     // `#queuemirrormarkers`: a sibling queue's struck row is its
@@ -280,7 +283,10 @@ pub fn derive_claim_runtime_projection_scoped(
                     if struck && !block.scheduler_selected {
                         return None;
                     }
-                    let identity = agent_doc_queue::queue_claim::claim_identity(&prompt.text);
+                    let identity = agent_doc_queue::queue_claim::claim_identity_at(block.entries, index)
+                        .unwrap_or_else(|| {
+                            agent_doc_queue::queue_claim::claim_identity(&prompt.text)
+                        });
                     let observed =
                         agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
                     if let Some(claim) = claim_states.get(&identity)
@@ -323,7 +329,7 @@ pub fn derive_claim_runtime_projection_scoped(
                         )
                     }) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                    } else if selected.claims(&prompt.text) {
+                    } else if selected.claims_at(block.entries, index) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Running
                     } else if blockers.blocks_row(&prompt.text) {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
@@ -852,17 +858,19 @@ mod tests {
             "<!-- agent:exchange -->\n{cells}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n- {parent}\n  - {child}\n- {composite}\n<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        assert!(agent_doc_queue::queue_claim::completion_evidence_matches_row(
-            parent,
-            &format!("📥 {parent}\n  - {child}"),
-        ));
-        assert!(agent_doc_queue::queue_claim::completion_evidence_matches_row(
-            "parent - child",
-            "parent\n  - child",
-        ));
-        assert!(!agent_doc_queue::queue_claim::completion_evidence_matches_row(
-            composite, parent,
-        ));
+        assert!(
+            agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                parent,
+                &format!("📥 {parent}\n  - {child}"),
+            )
+        );
+        assert!(
+            agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                "parent - child",
+                "parent\n  - child",
+            )
+        );
+        assert!(!agent_doc_queue::queue_claim::completion_evidence_matches_row(composite, parent,));
 
         let queue_len = |document: &str| {
             let components = agent_doc_element::element::parse(document).unwrap();
@@ -1438,7 +1446,10 @@ mod tests {
             3_600,
         )
         .unwrap();
-        assert_eq!(outcome, agent_doc_queue::queue_claim::ClaimOutcome::Reassigned);
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
         assert_eq!(claim.generation, 2);
 
         let current = std::fs::read_to_string(&doc).unwrap();
@@ -1495,7 +1506,10 @@ mod tests {
             derive_claim_runtime_projection(&doc, &claimed.target_content, None).unwrap();
         assert_eq!(
             released.target_content,
-            two_queue_doc("- 📥 do [#jb263]\n", "- 📥 do [#jb263]\n- ~~do [#jb263]~~\n"),
+            two_queue_doc(
+                "- 📥 do [#jb263]\n",
+                "- 📥 do [#jb263]\n- ~~do [#jb263]~~\n"
+            ),
         );
     }
 
@@ -1581,20 +1595,19 @@ mod tests {
         let effects = FakeEffects::default();
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let claimed = std::fs::read_to_string(&doc).unwrap();
-        assert!(claimed.contains("- 📥 inline coordinator work"), "{claimed}");
         assert!(
-            claimed.contains(
-                "- 🟡 [#subagent:worker#1] dispatched worker work"
-            ),
+            claimed.contains("- 📥 inline coordinator work"),
+            "{claimed}"
+        );
+        assert!(
+            claimed.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{claimed}"
         );
         let claimed_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
         assert!(
-            claimed_snapshot.contains(
-                "- 🟡 [#subagent:worker#1] dispatched worker work"
-            ),
+            claimed_snapshot.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{claimed_snapshot}"
         );
 
@@ -1610,9 +1623,7 @@ mod tests {
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let running = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            running.contains(
-                "- 🚧 [#subagent:worker#1] dispatched worker work"
-            ),
+            running.contains("- 🚧 [#subagent:worker#1] dispatched worker work"),
             "{running}"
         );
 
@@ -1634,9 +1645,7 @@ mod tests {
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let reported = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            reported.contains(
-                "- ☑️ [#subagent:worker#1] dispatched worker work"
-            ),
+            reported.contains("- ☑️ [#subagent:worker#1] dispatched worker work"),
             "{reported}"
         );
         let synchronized = claim_reports_with_effects(&effects, &doc).unwrap();
@@ -1649,8 +1658,8 @@ mod tests {
             crate::claim_release_receipt::ReleaseKind::Reported,
             Some(1),
         )
-            .unwrap()
-            .unwrap();
+        .unwrap()
+        .unwrap();
         project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap();
         let released_projection = std::fs::read_to_string(&doc).unwrap();
         assert!(
@@ -1658,9 +1667,7 @@ mod tests {
             "{released_projection}"
         );
         assert!(
-            released_projection.contains(
-                "- ☑️ [#subagent:worker#1] dispatched worker work"
-            )
+            released_projection.contains("- ☑️ [#subagent:worker#1] dispatched worker work")
                 && !released_projection.contains("- 🟡 dispatched worker work"),
             "{released_projection}"
         );
@@ -1669,9 +1676,7 @@ mod tests {
             .unwrap();
         assert!(
             released_snapshot.contains("- 📥 inline coordinator work")
-                && released_snapshot.contains(
-                    "- ☑️ [#subagent:worker#1] dispatched worker work"
-                )
+                && released_snapshot.contains("- ☑️ [#subagent:worker#1] dispatched worker work")
                 && !released_snapshot.contains("- 🟡 dispatched worker work"),
             "{released_snapshot}"
         );
@@ -1683,8 +1688,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let item = "finish sdk demo";
         let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
-        let (_, claim) =
-            crate::queue_claim::claim(&doc, item, "subagent:sdk", 600).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, item, "subagent:sdk", 600).unwrap();
         crate::queue_claim::start_attempt(
             &doc,
             item,
@@ -1782,8 +1786,14 @@ mod tests {
         }
 
         let live = effects.current();
-        assert!(live.contains("- 🚧 [#subagent:free#1] free text worker\n"), "{live}");
-        assert!(live.contains("- 🚧 [#subagent:normalized#1] do [#normalized-worker]\n"), "{live}");
+        assert!(
+            live.contains("- 🚧 [#subagent:free#1] free text worker\n"),
+            "{live}"
+        );
+        assert!(
+            live.contains("- 🚧 [#subagent:normalized#1] do [#normalized-worker]\n"),
+            "{live}"
+        );
         assert_eq!(live.matches("free text worker").count(), 1, "{live}");
         assert_eq!(live.matches("normalized-worker").count(), 1, "{live}");
 
@@ -1913,20 +1923,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let item = "#gh-issue https://github.com/example/project/issues/299";
         let unrelated = "#gh-issue https://github.com/example/project/issues/300";
-        let doc = write_claim_projection_doc(
-            dir.path(),
-            &format!("- {item}\n- {unrelated}\n"),
-        );
+        let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n- {unrelated}\n"));
         crate::queue_claim::claim(&doc, item, "subagent:gh299", 600).unwrap();
-        crate::queue_claim::start_attempt(
-            &doc,
-            item,
-            "subagent:gh299",
-            "/root/gh299",
-            600,
-            1,
-        )
-        .unwrap();
+        crate::queue_claim::start_attempt(&doc, item, "subagent:gh299", "/root/gh299", 600, 1)
+            .unwrap();
 
         // Model a stale visible cut after the durable worker binding survived a
         // controller handoff: the exact running row is bare and its sibling is
@@ -1936,9 +1936,9 @@ mod tests {
 
         assert!(projection.changed);
         assert!(
-            projection.target_content.contains(&format!(
-                "- 🚧 [#subagent:gh299#1] {item}\n"
-            )),
+            projection
+                .target_content
+                .contains(&format!("- 🚧 [#subagent:gh299#1] {item}\n")),
             "{}",
             projection.target_content
         );
@@ -1991,11 +1991,9 @@ mod tests {
         );
         let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
         assert!(
-            projection
-                .target_content
-                .contains(&format!(
-                    "- 🚧 [#subagent:project_rebase_review#1] {question}\n"
-                )),
+            projection.target_content.contains(&format!(
+                "- 🚧 [#subagent:project_rebase_review#1] {question}\n"
+            )),
             "{}",
             projection.target_content
         );
@@ -2017,24 +2015,15 @@ mod tests {
         let item = "#gh-issue https://github.com/example/project/issues/299";
         let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
         crate::queue_claim::claim(&doc, item, "subagent:gh299", 600).unwrap();
-        crate::queue_claim::start_attempt(
-            &doc,
-            item,
-            "subagent:gh299",
-            "/root/gh299",
-            600,
-            1,
-        )
-        .unwrap();
+        crate::queue_claim::start_attempt(&doc, item, "subagent:gh299", "/root/gh299", 600, 1)
+            .unwrap();
 
         let live = std::fs::read_to_string(&doc).unwrap();
         let live_projection = derive_claim_runtime_projection(&doc, &live, None).unwrap();
         assert_eq!(
             live_projection
                 .target_content
-                .matches(&format!(
-                    "- 🚧 [#subagent:gh299#1] {item}\n"
-                ))
+                .matches(&format!("- 🚧 [#subagent:gh299#1] {item}\n"))
                 .count(),
             1,
             "a live worked row must project exactly one typed lifecycle marker: {}",
@@ -2051,9 +2040,7 @@ mod tests {
         assert!(
             terminal_projection
                 .target_content
-                .contains(&format!(
-                    "- ❔ [#subagent:gh299#1] {item}\n"
-                )),
+                .contains(&format!("- ❔ [#subagent:gh299#1] {item}\n")),
             "{}",
             terminal_projection.target_content
         );
@@ -2069,10 +2056,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let receipted = "do [#release-promotion-concurrency]";
         let celled = "tmux pane auto sync is not working. Sync Tmux Panes works.";
-        let doc = write_claim_projection_doc(
-            dir.path(),
-            &format!("- 🚧 {receipted}\n- 🚧 {celled}\n"),
-        );
+        let doc =
+            write_claim_projection_doc(dir.path(), &format!("- 🚧 {receipted}\n- 🚧 {celled}\n"));
         let mut cells = String::new();
         for (item, owner) in [
             (receipted, "subagent:release_promotion_concurrency"),
@@ -2233,9 +2218,7 @@ mod tests {
             "{projected}"
         );
         assert!(
-            projected.contains(
-                "- 🟡 [#subagent:worker#1] dispatched worker work"
-            ),
+            projected.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{projected}"
         );
     }

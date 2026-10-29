@@ -175,6 +175,15 @@ pub struct QueueClaim {
     /// field existed: its follows are unattributable and never repaired.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub followed_generation: u64,
+    /// Authored row when this attempt was claimed, including nested children
+    /// then present.
+    ///
+    /// A nest-vector `item_text` is the claim key and has no sub-prompt block.
+    /// Steering measures later children against this row (`#nestedclaimsteer`,
+    /// `#nestlistlineage`). `None` when `item_text` is already that row, or
+    /// for a claim stored before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_time_row: Option<String>,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -383,8 +392,9 @@ pub fn live_row_identities(
 ) -> HashSet<QueueItemIdentity> {
     entries
         .iter()
-        .filter_map(|entry| match entry {
-            crate::document_queue::QueueEntry::Prompt(prompt) => Some(claim_identity(&prompt.text)),
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            crate::document_queue::QueueEntry::Prompt(_) => claim_identity_at(entries, index),
             _ => None,
         })
         .collect()
@@ -467,6 +477,9 @@ pub struct ClaimQueueRows {
     /// Live head rows in queue order, each still carrying its binary-owned
     /// lifecycle and `[#owner#generation]` projection (`#claimrowmigrate`).
     pub rows: Vec<String>,
+    /// Claim keys parallel to `rows` (`#nestlistlineage`). Empty when the
+    /// view was built from display rows only; follow then keys `rows`.
+    pub claim_texts: Vec<String>,
     /// Work texts of the queue's struck (completed) rows, markers and any
     /// baked-in auto-struck note removed.
     pub struck: Vec<String>,
@@ -485,6 +498,7 @@ impl ClaimQueueView {
             queues: vec![ClaimQueueRows {
                 queue_id: None,
                 rows: rows.to_vec(),
+                claim_texts: Vec::new(),
                 struck: Vec::new(),
             }],
         }
@@ -500,23 +514,34 @@ impl ClaimQueueView {
         let queues = graph
             .blocks()
             .iter()
-            .map(|block| ClaimQueueRows {
-                queue_id: Some(block.id.clone()),
-                rows: document_queue::prompts(&block.entries)
+            .map(|block| {
+                let paired = document_queue::executable_prompt_indexes(&block.entries)
                     .into_iter()
-                    .map(|prompt| prompt.text.trim().to_string())
-                    .collect(),
-                struck: block
-                    .entries
-                    .iter()
-                    .filter_map(|entry| match entry {
-                        QueueEntry::Completed(prompt) => {
-                            Some(crate::queue_consume::struck_row_work_text(&prompt.text))
-                        }
-                        _ => None,
+                    .filter_map(|index| {
+                        let QueueEntry::Prompt(prompt) = &block.entries[index] else {
+                            return None;
+                        };
+                        let claim = document_queue::lineage_claim_text(&block.entries, index)?;
+                        Some((prompt.text.trim().to_string(), claim))
                     })
-                    .filter(|text| !text.is_empty())
-                    .collect(),
+                    .collect::<Vec<_>>();
+                let (rows, claim_texts) = paired.into_iter().unzip();
+                ClaimQueueRows {
+                    queue_id: Some(block.id.clone()),
+                    rows,
+                    claim_texts,
+                    struck: block
+                        .entries
+                        .iter()
+                        .filter_map(|entry| match entry {
+                            QueueEntry::Completed(prompt) => {
+                                Some(crate::queue_consume::struck_row_work_text(&prompt.text))
+                            }
+                            _ => None,
+                        })
+                        .filter(|text| !text.is_empty())
+                        .collect(),
+                }
             })
             .collect();
         Some(Self { queues })
@@ -527,6 +552,31 @@ impl ClaimQueueView {
         self.queues
             .iter()
             .flat_map(|queue| queue.rows.iter().cloned())
+            .collect()
+    }
+
+    /// Claim keys parallel to [`Self::rows`] (`#nestlistlineage`).
+    ///
+    /// A queue built with [`Self::single`] has no claim texts; its display
+    /// rows, markers stripped, are the keys.
+    pub fn claim_keys(&self) -> Vec<String> {
+        self.queues
+            .iter()
+            .flat_map(|queue| {
+                if queue.claim_texts.len() == queue.rows.len() {
+                    queue.claim_texts.clone()
+                } else {
+                    queue
+                        .rows
+                        .iter()
+                        .map(|row| {
+                            agent_doc_document::queue_projection::strip_in_progress_marker(
+                                row.trim(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                }
+            })
             .collect()
     }
 }
@@ -1047,6 +1097,7 @@ impl QueueClaimLedger {
             anchor: None,
             followed_from: Vec::new(),
             followed_generation: 0,
+            claim_time_row: None,
         };
         match self
             .claims
@@ -1733,20 +1784,28 @@ impl QueueClaimLedger {
         // Rows may carry the binary-owned lifecycle projection. Work text and
         // identity never include it; the exact owner annotation is kept apart
         // as row evidence (`#claimrowmigrate`).
-        let texts: Vec<String> = live_heads
+        let display: Vec<String> = live_heads
             .iter()
             .map(|head| strip_in_progress_marker(head.trim()))
             .collect();
+        // Identity follows the nest vector when the view has one. The anchor
+        // still pairs on the visible row, markers stripped (`#nestlistlineage`).
+        let claim_keys: Vec<String> = if queue.claim_texts.len() == live_heads.len() {
+            queue.claim_texts.clone()
+        } else {
+            display.clone()
+        };
         let row_owners: Vec<Option<QueueOwnerProjection>> = live_heads
             .iter()
             .map(|head| owner_projection(head))
             .collect();
-        let norms: Vec<String> = texts
+        let norms: Vec<String> = display
             .iter()
             .map(|head| normalize_queue_head_text(head))
             .collect();
-        let live: Vec<QueueItemIdentity> = texts.iter().map(|head| claim_identity(head)).collect();
-        let families: Vec<QueueItemIdentity> = texts
+        let live: Vec<QueueItemIdentity> =
+            claim_keys.iter().map(|head| claim_identity(head)).collect();
+        let families: Vec<QueueItemIdentity> = claim_keys
             .iter()
             .map(|head| effect_family_identity(head))
             .collect();
@@ -1902,7 +1961,7 @@ impl QueueClaimLedger {
             {
                 continue;
             }
-            let text = texts[*head_idx].trim().to_string();
+            let text = claim_keys[*head_idx].trim().to_string();
             let claim = &mut self.claims[*claim_idx];
             let previous = std::mem::replace(&mut claim.item_text, text.clone());
             claim.identity = live[*head_idx].clone();
@@ -2121,8 +2180,71 @@ impl QueueClaimLedger {
 /// identity ([`queue_head_identity`]). Every claim comparison — the ledger,
 /// [`ClaimedQueueItems::claims`], live-head closure, dispatch membership —
 /// goes through this one function.
+///
+/// A nest vector (`root: …: item`, `#nestlistlineage`) is one free-text key.
+/// The same bare `#tag` under two parents is two claims. A leading intent tag
+/// whose remainder is the work (`#subagents: #gh-fix <url>`) stays on
+/// [`queue_head_identity`].
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
-    queue_head_identity(item.trim())
+    let trimmed = item.trim();
+    if let Some(identity) = nest_vector_claim_identity(trimmed) {
+        return identity;
+    }
+    queue_head_identity(trimmed)
+}
+
+/// Free-text identity of a nest vector, when `text` is one.
+///
+/// `queue_head_identity` strips a leading `#id:` as an intent tag, so
+/// `#parent: #rebase` would collapse to `rebase` and every nested copy would
+/// share one claim. A URL or prose ancestor is kept whole. A routing tag in
+/// front of other work is left to [`queue_head_identity`].
+fn nest_vector_claim_identity(text: &str) -> Option<QueueItemIdentity> {
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    let head = agent_doc_element_queue::strip_priority_markers(head.trim());
+    let head = head.trim();
+    // `do [#id]: note` is an annotated directive, not a nest vector.
+    if head.to_ascii_lowercase().starts_with("do ") {
+        return None;
+    }
+    let (ancestors, leaf) = head.rsplit_once(": ")?;
+    let ancestors = ancestors.trim();
+    let leaf = leaf.trim();
+    if ancestors.is_empty() || leaf.is_empty() {
+        return None;
+    }
+    let stripped = agent_doc_element_queue::strip_intent_tags(head);
+    let leaf_is_bare_id = leaf.starts_with('#')
+        && !leaf[1..]
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+    if stripped != head {
+        let keeps_parent = if stripped.contains(": ") {
+            // `#parent: child: #rebase` keeps every ancestor. `#gh-fix: see: the
+            // bug` is a tagged line whose work contains a colon.
+            head.matches(": ").count() >= 2 && leaf_is_bare_id
+        } else {
+            stripped == leaf && leaf_is_bare_id
+        };
+        if !keeps_parent {
+            return None;
+        }
+    }
+    Some(QueueItemIdentity::FreeText(
+        agent_doc_element_queue::normalize_multiline_dedup_text(head),
+    ))
+}
+
+/// Work identity of the queue row at `index` (`#nestlistlineage`).
+///
+/// A nested executable leaf that is not a tracked directive keys as its nest
+/// vector. Every other row keys as [`claim_identity`] of its marker-stripped
+/// text. `None` when `index` is not a prompt row.
+pub fn claim_identity_at(
+    entries: &[crate::document_queue::QueueEntry],
+    index: usize,
+) -> Option<QueueItemIdentity> {
+    crate::document_queue::lineage_claim_text(entries, index).map(|text| claim_identity(&text))
 }
 
 /// Whether completion cell item `cell_item` is queue row `row_text`'s own work
@@ -2412,6 +2534,28 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
     {
         return Ok(head.clone());
     }
+    // `#nestlistlineage`: `--item '#rebase'` names the nest vector when exactly
+    // one live head's leaf is that work. Several parents are ambiguous.
+    let by_leaf: Vec<String> = live_heads
+        .iter()
+        .filter(|head| {
+            head.rsplit_once(": ").is_some_and(|(ancestors, leaf)| {
+                !ancestors.is_empty() && !leaf.is_empty() && claim_identity(leaf) == identity
+            })
+        })
+        .cloned()
+        .collect();
+    match by_leaf.len() {
+        1 => return Ok(by_leaf[0].clone()),
+        0 => {}
+        _ => {
+            return Err(QueueClaimMiss {
+                item: item.trim().to_string(),
+                live_heads: live_heads.to_vec(),
+                ambiguous: by_leaf,
+            });
+        }
+    }
     // `#multilinequeuehead`: a multi-line head (a title line plus a pasted
     // fenced block) is named by its title line. The item resolves only when
     // exactly one live multi-line head has that first line; several heads with
@@ -2557,6 +2701,15 @@ impl ClaimedQueueItems {
         !self.0.is_empty() && self.0.contains(&claim_identity(prompt_text))
     }
 
+    /// Whether the row at `index` is claimed (`#nestlistlineage`).
+    ///
+    /// Identity is the row's nest vector when it has one, computed from the
+    /// full `entries` list before any row is dropped.
+    pub fn claims_at(&self, entries: &[crate::document_queue::QueueEntry], index: usize) -> bool {
+        !self.0.is_empty()
+            && claim_identity_at(entries, index).is_some_and(|id| self.0.contains(&id))
+    }
+
     /// Whether this set holds a claimed identity `earlier` did not
     /// (GH #319 claim visibility): a claim landed between two reads of the ledger.
     /// A claim that released or expired in between is not a gain.
@@ -2568,6 +2721,80 @@ impl ClaimedQueueItems {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#nestlistlineage`: the contracts/162 `#rebase` child is not the
+    /// haiven-api PR 767 `#rebase` child. A folded `push` stays out of the key.
+    /// A top-level `#rebase` and a nested `do [#id]` stay id-backed.
+    #[test]
+    fn nested_rebase_under_different_parents_is_different_work() {
+        use agent_doc_element_queue::QueueItemIdentity;
+
+        let body = "\
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - #rebase
+    - push
+- https://github.com/haiven-dev/haiven-contracts/pull/162
+  - #rebase
+- [#epic]
+  - #rebase
+- do [#parent]
+  - do [#child]
+- #rebase
+";
+        let entries = crate::document_queue::parse(body).unwrap();
+        let mut keys = Vec::new();
+        for index in crate::document_queue::executable_prompt_indexes(&entries) {
+            let text = crate::document_queue::lineage_claim_text(&entries, index).unwrap();
+            if text == "#rebase" || text.ends_with(": #rebase") || text.contains("do [#child]") {
+                keys.push((text, claim_identity_at(&entries, index).unwrap()));
+            }
+        }
+        let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase";
+        let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
+        let epic = "#epic: #rebase";
+        assert!(
+            keys.iter().any(|(text, _)| text == api),
+            "folded push stays out of the key: {keys:?}"
+        );
+        let identity = |needle: &str| {
+            keys.iter()
+                .find(|(text, _)| text == needle)
+                .map(|(_, identity)| identity.clone())
+                .unwrap_or_else(|| panic!("missing {needle}: {keys:?}"))
+        };
+        let api_id = identity(api);
+        let contracts_id = identity(contracts);
+        let epic_id = identity(epic);
+        assert_ne!(api_id, contracts_id);
+        assert_ne!(api_id, epic_id);
+        assert_ne!(contracts_id, epic_id);
+        assert!(matches!(api_id, QueueItemIdentity::FreeText(_)));
+        assert!(matches!(epic_id, QueueItemIdentity::FreeText(_)));
+        assert_eq!(
+            identity("#rebase"),
+            QueueItemIdentity::Id("rebase".to_string())
+        );
+        assert_eq!(
+            identity("do [#child]"),
+            QueueItemIdentity::Id("child".to_string())
+        );
+        assert!(
+            !ClaimedQueueItems::from_identities([contracts_id.clone()]).claims_at(
+                &entries,
+                crate::document_queue::executable_prompt_indexes(&entries)
+                    .into_iter()
+                    .find(|index| {
+                        crate::document_queue::lineage_claim_text(&entries, *index).as_deref()
+                            == Some(api)
+                    })
+                    .unwrap(),
+            )
+        );
+        let heads = vec![api.to_string(), contracts.to_string()];
+        let miss = resolve_claim_target("#rebase", &heads).unwrap_err();
+        assert_eq!(miss.ambiguous, heads);
+        assert_eq!(resolve_claim_target(contracts, &heads).unwrap(), contracts);
+    }
 
     fn session(harness: &str, id: &str, pane: &str, pid: u32) -> ClaimOwnerSession {
         ClaimOwnerSession {
@@ -3043,6 +3270,7 @@ mod tests {
                     anchor: None,
                     followed_from: Vec::new(),
                     followed_generation: 0,
+                    claim_time_row: None,
                 },
                 QueueClaim {
                     identity: QueueItemIdentity::FreeText(format!("#gh-fix {url}")),
@@ -3059,6 +3287,7 @@ mod tests {
                     anchor: None,
                     followed_from: Vec::new(),
                     followed_generation: 0,
+                    claim_time_row: None,
                 },
             ],
             cancellations: Vec::new(),

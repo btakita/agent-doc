@@ -27,18 +27,18 @@ pub struct ClaimTimeSnapshot {
 }
 
 impl ClaimTimeSnapshot {
-    /// Oldest followed text, else the claim's current `item_text`.
+    /// Row text post-claim additions are measured against.
     ///
-    /// Follow rewrites `item_text` to the live row. The first `followed_from`
-    /// entry is the row as it was when the claim was made, which is the
-    /// baseline the post-claim additions are measured against.
+    /// `claim_time_row` is that row when the claim key is a nest vector
+    /// (`#nestlistlineage`). Otherwise the oldest `followed_from` entry is the
+    /// row as claimed, and `item_text` is the fallback.
     pub fn from_claim(claim: &QueueClaim) -> Self {
         Self {
             identity: claim.identity.clone(),
             claim_time_text: claim
-                .followed_from
-                .first()
-                .cloned()
+                .claim_time_row
+                .clone()
+                .or_else(|| claim.followed_from.first().cloned())
                 .unwrap_or_else(|| claim.item_text.clone()),
         }
     }
@@ -133,23 +133,25 @@ pub fn expand_entries(
 }
 
 fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mut Vec<QueueEntry>) {
-    let identity = claim_identity(&prompt.text);
+    let index = out.len();
+    out.push(QueueEntry::Prompt(prompt.clone()));
+    // Parents already pushed supply the nest vector (`#nestlistlineage`).
+    let identity = crate::queue_claim::claim_identity_at(out, index)
+        .unwrap_or_else(|| claim_identity(&prompt.text));
     let Some(snapshot) = snapshots
         .iter()
         .find(|snapshot| snapshot.identity == identity)
     else {
-        out.push(QueueEntry::Prompt(prompt.clone()));
         return;
     };
     if !has_subprompts(&prompt.text) {
-        out.push(QueueEntry::Prompt(prompt.clone()));
         return;
     }
     let split = split_nested_claim_steer(&prompt.text, &snapshot.claim_time_text);
     if split.routable.is_empty() {
-        out.push(QueueEntry::Prompt(prompt.clone()));
         return;
     }
+    out.pop();
     let mut steering = prompt.clone();
     steering.text = split.steering.into_owned();
     steering.multiline = false;
@@ -215,7 +217,14 @@ mod tests {
     fn a_claimed_routable_child_splits_its_own_grandchildren() {
         let body = "- Parent\n  - alpha\n  - beta\n    - first gc\n    - second gc\n";
         let entries = document_queue::parse(body).unwrap();
-        let snapshots = vec![parent_snapshot("Parent"), parent_snapshot("beta")];
+        // `beta` is a nested leaf, so its claim key is the nest vector
+        // (`#nestlistlineage`). Claim-time text stays the row, which is what
+        // later grandchildren are measured against.
+        let beta = ClaimTimeSnapshot {
+            identity: claim_identity("Parent: beta"),
+            claim_time_text: "beta".to_string(),
+        };
+        let snapshots = vec![parent_snapshot("Parent"), beta];
         let expanded = expand_entries(entries, &snapshots);
         let prompts = document_queue::prompts(&expanded);
         assert_eq!(
@@ -244,6 +253,16 @@ mod tests {
             &document_queue::parse("- epic\n  - do [#alpha]\n  - remember the logs\n").unwrap(),
             0
         ));
+    }
+
+    #[test]
+    fn a_lineage_claim_measures_children_against_the_stored_row() {
+        let mut ledger = crate::queue_claim::QueueClaimLedger::default();
+        ledger.claim("Parent: beta", "subagent:route", 1, 100);
+        ledger.claims[0].claim_time_row = Some("beta".to_string());
+        let snapshot = ClaimTimeSnapshot::from_claim(&ledger.claims[0]);
+        assert_eq!(snapshot.claim_time_text, "beta");
+        assert_eq!(snapshot.identity, claim_identity("Parent: beta"));
     }
 
     #[test]

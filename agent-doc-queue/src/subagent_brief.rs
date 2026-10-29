@@ -359,7 +359,8 @@ pub fn subagent_authorization_with_presets(
             computed.as_str()
         }
     };
-    authorization.subagent_prompt_preamble = render_preamble(document, &authorization, submitted);
+    authorization.subagent_prompt_preamble =
+        render_preamble(document, content, &authorization, submitted);
     authorization
 }
 
@@ -570,7 +571,12 @@ pub const SUBAGENT_NESTED_OUTWARD_AUTHORIZATION: &str = concat!(
 /// Marker line present exactly when the authorization failed closed.
 pub const UNRESOLVED_AUTHORIZATION_MARKER: &str = "AUTHORIZATION NOT RESOLVED";
 
-fn render_preamble(document: &str, auth: &SubagentAuthorization, submitted: &str) -> String {
+fn render_preamble(
+    document: &str,
+    content: &str,
+    auth: &SubagentAuthorization,
+    submitted: &str,
+) -> String {
     let mut out = String::new();
     out.push_str(SUBAGENT_PREAMBLE_MARKER);
     out.push_str(&format!(
@@ -591,7 +597,14 @@ fn render_preamble(document: &str, auth: &SubagentAuthorization, submitted: &str
             "\nOrigin queue id (dispatch-time provenance):\n> {queue_id}\n\nAny follow-up queue heads produced by this work belong immediately after the originating head in this queue. Report them to the coordinator in order; the coordinator applies them with `agent-doc queue follow-up {document} --id {queue_id} --after <origin> --item <text>...`. Do not place them in a selected or mirrored sibling queue.\n"
         ));
     }
-    let outward = nested_outward_action_lines(&auth.item);
+    // A lineage claim key (`url: #rebase`) has no folded `push` child. The
+    // located row still does (`#nestedoutwardauth`, `#nestlistlineage`).
+    let mut outward = nested_outward_action_lines(&auth.item);
+    if outward.is_empty()
+        && let Some(row) = crate::queue_response::queue_row_text_for_head(content, &auth.item)
+    {
+        outward = nested_outward_action_lines(&row);
+    }
     if !outward.is_empty() {
         out.push_str(
             "\nOperator authorization, nested under the queue item (effective directives):\n",
@@ -1314,6 +1327,21 @@ agent_doc_format: template
         assert!(
             !preamble.contains("ask the coordinator for its text"),
             "a request annotation is not missing backlog text: {preamble}"
+        );
+
+        let parent = "https://github.com/haiven-dev/haiven-contracts/pull/162";
+        let nested = format!("{parent}\n  - #rebase\n    - push ⟦effect:2⟧");
+        let content = doc(fm, "subagents", &[&nested], &[]);
+        let lineage = format!("{parent}: #rebase");
+        let preamble =
+            subagent_authorization("doc.md", &content, &lineage).subagent_prompt_preamble;
+        assert!(
+            preamble.contains(&format!("> {lineage}")),
+            "the quote stays the lineage item: {preamble}"
+        );
+        assert!(
+            preamble.contains("> push\n"),
+            "a folded push on the located row is still authorization: {preamble}"
         );
 
         let review = "#review\n  - I don't see the review on github. publish";

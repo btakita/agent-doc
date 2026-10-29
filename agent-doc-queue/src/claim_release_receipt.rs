@@ -331,6 +331,7 @@ mod tests {
             anchor: None,
             followed_from: Vec::new(),
             followed_generation: 0,
+            claim_time_row: None,
         }
     }
 

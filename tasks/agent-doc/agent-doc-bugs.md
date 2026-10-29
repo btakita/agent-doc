@@ -758,8 +758,35 @@ Both named commits are in this release. `9c09d2aadc` and `1bbc28a6a9` were alrea
 The row asks for errors during a prompt to be surfaced, using the `#review` of haiven-api pull 767 as the example. The worker owns the spec, the tests, and a push of that branch. Install stays with the coordinator after the branch integrates.
 
 `subagent:runduplicate` generation 1 keeps worker `01a18839-8b85-7601-9741-632e1a6358b7`. `subagent:responseid` generation 1 keeps worker `01a18839-c53c-7141-ab40-b2a9128881b8`. `subagent:reviewpublish` generation 1 is reported, and the marker choice is already in the exchange.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
 
-<!-- agent:boundary:0a96ac8f -->
+### Re: Local vs published marker — grok-4.7 · 2026-10-29T11:41-04:00
+
+`subagent:reviewpublish` generation 1, worker `01a18839-8b85-7601-9741-6333916b1f50`, returned a blocking design choice. Branch `fix/local-vs-published-marker` is unchanged at `7b44d8bb28`. Nothing on that branch was committed or pushed.
+
+[#subagent-operator-request-review-publish-marker] subagent operator request
+- *queue_item:*
+  - I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"?
+- *context:*
+  - No spec, icon, or annotation currently records that a `#review` was only drafted or that a code change was only committed locally.
+  - Queue rows still show only lifecycle (`📥` `🚧` `☑️`), so a reported `#review` looks the same whether GitHub has the review or not.
+  - The same gap applies to a code-change row such as `#rebase` or `#push`: local commits and a pushed remote head are not distinct.
+  - A row can be both: already published, then changed again locally.
+  - Ordinary rows (questions, research) have neither state and must stay unmarked.
+  - Branch `fix/local-vs-published-marker` is unchanged at `7b44d8bb2890fb636b4579862ff64a5bd15d5e28`. Nothing was committed or pushed.
+- *choices:*
+  - **Annotation, worker-reported**: Add `⟦local⟧` and `⟦published⟧`, alone or together, only when `queue report-complete` records that state. Strip them from work identity, document them in the queue-marker legend, and leave every other row unmarked.
+  - **Icons, worker-reported**: Same source and same rows, but two new composing glyphs instead of bracket annotations. The operator names both glyphs before implementation.
+  - **Observe git and GitHub**: On projection, for a row whose parent or text is a pull-request URL and whose leading preset is `#review` or a code-change preset (`#rebase`, `#push`, `#fix-ci`, `#address`), query `gh` and the branch upstream and paint the marker. No worker report required. Projection then depends on network and credentials.
+  - **Other**: The operator specifies the tokens, the row rule, and the source of truth.
+
+The choice is `#reviewpublish-marker` on the todo list. Implementation of the marker starts from the option you pick.
+
+<!-- agent:boundary:2701ccd9 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -768,7 +795,7 @@ The row asks for errors during a prompt to be surfaced, using the `#review` of h
 - do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~ — auto-struck: answered this cycle (#ftstrike)
-- ☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+- 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
 - 🚧 [#subagent:runduplicate#1] As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.
 - 🚧 [#subagent:responseid#1] Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
 ---
@@ -811,6 +838,8 @@ The row asks for errors during a prompt to be surfaced, using the `#review` of h
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
 - [x] [#rtsteering-force-lease] Allow or deny git push --force-with-lease on fix/realtime-steering-parity only
 - [x] [#subagent-operator-request-rtsteering-force-lease] Answer the blocking subagent permission request for tracked work grok-live-editor for queue item ‘re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering’ in agent:exchange: permission to run `git push --force-with-lease` on `fix/realtime-steering-parity` only (choices: allow, deny) (source: agent:backlog [#grok-live-editor])
+- [ ] [#reviewpublish-marker] Pick the local-vs-published marker for a #review or code-change row. Worker 01a18839-8b85-7601-9741-6333916b1f50 left branch fix/local-vs-published-marker unchanged at 7b44d8bb28. (1) Annotation, worker-reported: ⟦local⟧ and ⟦published⟧, alone or together, only when queue report-complete records that state. (2) Icons, worker-reported: same rule, and you name both glyphs first. (3) Observe git and GitHub on projection for a pull-request row whose preset is #review, #rebase, #push, #fix-ci, or #address. (4) Other: you specify the tokens, the row rule, and the source of truth.
+- [ ] [#subagent-operator-request-review-publish-marker] Answer the blocking subagent question for queue item ‘I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context…’ in agent:exchange: Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"? (choices: Annotation, worker-reported, Icons, worker-reported, Observe git and GitHub, Other)
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

@@ -45,7 +45,8 @@ use agent_doc_tmux_commands::{
     kill_pane as kill_pane_command, kill_window as kill_window_command,
     list_panes as list_panes_command, list_panes_all as list_panes_all_command,
     list_windows as list_windows_command, list_windows_all as list_windows_all_command,
-    new_window_in_cwd as new_window_in_cwd_command, rename_window as rename_window_command,
+    load_buffer as load_buffer_command, new_window_in_cwd as new_window_in_cwd_command,
+    paste_buffer_bracketed, rename_window as rename_window_command,
     resize_window_height as resize_window_height_command, respawn_pane as respawn_pane_command,
     respawn_pane_with_launch_script_and_exit, send_key as send_key_command,
     swap_window as swap_window_command, text_only_command, text_submit_command,
@@ -788,6 +789,62 @@ pub fn send_submitted_text_logged(
     let profile = tmux_submit_profile_for_harness("");
     log_submitted_text_profile(sink, source, pane_id, text, None, profile);
     send_submitted_text_with_profile(runner, pane_id, text, profile)
+}
+
+/// Paste `text` into `pane` as one bracketed paste, then submit with Enter
+/// (`#routesyncsteer`).
+///
+/// A multiline diff cannot go through `send-keys` without `-l`: a raw line
+/// feed would submit each line. The text is loaded into a private paste buffer
+/// and pasted with `-p -r`, so an application that requested bracketed paste
+/// (Grok's composer) keeps the newlines inside one draft. `settle_before_submit`
+/// waits before Enter so the composer can absorb the paste.
+pub fn paste_bracketed_text_and_submit(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    pane_id: &str,
+    text: &str,
+    settle_before_submit: std::time::Duration,
+) -> Result<(), TmuxIoError> {
+    let text = agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(text);
+    if text.is_empty() {
+        return Err(TmuxIoError::Failed {
+            binary: "tmux".to_string(),
+            code: None,
+            stderr: "refusing to submit an empty steering paste".to_string(),
+        });
+    }
+    let buffer = route_sync_paste_buffer_name();
+    let path = std::env::temp_dir().join(format!("{buffer}.txt"));
+    let _cleanup = RemoveFileOnDrop(path.clone());
+    std::fs::write(&path, text).map_err(|err| TmuxIoError::Failed {
+        binary: "tmux".to_string(),
+        code: None,
+        stderr: format!("could not write the steering paste: {err}"),
+    })?;
+    run_command(
+        runner,
+        &load_buffer_command(&buffer, &path.display().to_string()),
+    )?;
+    run_command(runner, &paste_buffer_bracketed(pane_id, &buffer))?;
+    if !settle_before_submit.is_zero() {
+        std::thread::sleep(settle_before_submit);
+    }
+    send_key(runner, pane_id, "Enter")
+}
+
+fn route_sync_paste_buffer_name() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    format!("adsteer-{}-{seq}", std::process::id())
+}
+
+struct RemoveFileOnDrop(PathBuf);
+
+impl Drop for RemoveFileOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 pub fn send_submitted_text_for_harness_logged(
@@ -1670,6 +1727,52 @@ mod tests {
                 vec!["send-keys", "-t", "%1", "/new"],
                 vec!["send-keys", "-t", "%1", "Enter"],
             ]
+        );
+    }
+
+    #[test]
+    fn bracketed_paste_submits_the_diff_as_one_draft() {
+        struct ReadingRunner {
+            loaded: RefCell<String>,
+            commands: RefCell<Vec<Vec<String>>>,
+        }
+        impl TmuxCommandRunner for ReadingRunner {
+            fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
+                if command.args().first().map(String::as_str) == Some("load-buffer") {
+                    let path = command.args().last().expect("buffer path");
+                    *self.loaded.borrow_mut() = fs::read_to_string(path).expect("paste file");
+                }
+                self.commands.borrow_mut().push(command.args().to_vec());
+                Ok(String::new())
+            }
+        }
+        let runner = ReadingRunner {
+            loaded: RefCell::new(String::new()),
+            commands: RefCell::new(Vec::new()),
+        };
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1 @@\n-old\n+new steering\n";
+        paste_bracketed_text_and_submit(&runner, "%9", diff, std::time::Duration::ZERO).unwrap();
+        assert_eq!(runner.loaded.borrow().as_str(), diff.trim_end());
+        let commands = runner.commands.borrow().clone();
+        assert_eq!(commands.len(), 3, "{commands:?}");
+        assert_eq!(commands[0][0], "load-buffer");
+        assert_eq!(
+            commands[1].as_slice(),
+            [
+                "paste-buffer",
+                "-p",
+                "-r",
+                "-d",
+                "-b",
+                commands[0][2].as_str(),
+                "-t",
+                "%9"
+            ]
+        );
+        assert_eq!(commands[2].as_slice(), ["send-keys", "-t", "%9", "Enter"]);
+        assert!(
+            !runner.loaded.borrow().contains("agent-doc "),
+            "the paste is the diff, not a second trigger"
         );
     }
 }

@@ -357,6 +357,174 @@ pub fn closeout_wait_route_outcome(
     }
 }
 
+/// `#routesyncsteer`: an explicit send into a running Grok turn is not
+/// delivered until this pane accepts the diff. Hook harnesses keep the
+/// pending-item count; their next hook injects the flush.
+enum RunningTurnSteeringClaim {
+    Count(usize),
+    NotDelivered(String),
+}
+
+fn route_sync_steering_not_delivered(file: &Path, reason: &str) -> String {
+    format!(
+        "[route] the latest diff since the last send was not handed to the agent already running for {}: {reason}. No second turn was started. steering_delivered=0 sent=explicit {}",
+        file.display(),
+        agent_doc_flow::outcome::user_outcome_fields(
+            agent_doc_flow::outcome::UserFacingOutcomeKind::DeferredForOperatorProof,
+        ),
+    )
+}
+
+fn one_line_error(err: &impl std::fmt::Display) -> String {
+    err.to_string()
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(240)
+        .collect()
+}
+
+fn pending_explicit_send_count(file: &Path) -> usize {
+    agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file)
+        .map(|items| items.len())
+        .unwrap_or(0)
+}
+
+/// Count, and for a busy Grok composer submit, the explicit send.
+///
+/// `submit` is false when the caller has already proved the pane idle: typing
+/// there would start a turn instead of steering the one that is running.
+fn running_turn_steering_claim(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    submit: bool,
+) -> RunningTurnSteeringClaim {
+    if !submit
+        || !agent_doc_harness::steering_delivery::explicit_running_turn_send_is_composer_diff(
+            harness,
+        )
+    {
+        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
+    }
+    let harness_cfg = HarnessConfig::from_agent_name(harness);
+    let capture = match agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) {
+        Ok(capture) => capture,
+        Err(err) => {
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                &format!("the pane could not be read ({})", one_line_error(&err)),
+            ));
+        }
+    };
+    if !harness_cfg.has_busy_cue(&capture) {
+        return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
+    }
+    match agent_doc_harness::grok_follow_up_composer(&capture) {
+        agent_doc_harness::GrokFollowUpComposer::Draft { .. } => {
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                "the composer holds an unsent draft",
+            ));
+        }
+        agent_doc_harness::GrokFollowUpComposer::Unreadable => {
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                "the composer could not be read",
+            ));
+        }
+        agent_doc_harness::GrokFollowUpComposer::Empty => {}
+    }
+    let prepared =
+        match agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(file) {
+            Ok(prepared) => prepared,
+            Err(err) => {
+                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                    file,
+                    &format!(
+                        "the diff since the last send could not be read ({})",
+                        one_line_error(&err)
+                    ),
+                ));
+            }
+        };
+    let Some(prepared) = prepared else {
+        return RunningTurnSteeringClaim::Count(0);
+    };
+    if let Err(err) = agent_doc_tmux_io::paste_bracketed_text_and_submit(
+        tmux,
+        pane,
+        &prepared.instructions,
+        Duration::from_millis(80),
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_not_delivered file={} pane={pane} harness={harness} error={} (#routesyncsteer)",
+                file.display(),
+                one_line_error(&err)
+            ),
+        );
+        return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+            file,
+            &format!(
+                "tmux did not accept the follow-up ({})",
+                one_line_error(&err)
+            ),
+        ));
+    }
+    if let Err(err) =
+        agent_doc_session_check_io::midturn_steering::record_route_sync_steering_delivered(
+            file,
+            &prepared.cycle_id,
+            &prepared.content,
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_baseline_record_failed file={} error={} (#routesyncsteer)",
+                file.display(),
+                one_line_error(&err)
+            ),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_sync_steering_delivered file={} pane={pane} harness={} items={} bytes={} (#routesyncsteer)",
+            file.display(),
+            harness_cfg.binary,
+            prepared.pending_items,
+            prepared.instructions.len()
+        ),
+    );
+    RunningTurnSteeringClaim::Count(prepared.pending_items.max(1))
+}
+
+/// `None` when the diff was not handed to the running turn. The caller records
+/// the deferral and must not also report `steering_delivered_to_owner`.
+fn claimed_running_turn_steering(
+    tmux: &Tmux,
+    file: &Path,
+    pane: &str,
+    harness: &str,
+    submit: bool,
+    visibility_reason: &str,
+) -> Option<usize> {
+    match running_turn_steering_claim(tmux, file, pane, harness, submit) {
+        RunningTurnSteeringClaim::Count(count) => Some(count),
+        RunningTurnSteeringClaim::NotDelivered(message) => {
+            eprintln!("{message}");
+            crate::invocation::record_route_deferral(message);
+            crate::invocation::report_pane_if_not_visible(tmux, file, pane, visibility_reason);
+            None
+        }
+    }
+}
+
 fn open_empty_preflight_recovery_command(file: &Path) -> Option<String> {
     closeout_recovery_command(CloseoutRecoveryCommandInput {
         document: file.display().to_string(),
@@ -542,11 +710,17 @@ pub fn route_via_authoritative_actor(
                         verdict
                     ),
                 );
-                let explicit =
-                    agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(file)
-                        .map(|items| items.len())
-                        .unwrap_or(0);
                 let pane_idle = observe_owner_pane_idle();
+                let Some(explicit) = claimed_running_turn_steering(
+                    tmux,
+                    file,
+                    &dispatch_pane,
+                    &actor.record.harness,
+                    !pane_idle,
+                    "route_live_owner_target_not_visible",
+                ) else {
+                    return Ok(dispatch_pane);
+                };
                 if pane_idle {
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -685,12 +859,16 @@ pub fn route_via_authoritative_actor(
                     // `#claimedsteerwake`: this route is the operator's
                     // explicit send. Pending steering goes to the owning turn
                     // instead of the route reporting "nothing was dispatched".
-                    let explicit =
-                        agent_doc_session_check_io::midturn_steering::explicit_send_pending_items(
-                            file,
-                        )
-                        .map(|items| items.len())
-                        .unwrap_or(0);
+                    let Some(explicit) = claimed_running_turn_steering(
+                        tmux,
+                        file,
+                        &dispatch_pane,
+                        &actor.record.harness,
+                        matches!(owner_turn, RouteOwnerTurnEvidence::Live),
+                        "route_closeout_wait_target_not_visible",
+                    ) else {
+                        return Ok(dispatch_pane);
+                    };
                     let outcome = closeout_wait_route_outcome(
                         file,
                         &head,
@@ -1888,6 +2066,22 @@ mod tests {
         );
         assert!(!message.contains("blocker:"), "{message}");
         assert!(!message.contains("session-check"), "{message}");
+
+        let refused = route_sync_steering_not_delivered(file, "the composer could not be read");
+        assert!(refused.contains("steering_delivered=0"), "{refused}");
+        assert!(
+            refused.contains("was not handed to the agent already running"),
+            "{refused}"
+        );
+        assert!(
+            !refused.contains("steering_delivered_to_owner"),
+            "{refused}"
+        );
+        assert!(!refused.contains("ui_outcome_class=ok"), "{refused}");
+        assert!(
+            refused.contains("ui_outcome=deferred_for_operator_proof"),
+            "{refused}"
+        );
 
         // Nothing pending: the existing deferral is unchanged.
         let deferred = closeout_wait_route_outcome(

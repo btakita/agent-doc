@@ -1401,6 +1401,153 @@ pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
     .unwrap_or_default())
 }
 
+/// Document text last handed to a running owner as an explicit-send diff
+/// (`#routesyncsteer`). Keyed by the cycle so a new turn does not diff
+/// against the previous turn's delivery.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct RouteSyncBaseline {
+    cycle_id: String,
+    content: String,
+}
+
+/// Steering instructions for one explicit send into a running turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteSyncSteering {
+    pub instructions: String,
+    /// Classified explicit-send items. Zero when the payload is only the diff.
+    pub pending_items: usize,
+    pub cycle_id: String,
+    /// Authoritative document to record after the pane accepts the paste.
+    pub content: String,
+}
+
+fn route_sync_baseline_key(file: &Path) -> String {
+    state_key("route_sync_baseline", file)
+}
+
+fn load_route_sync_baseline(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    file: &Path,
+) -> Option<RouteSyncBaseline> {
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        conn,
+        &route_sync_baseline_key(file),
+    )
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+}
+
+/// The latest diff since the last successful explicit send, rendered as
+/// steering instructions (`#routesyncsteer`).
+///
+/// The previous text is the document recorded after the last delivery in this
+/// cycle, or the cycle's steering baseline when this is the first send. `None`
+/// when that diff is empty and no explicit-send item is waiting.
+pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteering>> {
+    let Some(root) = project_root(file) else {
+        return Ok(None);
+    };
+    if !agent_doc_sqlite::state_store::state_db_path(&root).exists() {
+        return Ok(None);
+    }
+    let content = crate::resolve_current_document_content(file, "route_sync_steering")?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let watermark = load_watermark(&conn, &state_key("base", file))?;
+    let stored = load_route_sync_baseline(&conn, file);
+    let items = match explicit_send_pending_items(file) {
+        Ok(items) => items,
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_items_unreadable file={} error={} (#routesyncsteer)",
+                    file.display(),
+                    first_error_line(&format!("{err:#}"))
+                ),
+            );
+            Vec::new()
+        }
+    };
+    let (previous, cycle_id) = if let Some(watermark) = watermark {
+        let previous = match &stored {
+            Some(stored) if stored.cycle_id == watermark.cycle_id => stored.content.clone(),
+            _ => watermark.baseline.clone(),
+        };
+        (Some(previous), watermark.cycle_id)
+    } else {
+        (None, String::new())
+    };
+    let diff = previous
+        .as_deref()
+        .and_then(|previous| agent_doc_diff::unified_diff_from_contents(previous, &content));
+    let instructions =
+        core::render_route_sync_steering(&file.display().to_string(), diff.as_deref(), &items);
+    let Some(instructions) = instructions else {
+        return Ok(None);
+    };
+    Ok(Some(RouteSyncSteering {
+        instructions,
+        pending_items: items.len(),
+        cycle_id,
+        content,
+    }))
+}
+
+fn first_error_line(text: &str) -> String {
+    text.lines()
+        .next()
+        .unwrap_or(text)
+        .replace('\n', " ")
+        .chars()
+        .take(240)
+        .collect()
+}
+
+/// Remember `content` as the last document handed to the running owner, and
+/// acknowledge every steering consumer so the same diff is not sent again.
+pub fn record_route_sync_steering_delivered(
+    file: &Path,
+    cycle_id: &str,
+    content: &str,
+) -> Result<()> {
+    let Some(root) = project_root(file) else {
+        return Ok(());
+    };
+    let baseline = RouteSyncBaseline {
+        cycle_id: cycle_id.to_string(),
+        content: content.to_string(),
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &route_sync_baseline_key(file),
+        &serde_json::to_string(&baseline)?,
+        now_ms(),
+    )?;
+    for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
+        if let Err(err) = observe(file, consumer, true) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_ack_failed file={} consumer={consumer} error={} (#routesyncsteer)",
+                    file.display(),
+                    first_error_line(&format!("{err:#}"))
+                ),
+            );
+        }
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_sync_steering_baseline_recorded file={} cycle={cycle_id} bytes={} (#routesyncsteer)",
+            file.display(),
+            content.len()
+        ),
+    );
+    Ok(())
+}
+
 fn wake_receipt_key(file: &Path) -> String {
     state_key("wake", file)
 }
@@ -2026,6 +2173,69 @@ mod tests {
         assert!(
             rerun.as_ref().is_none_or(|report| report.items.is_empty()),
             "{rerun:?}"
+        );
+    }
+
+    /// `#routesyncsteer`: Run Agent Doc on a running turn sends the diff since
+    /// the last send, then the next send contains only what changed after that.
+    #[test]
+    fn route_sync_steering_is_the_diff_since_the_last_send() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, Some("current task"), Vec::new()).unwrap();
+        record_explicit_send(&file).unwrap();
+
+        let edited = baseline.replace("- current task\n", "- current task\n- ship the diff\n");
+        std::fs::write(&file, &edited).unwrap();
+        let first = prepare_route_sync_steering(&file)
+            .unwrap()
+            .expect("first send has a diff");
+        assert!(
+            first.instructions.contains("+ship the diff")
+                || first.instructions.contains("ship the diff"),
+            "{}",
+            first.instructions
+        );
+        assert!(
+            first.instructions.contains("diff since the last send")
+                || first.instructions.contains(core::STEERING_MARKER),
+            "{}",
+            first.instructions
+        );
+        assert!(
+            !first.instructions.contains("agent-doc plan.md\n"),
+            "{first:?}"
+        );
+        record_route_sync_steering_delivered(&file, &first.cycle_id, &first.content).unwrap();
+        assert!(
+            prepare_route_sync_steering(&file).unwrap().is_none(),
+            "the same document is not sent twice"
+        );
+
+        let later = edited.replace(
+            "- ship the diff\n",
+            "- ship the diff\n- and the follow-up\n",
+        );
+        std::fs::write(&file, &later).unwrap();
+        record_explicit_send(&file).unwrap();
+        let second = prepare_route_sync_steering(&file)
+            .unwrap()
+            .expect("second send is only the newer diff");
+        assert!(
+            second.instructions.contains("and the follow-up"),
+            "{}",
+            second.instructions
+        );
+        assert!(
+            !second
+                .instructions
+                .lines()
+                .any(|line| line.starts_with('+') && line.contains("ship the diff")),
+            "the previous send is the baseline, not the cycle admission text: {}",
+            second.instructions
         );
     }
 

@@ -1299,6 +1299,35 @@ pub fn content_hash(text: &str) -> String {
 /// Header line every rendered steering payload starts with.
 pub const STEERING_MARKER: &str = "[agent-doc] operator steering arrived mid-turn";
 
+/// Steering instructions for an explicit Run Agent Doc on a running turn
+/// (`#routesyncsteer`): the unified diff since the last send, plus any
+/// classified items the hook would have injected. `None` when both are empty.
+pub fn render_route_sync_steering(
+    document: &str,
+    diff: Option<&str>,
+    items: &[SteeringItem],
+) -> Option<String> {
+    let diff = diff.map(str::trim).filter(|diff| !diff.is_empty());
+    let items_text = render_steering_context(document, items, 0);
+    match (diff, items_text) {
+        (None, None) => None,
+        (Some(diff), items_text) => {
+            let mut out = format!(
+                "{STEERING_MARKER} in {document}. The operator sent the session document \
+                 again while this turn was running. Here is the diff since the last send. \
+                 Handle it as operator steering now; do not start a second turn, do not run \
+                 `agent-doc preflight`, and do not `--force-disk`.\n\n{diff}"
+            );
+            if let Some(items_text) = items_text {
+                out.push_str("\n\n");
+                out.push_str(&items_text);
+            }
+            Some(out)
+        }
+        (None, Some(items_text)) => Some(items_text),
+    }
+}
+
 /// Render settled steering as agent-facing context. `None` when nothing is
 /// ready (pending-only observations stay silent).
 pub fn render_steering_context(
@@ -2046,6 +2075,18 @@ pub fn subagent_dispatch_heads_with_presets(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_sync_steering_carries_the_diff_since_the_last_send() {
+        let diff = "--- snapshot\n+++ document\n@@ -1 +1 @@\n-old\n+new queue head\n";
+        let text = render_route_sync_steering("tasks/bugs.md", Some(diff), &[]).unwrap();
+        assert!(text.contains(STEERING_MARKER), "{text}");
+        assert!(text.contains("diff since the last send"), "{text}");
+        assert!(text.contains("+new queue head"), "{text}");
+        assert!(text.contains("do not start a second turn"), "{text}");
+        assert!(render_route_sync_steering("tasks/bugs.md", None, &[]).is_none());
+        assert!(render_route_sync_steering("tasks/bugs.md", Some("  \n"), &[]).is_none());
+    }
 
     /// `#steergatenamo`: the decision log keeps the END of the item, where
     /// end-of-turn evidence is, bounded and cut on a char boundary.

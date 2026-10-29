@@ -61,27 +61,28 @@ fn is_idle_footer_line(line: &str) -> bool {
     })
 }
 
-pub fn project(output: &str) -> PaneComposerProjection {
+struct ParsedGrokComposer {
+    draft: String,
+    ghost: bool,
+    end: usize,
+    lines: Vec<String>,
+    rendered_prompt: String,
+}
+
+/// The boxed composer, independent of whether the footer is an idle prompt or
+/// a live `Ctrl+c:cancel` turn. `None` when the box cannot be read.
+fn parse_grok_composer(output: &str) -> Option<ParsedGrokComposer> {
     let raw_lines: Vec<_> = output.lines().collect();
-    let lines: Vec<_> = raw_lines
+    let lines: Vec<String> = raw_lines
         .iter()
         .map(|line| agent_doc_turn_executor_tmux::prompt::strip_ansi(line))
         .collect();
-    let Some(start) = lines
-        .iter()
-        .rposition(|line| line.trim().starts_with('╭') && line.trim().ends_with('╮'))
-    else {
-        return PaneComposerProjection::Absent;
-    };
-    let Some(first) = lines
-        .get(start + 1)
-        .and_then(|line| line.trim().strip_prefix("│ ❯"))
-    else {
-        return PaneComposerProjection::Absent;
-    };
-    let Some(first) = first.strip_suffix('│') else {
-        return PaneComposerProjection::Absent;
-    };
+    let start = lines.iter().rposition(|line| {
+        let line = line.trim();
+        line.starts_with('╭') && line.ends_with('╮')
+    })?;
+    let first = lines.get(start + 1)?.trim().strip_prefix("│ ❯")?;
+    let first = first.strip_suffix('│')?;
     let mut draft = first.trim().to_string();
     let mut end = None;
     for (i, line) in lines.iter().enumerate().skip(start + 2) {
@@ -90,9 +91,9 @@ pub fn project(output: &str) -> PaneComposerProjection {
             end = Some(i);
             break;
         }
-        let Some(body) = line.strip_prefix('│').and_then(|s| s.strip_suffix('│')) else {
-            return PaneComposerProjection::Absent;
-        };
+        let body = line
+            .strip_prefix('│')
+            .and_then(|text| text.strip_suffix('│'))?;
         if !body.trim().is_empty() {
             if !draft.is_empty() {
                 draft.push('\n');
@@ -100,23 +101,37 @@ pub fn project(output: &str) -> PaneComposerProjection {
             draft.push_str(body.trim());
         }
     }
-    let Some(end) = end else {
-        return PaneComposerProjection::Absent;
-    };
+    let end = end?;
     // Grok Build's next-prompt suggestion is visual ghost text, not textarea
     // state. Terminal-native themes mark it faint+italic; RGB themes use a
     // light-gray foreground+italic. Preserve the raw ANSI until this boundary:
     // stripping it first makes the ghost indistinguishable from typed input and
     // strands dispatch-only reopen behind `submit_or_clear_pane_draft`.
-    let first_body_is_ghost = raw_lines.get(start + 1).is_some_and(|line| {
+    let ghost = raw_lines.get(start + 1).is_some_and(|line| {
         agent_doc_turn_executor_tmux::prompt::prompt_line_body_is_ghost_placeholder(line)
     });
-    if !draft.is_empty() && !first_body_is_ghost {
-        return PaneComposerProjection::OperatorDraft { preview: draft };
+    let rendered_prompt = lines[start + 1].trim().to_string();
+    Some(ParsedGrokComposer {
+        draft,
+        ghost,
+        end,
+        lines,
+        rendered_prompt,
+    })
+}
+
+pub fn project(output: &str) -> PaneComposerProjection {
+    let Some(parsed) = parse_grok_composer(output) else {
+        return PaneComposerProjection::Absent;
+    };
+    if !parsed.draft.is_empty() && !parsed.ghost {
+        return PaneComposerProjection::OperatorDraft {
+            preview: parsed.draft,
+        };
     }
     // Only the observed idle footer may follow the box. Unknown modal/help/auth
     // UI remains absent, even if old prompt artwork is still visible above it.
-    if lines[end + 1..]
+    if parsed.lines[parsed.end + 1..]
         .iter()
         .any(|line| !is_idle_footer_line(line))
     {
@@ -124,8 +139,34 @@ pub fn project(output: &str) -> PaneComposerProjection {
     }
     PaneComposerProjection::ReadyEmpty {
         evidence: PaneComposerReadinessEvidence::Prompt {
-            rendered: lines[start + 1].trim().into(),
+            rendered: parsed.rendered_prompt,
         },
+    }
+}
+
+/// Whether a running Grok composer can take one mid-turn follow-up
+/// (`#routesyncsteer`). A busy footer still parses: the readiness projection
+/// collapses that screen to `Busy` and would otherwise hide an operator draft.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FollowUpComposer {
+    /// Empty box, or ghost suggestion text only.
+    Empty,
+    /// Unsent operator text. A follow-up must not clobber it.
+    Draft { preview: String },
+    /// The box could not be read. Do not type.
+    Unreadable,
+}
+
+pub fn follow_up_composer(output: &str) -> FollowUpComposer {
+    let Some(parsed) = parse_grok_composer(output) else {
+        return FollowUpComposer::Unreadable;
+    };
+    if !parsed.draft.is_empty() && !parsed.ghost {
+        FollowUpComposer::Draft {
+            preview: parsed.draft,
+        }
+    } else {
+        FollowUpComposer::Empty
     }
 }
 
@@ -199,6 +240,23 @@ mod tests {
         assert_eq!(
             project_pane_composer(&IDLE.replace("Ctrl+x", "Ctrl+c:cancel │ Ctrl+x"), &h),
             PaneComposerProjection::Busy
+        );
+        let busy = IDLE.replace("Ctrl+x", "Ctrl+c:cancel │ Ctrl+x");
+        assert_eq!(follow_up_composer(IDLE), FollowUpComposer::Empty);
+        assert_eq!(follow_up_composer(&busy), FollowUpComposer::Empty);
+        assert_eq!(
+            follow_up_composer(&busy.replace("│ ❯ ", "│ ❯ unfinished note ")),
+            FollowUpComposer::Draft {
+                preview: "unfinished note".to_string(),
+            }
+        );
+        assert_eq!(
+            follow_up_composer("no composer"),
+            FollowUpComposer::Unreadable
+        );
+        assert_eq!(
+            follow_up_composer(LIVE_GROK_47_IDLE_GHOST),
+            FollowUpComposer::Empty
         );
         assert_eq!(
             project_pane_composer(&format!("Waiting for response… 1.0s [stop]\n{IDLE}"), &h),

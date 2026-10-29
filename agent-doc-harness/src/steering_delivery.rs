@@ -59,6 +59,13 @@ pub struct SteeringDeliveryAdapter {
 /// Every harness agent-doc supports, by canonical binary name.
 pub const SUPPORTED_HARNESSES: [&str; 5] = ["claude", "codex", "opencode", "grok", "cursor"];
 
+/// `#routesyncsteer`: Grok Build cannot inject hook context into a running
+/// turn, so an explicit Run Agent Doc submits the latest document diff into
+/// the composer. Every other harness keeps its hook or poll delivery.
+pub fn explicit_running_turn_send_is_composer_diff(harness: &str) -> bool {
+    steering_delivery_adapter(harness).harness == "grok"
+}
+
 /// The delivery adapter for `harness` (any spelling `normalize_harness_name`
 /// or `HarnessConfig::from_agent_name` accepts). Unknown names fall back to
 /// the Claude Code adapter, matching `HarnessConfig::from_agent_name`.
@@ -105,7 +112,9 @@ pub fn steering_delivery_adapter(harness: &str) -> SteeringDeliveryAdapter {
         "grok" | "grok-build" => SteeringDeliveryAdapter {
             harness: "grok",
             // Grok Build lifecycle hooks are notifications: stdout cannot
-            // inject context into the running turn.
+            // inject context into the running turn. An explicit Run Agent Doc
+            // while that turn is busy therefore types the latest diff into
+            // the composer (`#routesyncsteer`); passive delivery stays a poll.
             busy: BusyDelivery::PollAndCommandBoundary,
             idle: IdleDelivery::SupervisorTrigger,
             // `grok -p <PROMPT>` is its single-turn headless mode.
@@ -158,6 +167,18 @@ mod tests {
             if let IdleDelivery::Unavailable { gap } = adapter.idle {
                 assert!(!gap.trim().is_empty(), "{harness} names its idle gap");
             }
+        }
+    }
+
+    #[test]
+    fn only_grok_types_an_explicit_send_into_the_running_composer() {
+        assert!(explicit_running_turn_send_is_composer_diff("grok"));
+        assert!(explicit_running_turn_send_is_composer_diff("grok-build"));
+        for harness in ["claude", "codex", "opencode", "cursor"] {
+            assert!(
+                !explicit_running_turn_send_is_composer_diff(harness),
+                "{harness}"
+            );
         }
     }
 

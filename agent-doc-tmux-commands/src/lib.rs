@@ -238,6 +238,19 @@ pub fn send_keys_literal(target: &str, text: &str) -> TmuxCommand {
     TmuxCommand::new(["send-keys", "-t", target, "-l", text])
 }
 
+/// Load `path` into a named paste buffer (`#routesyncsteer`).
+pub fn load_buffer(buffer: &str, path: &str) -> TmuxCommand {
+    TmuxCommand::new(["load-buffer", "-b", buffer, path])
+}
+
+/// Paste `buffer` into `target` as one bracketed paste, keeping line feeds,
+/// then delete the buffer. `-p` wraps the paste only when the application has
+/// requested bracketed paste, so a multiline diff stays one composer draft
+/// instead of submitting on every line. `-r` keeps those line feeds.
+pub fn paste_buffer_bracketed(target: &str, buffer: &str) -> TmuxCommand {
+    TmuxCommand::new(["paste-buffer", "-p", "-r", "-d", "-b", buffer, "-t", target])
+}
+
 pub fn send_key(target: &str, key: &str) -> TmuxCommand {
     TmuxCommand::new(["send-keys", "-t", target, key])
 }
@@ -966,6 +979,27 @@ pub mod input_diag {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bracketed_paste_keeps_newlines_and_names_the_buffer() {
+        assert_eq!(
+            load_buffer("adsteer-1", "/tmp/steer.txt").args(),
+            ["load-buffer", "-b", "adsteer-1", "/tmp/steer.txt"]
+        );
+        assert_eq!(
+            paste_buffer_bracketed("%7", "adsteer-1").args(),
+            [
+                "paste-buffer",
+                "-p",
+                "-r",
+                "-d",
+                "-b",
+                "adsteer-1",
+                "-t",
+                "%7"
+            ]
+        );
+    }
 
     #[test]
     fn literal_send_keys_keeps_user_text_as_one_arg() {

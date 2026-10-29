@@ -546,7 +546,20 @@ An unclosed opener now reports `unclosed component: the component has no close `
 > **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 
 **Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `10c88c343d` before integration. The same owner keeps that result.
-<!-- agent:boundary:a57f5721 -->
+
+> **Queue prompt:** Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+
+A busy Grok turn now gets one paste of the unified diff since the last successful send, then Enter. `steering_delivered_to_owner` is reported only after tmux accepts that submit. A composer that holds a draft, or a pane whose composer cannot be read, is left untyped and the route defers with `steering_delivered=0`. An idle pane is left untyped. Claude and Codex stay on the next-hook flush. Commit `35688020683ff8d2f950a9e6370110946d2a4853` is on `main` (rebased from `fbcdae622d`, same 15-file patch). Worker `make check` exited 0: nextest 12159 passed, 187 skipped. The coordinator fast-forwarded `10c88c343d..3568802068` and `make install` exited 0. Installed sha256 `bbb1284f90959905511b3b33c49edd68684b43d9e0c17d65b71250b4408f88b3` matches the release-local binary and `~/.cargo/bin/agent-doc`. `agent-doc --version` is `agent-doc 0.35.560`. JetBrains plugin bytes were unchanged, so no JetBrains restart is required. `reload_library` delivered 1/1 editor endpoints. CI `40814610845`, Book `40814610830`, and Pages `40814610906` were in progress at closeout.
+
+### Re: route submits the diff — grok-4.7 · 2026-10-28T23:54-04:00
+
+> **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
+
+**Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `3568802068` before integration. The same owner keeps that result.
+
+queue_worker_binding: subagent:routesyncsteer generation 1 worker 01a1859b-9e3d-74d3-bc62-fe3ce4b782ff
+
+<!-- agent:boundary:242ea919 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -555,12 +568,9 @@ An unclosed opener now reports `unclosed component: the component has no close `
 - 📥 do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 - 🚧 [#subagent:apirunclaims#1] In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.
-- ~~In the document template, `agent:run` should not have the `go` attribute, since go-mode is the default.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~api.md Run Agent Doc: `route could not prepare /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md`) before dispatching: route duplicate prompt residue guard failed: failed to parse components: unclosed component: <!-- agent:run --> without matching close (opening marker at line 315)`~~
-  - ~~The issue was no close `/agent:run`. agent-doc should print the specific cause of the parse error.~~
 - 🚧 [#subagent:nestlistlineage#1] api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.
 - 🚧 [#subagent:contractprsstall#1] Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.
-- 🚧 [#subagent:routesyncsteer#1] Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+- ~~Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

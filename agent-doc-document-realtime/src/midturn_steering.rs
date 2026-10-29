@@ -821,6 +821,7 @@ fn queue_items(content: &str) -> Vec<QueueItem> {
     let Ok(entries) = agent_doc_queue::document_queue::parse(&body) else {
         return Vec::new();
     };
+    let entries = agent_doc_queue::nested_claim_steer::expand_if_installed(entries);
     entries
         .into_iter()
         .filter_map(|entry| match entry {

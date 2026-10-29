@@ -718,6 +718,7 @@ fn located_prompt(
         let Ok(entries) = crate::document_queue::parse(body) else {
             continue;
         };
+        let entries = crate::nested_claim_steer::expand_if_installed(entries);
         if let Some(index) = crate::document_queue::prompt_index_for_text(&entries, prompt_text) {
             return Some((entries, index));
         }
@@ -739,7 +740,11 @@ pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<Strin
 fn parsed_queue_bodies(content: &str) -> Vec<Vec<crate::document_queue::QueueEntry>> {
     queue_bodies_for_nest(content)
         .into_iter()
-        .filter_map(|body| crate::document_queue::parse(body).ok())
+        .filter_map(|body| {
+            crate::document_queue::parse(body)
+                .ok()
+                .map(crate::nested_claim_steer::expand_if_installed)
+        })
         .collect()
 }
 

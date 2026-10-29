@@ -83,6 +83,7 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
 /// Live, unclaimed queue lines with subagent intent that are new since the
 /// previous cycle's seed, in queue order.
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
+    let _guard = crate::queue_claim::steer_guard_for(file, content);
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     // `#reportedrelease`: a line whose worker already reported (its claim was
@@ -257,6 +258,7 @@ pub fn subagent_authorization_for_content(
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     let components = agent_doc_element::element::parse(content).unwrap_or_default();
+    let _guard = crate::queue_claim::steer_guard_for(file, content);
     let submitted = agent_doc_queue::queue_response::submitted_queue_prompt(content, item);
     Ok(
         agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
@@ -293,6 +295,23 @@ pub fn subagent_authorization_for_content_submitted(
     )
 }
 
+/// Folded resolve missed. A `#nestedclaimsteer` sibling is a live head only
+/// while the claim-ledger view is installed, so try that after the folded miss.
+fn expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
+    let _guard = crate::queue_claim::steer_guard_for(file, content)?;
+    let heads =
+        agent_doc_queue::queue_continuation::live_queue_head_texts(content).unwrap_or_default();
+    agent_doc_queue::queue_claim::resolve_claim_target(item, &heads).ok()
+}
+
+fn plain_or_expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
+    let heads =
+        agent_doc_queue::queue_continuation::live_queue_head_texts(content).unwrap_or_default();
+    agent_doc_queue::queue_claim::resolve_claim_target(item, &heads)
+        .ok()
+        .or_else(|| expanded_claim_head(file, item, content))
+}
+
 /// `agent-doc queue brief`: resolve `item` (`#id` / `do [#id]` / the line's
 /// text) to the live queue head it names, on disk or, while an editor save is
 /// deferred, in the editor authority's text (the view preflight dispatched
@@ -311,21 +330,26 @@ pub fn subagent_authorization_for_item(
     let (content, head) =
         match agent_doc_queue::queue_claim::resolve_claim_target(item, &disk_heads) {
             Ok(head) => (disk, head),
-            Err(miss) => {
-                let Some(authority) =
+            Err(miss) if miss.ambiguous.is_empty() => {
+                if let Some(head) = expanded_claim_head(file, item, &disk) {
+                    (disk, head)
+                } else if let Some(authority) =
                     crate::queue_claim::editor_authority_text(file, "queue_brief")
-                else {
+                {
+                    let Some(head) = plain_or_expanded_claim_head(file, item, &authority) else {
+                        return Err(miss.into());
+                    };
+                    (authority, head)
+                } else {
                     return Err(miss.into());
-                };
-                let heads = agent_doc_queue::queue_continuation::live_queue_head_texts(&authority)
-                    .unwrap_or_default();
-                let head = agent_doc_queue::queue_claim::resolve_claim_target(item, &heads)?;
-                (authority, head)
+                }
             }
+            Err(miss) => return Err(miss.into()),
         };
     let head = agent_doc_document::queue_projection::strip_priority_markers(&head)
         .trim()
         .to_string();
+    let _guard = crate::queue_claim::steer_guard_for(file, &content);
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
     let components = agent_doc_element::element::parse(&content).unwrap_or_default();

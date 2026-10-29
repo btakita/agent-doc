@@ -960,6 +960,7 @@ pub fn queue_subagent_dispatch_entries(
     content: &str,
     items: &[String],
 ) -> anyhow::Result<Vec<QueueSubagentDispatch>> {
+    let _guard = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, content);
     let document = file.display().to_string();
     let submitted_prompts =
         agent_doc_queue::queue_response::submitted_prompts_for_heads(content, items);
@@ -3639,6 +3640,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let (content, _) = infer_queue_go_from_prompt_edit(&content, snapshot_content.as_deref())?;
+    let _nested_claim_steer = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let components = match agent_doc_element::element::parse(&content) {
         Ok(components) => components,
         Err(_) => return Ok(QueueState::default()),
@@ -4867,6 +4869,7 @@ pub fn run_queue_maintenance_with_coin_gate(
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
+    let _nested_claim_steer = agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let mut current_content = content.clone();
     let effective_prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(

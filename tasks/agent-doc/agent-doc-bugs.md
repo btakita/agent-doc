@@ -353,23 +353,32 @@ Commit `571ab1df97` on `fix/release-include-context` already builds the regressi
 
 No additional backlog follow-up is needed because the include-strike fix is already with worker `01a184ce`, and `#grok-live-editor` remains its existing open backlog item.
 
+### Re: operator request stays on the nested run item — grok-4.7 · 2026-10-28T20:19-04:00
+
+> **Queue prompt:** api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
+
+Worker `01a184d6` landed `04fe6be064` on main. Closeout keeps `[#subagent-operator-request-pr759-fix-ci-push]` on the nested run row by matching the parent-line work identity and the brief's collapsed origin. Coordinator `make check` on that commit exited 0 (nextest 12128 passed, 187 skipped). The added lines were denylist-clean. `make install` of the integrated main commit `9653bffdb4` exited 0. The published release stays v0.35.560.
+
+`9653bffdb4` is the include-strike fix. Its regression starts from the unstruck `release + publish` rows, and the struck form is only the projected effect once every named include is done.
+
+The entire-tree claim stays with worker `01a184e6`. That worktree is still dirty and its `make check` is still running.
+
+`do [#grok-live-editor]` stays open. Worker `01a184da` holds the nested parity line that references it.
+
+No additional backlog follow-up is needed because both commits are on main.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#apikeepsrefusing]~~
-- ~~Error on api.md: [route] Sent 2 updates to the agent already running for /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md; it will handle them in this turn. No second trigger was injected. steering_delivered=2 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
-- ~~The queue prompt in the response for a nested agent:run item should show the entire nest "vector" such as `root parent: parent: item`.~~
-- ~~Nested .agent-doc/project.md files are not being honored. Agent Doc files in src/haiven-dev should read agent-loop/src/haiven-dev/.agent-doc/project.md and ageunt-loop/.agent-doc/project.md~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~When submitting a nested run item, include the parent lineage using the nested prompts. For example, in api.md `https://github.com/haiven-dev/haiven-api/pull/758: #rebase` created `[#subagent:pr767-rebase#1] #rebase` which bound to the wrong PR. If you are only sending `#rebase` as the prompt, the agent does not understand the nesting. The agent should be able to understand the entire tree and the actual prompt list item that is being sent.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:entiretree#1] The entire tree should be sent to the agent with the item to run. Each leaf node in the prompt in the prompt tree should be run with the full lineage and the entire tree sent as context.
   - Use the AST to guide the agent.
 - ~~release + publish~~
   - ~~Include #subagent:nestvector + #subagent:nestedproject~~
   - ~~Include #subagent:nestedlineage~~
-- 🚧 [#subagent:pr759fixci#1] api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.
+- ~~api.md running grok has [#subagent-operator-request-pr759-fix-ci-push] but [#subagent-operator-request-pr759-fix-ci-push] was not added into the run item.~~ — auto-struck: answered this cycle (#ftstrike)
 - 📥 do [#grok-live-editor]
   - 🚧 [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 <!-- /agent:run -->

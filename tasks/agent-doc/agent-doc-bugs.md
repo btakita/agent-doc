@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1119,7 +1119,25 @@ A live nested line under a blocking operator-request row is that request's answe
 The plan test uses the wording in this document: `Annotation, worker-reported` plus the icon question, and the timestamp-highlight / numeric-glyph line. The marker design and the recency design are not implemented.
 
 The private-name scan of added lines was clean. The worker reported four `cargo test` runs, all exit 0: two document tests, one queue test, and 60 plan tests. This closeout did not re-run them, `make check`, or `make install`. The branch is not merged.
-<!-- agent:boundary:2979a464 -->
+> **Queue prompt:** Run `make install` so we can test locally.
+
+### Re: Local install is the answers-in-plan build — grok-4.7 · 2026-10-29T13:54-04:00
+
+`make install` in `/home/brian/worktrees/agent-doc-answersinplan` exited 0. The log is `target/install-answersinplan.log`. Commit `ce407521928f18b22bd127b063eb45bb0f3c0f67` matches `origin/fix/operator-answers-in-plan`. Main stays at `7b44d8bb28`. The branch is unmerged.
+
+`/home/brian/.cargo/bin/agent-doc` sha256 is `fbd2eaeff080d72b01b4f6836a8fd279797670684f852e056a1099f231b504fc`. `agent-doc --version` prints `agent-doc 0.35.561`.
+
+JetBrains packages were already current: IDE 263 `0.2.891` at IntelliJ IDEA 2026.3 and IDE 262 `0.2.890` at Rider 2026.2. No JetBrains restart. VS Code sync was skipped because vsce is not installed, so that package stays on its previous generation.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records this. A timestamp annotation can highlight the newest three rows, and a numeric recency glyph can carry that order. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+<!-- agent:boundary:1a130bc0 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->

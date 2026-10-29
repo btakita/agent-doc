@@ -170,7 +170,8 @@ pub fn line_is_response_heading(trimmed: &str) -> bool {
 /// Normalize a prompt line for "already present in exchange" comparison:
 /// trim and strip a leading `❯` prompt marker.
 pub fn normalize_prompt_line(line: &str) -> String {
-    line.trim().trim_start_matches('❯').trim().to_string()
+    let line = agent_doc_element_queue::strip_trailing_response_surrogate(line.trim());
+    line.trim_start_matches('❯').trim().to_string()
 }
 
 /// True when `head_id` names an item tracked in `agent:backlog`, `agent:review`,
@@ -492,13 +493,13 @@ pub fn queue_head_is_free_text_prompt(content: &str) -> Result<bool> {
 pub fn response_heading_topic(line: &str) -> Option<&str> {
     let trimmed = line.trim().trim_start_matches('❯').trim();
     let topic = trimmed.strip_prefix("### Re:")?.trim();
-    Some(
-        topic
-            .split_once(" — ")
-            .map(|(topic, _)| topic)
-            .unwrap_or(topic)
-            .trim(),
-    )
+    let topic = topic
+        .split_once(" — ")
+        .map(|(topic, _)| topic)
+        .unwrap_or(topic)
+        .trim();
+    let topic = topic.strip_suffix(" (HEAD)").unwrap_or(topic).trim_end();
+    Some(agent_doc_element_queue::strip_trailing_response_surrogate(topic).trim())
 }
 
 pub fn response_topic_matches_queue_head(topic: &str, queue_head: &str) -> bool {
@@ -527,6 +528,13 @@ pub fn response_explicitly_targets_queue_head(response: &str, queue_head: &str) 
 /// newlines) becomes one space, so two spellings of the same prompt compare equal
 /// regardless of cosmetic markers (#ftstrike).
 pub fn normalize_for_answer_match(s: &str) -> String {
+    let owned;
+    let s = if s.contains(agent_doc_element_queue::RESPONSE_SURROGATE_PREFIX) {
+        owned = agent_doc_element_queue::strip_response_surrogate_annotation(s);
+        owned.as_str()
+    } else {
+        s
+    };
     let mut out = String::with_capacity(s.len());
     let mut prev_space = false;
     for ch in s.chars() {
@@ -2490,6 +2498,18 @@ mod tests {
         );
         assert_eq!(response_heading_topic("### Re: #foo"), Some("#foo"));
         assert_eq!(response_heading_topic("## Re: #foo"), None);
+        assert_eq!(
+            response_heading_topic("### Re: do the thing ⟦response:0123456789ab⟧ (HEAD)"),
+            Some("do the thing")
+        );
+        assert_eq!(
+            response_heading_topic("### Re: do the thing — model ⟦response:0123456789ab⟧"),
+            Some("do the thing")
+        );
+        assert_eq!(
+            normalize_for_answer_match("do the thing ⟦response:0123456789ab⟧"),
+            normalize_for_answer_match("do the thing")
+        );
     }
 
     #[test]

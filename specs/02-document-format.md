@@ -919,6 +919,12 @@ naming the ids and the exact `--todo-done <selector>` command, and logs
 `operator_todo_done_advisory` to `ops.log`. Like the gate advisory it is
 id-based, never writes, and never fails the closeout.
 
+**Response surrogate id (`#responsesurrogate`).** Each newly materialized assistant response carries one stable surrogate id so the operator can locate that response from the prompt it answers. The id is 12 lowercase hex characters, the leading SHA-256 prefix of the response's token-stripped identity digest (heading + body, ignoring `(HEAD)`, boundary markers, and the surrogate token itself). A collision with a different digest salts the hash. The visible token is `⟦response:<id>⟧`.
+
+The token is appended to the `### Re:` heading, before a transient ` (HEAD)` suffix when that suffix is present. It is also appended to the exchange prompt that response answers (each `❯` line in the contiguous prompt tail, or the last content line of that tail when it has no `❯`) and, once the answered `agent:run` / `agent:loop` / `agent:queue` row is struck, to that row outside the strike (including after an `— auto-struck:` note). A still-live queue row is not labeled. The same id is appended to the last content line of the consumed prompt echo inside the response (`#queue-prompt-echo-in-response`).
+
+The token is not part of response-cell identity, prompt-node identity, queue work identity, claim identity, or `(HEAD)` baseline heading keys. Retries and body edits keep the id already written on the heading. A historical response that has no token is left unchanged. `agent:response-toc` `live:N` ordinals are a separate, shifting locator and are not this id.
+
 **Exchange prompt defaults.** `<!-- agent:exchange preset="#review" -->` applies
 the named frontmatter prompt preset to each new exchange prompt, including the
 prompt admitted at preflight and prompts surfaced as realtime steering. A bare

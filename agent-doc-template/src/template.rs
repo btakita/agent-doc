@@ -421,7 +421,7 @@ fn is_displaced_struck_queue_item(line: &str) -> bool {
     let Some(rest) = trimmed.strip_prefix("- ") else {
         return false;
     };
-    let rest = rest.trim();
+    let rest = agent_doc_markdown_ast::strip_trailing_response_surrogate(rest.trim());
     let Some(inner) = rest.strip_prefix("~~").and_then(|s| s.strip_suffix("~~")) else {
         return false;
     };
@@ -1737,12 +1737,9 @@ fn collect_re_headings(content: &str) -> std::collections::HashSet<String> {
         if !after_hash.trim_start().starts_with("Re:") {
             continue;
         }
-        let stripped = body
-            .trim_start()
-            .trim_end()
-            .trim_end_matches(" (HEAD)")
-            .to_string();
-        set.insert(stripped);
+        set.insert(agent_doc_markdown_ast::response_heading_baseline_key(
+            body.trim_start(),
+        ));
     }
     set
 }
@@ -1824,13 +1821,8 @@ pub(crate) fn annotate_re_headings_with_head(
                 .iter()
                 .copied()
                 .filter(|&idx| {
-                    let line = &lines[idx];
-                    let key = line
-                        .trim_end_matches('\n')
-                        .trim_end_matches('\r')
-                        .trim_start()
-                        .trim_end();
-                    !baseline_set.contains(key)
+                    let key = agent_doc_markdown_ast::response_heading_baseline_key(&lines[idx]);
+                    !baseline_set.contains(&key)
                 })
                 .collect();
             if filtered.is_empty() {
@@ -2078,6 +2070,25 @@ mod tests {
     use super::*;
     use std::path::Path;
     use tempfile::TempDir;
+
+    /// `#responsesurrogate`: a token on an older heading must not make every
+    /// heading look new when several `### Re:` lines are open. `(HEAD)` stays
+    /// on the heading that is actually absent from the baseline.
+    #[test]
+    fn response_surrogate_does_not_look_like_a_new_baseline_heading() {
+        let baseline = collect_re_headings("### Re: old — model\n### Re: new — model\n");
+        let content = "### Re: old — model ⟦response:0123456789ab⟧\n### Re: newer — model\n";
+        let annotated = annotate_re_headings_with_head(content, Some(&baseline));
+        assert!(
+            annotated.starts_with("### Re: old — model ⟦response:0123456789ab⟧\n"),
+            "{annotated}"
+        );
+        assert!(!annotated.contains("0123456789ab⟧ (HEAD)"), "{annotated}");
+        assert!(
+            annotated.contains("### Re: newer — model (HEAD)"),
+            "{annotated}"
+        );
+    }
     /// `#patchretryidem`: a post-CAS-race finalize RETRY re-runs patch
     /// application against a document that may already carry the response.
     /// Applying the same exchange patch twice must not splice the document —

@@ -1698,6 +1698,8 @@ fn classify_prompt_bearing_changes_from_annotated_internal(
 }
 
 fn classify_prompt_bearing_changes_raw(diff: &str) -> Vec<PromptBearingChange> {
+    let neutralized = neutralize_response_surrogate_diff(diff);
+    let diff = neutralized.as_str();
     let mut changes = annotate_diff(diff)
         .map(|annotated| classify_prompt_bearing_changes_from_annotated(&annotated))
         .unwrap_or_default();
@@ -1907,7 +1909,9 @@ fn line_is_managed_state_only(line: &str) -> bool {
     // same way and churned exactly the same.
     let is_list_item = trimmed.starts_with("- ");
     let struck_whole_line = {
-        let body = trimmed.strip_prefix("- ").unwrap_or("").trim();
+        let body = element_queue::strip_trailing_response_surrogate(
+            trimmed.strip_prefix("- ").unwrap_or("").trim(),
+        );
         body.strip_prefix("~~")
             .and_then(|rest| rest.strip_suffix("~~"))
             .is_some_and(|inner| !inner.trim().is_empty() && !inner.contains("~~"))
@@ -3608,10 +3612,97 @@ fn is_boundary_artifact(added: &[&str], removed: &[&str]) -> bool {
             {
                 return true;
             }
+            // A line that gains only `⟦response:id⟧` is the same line. Strip the
+            // token before the `(HEAD)` pair check so both decorations together
+            // still count as one boundary edit.
+            let a_norm = element_queue::strip_response_surrogate_annotation(a_trim);
+            let r_norm = element_queue::strip_response_surrogate_annotation(r_trim);
+            let a_norm = a_norm.trim();
+            let r_norm = r_norm.trim();
+            if a_norm == r_norm {
+                return true;
+            }
+            if is_head_boundary_artifact(a_norm)
+                && a_norm
+                    .strip_suffix(" (HEAD)")
+                    .is_some_and(|base| base.trim() == r_norm)
+            {
+                return true;
+            }
+            if is_head_boundary_artifact(r_norm)
+                && r_norm
+                    .strip_suffix(" (HEAD)")
+                    .is_some_and(|base| base.trim() == a_norm)
+            {
+                return true;
+            }
             false
         });
     }
     false
+}
+
+/// Drop added/removed pairs that differ only by a response-surrogate token.
+///
+/// Stamping `❯ prompt` to `❯ prompt ⟦response:id⟧` must not look like a new
+/// prompt. Unmatched lines keep their original text, so a real new prompt still
+/// classifies. Hunk headers are left as written.
+fn neutralize_response_surrogate_diff(diff: &str) -> String {
+    let lines: Vec<&str> = diff.lines().collect();
+    let mut out = Vec::with_capacity(lines.len());
+    let mut index = 0usize;
+    while index < lines.len() {
+        if !lines[index].starts_with("@@") {
+            out.push(lines[index]);
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < lines.len() && !lines[index].starts_with("@@") {
+            index += 1;
+        }
+        out.extend(neutralize_response_surrogate_hunk(&lines[start..index]));
+    }
+    out.join("\n")
+}
+
+fn neutralize_response_surrogate_hunk<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if index == 0 && line.starts_with("@@") {
+            continue;
+        }
+        if line.starts_with('+') && !line.starts_with("+++") {
+            added.push((index, &line[1..]));
+        } else if line.starts_with('-') && !line.starts_with("---") {
+            removed.push((index, &line[1..]));
+        }
+    }
+    let mut drop = vec![false; lines.len()];
+    let mut used = vec![false; added.len()];
+    for (removed_index, removed_text) in &removed {
+        let removed_key = element_queue::strip_response_surrogate_annotation(removed_text);
+        let removed_key = removed_key.trim();
+        let Some(added_slot) = added.iter().enumerate().find(|(slot, (_, added_text))| {
+            if used[*slot] || added_text.trim() == removed_text.trim() {
+                return false;
+            }
+            let added_key = element_queue::strip_response_surrogate_annotation(added_text);
+            added_key.trim() == removed_key
+        }) else {
+            continue;
+        };
+        used[added_slot.0] = true;
+        drop[*removed_index] = true;
+        drop[added_slot.1.0] = true;
+    }
+    lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (!drop[index]).then_some(*line))
+        .collect()
 }
 
 /// Check if the diff looks like an annotation (inline edits to existing content).
@@ -4591,6 +4682,25 @@ Please fix the bug.\n\
         let diff = "--- snapshot\n+++ document\n@@ -1,3 +1,3 @@\n-### Re: Something (HEAD)\n+### Re: Something\n";
         let c = classify_diff(diff);
         assert_eq!(c.diff_type, DiffType::BoundaryArtifact);
+    }
+
+    /// `#responsesurrogate`: stamping a prompt or a struck row is not a new
+    /// user turn and not fresh queue intent.
+    #[test]
+    fn response_surrogate_token_is_not_a_prompt_target() {
+        let diff = "--- snapshot\n+++ document\n@@ -1,2 +1,2 @@\n-❯ do the thing\n+❯ do the thing ⟦response:0123456789ab⟧\n";
+        let class = classify_diff(diff);
+        assert_eq!(class.diff_type, DiffType::BoundaryArtifact);
+        let changes = classify_prompt_bearing_changes(diff);
+        assert!(
+            changes
+                .iter()
+                .all(|change| change.kind != PromptBearingChangeKind::PromptTarget),
+            "{changes:?}"
+        );
+        assert!(text_is_managed_state_only(
+            "- ~~do the thing~~ ⟦response:0123456789ab⟧"
+        ));
     }
 
     #[test]

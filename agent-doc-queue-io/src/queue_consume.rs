@@ -31,6 +31,10 @@ use agent_doc_queue::{
     },
 };
 
+fn stamp_consumed_response_surrogates(before: &str, after: String) -> String {
+    agent_doc_markdown_ast::stamp_new_response_surrogates(before, &after)
+}
+
 pub trait QueueConsumeWriteEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> Result<String>;
 
@@ -580,6 +584,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
         std::slice::from_ref(&observed_head),
         response_first_line.as_deref(),
     );
+    target = stamp_consumed_response_surrogates(&content, target);
 
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
@@ -2625,6 +2630,9 @@ fn plan_queue_prompt_consumption_inner(
                 );
             }
 
+            let current = stamp_consumed_response_surrogates(content, current);
+            let new_snap =
+                stamp_consumed_response_surrogates(snapshot_content.unwrap_or(content), new_snap);
             return Ok(Some(QueueConsumptionPlan {
                 consumed_text,
                 consumed_texts,
@@ -3062,6 +3070,9 @@ fn plan_queue_prompt_consumption_inner(
         log_snapshot_sync_skipped(file, "queue consume snapshot sync", "snapshot is missing");
     }
 
+    let current = stamp_consumed_response_surrogates(content, current);
+    let new_snap =
+        stamp_consumed_response_surrogates(snapshot_content.unwrap_or(content), new_snap);
     Ok(Some(QueueConsumptionPlan {
         consumed_text,
         consumed_texts,

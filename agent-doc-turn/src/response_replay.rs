@@ -23,6 +23,13 @@ pub fn first_response_heading_line(response: &str) -> Option<&str> {
 }
 
 fn normalize_replay_topic(text: &str) -> String {
+    let owned;
+    let text = if text.contains(agent_doc_markdown_ast::RESPONSE_SURROGATE_PREFIX) {
+        owned = agent_doc_markdown_ast::strip_response_surrogate_annotation(text);
+        owned.as_str()
+    } else {
+        text
+    };
     let trimmed = text.trim();
     let trimmed = trimmed
         .strip_prefix("❯ ")
@@ -506,7 +513,10 @@ pub fn materialize_response_in_current_exchange(
         .find(|component| component.name == "exchange")?;
     let mut exchange_body = exchange.content(current).to_string();
     if let Some(repaired) = repair_response_heading_after_body(&exchange_body, &response) {
-        return Some(exchange.replace_content(current, &repaired));
+        let replaced = exchange.replace_content(current, &repaired);
+        return Some(agent_doc_markdown_ast::stamp_new_response_surrogates(
+            current, &replaced,
+        ));
     }
     if let Some(suffix) = orphan_response_suffix_range(&exchange_body, &response) {
         exchange_body.replace_range(suffix, "");
@@ -515,7 +525,10 @@ pub fn materialize_response_in_current_exchange(
         &mut exchange_body,
         &response,
     );
-    Some(exchange.replace_content(current, &exchange_body))
+    let replaced = exchange.replace_content(current, &exchange_body);
+    Some(agent_doc_markdown_ast::stamp_new_response_surrogates(
+        current, &replaced,
+    ))
 }
 
 /// Reassemble or collapse an exact retained-response replay fragment shell.
@@ -1367,18 +1380,13 @@ fn normalize_response_block_line(line: &str) -> Option<String> {
         return None;
     }
     if trimmed.starts_with("### Re:") {
-        return Some(
-            trimmed
-                .strip_suffix(" (HEAD)")
-                .unwrap_or(trimmed)
-                .to_string(),
-        );
+        return Some(strip_transient_response_head_marker(trimmed));
     }
     let unprefixed = trimmed
         .strip_prefix('❯')
         .map(str::trim_start)
         .unwrap_or(trimmed);
-    Some(unprefixed.to_string())
+    Some(strip_transient_response_head_marker(unprefixed))
 }
 
 fn block_has_prompt_prefixed_body(block_lines: &[&str]) -> bool {
@@ -1475,15 +1483,19 @@ fn normalize_response_line(line: &str) -> Option<String> {
 }
 
 fn strip_transient_response_head_marker(line: &str) -> String {
-    if let Some(stripped) = line.strip_suffix(" (HEAD)") {
+    let stripped = if let Some(stripped) = line.strip_suffix(" (HEAD)") {
         let trimmed = stripped.trim_start();
         let is_re_heading = trimmed.starts_with("### Re:");
         let is_bold_re_heading = trimmed.starts_with("**Re:") && trimmed.ends_with("**");
         if is_re_heading || is_bold_re_heading {
-            return stripped.to_string();
+            stripped
+        } else {
+            line
         }
-    }
-    line.to_string()
+    } else {
+        line
+    };
+    agent_doc_markdown_ast::strip_response_surrogate_annotation(stripped)
 }
 
 #[cfg(test)]
@@ -1664,7 +1676,9 @@ mod tests {
             "The practical options are listed below.\n",
             "<!-- /agent:exchange -->\n",
         );
-        assert!(response_materialized_in_exchange_response_cell(response, content));
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
     }
 
     #[test]
@@ -1901,7 +1915,9 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
 
-        assert!(response_materialized_in_exchange_response_cell(response, content));
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
         assert_eq!(
             materialize_response_in_current_exchange(content, response).as_deref(),
             Some(content)

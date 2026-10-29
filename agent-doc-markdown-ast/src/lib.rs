@@ -17,6 +17,14 @@ pub mod events;
 pub mod exchange_tree;
 pub mod mutations;
 pub mod overlay;
+pub mod response_surrogate;
+
+pub use agent_doc_element_queue::{
+    RESPONSE_SURROGATE_PREFIX, is_response_surrogate_id, response_surrogate_token,
+    split_trailing_response_surrogate, strip_response_surrogate_annotation,
+    strip_trailing_response_surrogate,
+};
+pub use response_surrogate::{response_heading_baseline_key, stamp_new_response_surrogates};
 
 use std::hash::{Hash, Hasher};
 

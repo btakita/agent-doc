@@ -538,6 +538,10 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     // below the struck parent part; only the parent part carries the wrapper.
     let (raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&source[start..end]);
+    // A response surrogate sits outside the strike. Drop it before the `~~`
+    // check so unstrike still sees the wrapper, and do not put it back on the
+    // live row.
+    let raw = agent_doc_element_queue::strip_trailing_response_surrogate(raw);
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
     // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
     // wrapper before the deterministic separator, so split there first.

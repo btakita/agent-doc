@@ -973,14 +973,21 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     // every live child is struck with the parent
                     // (`#struckparentkids`) so an answered child reads closed.
                     // A reopened block's parent is already struck and is not
-                    // wrapped twice.
+                    // wrapped twice. A response surrogate rides outside `~~`.
                     let (head, block) =
                         agent_doc_element_queue::subprompts::split_subprompt_block(&p.text);
+                    let (head, token) =
+                        agent_doc_element_queue::split_trailing_response_surrogate(head);
                     out.push_str("~~");
                     out.push_str(agent_doc_element_queue::subprompts::unwrap_struck_parent(
                         head,
                     ));
-                    out.push_str("~~\n");
+                    out.push_str("~~");
+                    if let Some(token) = token {
+                        out.push(' ');
+                        out.push_str(token);
+                    }
+                    out.push('\n');
                     if let Some(block) = block {
                         let struck =
                             agent_doc_element_queue::subprompts::strike_subprompt_block(block);
@@ -1392,6 +1399,7 @@ fn strip_queue_bullet(line: &str) -> &str {
 }
 
 fn strip_strike_markers(line: &str) -> &str {
+    let line = agent_doc_element_queue::strip_trailing_response_surrogate(line);
     line.strip_prefix("~~")
         .and_then(|s| s.strip_suffix("~~"))
         .or_else(|| line.strip_prefix('~').and_then(|s| s.strip_suffix('~')))
@@ -2705,12 +2713,19 @@ pub fn sort_prompts_by_dag_with_operator_authored(
     Some(out)
 }
 
-fn parse_completed_inline(text: &str) -> Option<&str> {
+fn parse_completed_inline(text: &str) -> Option<String> {
     let trimmed = text.trim();
-    let inner = parse_completed_inline_once(trimmed)?;
+    let (body, token) = agent_doc_element_queue::split_trailing_response_surrogate(trimmed);
+    let inner = parse_completed_inline_once(body)?;
     let inner = parse_completed_inline_once(inner).unwrap_or(inner);
     let inner = inner.trim();
-    (!inner.is_empty()).then_some(inner)
+    if inner.is_empty() {
+        return None;
+    }
+    Some(match token {
+        Some(token) => format!("{inner} {token}"),
+        None => inner.to_string(),
+    })
 }
 
 fn parse_completed_inline_once(trimmed: &str) -> Option<&str> {
@@ -3020,7 +3035,7 @@ fn nest_row_work_text(text: &str) -> String {
 }
 
 fn unwrap_nest_strike(text: &str) -> &str {
-    let trimmed = text.trim();
+    let trimmed = agent_doc_element_queue::strip_trailing_response_surrogate(text.trim());
     if let Some(inner) = trimmed
         .strip_prefix("~~")
         .and_then(|rest| rest.strip_suffix("~~"))
@@ -4314,7 +4329,11 @@ fn head_shape(prompt: &QueuePrompt) -> HeadShape {
 pub const QUEUE_EFFECT_ANNOTATION_PREFIX: &str = "⟦effect:";
 
 fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
-    let trimmed = text.trim_end();
+    // A response surrogate may follow `⟦effect:N⟧`. Peel it before the effect
+    // parse. Failure returns the original text, token included. Success returns
+    // the authored base without the surrogate.
+    let (stripped, _) = agent_doc_element_queue::split_trailing_response_surrogate(text);
+    let trimmed = stripped.trim_end();
     let Some(before_close) = trimmed.strip_suffix('⟧') else {
         return (text.to_string(), None);
     };
@@ -4404,12 +4423,18 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
             let QueueEntry::Prompt(prompt) = &entries[index] else {
                 unreachable!("effect-family index must name a live prompt");
             };
-            let (base, _) = split_queue_effect_annotation(&prompt.text);
+            let (peeled, response_token) =
+                agent_doc_element_queue::split_trailing_response_surrogate(&prompt.text);
+            let (base, _) = split_queue_effect_annotation(peeled);
             let effect = effect.expect("every duplicate effect receives an id");
-            let text = format!(
+            let mut text = format!(
                 "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
                 base.trim_end()
             );
+            if let Some(token) = response_token {
+                text.push(' ');
+                text.push_str(token);
+            }
             if text != prompt.text {
                 changed = true;
                 let QueueEntry::Prompt(target) = &mut annotated[index] else {
@@ -9383,6 +9408,31 @@ mod tests {
                 p("📥 release + publish ⟦effect:2⟧"),
                 p("release + publish ⟦effect:1⟧"),
                 p("release + publish ⟦effect:3⟧"),
+            ]
+        );
+    }
+
+    /// `#responsesurrogate`: the locator round-trips outside `~~` and survives
+    /// an effect-id rewrite without becoming the effect id.
+    #[test]
+    fn response_surrogate_round_trips_outside_strike_and_effect_annotation() {
+        let token = "⟦response:0123456789ab⟧";
+        let body = format!("- ~~do the thing~~ {token}\n");
+        let entries = parse(&body).unwrap();
+        assert_eq!(render(&entries), body);
+        assert_eq!(
+            split_queue_effect_annotation(&format!("release + publish ⟦effect:2⟧ {token}")),
+            ("release + publish".to_string(), Some(2))
+        );
+        let entries = vec![
+            p(&format!("release + publish {token}")),
+            p(&format!("release + publish ⟦effect:2⟧ {token}")),
+        ];
+        assert_eq!(
+            annotate_duplicate_queue_effects(&entries).unwrap(),
+            vec![
+                p(&format!("release + publish ⟦effect:1⟧ {token}")),
+                p(&format!("release + publish ⟦effect:2⟧ {token}")),
             ]
         );
     }

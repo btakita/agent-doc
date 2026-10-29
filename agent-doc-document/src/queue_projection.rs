@@ -1253,7 +1253,12 @@ pub fn strip_priority_markers(text: &str) -> String {
             bare[..start].trim_end()
         };
     }
-    bare.to_string()
+    if !bare.contains(agent_doc_element_queue::RESPONSE_SURROGATE_PREFIX) {
+        return bare.to_string();
+    }
+    agent_doc_element_queue::strip_response_surrogate_annotation(bare)
+        .trim()
+        .to_string()
 }
 
 /// The dispatch brief's `<origin-queue-item>`: projection prefixes stripped,
@@ -1875,11 +1880,20 @@ mod tests {
             QueueLifecycleMarker::Blocked,
             &blockers,
         );
-        assert_eq!(blocked, "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]");
-        assert_eq!(lifecycle_marker(&blocked), Some(QueueLifecycleMarker::Blocked));
+        assert_eq!(
+            blocked,
+            "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]"
+        );
+        assert_eq!(
+            lifecycle_marker(&blocked),
+            Some(QueueLifecycleMarker::Blocked)
+        );
         assert_eq!(blocked_marker_ids(&blocked), vec!["sbx", "deploy"]);
         assert_eq!(strip_priority_markers(&blocked), "do [#stg]");
-        assert_eq!(strip_in_progress_marker(&blocked), ":round_pushpin: do [#stg]");
+        assert_eq!(
+            strip_in_progress_marker(&blocked),
+            ":round_pushpin: do [#stg]"
+        );
         // Repaint replaces the token, including a changed blocker list.
         assert_eq!(
             apply_lifecycle_marker_with_blockers(
@@ -1901,7 +1915,10 @@ mod tests {
             "🙋⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg] [#subagent-operator-request-x]"
         );
         // A bare annotation left behind by a hand edit is still projection.
-        assert_eq!(strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"), "do [#stg]");
+        assert_eq!(
+            strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"),
+            "do [#stg]"
+        );
         // An operator's own prose is never read as the annotation.
         assert_eq!(
             strip_priority_markers("⟦blocked by sbx do [#stg]"),

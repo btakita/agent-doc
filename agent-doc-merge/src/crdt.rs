@@ -1176,10 +1176,12 @@ fn list_item_key(item: &str) -> String {
 /// working-tree-only ` (HEAD)` annotation.
 fn exchange_heading_key(block: &str) -> String {
     let heading = block.lines().next().unwrap_or("").trim();
-    heading
+    let heading = heading
         .strip_suffix(" (HEAD)")
         .unwrap_or(heading)
-        .trim_end()
+        .trim_end();
+    agent_doc_element_queue::strip_trailing_response_surrogate(heading)
+        .trim()
         .to_string()
 }
 

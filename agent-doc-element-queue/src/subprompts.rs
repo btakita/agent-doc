@@ -113,7 +113,7 @@ pub fn subprompt_row_is_eligible(content: &str) -> bool {
 }
 
 fn strip_strike(text: &str) -> &str {
-    let text = text.trim();
+    let text = super::strip_trailing_response_surrogate(text.trim());
     if let Some(inner) = text.strip_prefix("~~") {
         return inner.strip_suffix("~~").unwrap_or(inner).trim();
     }
@@ -276,7 +276,7 @@ pub fn strike_subprompt_block(block: &str) -> String {
 /// nests `~~~~x~~~~`. Accepts `~~x~~` and the annotated `#qstrikenote` shape
 /// (`~~x~~ — auto-struck: …`); anything else is returned unchanged.
 pub fn unwrap_struck_parent(head: &str) -> &str {
-    let trimmed = head.trim();
+    let trimmed = super::strip_trailing_response_surrogate(head.trim());
     let Some(rest) = trimmed.strip_prefix("~~") else {
         return trimmed;
     };

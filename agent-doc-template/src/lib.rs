@@ -13,4 +13,5 @@ pub mod stale_baseline;
 pub mod structure_guard;
 pub mod todo_patch_guard;
 
+pub use agent_doc_markdown_ast::stamp_new_response_surrogates;
 pub use template::*;

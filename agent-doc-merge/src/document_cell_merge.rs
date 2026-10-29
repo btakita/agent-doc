@@ -1128,13 +1128,14 @@ fn is_h3_heading(trimmed: &str) -> bool {
 fn normalize_heading_key(trimmed: &str) -> String {
     let body = trimmed.strip_prefix("###").unwrap_or(trimmed).trim();
     let mut t = body.trim();
-    // Strip a surrounding strike wrapper.
-    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
-        t = t[2..t.len() - 2].trim();
-    }
-    // Strip a trailing ` (HEAD)` boundary annotation.
+    // Strip a trailing ` (HEAD)` boundary annotation, then a response surrogate,
+    // before the strike wrapper. The token sits outside `~~`.
     if let Some(stripped) = t.strip_suffix("(HEAD)") {
         t = stripped.trim_end();
+    }
+    t = agent_doc_element_queue::strip_trailing_response_surrogate(t);
+    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
+        t = t[2..t.len() - 2].trim();
     }
     t.to_string()
 }

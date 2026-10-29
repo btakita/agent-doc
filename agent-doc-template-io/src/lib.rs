@@ -16,6 +16,7 @@ use agent_doc_template::patchback::{PatchbackShape, TemplatePatchbackPlan};
 use agent_doc_template::response_materialization::response_materialization_probe;
 use agent_doc_template::{
     ComponentInfo, PatchBlock, TemplateInfo, apply_patches_pure, apply_patches_with_overrides_pure,
+    stamp_new_response_surrogates,
 };
 
 pub mod backlog_normalization;
@@ -403,6 +404,7 @@ pub fn apply_patches_with_project_config(
         &component_configs,
         &max_lines_configs,
     )
+    .map(|applied| stamp_new_response_surrogates(doc, &applied))
 }
 
 /// File-based wrapper for
@@ -446,6 +448,7 @@ pub fn apply_patches_with_overrides_with_project_config(
         &max_lines_configs,
         mode_overrides,
     )
+    .map(|applied| stamp_new_response_surrogates(doc, &applied))
 }
 
 /// Get template info for a document (for plugin rendering).

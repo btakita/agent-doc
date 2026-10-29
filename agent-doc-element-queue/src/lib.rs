@@ -623,9 +623,96 @@ pub fn render_struck_row_body(text: &str) -> String {
     }
 }
 
+/// Visible surrogate locator for one assistant response (`#responsesurrogate`).
+/// The id is 12 lowercase hex characters. It is not queue-work identity.
+pub const RESPONSE_SURROGATE_PREFIX: &str = "⟦response:";
+
+const RESPONSE_SURROGATE_CLOSE: char = '⟧';
+
+/// True when `id` is exactly 12 lowercase hex characters.
+pub fn is_response_surrogate_id(id: &str) -> bool {
+    id.len() == 12
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// `⟦response:<id>⟧` for a validated id. Callers pass [`is_response_surrogate_id`].
+pub fn response_surrogate_token(id: &str) -> String {
+    format!("{RESPONSE_SURROGATE_PREFIX}{id}{RESPONSE_SURROGATE_CLOSE}")
+}
+
+/// Split one trailing `⟦response:<id>⟧` from `text`.
+///
+/// The returned prefix drops one preceding ASCII space and does not include
+/// whitespace that followed the token. Text with no suffix token is returned
+/// unchanged, including its own trailing whitespace.
+pub fn split_trailing_response_surrogate(text: &str) -> (&str, Option<&str>) {
+    let trimmed_end = text.trim_end();
+    let Some(open) = trimmed_end.rfind(RESPONSE_SURROGATE_PREFIX) else {
+        return (text, None);
+    };
+    let after = &trimmed_end[open + RESPONSE_SURROGATE_PREFIX.len()..];
+    let Some(id) = after.strip_suffix(RESPONSE_SURROGATE_CLOSE) else {
+        return (text, None);
+    };
+    if !is_response_surrogate_id(id) {
+        return (text, None);
+    }
+    let mut prefix_end = open;
+    if prefix_end > 0 && trimmed_end.as_bytes()[prefix_end - 1] == b' ' {
+        prefix_end -= 1;
+    }
+    (&text[..prefix_end], Some(&trimmed_end[open..]))
+}
+
+/// `text` without one trailing response-surrogate token.
+pub fn strip_trailing_response_surrogate(text: &str) -> &str {
+    split_trailing_response_surrogate(text).0
+}
+
+/// Remove every valid response-surrogate token from `text`.
+///
+/// A fast path returns `text` owned and unchanged when the prefix is absent.
+/// Uppercase, short, and non-12-hex ids are left in place. `⟦blocked by …⟧`
+/// is not a response token.
+pub fn strip_response_surrogate_annotation(text: &str) -> String {
+    if !text.contains(RESPONSE_SURROGATE_PREFIX) {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(RESPONSE_SURROGATE_PREFIX) {
+        let after = &rest[start + RESPONSE_SURROGATE_PREFIX.len()..];
+        if let Some(close) = after.find(RESPONSE_SURROGATE_CLOSE) {
+            let id = &after[..close];
+            if is_response_surrogate_id(id) {
+                let mut end = start;
+                if end > 0 && rest.as_bytes()[end - 1] == b' ' {
+                    end -= 1;
+                }
+                out.push_str(&rest[..end]);
+                let close_len = RESPONSE_SURROGATE_CLOSE.len_utf8();
+                rest = &after[close + close_len..];
+                continue;
+            }
+        }
+        let advance = rest[start..]
+            .chars()
+            .next()
+            .map(char::len_utf8)
+            .unwrap_or(1);
+        out.push_str(&rest[..start + advance]);
+        rest = &rest[start + advance..];
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Strip all leading lifecycle/priority markers (`:pushpin:`/`📌`/`📍`/`🟡`/`🚧`/`📥`/`☑️`/`⚠️`/`⏭️`/`⏳`
 /// and the `**pin**`/`**prioritized**` word forms) from a queue head so a
 /// marker-decorated line keys to the same durable identity as the bare line.
+/// A response surrogate token is not work identity either.
 /// Shared with the CRDT cell-merge free-text keyer so merge, convergence, and
 /// dedup all normalize the same marker set.
 pub fn strip_priority_markers(text: &str) -> String {
@@ -666,7 +753,10 @@ pub fn strip_priority_markers(text: &str) -> String {
             bare[..start].trim_end()
         };
     }
-    bare.to_string()
+    if !bare.contains(RESPONSE_SURROGATE_PREFIX) {
+        return bare.to_string();
+    }
+    strip_response_surrogate_annotation(bare).trim().to_string()
 }
 
 /// The **work identity** of a live queue head: the one key queue claims,
@@ -769,6 +859,42 @@ mod tests {
         assert_eq!(
             super::strip_priority_markers("⟦blocked by sbx do [#stg]"),
             "⟦blocked by sbx do [#stg]"
+        );
+    }
+
+    /// `#responsesurrogate`: the locator is not queue-work identity.
+    #[test]
+    fn response_surrogate_is_not_queue_work_identity() {
+        let token = "⟦response:0123456789ab⟧";
+        assert_eq!(
+            super::strip_priority_markers(&format!("do [#stg] {token}")),
+            "do [#stg]"
+        );
+        assert_eq!(
+            super::queue_head_identity(&format!("do [#stg] {token}")),
+            super::queue_head_identity("do [#stg]")
+        );
+        assert!(super::is_response_surrogate_id("0123456789ab"));
+        assert!(!super::is_response_surrogate_id("0123456789AB"));
+        assert!(!super::is_response_surrogate_id("0123456789"));
+        assert!(!super::is_response_surrogate_id("0123456789abcdef"));
+        assert_eq!(
+            super::strip_response_surrogate_annotation("⟦blocked by sbx⟧ do [#stg]"),
+            "⟦blocked by sbx⟧ do [#stg]"
+        );
+        assert_eq!(
+            super::strip_response_surrogate_annotation(&format!(
+                "keep ⟦response:0123456789abcdef⟧ {token}"
+            )),
+            "keep ⟦response:0123456789abcdef⟧"
+        );
+        assert_eq!(
+            super::split_trailing_response_surrogate(&format!("do [#stg] {token}\n")),
+            ("do [#stg]", Some(token))
+        );
+        assert_eq!(
+            super::split_trailing_response_surrogate("do [#stg]\n"),
+            ("do [#stg]\n", None)
         );
     }
 

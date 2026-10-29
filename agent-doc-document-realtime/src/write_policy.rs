@@ -2939,6 +2939,7 @@ pub fn live_prompt_drift_recovery_target(
         &response_block,
     );
     let recovered = exchange.replace_content(file_content, &exchange_body);
+    let recovered = agent_doc_template::stamp_new_response_surrogates(file_content, &recovered);
     // `#closeoutduplicatedcommit`: the materialization site's own backstop. A
     // target that carries more copies of a response than the document it is
     // rebased onto would re-append a response the document already holds; the

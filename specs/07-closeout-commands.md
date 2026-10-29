@@ -14,6 +14,13 @@ authorizes a strike. Unselected, struck, id-backed, and foreign-exchange work is
 outside this gate. The pure policy owner is `queue_closeout_guard`; no new
 retry loop, cache, or state authority is introduced.
 
+A newly materialized `### Re:` response carries a stable surrogate id
+(`#responsesurrogate`, [§2](02-document-format.md)). Closeout appends that id to
+the response heading, to the exchange prompt it answers, and to the consumed
+`agent:run` row once that row is struck. The id is durable document text. It is
+not a transient `(HEAD)` marker, and closeout does not backfill it onto
+historical responses that lack one.
+
 When an exact free-text quote is followed by a scoped `**Deferred:**`, the
 operator-facing closeout diagnostic must say that the head remains pending
 because of that deferral; it must not claim the exact Queue echo was missing.

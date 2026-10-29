@@ -83,6 +83,8 @@ impl ExchangeNode {
                     .map(|l| l.trim())
                     .collect::<Vec<_>>()
                     .join("\n");
+                let body =
+                    agent_doc_element_queue::strip_response_surrogate_annotation(body.trim());
                 format!("p:{}", short_content_hash(body.trim()))
             }
             ExchangeNodeKind::Salient { cycle_id } => format!("s:{cycle_id}"),
@@ -126,11 +128,14 @@ fn is_salient_close_marker(trimmed: &str) -> bool {
 fn normalize_heading_key(trimmed: &str) -> String {
     let body = trimmed.strip_prefix("###").unwrap_or(trimmed).trim();
     let mut t = body.trim();
-    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
-        t = t[2..t.len() - 2].trim();
-    }
     if let Some(stripped) = t.strip_suffix("(HEAD)") {
         t = stripped.trim_end();
+    }
+    // The surrogate sits outside a `~~` wrapper (`~~Re: x~~ ⟦response:id⟧`).
+    // Strip it before the wrapper check so the wrapper still comes off.
+    t = agent_doc_element_queue::strip_trailing_response_surrogate(t);
+    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
+        t = t[2..t.len() - 2].trim();
     }
     t.to_string()
 }
@@ -163,7 +168,16 @@ pub fn response_identity_digest(lines: &[String]) -> String {
         } else if is_transient_boundary(trimmed) {
             continue;
         } else {
-            norm.push(raw.trim_end().to_string());
+            let trimmed_end = raw.trim_end();
+            if trimmed_end.contains(agent_doc_element_queue::RESPONSE_SURROGATE_PREFIX) {
+                norm.push(
+                    agent_doc_element_queue::strip_response_surrogate_annotation(trimmed_end)
+                        .trim_end()
+                        .to_string(),
+                );
+            } else {
+                norm.push(trimmed_end.to_string());
+            }
         }
     }
     while norm.last().is_some_and(|l| l.trim().is_empty()) {
@@ -278,9 +292,12 @@ impl ResponseTurnCellPolicy {
 /// changes the response cell's identity.
 pub fn normalize_response_order_line(line: &str) -> String {
     let normalized = line.trim().trim_start_matches('❯').trim();
-    normalized
+    let normalized = normalized
         .strip_suffix(" (HEAD)")
         .unwrap_or(normalized)
+        .trim_end();
+    agent_doc_element_queue::strip_trailing_response_surrogate(normalized)
+        .trim()
         .to_string()
 }
 

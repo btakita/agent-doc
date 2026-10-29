@@ -1212,7 +1212,8 @@ pub unsafe extern "C" fn agent_doc_apply_patch(
             &HashMap::new(),
             &overrides,
         )
-        .and_then(normalize_editor_visible_result),
+        .and_then(normalize_editor_visible_result)
+        .map(|applied| template::stamp_new_response_surrogates(doc_str, &applied)),
     )
 }
 
@@ -1261,7 +1262,10 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
         if let Some(comp) = components.iter().find(|c| c.name == name) {
             let result =
                 comp.append_with_caret(doc_str, patch_content, Some(caret_offset as usize));
-            return ffi_patch_from_result(normalize_editor_visible_result(result));
+            return ffi_patch_from_result(
+                normalize_editor_visible_result(result)
+                    .map(|applied| template::stamp_new_response_surrogates(doc_str, &applied)),
+            );
         }
     }
 
@@ -1279,7 +1283,8 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_caret(
             &HashMap::new(),
             &overrides,
         )
-        .and_then(normalize_editor_visible_result),
+        .and_then(normalize_editor_visible_result)
+        .map(|applied| template::stamp_new_response_surrogates(doc_str, &applied)),
     )
 }
 
@@ -1337,7 +1342,10 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
             } else {
                 result
             };
-            return ffi_patch_from_result(normalize_editor_visible_result(result));
+            return ffi_patch_from_result(
+                normalize_editor_visible_result(result)
+                    .map(|applied| template::stamp_new_response_surrogates(doc_str, &applied)),
+            );
         }
     }
 
@@ -1355,7 +1363,8 @@ pub unsafe extern "C" fn agent_doc_apply_patch_with_boundary(
             &HashMap::new(),
             &overrides,
         )
-        .and_then(normalize_editor_visible_result),
+        .and_then(normalize_editor_visible_result)
+        .map(|applied| template::stamp_new_response_surrogates(doc_str, &applied)),
     )
 }
 

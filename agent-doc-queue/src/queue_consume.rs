@@ -1834,6 +1834,7 @@ fn project_free_text_strike_of_node_keys(
     // boundary just like queue consume. Retire its completion cell in the same
     // derived target so stale evidence cannot attach to a later same-text row.
     let annotated = retire_consumed_completion_feedback(&annotated, &consumed_heads).0;
+    let annotated = agent_doc_markdown_ast::stamp_new_response_surrogates(content, &annotated);
     let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
     let mut target_content = annotated;
     if remaining == 0 {
@@ -2334,13 +2335,15 @@ pub fn annotate_struck_free_text_line(line: &str) -> String {
     if core.contains('\n') || trimmed_end.trim_start().starts_with("~~~") {
         return line.to_string();
     }
-    if trimmed_end.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
+    let (without_token, token) =
+        agent_doc_element_queue::split_trailing_response_surrogate(trimmed_end);
+    if without_token.contains(agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR) {
         return line.to_string();
     }
-    if !trimmed_end.ends_with("~~") {
+    if !without_token.ends_with("~~") {
         return line.to_string();
     }
-    let content = strip_list_bullet_prefix(trimmed_end);
+    let content = strip_list_bullet_prefix(without_token);
     let Some(inner) = content
         .strip_prefix("~~")
         .and_then(|rest| rest.strip_suffix("~~"))
@@ -2350,10 +2353,14 @@ pub fn annotate_struck_free_text_line(line: &str) -> String {
     if inner.trim().is_empty() {
         return line.to_string();
     }
-    format!(
-        "{trimmed_end}{}{STRUCK_FREE_TEXT_NOTE}{trailing_ws}{newline}",
+    let annotated = format!(
+        "{without_token}{}{STRUCK_FREE_TEXT_NOTE}",
         agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
-    )
+    );
+    match token {
+        Some(token) => format!("{annotated} {token}{trailing_ws}{newline}"),
+        None => format!("{annotated}{trailing_ws}{newline}"),
+    }
 }
 
 /// Strip a leading markdown list bullet from a line's content.
@@ -4233,6 +4240,10 @@ Old.
             "- ~~foo~~ — auto-struck: answered this cycle (#ftstrike)\n"
         );
         assert_eq!(annotate_struck_free_text_line("- ~~~~"), "- ~~~~");
+        assert_eq!(
+            annotate_struck_free_text_line("- ~~foo~~ ⟦response:0123456789ab⟧"),
+            "- ~~foo~~ — auto-struck: answered this cycle (#ftstrike) ⟦response:0123456789ab⟧"
+        );
     }
 
     #[test]

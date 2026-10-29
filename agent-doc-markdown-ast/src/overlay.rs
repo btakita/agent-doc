@@ -52,7 +52,8 @@ pub const STRUCK_ANNOTATION_SEPARATOR: &str = " — auto-struck: ";
 /// struck node whose text is the inner content. Returns `(false, body)` unchanged
 /// when the body is not strike-wrapped.
 fn split_struck_body(body: &str) -> (bool, &str) {
-    let inner_with_tail = match body.strip_prefix("~~") {
+    let strike = agent_doc_element_queue::strip_trailing_response_surrogate(body);
+    let inner_with_tail = match strike.strip_prefix("~~") {
         Some(rest) => rest,
         None => return (false, body),
     };
@@ -798,9 +799,10 @@ fn extract_bracket_id(text: &str) -> Option<String> {
 /// before: the remainder IS the text.
 fn work_item_id(text: &str) -> (String, bool) {
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
-    match extract_bracket_id(work) {
+    let work = agent_doc_element_queue::strip_response_surrogate_annotation(work);
+    match extract_bracket_id(&work) {
         Some(id) => (id, true),
-        None => (content_item_id(&classify(work), work), false),
+        None => (content_item_id(&classify(&work), &work), false),
     }
 }
 
@@ -917,13 +919,14 @@ fn parse_multiline_item(
     // projection's, so a lifecycle marker or owner annotation leading the
     // title never becomes the node key.
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(&text);
+    let work = agent_doc_element_queue::strip_response_surrogate_annotation(work);
     let first_line = work
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("");
     let leading_id = extract_bracket_id(first_line);
     let explicit_id = leading_id.is_some();
-    let id = leading_id.unwrap_or_else(|| content_item_id(&classify(work), work));
+    let id = leading_id.unwrap_or_else(|| content_item_id(&classify(&work), &work));
     Item {
         id,
         explicit_id,
@@ -1683,6 +1686,11 @@ trailing residue
         assert_eq!(
             split_struck_body("~~foo bar~~ — auto-struck: answered this cycle (#ftstrike)"),
             (true, "foo bar")
+        );
+        // A trailing response surrogate stays outside the strike wrapper.
+        assert_eq!(
+            split_struck_body("~~foo~~ ⟦response:0123456789ab⟧"),
+            (true, "foo")
         );
         // Not struck.
         assert_eq!(split_struck_body("foo"), (false, "foo"));

@@ -9,7 +9,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use agent_doc_element_queue::nested_claim_steer::split_nested_claim_steer;
+use agent_doc_element_queue::nested_claim_steer::split_nested_claim_steer_with_limit;
 use agent_doc_element_queue::subprompts::has_subprompts;
 
 use crate::document_queue::{QueueEntry, QueuePrompt};
@@ -24,6 +24,9 @@ thread_local! {
 pub struct ClaimTimeSnapshot {
     pub identity: agent_doc_element_queue::QueueItemIdentity,
     pub claim_time_text: String,
+    /// Number of post-claim direct additions that still steer this attempt.
+    /// A reported worker is finished and therefore has no steering slot.
+    pub steering_addition_limit: usize,
 }
 
 impl ClaimTimeSnapshot {
@@ -40,6 +43,12 @@ impl ClaimTimeSnapshot {
                 .clone()
                 .or_else(|| claim.followed_from.first().cloned())
                 .unwrap_or_else(|| claim.item_text.clone()),
+            steering_addition_limit: match claim.state {
+                crate::queue_claim::QueueClaimState::Claimed
+                | crate::queue_claim::QueueClaimState::Running => 1,
+                crate::queue_claim::QueueClaimState::Reported
+                | crate::queue_claim::QueueClaimState::Lost => 0,
+            },
         }
     }
 }
@@ -147,7 +156,11 @@ fn expand_prompt(prompt: &QueuePrompt, snapshots: &[ClaimTimeSnapshot], out: &mu
     if !has_subprompts(&prompt.text) {
         return;
     }
-    let split = split_nested_claim_steer(&prompt.text, &snapshot.claim_time_text);
+    let split = split_nested_claim_steer_with_limit(
+        &prompt.text,
+        &snapshot.claim_time_text,
+        snapshot.steering_addition_limit,
+    );
     if split.routable.is_empty() {
         return;
     }
@@ -176,6 +189,7 @@ mod tests {
         ClaimTimeSnapshot {
             identity: claim_identity(text),
             claim_time_text: text.to_string(),
+            steering_addition_limit: 1,
         }
     }
 
@@ -223,6 +237,7 @@ mod tests {
         let beta = ClaimTimeSnapshot {
             identity: claim_identity("Parent: beta"),
             claim_time_text: "beta".to_string(),
+            steering_addition_limit: 1,
         };
         let snapshots = vec![parent_snapshot("Parent"), beta];
         let expanded = expand_entries(entries, &snapshots);
@@ -263,6 +278,27 @@ mod tests {
         let snapshot = ClaimTimeSnapshot::from_claim(&ledger.claims[0]);
         assert_eq!(snapshot.claim_time_text, "beta");
         assert_eq!(snapshot.identity, claim_identity("Parent: beta"));
+        assert_eq!(snapshot.steering_addition_limit, 1);
+    }
+
+    #[test]
+    fn a_reported_claim_routes_the_first_post_claim_child() {
+        let body = "- Parent\n  - follow-up\n";
+        let entries = document_queue::parse(body).unwrap();
+        let snapshot = ClaimTimeSnapshot {
+            identity: claim_identity("Parent"),
+            claim_time_text: "Parent".to_string(),
+            steering_addition_limit: 0,
+        };
+        let expanded = expand_entries(entries, &[snapshot]);
+        let prompts = document_queue::prompts(&expanded);
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0].text, "follow-up");
+        assert_eq!(prompts[0].indent, 2);
+        assert_eq!(
+            document_queue::nest_vector_for_prompt_text(&expanded, "follow-up").as_deref(),
+            Some("Parent: follow-up")
+        );
     }
 
     #[test]

@@ -679,7 +679,6 @@ The operator chose allow. `git push --force-with-lease origin fix/realtime-steer
 > **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 
 **Deferred:** `origin/fix/realtime-steering-parity` and the local HEAD are both `eac6892dc30d2e80dea901fe19260b354851226b`. `make check` on that rebase exited 0: 12180 passed, 187 skipped. Integration onto main stays with the coordinator after review. Generation 2 remains `subagent:rtsteeringparity`.
-
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 

@@ -2520,6 +2520,30 @@ impl std::fmt::Display for QueueClaimMiss {
 
 impl std::error::Error for QueueClaimMiss {}
 
+/// Live nest-vector heads whose leaf is `item`, in `live_heads` order.
+///
+/// Empty when `item` is itself a live head (an exact claim, including a
+/// top-level bare `#tag`). One match is that parent. Several matches are the
+/// same leaf under different parents (`#nestlistlineage`).
+pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
+    let identity = claim_identity(item);
+    if live_heads
+        .iter()
+        .any(|head| claim_identity(head) == identity)
+    {
+        return Vec::new();
+    }
+    live_heads
+        .iter()
+        .filter(|head| {
+            head.rsplit_once(": ").is_some_and(|(ancestors, leaf)| {
+                !ancestors.is_empty() && !leaf.is_empty() && claim_identity(leaf) == identity
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// Resolve a claim `--item` to the live queue head it names.
 ///
 /// The item matches a head by claim identity (the exact line, marker-
@@ -2534,27 +2558,11 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
     {
         return Ok(head.clone());
     }
-    // `#nestlistlineage`: `--item '#rebase'` names the nest vector when exactly
-    // one live head's leaf is that work. Several parents are ambiguous.
-    let by_leaf: Vec<String> = live_heads
-        .iter()
-        .filter(|head| {
-            head.rsplit_once(": ").is_some_and(|(ancestors, leaf)| {
-                !ancestors.is_empty() && !leaf.is_empty() && claim_identity(leaf) == identity
-            })
-        })
-        .cloned()
-        .collect();
-    match by_leaf.len() {
-        1 => return Ok(by_leaf[0].clone()),
-        0 => {}
-        _ => {
-            return Err(QueueClaimMiss {
-                item: item.trim().to_string(),
-                live_heads: live_heads.to_vec(),
-                ambiguous: by_leaf,
-            });
-        }
+    // `#nestlistlineage`: `--item '#rebase'` names the nest vector. One parent
+    // is that row. Several parents name the first in queue order here; `queue
+    // claim` binds the first of those rows that no live claim holds.
+    if let Some(head) = nest_leaf_matches(item, live_heads).into_iter().next() {
+        return Ok(head);
     }
     // `#multilinequeuehead`: a multi-line head (a title line plus a pasted
     // fenced block) is named by its title line. The item resolves only when
@@ -2791,8 +2799,11 @@ mod tests {
             )
         );
         let heads = vec![api.to_string(), contracts.to_string()];
-        let miss = resolve_claim_target("#rebase", &heads).unwrap_err();
-        assert_eq!(miss.ambiguous, heads);
+        assert_eq!(resolve_claim_target("#rebase", &heads).unwrap(), api);
+        assert_eq!(
+            resolve_claim_target("#rebase", &[contracts.to_string()]).unwrap(),
+            contracts
+        );
         assert_eq!(resolve_claim_target(contracts, &heads).unwrap(), contracts);
     }
 

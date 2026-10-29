@@ -2020,11 +2020,56 @@ fn queue_component_items(
         .collect()
 }
 
+struct QueueDispatchRow {
+    raw: String,
+    norm: String,
+    /// Claim key. A nested non-tracked leaf is its nest vector when that
+    /// identity differs from the visible line (`#nestlistlineage`).
+    head: String,
+}
+
+/// Executable rows of one queue block with the head `queue claim` resolves.
+fn queue_component_dispatch_rows(
+    content: &str,
+    component: &agent_doc_element::element::Component,
+) -> Vec<QueueDispatchRow> {
+    let Ok(entries) = agent_doc_queue::document_queue::parse(component.content(content)) else {
+        return Vec::new();
+    };
+    let entries = agent_doc_queue::nested_claim_steer::expand_if_installed(entries);
+    agent_doc_queue::document_queue::executable_prompt_indexes(&entries)
+        .into_iter()
+        .filter_map(|index| {
+            let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = &entries[index]
+            else {
+                return None;
+            };
+            let raw =
+                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim());
+            let norm = normalize_queue_text(&raw);
+            if norm.is_empty() {
+                return None;
+            }
+            let lineage = agent_doc_queue::document_queue::lineage_claim_text(&entries, index)
+                .unwrap_or_else(|| norm.clone());
+            let head = if agent_doc_queue::queue_claim::claim_identity(&lineage)
+                == agent_doc_queue::queue_claim::claim_identity(&norm)
+            {
+                norm.clone()
+            } else {
+                lineage
+            };
+            Some(QueueDispatchRow { raw, norm, head })
+        })
+        .collect()
+}
+
 /// The queue-level subagents attribute applied to one queue block:
 /// `(mode, eligible heads, live heads)`, or `None` when that block's marker
 /// has no valid `subagents` / `fan-out` attribute. Eligible heads are every
 /// live line classified `subagent` against that block (no "new since seed"
-/// filter), in queue order.
+/// filter), in queue order. A shared nested leaf is the nest vector, so two
+/// `#rebase` rows stay two heads.
 pub fn queue_component_subagent_heads(
     content: &str,
     component: &agent_doc_element::element::Component,
@@ -2036,7 +2081,7 @@ pub fn queue_component_subagent_heads(
 )> {
     let mode = agent_doc_queue::subagent_intent::queue_subagents_mode(&component.attrs)?;
     let presets = PresetContext::for_queue_component(content, component, &[], prompt_presets);
-    let items = queue_component_items(content, component);
+    let items = queue_component_dispatch_rows(content, component);
     let awaiting_operator =
         agent_doc_queue::queue_continuation::awaiting_operator_head_ids(content);
     // `#queueblocked`: a row whose tracked item waits on open blockers is not
@@ -2056,9 +2101,9 @@ pub fn queue_component_subagent_heads(
         .filter(|item| !blockers.blocks_row(&item.norm))
         // `#queueoperatoranswer`: an operator answer row goes to the worker that asked.
         .filter(|item| !answer_rows.holds_from_dispatch(&item.raw))
-        .map(|item| item.norm.clone())
+        .map(|item| item.head.clone())
         .collect();
-    let live = items.into_iter().map(|item| item.norm).collect();
+    let live = items.into_iter().map(|item| item.head).collect();
     Some((mode, eligible, live))
 }
 
@@ -3477,6 +3522,25 @@ mod tests {
             live,
             vec!["organize B".to_string(), "publish B [inline]".to_string()]
         );
+    }
+
+    /// A shared `#rebase` leaf is dispatched as each parent's nest vector.
+    /// One parent still names that row; the visible line stays the leaf.
+    #[test]
+    fn shared_rebase_heads_keep_each_parent_lineage() {
+        let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase";
+        let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let (_, eligible, live) = queue_attr_subagent_heads(&content).unwrap();
+        assert_eq!(eligible, vec![api.to_string(), contracts.to_string()]);
+        assert_eq!(live, eligible);
+        let unique = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let (_, eligible, _) = queue_attr_subagent_heads(&unique).unwrap();
+        assert_eq!(eligible, vec![api.to_string()]);
     }
 
     /// An earlier `subagents` run whose only head is operator-gated must not

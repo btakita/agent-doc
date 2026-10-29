@@ -1461,6 +1461,48 @@ pub fn live_executable_row_keys(content: &str) -> Option<Vec<(String, String)>> 
     )
 }
 
+/// Executable rows of every queue as `(display, lineage)`.
+///
+/// Same pair as [`live_executable_row_keys`], across every queue rather than
+/// the selected one. A leaf that is unique in the selected queue and repeated
+/// under another `agent:run` stays a shared leaf (`#nestlistlineage`).
+pub fn all_executable_row_keys(content: &str) -> Option<Vec<(String, String)>> {
+    let components = element::parse(content).ok()?;
+    let queue_set = crate::queue_set::QueueSet::parse(content, &components).ok()?;
+    let mut keys = Vec::new();
+    for block in queue_set.blocks() {
+        let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        for index in document_queue::executable_prompt_indexes(entries.as_ref()) {
+            let Some(QueueEntry::Prompt(prompt)) = entries.get(index) else {
+                continue;
+            };
+            let display = strip_in_progress_marker(prompt.text.trim());
+            if display.trim().is_empty() {
+                continue;
+            }
+            let Some(lineage) = document_queue::lineage_claim_text(entries.as_ref(), index) else {
+                continue;
+            };
+            keys.push((display, lineage));
+        }
+    }
+    Some(keys)
+}
+
+/// Claim keys of every queue, in document order.
+///
+/// A nested non-tracked leaf is its nest vector (`#nestlistlineage`). `queue
+/// claim` resolves `--item` against this set, so a head dispatched from a
+/// sibling run is claimable. Drain selection stays on [`live_queue_head_texts`].
+pub fn all_queue_head_texts(content: &str) -> Option<Vec<String>> {
+    Some(
+        all_executable_row_keys(content)?
+            .into_iter()
+            .map(|(_, lineage)| lineage)
+            .collect(),
+    )
+}
+
 /// Live queue-head rows in queue order, each still carrying its binary-owned
 /// lifecycle and `[#owner#generation]` projection (`None` when no queue
 /// parses). The claim ledger's edit follow reads the projection as row

@@ -81,7 +81,7 @@ pub fn reference_queue_for_dispatch(file: &Path) -> Result<Option<Vec<String>>> 
 }
 
 fn executable_row_keys(content: &str) -> Vec<(String, String)> {
-    agent_doc_queue::queue_continuation::live_executable_row_keys(content).unwrap_or_default()
+    agent_doc_queue::queue_continuation::all_executable_row_keys(content).unwrap_or_default()
 }
 
 /// The string `queue_subagent_dispatch` lists for a lineage claim key.
@@ -251,10 +251,8 @@ fn queue_attr_subagent_plan_with_presets(
         if predecessor_live {
             continue;
         }
-        let owner_state = block.state_excluding_claimed_with_control(
-            &claimed,
-            queue_control.as_deref(),
-        );
+        let owner_state =
+            block.state_excluding_claimed_with_control(&claimed, queue_control.as_deref());
         let Some((mode, eligible, live)) =
             core::queue_component_subagent_heads(content, block.component, prompt_presets)
         else {
@@ -451,13 +449,13 @@ pub fn subagent_authorization_for_content_submitted(
 fn expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
     let _guard = crate::queue_claim::steer_guard_for(file, content)?;
     let heads =
-        agent_doc_queue::queue_continuation::live_queue_head_texts(content).unwrap_or_default();
+        agent_doc_queue::queue_continuation::all_queue_head_texts(content).unwrap_or_default();
     agent_doc_queue::queue_claim::resolve_claim_target(item, &heads).ok()
 }
 
 fn plain_or_expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
     let heads =
-        agent_doc_queue::queue_continuation::live_queue_head_texts(content).unwrap_or_default();
+        agent_doc_queue::queue_continuation::all_queue_head_texts(content).unwrap_or_default();
     agent_doc_queue::queue_claim::resolve_claim_target(item, &heads)
         .ok()
         .or_else(|| expanded_claim_head(file, item, content))
@@ -477,7 +475,7 @@ pub fn subagent_authorization_for_item(
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to brief queue item {item:?}", file.display()))?;
     let disk_heads =
-        agent_doc_queue::queue_continuation::live_queue_head_texts(&disk).unwrap_or_default();
+        agent_doc_queue::queue_continuation::all_queue_head_texts(&disk).unwrap_or_default();
     let (content, head) =
         match agent_doc_queue::queue_claim::resolve_claim_target(item, &disk_heads) {
             Ok(head) => (disk, head),
@@ -585,6 +583,78 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "a claimed item is already dispatched"
+        );
+    }
+
+    /// `#nestlistlineage`: two live `#rebase` rows are two claims. A short
+    /// leaf binds the next unclaimed parent and leaves every row in the
+    /// document. One parent is still claimed by `#rebase`.
+    #[test]
+    fn shared_rebase_claim_binds_each_parent_and_keeps_every_row() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("api.md");
+        let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase";
+        let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&file, &content).unwrap();
+        let listed = pending_subagent_dispatch_for_content(&file, &content).unwrap();
+        assert_eq!(listed, vec![api.to_string(), contracts.to_string()]);
+        assert!(
+            claim_command("api.md", &listed[0]).contains(&format!("--item '{api}'")),
+            "{}",
+            claim_command("api.md", &listed[0])
+        );
+
+        let (_, first) = crate::queue_claim::claim(&file, "#rebase", "subagent:a", 600).unwrap();
+        assert_eq!(first.item_text, api);
+        let (_, second) = crate::queue_claim::claim(&file, "#rebase", "subagent:b", 600).unwrap();
+        assert_eq!(second.item_text, contracts);
+        let err = crate::queue_claim::claim(&file, "#rebase", "subagent:c", 600).unwrap_err();
+        assert!(
+            err.to_string().contains("already held"),
+            "a shared leaf is refused only once every parent is held: {err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+
+        let unique_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(unique_dir.path().join(".agent-doc")).unwrap();
+        let unique_file = unique_dir.path().join("api.md");
+        let unique = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&unique_file, &unique).unwrap();
+        let listed = pending_subagent_dispatch_for_content(&unique_file, &unique).unwrap();
+        assert_eq!(listed, vec!["#rebase".to_string()]);
+        let (_, claim) =
+            crate::queue_claim::claim(&unique_file, "#rebase", "subagent:a", 600).unwrap();
+        assert_eq!(claim.item_text, api);
+        assert_eq!(std::fs::read_to_string(&unique_file).unwrap(), unique);
+
+        let exact_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(exact_dir.path().join(".agent-doc")).unwrap();
+        let exact_file = exact_dir.path().join("api.md");
+        std::fs::write(&exact_file, &content).unwrap();
+        let (_, exact) =
+            crate::queue_claim::claim(&exact_file, contracts, "subagent:a", 600).unwrap();
+        assert_eq!(exact.item_text, contracts);
+        let (_, other) =
+            crate::queue_claim::claim(&exact_file, "#rebase", "subagent:b", 600).unwrap();
+        assert_eq!(other.item_text, api);
+        assert_eq!(std::fs::read_to_string(&exact_file).unwrap(), content);
+
+        let sibling = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n## API\n\n<!-- agent:queue id=api-prs subagents go -->\n- https://github.com/haiven-dev/haiven-api/pull/767\n  - #rebase\n<!-- /agent:queue -->\n\n## Contracts\n\n<!-- agent:queue id=contracts-prs subagents -->\n- https://github.com/haiven-dev/haiven-contracts/pull/162\n  - #rebase\n<!-- /agent:queue -->\n"
+        );
+        let sibling_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(sibling_dir.path().join(".agent-doc")).unwrap();
+        let sibling_file = sibling_dir.path().join("api.md");
+        std::fs::write(&sibling_file, &sibling).unwrap();
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&sibling_file, &sibling).unwrap(),
+            vec![api.to_string(), contracts.to_string()]
         );
     }
 
@@ -1099,7 +1169,12 @@ mod tests {
         );
     }
 
-    fn three_runs(first_attr: &str, first_body: &str, second_attr: &str, second_body: &str) -> String {
+    fn three_runs(
+        first_attr: &str,
+        first_body: &str,
+        second_attr: &str,
+        second_body: &str,
+    ) -> String {
         format!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n\
              <!-- agent:run id=first {first_attr} -->\n{first_body}\

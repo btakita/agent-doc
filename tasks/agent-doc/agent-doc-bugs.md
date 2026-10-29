@@ -580,8 +580,27 @@ The exchange tail restates the closeout for the unclaimed `agent:run` rows. That
 > **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
 
 **Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `0552d86df0` before integration. The same owner keeps that result. A second worker stays unstarted.
+> **Chat prompt (#chatprompt:run-stall):** When I moved agent:run id="main" id="contract-prs", Run Agent Doc on api.md was not wedged? Is the core issue due to all items in id="main" being blocked, so when it was the first agent:run, it stalled the entire turn? This would mean that all agent:run + agent:loop + agent:queue elements should be subject to run each turn.
 
-<!-- agent:boundary:17addd1a -->
+> **Chat prompt (#chatprompt:answer-subagent):** Answer in a subagent.
+
+### Re: a blocked first queue — grok-4.7 · 2026-10-29T00:20-04:00
+
+A read-only pass over main `0552d86df0` answers the reorder. The dispatch walk is `queue_attr_subagent_plan_with_presets` in `agent-doc-queue-io/src/subagent_dispatch.rs`. In-session selection is `QueueGraph::selected_excluding_claimed` in `agent-doc-queue/src/queue_graph.rs`.
+
+An `agent:run` whose heads are all claimed is `Paused`. That queue leaves the turn free, and a later `subagents` queue is still offered. The reorder unwedged `api.md` when the queue that was first was still owner-available inline work: an unclaimed prompt, a reported row, an operator-gated row, or an unclaimed group-label parent. That inline `Ready` queue stops the walk, so a later `subagents` queue stays unoffered while it remains first. An `after=` dependency stays in place across a reorder.
+
+`agent:run`, `agent:loop`, and legacy `agent:queue` all enter that walk. They parse as one queue block. Every ready `subagents` queue is offered in the same turn. The inline drain takes the one queue that has owner-available work, skipping a queue that has nothing runnable.
+
+> **Queue prompt:** re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
+
+**Deferred:** This head waits for a rebase of finished commit `b78f52311c` on `fix/realtime-steering-parity` (worker `01a184da-4035-74d0-b8a1-6e4a03fd9928`) onto `0552d86df0` before integration. The same owner keeps that result. A second worker stays unstarted.
+
+> **Queue prompt:** release + publish: Include #subagent:contractprsstall.
+
+**Deferred:** `#subagent:contractprsstall` is still open, so this head stays queued. Worker `01a185e3-33fd-7dd0-8278-c86793b1be8c` (`subagent:releaseinclude`, generation 1) is confirming that `origin/main` does not contain that fix. The published release remains `v0.35.560`.
+
+<!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -589,10 +608,9 @@ The exchange tail restates the closeout for the unclaimed `agent:run` rows. That
   - ~~Where does this file live? My Coder agent is asking.~~
 - 📥 do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#1] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering
-- ~~In api.md, there are still many 📥 `agent:run` items: and the turn ended. So the Grok agent did not claim these items.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:nestlistlineage#1] api.md: nested list item `https://github.com/haiven-dev/haiven-contracts/pull/162 > #rebase` ran on pr 767 `- ☑️ [#subagent:pr767-rebase#1] #rebase`. I believe we fixed the list lineage fix, but it does not seem to be working.
 - 🚧 [#subagent:contractprsstall#1] Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.
-- ~~Run Agent Doc on a running turn should always send the latest diff from the last send as steering instructions: [route] Sent 3 updates to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=3 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
+- 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

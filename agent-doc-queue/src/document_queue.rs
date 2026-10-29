@@ -1275,16 +1275,31 @@ pub fn sync_backlog_into_queue(
 
     let new_entries: Vec<QueueEntry> = match mode {
         BacklogQueueSyncMode::Sync => {
-            // Mirror backlog-backed directives, but never delete no-id operator
-            // queue text such as a freshly typed `- test`.
+            // Mirror only the canonical top-level directives this projection
+            // owns. A prompt merely *mentioning* an id is operator-authored
+            // queue content, not a backlog mirror row. In particular, nested
+            // preset leaves such as `  - #review` belong to their parent task;
+            // treating every `#word` as mirror-owned deleted that leaf on the
+            // first preflight sync (#review-first-sync-preserve).
+            //
+            // Generated mirror rows are always top-level `do [#id]` entries.
+            // Once an operator nests or annotates one, it is no longer safe for
+            // sync to replace it. Preserve those rows and count their referenced
+            // ids as already represented so the mirror does not add a duplicate.
+            let preserved_reference_ids: std::collections::HashSet<String> = entries
+                .iter()
+                .filter(|entry| !is_canonical_top_level_backlog_mirror(entry))
+                .flat_map(queue_entry_reference_ids)
+                .collect();
             let mirror = ordered_ids
                 .iter()
+                .filter(|id| !preserved_reference_ids.contains(*id))
                 .map(|id| do_prompt_entry(id))
                 .collect::<Vec<_>>();
             let mut rebuilt = Vec::with_capacity(entries.len().max(mirror.len()));
             let mut inserted_mirror = false;
             for entry in entries {
-                if queue_entry_reference_ids(entry).is_empty() {
+                if !is_canonical_top_level_backlog_mirror(entry) {
                     rebuilt.push(entry.clone());
                 } else if !inserted_mirror {
                     rebuilt.extend(mirror.iter().cloned());
@@ -1326,6 +1341,35 @@ pub fn sync_backlog_into_queue(
     } else {
         Some(new_entries)
     }
+}
+
+/// Whether `entry` is a queue row generated and therefore owned by backlog
+/// `queue=sync`.
+///
+/// The mirror emits only top-level, unannotated `do [#id]` rows. Bare `#id`
+/// lines may invoke prompt presets, multi-id lines may be operator-authored
+/// grouping, and nested rows belong to an operator-authored queue tree. Those
+/// surfaces must survive a sync byte-for-byte.
+fn is_canonical_top_level_backlog_mirror(entry: &QueueEntry) -> bool {
+    let prompt = match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
+        _ => return false,
+    };
+    if prompt.indent != 0 || prompt.multiline {
+        return false;
+    }
+
+    let text = strip_priority_markers(&prompt.text);
+    let Some(rest) = text.strip_prefix("do [#") else {
+        return false;
+    };
+    let Some(id) = rest.strip_suffix(']') else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_'))
 }
 
 /// Stable-sort the `Prompt` entries of a queue by the priority `rank` of their
@@ -5745,6 +5789,32 @@ mod tests {
             sync_backlog_into_queue(&entries, &ids(&["a", "b"]), BacklogQueueSyncMode::Sync)
                 .expect("queue should change");
         assert_eq!(render(&synced), "- test\n- do [#a]\n- do [#b]\n");
+    }
+
+    #[test]
+    fn review_first_sync_preserve_keeps_nested_prompt_preset_leaf() {
+        // #review-first-sync-preserve: the parent URL is a group label and its
+        // nested `#review` leaf is an operator-authored prompt-preset invocation,
+        // not a stale backlog mirror id. The first `queue=sync` maintenance pass
+        // must replace only the canonical top-level mirror row.
+        let entries = parse(concat!(
+            "- https://github.com/example/sample-api/pull/762\n",
+            "  - #review\n",
+            "- do [#stale]\n",
+        ))
+        .unwrap();
+        let synced =
+            sync_backlog_into_queue(&entries, &ids(&["active"]), BacklogQueueSyncMode::Sync)
+                .expect("stale mirror row should be replaced");
+
+        assert_eq!(
+            render(&synced),
+            concat!(
+                "- https://github.com/example/sample-api/pull/762\n",
+                "  - #review\n",
+                "- do [#active]\n",
+            )
+        );
     }
 
     #[test]

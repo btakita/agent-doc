@@ -1887,6 +1887,97 @@ Done.
         assert!(plan.repo_actions.is_empty(), "{:?}", plan.repo_actions);
     }
 
+    /// A later `agent:run` defined after another run keeps its subprompts in
+    /// that head's plan entry. The origin queue id is that later section.
+    #[test]
+    fn connected_plan_ranges_across_a_later_run() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue: go
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## API <!-- agent:run id="api-prs" subagents go -->
+- https://example.com/api/pull/1
+  - #rebase
+<!-- /agent:run -->
+
+## Contracts <!-- agent:run id="contracts-prs" subagents -->
+- https://example.com/contracts/pull/9
+  - #rebase
+  - record the contracts note
+<!-- /agent:run -->
+
+## Nightly <!-- agent:loop id="nightly" subagents -->
+- https://example.com/loop/pull/3
+  - #check
+    - check the nightly note
+<!-- /agent:loop -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+        let contracts = plan
+            .queue_subagent_dispatch
+            .iter()
+            .find(|entry| entry.item.contains("example.com/contracts/pull/9: #rebase"))
+            .unwrap_or_else(|| {
+                panic!("later run head missing: {:?}", plan.queue_subagent_dispatch)
+            });
+        assert_eq!(
+            contracts.authorization.queue_id.as_deref(),
+            Some("contracts-prs")
+        );
+        assert!(
+            contracts
+                .authorization
+                .subagent_prompt_preamble
+                .contains("record the contracts note"),
+            "{}",
+            contracts.authorization.subagent_prompt_preamble
+        );
+        assert!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .any(|entry| entry.item.contains("record the contracts note")),
+            "the later subprompt is its own plan head: {:?}",
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>()
+        );
+        let api = plan
+            .queue_subagent_dispatch
+            .iter()
+            .find(|entry| entry.item.contains("example.com/api/pull/1"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "earlier run head missing: {:?}",
+                    plan.queue_subagent_dispatch
+                )
+            });
+        assert_eq!(api.authorization.queue_id.as_deref(), Some("api-prs"));
+    }
+
     #[test]
     fn connected_plan_turns_an_unbound_claim_into_exact_recovery_commands() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");

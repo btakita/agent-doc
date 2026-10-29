@@ -572,6 +572,8 @@ Indented child task lines are canonicalized when they look like list items: the 
 
 **Adding an item with nested sub-items (`#nestedtodoadd`):** every tracked-work add flag takes one multi-line value whose later lines are the item's nested sub-items, one indented `  - <text>` row each (`--backlog-add $'id=pmsync Sync PM state\n  - GitHub issues\n  - Jira tickets'`; likewise `--backlog-add-gated`/`-after`/`-before`/`-back`/`-to` and the `--icebox-add*` flags). The backlog and icebox flags file the lines as the item's continuation, which canonicalization turns into tracked subtasks (`  - [ ] [#pmsync-abcd] GitHub issues`). A replay compares nested list lines with their checkbox and leading own id stripped (`backlog::nested_line_identity`), so a replayed add, auto id or explicit id, is a no-op even after canonicalization or an operator check-off of a subtask. Before this, an auto-id replay filed the item a second time and an explicit-id replay failed `#preset-item-id-collision-enforce`. `--todo-add` takes the same input, validated strictly, and renders the sub-items as plain `  - <text>` rows that stay part of the todo item ([§2 nested todo sub-items](02-document-format.md)).
 
+**Plan range across queue sections (`#nestsubmit`):** A plan's dispatch batch ranges across every `agent:run` and `agent:loop` in document order, including sections defined after another run. Each head's submitted prompt tree and origin queue id come from the section that contains that head, so a later section's subprompts and follow-ups are not attached to the earlier selected queue.
+
 ## Implementation plan
 
 1. **Rust — commands** (`src/write.rs`, `src/pending.rs`):

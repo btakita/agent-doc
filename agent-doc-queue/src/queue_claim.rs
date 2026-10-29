@@ -105,7 +105,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agent_doc_element_queue::{QueueItemIdentity, queue_head_identity};
+use agent_doc_element_queue::{QueueItemIdentity, QueueReportState, queue_head_identity};
 use serde::{Deserialize, Serialize};
 
 /// Default claim TTL: two hours. Long enough for a background subagent to fix
@@ -129,6 +129,9 @@ pub struct QueueClaim {
     /// Typed lifecycle for this exact `(identity, owner, generation)` attempt.
     #[serde(default)]
     pub state: QueueClaimState,
+    /// Explicit local/published state supplied by the worker when reporting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_state: Option<QueueReportState>,
     /// The concrete harness worker that accepted this exact attempt. A claim
     /// is merely dispatching until `queue start` binds this field; labels in
     /// `owner` are coordinator-chosen and are not worker-liveness evidence.
@@ -1088,6 +1091,7 @@ impl QueueClaimLedger {
             owner: owner.trim().to_string(),
             generation: 1,
             state: QueueClaimState::Claimed,
+            publication_state: None,
             worker: None,
             dispatch_policy: None,
             tracked_item_aliases: Vec::new(),
@@ -1409,6 +1413,17 @@ impl QueueClaimLedger {
         item: &str,
         expected_generation: Option<u64>,
     ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        self.report_with_publication_state(item, expected_generation, None)
+    }
+
+    /// Report an attempt and, when supplied, persist the worker's explicit
+    /// local/published state on the same generation-fenced transition.
+    pub fn report_with_publication_state(
+        &mut self,
+        item: &str,
+        expected_generation: Option<u64>,
+        publication_state: Option<QueueReportState>,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
         let identity = claim_identity(item);
         let Some(claim) = self
             .claims
@@ -1430,6 +1445,9 @@ impl QueueClaimLedger {
             });
         }
         claim.state = QueueClaimState::Reported;
+        if publication_state.is_some() {
+            claim.publication_state = publication_state;
+        }
         Ok(claim.clone())
     }
 
@@ -3272,6 +3290,7 @@ mod tests {
                     owner: "subagent:a".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    publication_state: None,
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),
@@ -3289,6 +3308,7 @@ mod tests {
                     owner: "subagent:b".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    publication_state: None,
                     worker: None,
                     dispatch_policy: None,
                     tracked_item_aliases: Vec::new(),

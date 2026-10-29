@@ -164,7 +164,7 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 6] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 7] = [
     QueueMarkerAnnotation {
         token: "[#<owner>#<N>]",
         meaning: "Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity.",
@@ -180,6 +180,10 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 6] = [
     QueueMarkerAnnotation {
         token: "⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧",
         meaning: "Durable UTC time when a closeout struck the row. Editors derive `①`/`②`/`③` and graded highlights for the newest three addressed rows; visiting a row clears only its transient highlight.",
+    },
+    QueueMarkerAnnotation {
+        token: "⟦local⟧ / ⟦published⟧ / ⟦published+local⟧",
+        meaning: "Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (✎⇧). Metadata, not work identity.",
     },
     QueueMarkerAnnotation {
         token: "📫 / 📤",

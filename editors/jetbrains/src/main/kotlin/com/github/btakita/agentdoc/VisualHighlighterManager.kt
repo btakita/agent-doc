@@ -28,6 +28,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
+import com.github.btakita.agentdoc.shell.ShellQueueReportGutterIconRenderer
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
@@ -450,6 +451,11 @@ class VisualHighlighterManager private constructor(private val project: Project)
                     rank,
                     editor.colorsScheme.defaultForeground,
                 )
+            } else {
+                queueReportPresentation(key.kind)?.let { (glyph, tooltip) ->
+                    highlighter.gutterIconRenderer = ShellQueueReportGutterIconRenderer(glyph, tooltip)
+                    highlighter.errorStripeTooltip = tooltip
+                }
             }
             next.add(highlighter)
         }
@@ -646,6 +652,14 @@ class VisualHighlighterManager private constructor(private val project: Project)
             "recent_highlight_1", "recent_highlight_2", "recent_highlight_3" ->
                 HighlighterLayer.ADDITIONAL_SYNTAX + 1
             else -> HighlighterLayer.ADDITIONAL_SYNTAX
+        }
+
+    private fun queueReportPresentation(kind: String): Pair<String, String>? =
+        when (kind) {
+            "queue_report_local" -> "✎" to "Worker-reported local changes"
+            "queue_report_published" -> "⇧" to "Worker-reported published state"
+            "queue_report_published_local" -> "✎⇧" to "Published, then changed locally again"
+            else -> null
         }
 
     private fun mutedBackground(editor: Editor, accent: Color?): Color {

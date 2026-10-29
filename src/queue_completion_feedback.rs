@@ -11,6 +11,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use agent_doc_element::component_scope::{changed_component_scope, with_component_write_scope};
+use agent_doc_queue::QueueReportState;
 use agent_doc_queue::queue_claim::QueueClaim;
 use anyhow::{Context, Result, bail};
 
@@ -41,19 +42,28 @@ pub(crate) fn report_complete(
     file: &Path,
     item: &str,
     generation: Option<u64>,
+    publication_state: Option<QueueReportState>,
     response: &str,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
     anyhow::ensure!(
         !response.trim().is_empty(),
         "subagent completion response must not be empty"
     );
-    report_complete_with_lock_wait(file, item, generation, response, COMPLETION_LOCK_WAIT)
+    report_complete_with_lock_wait(
+        file,
+        item,
+        generation,
+        publication_state,
+        response,
+        COMPLETION_LOCK_WAIT,
+    )
 }
 
 fn report_complete_with_lock_wait(
     file: &Path,
     item: &str,
     generation: Option<u64>,
+    publication_state: Option<QueueReportState>,
     response: &str,
     lock_wait: Duration,
 ) -> Result<Option<CompletionFeedbackOutcome>> {
@@ -85,8 +95,12 @@ fn report_complete_with_lock_wait(
     if !claim.owner.starts_with("subagent:") {
         return Ok(None);
     }
-    let claim =
-        agent_doc_queue_io::queue_claim::report_attempt(file, &claim.item_text, generation)?;
+    let claim = agent_doc_queue_io::queue_claim::report_attempt_with_publication_state(
+        file,
+        &claim.item_text,
+        generation,
+        publication_state,
+    )?;
     // Derive the reported marker and completion cell from one cut and publish
     // one successor. Two separate retained editor writes can conflict while
     // the first is still awaiting projection.
@@ -480,6 +494,7 @@ mod tests {
             owner: "subagent:sdk-feedback".into(),
             generation: 1,
             state: agent_doc_queue::queue_claim::QueueClaimState::Running,
+            publication_state: None,
             worker: Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
                 worker_id: "worker:sdk-feedback".into(),
                 started_at_secs: 10,
@@ -712,12 +727,28 @@ mod tests {
             &doc,
             "finish sdk.md with deterministic tests",
             Some(1),
+            Some(QueueReportState::PublishedLocal),
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
         .unwrap()
         .unwrap();
         assert!(first.appended);
         assert!(!first.projection_pending);
+        assert_eq!(
+            first.claim.publication_state,
+            Some(QueueReportState::PublishedLocal)
+        );
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap().claims[0]
+                .publication_state,
+            Some(QueueReportState::PublishedLocal)
+        );
+        let reported_content = fs::read_to_string(&doc).unwrap();
+        assert!(
+            reported_content
+                .contains("finish sdk.md with deterministic tests ⟦published+local⟧"),
+            "{reported_content}"
+        );
         assert_eq!(
             agent_doc_queue_io::queue_claim::load_ledger(&doc)
                 .unwrap()
@@ -738,6 +769,7 @@ mod tests {
             &doc,
             "finish sdk.md with deterministic tests",
             Some(1),
+            None,
             "Implemented SDK support.\n\nTests: 12 passed.",
         )
         .unwrap()
@@ -845,9 +877,15 @@ mod tests {
         agent_doc_queue_io::queue_claim::cancel_removed_attempt(&doc, item, Some(first.generation))
             .unwrap();
         assert!(
-            report_complete(&doc, item, Some(first.generation), "worker one completed")
-                .unwrap()
-                .is_none(),
+            report_complete(
+                &doc,
+                item,
+                Some(first.generation),
+                None,
+                "worker one completed"
+            )
+            .unwrap()
+            .is_none(),
             "a tombstoned attempt cannot manufacture completion feedback"
         );
 
@@ -864,8 +902,14 @@ mod tests {
             replacement.generation,
         )
         .unwrap();
-        let stale =
-            report_complete(&doc, item, Some(first.generation), "late stale result").unwrap_err();
+        let stale = report_complete(
+            &doc,
+            item,
+            Some(first.generation),
+            None,
+            "late stale result",
+        )
+        .unwrap_err();
         assert!(stale.to_string().contains("stale queue claim generation"));
         assert!(
             !fs::read_to_string(&doc)
@@ -939,7 +983,7 @@ mod tests {
             .map(|item| {
                 let doc = doc.clone();
                 std::thread::spawn(move || {
-                    report_complete(&doc, item, Some(1), "concurrent worker completed")
+                    report_complete(&doc, item, Some(1), None, "concurrent worker completed")
                         .unwrap()
                         .unwrap()
                 })
@@ -1033,7 +1077,7 @@ mod tests {
         .unwrap()
         .expect("editor replica attaches");
 
-        let first = report_complete(&doc, "first worker", Some(1), "first result")
+        let first = report_complete(&doc, "first worker", Some(1), None, "first result")
             .unwrap()
             .unwrap();
         assert!(first.projection_pending);
@@ -1063,7 +1107,7 @@ mod tests {
             "fixture must expose the concurrent editor cut:\n{authoritative}",
         );
 
-        let second = report_complete(&doc, "second worker", Some(1), "second result")
+        let second = report_complete(&doc, "second worker", Some(1), None, "second result")
             .unwrap()
             .unwrap();
         assert!(second.projection_pending);
@@ -1132,6 +1176,7 @@ mod tests {
             &doc,
             "finish sdk",
             Some(1),
+            None,
             "worker completed",
             Duration::from_millis(50),
         )

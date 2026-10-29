@@ -47,6 +47,7 @@ stays.
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
 | `⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧` | Durable UTC time when a closeout struck the row. Editors derive `①`/`②`/`③` and graded highlights for the newest three addressed rows; visiting a row clears only its transient highlight. |
+| `⟦local⟧ / ⟦published⟧ / ⟦published+local⟧` | Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (✎⇧). Metadata, not work identity. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
 | `⟦<owner>#<N>⟧` | Older spelling of the owner annotation; normalized to `[#<owner>#<N>]`. |
 

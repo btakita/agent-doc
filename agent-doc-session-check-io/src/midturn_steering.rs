@@ -350,6 +350,7 @@ fn route_claimed_items(
                 owner: receipt.owner.clone(),
                 generation: receipt.generation,
                 state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
+                publication_state: receipt.publication_state,
                 worker: receipt.worker_id.as_ref().map(|worker_id| {
                     agent_doc_queue::queue_claim::QueueWorkerBinding {
                         worker_id: worker_id.clone(),

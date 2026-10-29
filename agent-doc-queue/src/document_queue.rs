@@ -1583,7 +1583,8 @@ pub fn set_prompt_runtime_projections(
     // ledger marker still does.
     let projection_key = |text: &str| {
         let cleaned = agent_doc_element_queue::subprompts::strip_subprompt_projections(text);
-        strip_priority_markers(cleaned.as_deref().unwrap_or(text))
+        let without_prefix = strip_priority_markers(cleaned.as_deref().unwrap_or(text));
+        agent_doc_element_queue::strip_queue_report_state_annotation(&without_prefix).to_string()
     };
     let mut targets = targets
         .iter()
@@ -1631,15 +1632,26 @@ pub fn set_prompt_runtime_projections(
                 let has_target = target.is_some();
                 if let Some(target) = target {
                     if !crate::queue_command::is_slash_command(&next.text) {
+                        let publication_state = target
+                            .text
+                            .lines()
+                            .next()
+                            .and_then(agent_doc_element_queue::queue_report_state_annotation)
+                            .map(|(_, state)| state);
                         let marked = agent_doc_document::queue_projection::apply_lifecycle_marker_with_blockers(
                             &next.text,
                             target.marker,
                             &target.blockers,
                         );
-                        let marked_text =
+                        let marked_with_owner =
                             agent_doc_document::queue_projection::apply_owner_projection(
                                 &marked,
                                 target.owner.as_ref(),
+                            );
+                        let marked_text =
+                            agent_doc_element_queue::render_queue_report_state_annotation(
+                                &marked_with_owner,
+                                publication_state,
                             );
                         if marked_text != next.text {
                             next.text = marked_text;
@@ -5344,6 +5356,24 @@ mod tests {
             project_prompt_runtime_projections(&projected, &targets).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn runtime_projection_carries_report_state_annotation_without_changing_identity() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let targets = vec![QueueRowProjection {
+            text: "worker work ⟦published+local⟧".to_string(),
+            marker: QueueLifecycleMarker::Reported,
+            owner: None,
+            blockers: Vec::new(),
+            reopen_completed: false,
+        }];
+        let projected = project_prompt_runtime_projections("- worker work\n", &targets)
+            .unwrap()
+            .unwrap()
+            .0;
+        assert_eq!(projected, "- ☑️ worker work ⟦published+local⟧\n");
+        assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
     }
 
     #[test]

@@ -28,7 +28,7 @@
 
 use std::collections::HashSet;
 
-use agent_doc_element_queue::QueueItemIdentity;
+use agent_doc_element_queue::{QueueItemIdentity, QueueReportState};
 use serde::{Deserialize, Serialize};
 
 use crate::queue_claim::{ClaimedQueueItems, QueueClaim, claim_identity};
@@ -52,6 +52,9 @@ pub struct ClaimReleaseReceipt {
     /// receipt that predates generation-fenced worker attestation.
     #[serde(default)]
     pub generation: u64,
+    /// Worker-reported local/published state retained through coordinator closeout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_state: Option<QueueReportState>,
     /// Creation time of the exact claim attempt; part of its attestation key.
     #[serde(default)]
     pub claimed_at_secs: u64,
@@ -166,6 +169,7 @@ impl ClaimReleaseReceiptLedger {
             item_text: claim.item_text.clone(),
             owner: claim.owner.clone(),
             generation: claim.generation,
+            publication_state: claim.publication_state,
             claimed_at_secs: claim.claimed_at_secs,
             worker_id: Some(worker.worker_id.clone()),
             completion_key: Some(completion_key),
@@ -319,6 +323,7 @@ mod tests {
             owner: owner.to_string(),
             generation: 1,
             state: crate::queue_claim::QueueClaimState::Reported,
+            publication_state: None,
             worker: Some(crate::queue_claim::QueueWorkerBinding {
                 worker_id: format!("worker:{owner}"),
                 started_at_secs: 1,
@@ -528,6 +533,7 @@ mod tests {
         for (index, (state, bound, key, expected)) in cases.into_iter().enumerate() {
             let mut candidate = claim(&format!("row {index}"), "subagent:worker");
             candidate.state = state;
+            candidate.publication_state = Some(QueueReportState::PublishedLocal);
             if !bound {
                 candidate.worker = None;
             }
@@ -549,6 +555,10 @@ mod tests {
             assert_eq!(ledger.receipts.len(), usize::from(expected.is_none()));
             if expected.is_none() {
                 assert!(ledger.receipts[0].attests_exact_attempt());
+                assert_eq!(
+                    ledger.receipts[0].publication_state,
+                    Some(QueueReportState::PublishedLocal)
+                );
             }
         }
 
@@ -557,6 +567,7 @@ mod tests {
             item_text: "legacy row".to_string(),
             owner: "subagent:legacy".to_string(),
             generation: 0,
+            publication_state: None,
             claimed_at_secs: 1,
             worker_id: None,
             completion_key: None,

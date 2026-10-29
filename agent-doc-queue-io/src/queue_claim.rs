@@ -974,12 +974,21 @@ fn refresh_attempt_at(
 
 /// Mark one exact worker attempt as reported/awaiting integration.
 pub fn report_attempt(file: &Path, item: &str, generation: Option<u64>) -> Result<QueueClaim> {
+    report_attempt_with_publication_state(file, item, generation, None)
+}
+
+pub fn report_attempt_with_publication_state(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    publication_state: Option<agent_doc_element_queue::QueueReportState>,
+) -> Result<QueueClaim> {
     let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_report")?;
     let now = now_secs();
     let claim = mutate_ledger(file, |ledger| {
         log_followed(file, &ledger.follow_edits_in_view(now, &heads));
         ledger
-            .report(&target, generation)
+            .report_with_publication_state(&target, generation, publication_state)
             .map_err(anyhow::Error::from)
     })?;
     agent_doc_ops_log_io::log_op(
@@ -1307,6 +1316,7 @@ pub fn record_released_cancellation(
         owner: reported.owner.clone(),
         generation: reported.generation,
         state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
+        publication_state: reported.publication_state,
         worker,
         dispatch_policy: None,
         tracked_item_aliases: Vec::new(),

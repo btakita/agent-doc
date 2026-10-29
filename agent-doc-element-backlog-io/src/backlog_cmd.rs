@@ -62,88 +62,130 @@ pub fn answered_queue_operator_action_ids(content: &str) -> Result<Vec<String>> 
 
     let components = element::parse(content).context("failed to parse components")?;
     let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
-    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
-        return Ok(Vec::new());
-    };
-    let Some(component) =
-        agent_doc_queue::queue_set::component_for_id(content, &components, &queue.id)?
-    else {
-        return Ok(Vec::new());
-    };
-    let entries = agent_doc_queue::document_queue::parse(component.content(content))?;
     let mut answered = Vec::new();
-    for entry in entries {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        for (id, queue_item) in &requests {
-            if agent_doc_document::queue_projection::operator_action_is_answered(
-                &prompt.text,
-                id,
-                queue_item,
-            ) && !answered.contains(id)
-            {
-                answered.push(id.clone());
+    for queue in queues.blocks() {
+        let entries = &queue.entries;
+        for (index, entry) in entries.iter().enumerate() {
+            let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            for (id, queue_item) in &requests {
+                if (agent_doc_document::queue_projection::operator_action_is_answered(
+                    &prompt.text,
+                    id,
+                    queue_item,
+                ) || nested_leaf_answers_operator_request(content, entries, index, id))
+                    && !answered.contains(id)
+                {
+                    answered.push(id.clone());
+                }
             }
         }
     }
     Ok(answered)
 }
 
-/// `#queueoperatoranswer`: lowercased request ids answered by a live selected-queue row
+/// `#subpromptanswer` / `#multi-queue-operator-answer`: a tracked parent and
+/// its indented leaves are separate queue entries (`#queuenest`), unlike a
+/// folded free-text sub-prompt block. A live executable free-text leaf beneath
+/// a work row carrying `request_id` is nevertheless the operator's answer to
+/// that row. Group labels and tracked child directives are context/work, not
+/// answers, and struck leaves are historical evidence rather than a new answer.
+fn nested_leaf_answers_operator_request(
+    content: &str,
+    entries: &[agent_doc_queue::document_queue::QueueEntry],
+    parent_index: usize,
+    request_id: &str,
+) -> bool {
+    use agent_doc_queue::document_queue::{QueueEntry, entry_is_group_parent};
+
+    let Some(QueueEntry::Prompt(parent)) = entries.get(parent_index) else {
+        return false;
+    };
+    if !agent_doc_document::queue_projection::operator_request_annotation_ids(&parent.text)
+        .iter()
+        .any(|id| id.eq_ignore_ascii_case(request_id))
+    {
+        return false;
+    }
+
+    for (index, entry) in entries.iter().enumerate().skip(parent_index + 1) {
+        let Some(indent) = (match entry {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt.indent),
+            _ => None,
+        }) else {
+            continue;
+        };
+        if indent <= parent.indent {
+            break;
+        }
+        let QueueEntry::Prompt(prompt) = entry else {
+            continue;
+        };
+        if entry_is_group_parent(entries, index) {
+            continue;
+        }
+        if agent_doc_queue::queue_response::queue_prompt_text_is_free_text(content, &prompt.text) {
+            return true;
+        }
+    }
+    false
+}
+
+/// `#queueoperatoranswer`: lowercased request ids answered by a live queue row
 /// that is nothing but an operator answer (`[#request-id]: <answer>`, or the
-/// request id as its own row with the answer nested beneath it).
+/// request id as its own row with the answer nested beneath it). Every queue
+/// block is scanned: selection controls execution order, not answer visibility.
 pub fn queue_operator_answer_row_ids(content: &str) -> Result<Vec<String>> {
     let components = element::parse(content).context("failed to parse components")?;
     let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
-    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
-        return Ok(Vec::new());
-    };
-    let Some(component) =
-        agent_doc_queue::queue_set::component_for_id(content, &components, &queue.id)?
-    else {
-        return Ok(Vec::new());
-    };
     let mut ids = Vec::new();
-    for entry in agent_doc_queue::document_queue::parse(component.content(content))? {
-        let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        if let Some(id) =
-            agent_doc_document::queue_projection::operator_answer_row_request_id(&prompt.text)
-            && !ids.contains(&id)
-        {
-            ids.push(id);
+    for queue in queues.blocks() {
+        for entry in &queue.entries {
+            let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if let Some(id) =
+                agent_doc_document::queue_projection::operator_answer_row_request_id(&prompt.text)
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
         }
     }
     Ok(ids)
 }
 
-/// Project blocking operator requests onto their originating selected-queue
-/// rows. Existing annotations survive only while the same-id todo remains open.
+/// Project blocking operator requests onto their originating rows in every
+/// queue block. Existing annotations survive only while the same-id todo
+/// remains open. Queue selection controls execution, never projection scope.
 pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {
     let full = read_command_document(file, "sync queue operator actions")?;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(&full);
     let components = element::parse(&full).context("failed to parse components")?;
     let queues = agent_doc_queue::queue_set::QueueSet::parse(&full, &components)?;
-    let Some(queue) = queues.selected().or_else(|| queues.blocks().first()) else {
+    let mut replacements = Vec::new();
+    for queue in queues.blocks() {
+        let component = queue.component;
+        let body = component.content(&full);
+        if let Some((projected, _)) =
+            agent_doc_queue::document_queue::project_prompt_operator_actions(
+                body,
+                actions,
+                &open_todo_ids,
+            )?
+        {
+            replacements.push((component.open_end, component.close_start, projected));
+        }
+    }
+    if replacements.is_empty() {
         return Ok(false);
-    };
-    let Some(component) =
-        agent_doc_queue::queue_set::component_for_id(&full, &components, &queue.id)?
-    else {
-        return Ok(false);
-    };
-    let body = component.content(&full);
-    let Some((projected, _)) = agent_doc_queue::document_queue::project_prompt_operator_actions(
-        body,
-        actions,
-        &open_todo_ids,
-    )?
-    else {
-        return Ok(false);
-    };
-    let target = component.replace_content(&full, &projected);
+    }
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    let mut target = full.clone();
+    for (start, end, projected) in replacements {
+        target.replace_range(start..end, &projected);
+    }
     persist_pending_write(file, &full, &target)?;
     emit_pending_receipt("[queue] synchronized operator-action indicators".to_string());
     Ok(true)
@@ -2777,6 +2819,116 @@ mod tests {
             answered_queue_operator_action_ids(&unanswered)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    /// `#multi-queue-operator-answer`: selection is an execution concern. A
+    /// live leaf in another run block still answers the request carried by its
+    /// tracked parent. This is the sdk-demo.md stale-bookkeeping shape from
+    /// 2026-10-29.
+    #[test]
+    fn tracked_parent_leaf_answers_request_in_a_nonselected_queue() {
+        let id = "subagent-operator-request-search-suggest-commit-pr";
+        let content = format!(
+            concat!(
+                "<!-- agent:run id=\"flash\" -->\n",
+                "- unrelated runnable head\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=\"threads\" -->\n",
+                "- 🙋 do [#search-suggest-ambiguous-status] [#{id}]\n",
+                "  - **commit + push + PR to sdk-dev**\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{id}] Answer the blocking subagent question for queue item ‘do [#search-suggest-ambiguous-status]’ in agent:exchange: Publish it.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            id = id,
+        );
+
+        assert_eq!(
+            answered_queue_operator_action_ids(&content).unwrap(),
+            vec![id.to_string()]
+        );
+
+        let historical_only = content.replace(
+            "  - **commit + push + PR to sdk-dev**\n",
+            "  - ~~**commit + push + PR to sdk-dev**~~\n",
+        );
+        assert!(
+            answered_queue_operator_action_ids(&historical_only)
+                .unwrap()
+                .is_empty(),
+            "a struck leaf cannot retroactively answer a later request"
+        );
+    }
+
+    /// The same request can appear in more than one run projection. Project it
+    /// everywhere in one write so switching queue selection cannot leave a
+    /// stale `🙋` row behind.
+    #[test]
+    fn operator_action_projection_updates_every_queue_block() {
+        let first = "subagent-operator-request-first";
+        let second = "subagent-operator-request-second";
+        let content = format!(
+            concat!(
+                "<!-- agent:run id=\"flash\" -->\n",
+                "- do [#first-work]\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=\"threads\" -->\n",
+                "- do [#second-work]\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{first}] Answer the first request.\n",
+                "- [ ] [#{second}] Answer the second request.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            first = first,
+            second = second,
+        );
+        let (_tmp, doc) = setup_test_dir();
+        fs::write(&doc, content).unwrap();
+
+        let changed = force_pending(|| {
+            sync_queue_operator_actions(
+                &doc,
+                &[
+                    ("do [#first-work]".to_string(), first.to_string()),
+                    ("do [#second-work]".to_string(), second.to_string()),
+                ],
+            )
+        });
+        assert!(changed);
+
+        let projected = fs::read_to_string(&doc).unwrap();
+        assert!(
+            projected.contains(&format!("- 🙋 do [#first-work] [#{first}]")),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!("- 🙋 do [#second-work] [#{second}]")),
+            "{projected}"
+        );
+    }
+
+    /// A standalone answer row in a later run block is just as visible as one
+    /// in the currently selected block.
+    #[test]
+    fn standalone_answer_row_is_found_across_queue_blocks() {
+        let id = "subagent-operator-request-later-run";
+        let content = format!(
+            concat!(
+                "<!-- agent:run id=\"flash\" -->\n",
+                "- unrelated runnable head\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=\"threads\" -->\n",
+                "- [#{id}]: Use the bot token.\n",
+                "<!-- /agent:run -->\n",
+            ),
+            id = id,
+        );
+        assert_eq!(
+            queue_operator_answer_row_ids(&content).unwrap(),
+            vec![id.to_string()]
         );
     }
 

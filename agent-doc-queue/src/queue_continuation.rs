@@ -3073,7 +3073,7 @@ mod tests {
     /// the request, that same parent is ordinary drainable work. The answer
     /// does not have to be copied onto the parent line.
     #[test]
-    fn subprompt_answer_unwedges_the_parent_after_the_glyph_clears() {
+    fn parent_operator_request_never_blocks_its_leaf() {
         let id = "subagent-operator-request-review-publish-marker";
         let marked = format!(
             "🙋☑️ [#subagent:reviewpublish#1] confusion about review markers [#{id}]\n  - Annotation, worker-reported"
@@ -3086,13 +3086,13 @@ mod tests {
         };
         assert_eq!(
             drainable_head_count(&document(&marked)),
-            0,
-            "a visible 🙋 still holds the row until projection clears it"
+            1,
+            "the parent is context, so its visible request cannot hold the leaf"
         );
         assert_eq!(
             drainable_head_count(&document(&cleared)),
             1,
-            "the sub-prompt answer leaves the parent drainable without a parent-line suffix"
+            "clearing a context-only parent does not change leaf drainability"
         );
     }
 

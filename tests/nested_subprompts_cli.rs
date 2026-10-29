@@ -1,11 +1,8 @@
 //! Nested sub-prompts in list components (`#nestedsubprompts`).
 //!
-//! The operator's 2026-10-27 report: a parent row in `agent:run` with four
-//! nested rows was invisible to dispatch (`queue claim` on the parent failed
-//! with "no live queue head matches") while each nested row was dispatched as
-//! an independent head and stamped with its own lifecycle marker. A nested
-//! list under a row is that row's sub-prompts: one head, claimed and
-//! dispatched as one unit, with the children carried verbatim in its brief.
+//! A row with nested rows is context rather than executable work. Its leaf
+//! descendants are independent queue heads, inherit their ancestor context,
+//! and remain executable even when the parent is blocked or struck.
 
 use std::fs;
 use std::process::Command;
@@ -164,57 +161,43 @@ fn live_rows() -> String {
 }
 
 #[test]
-fn a_parent_with_nested_rows_is_one_head_in_every_runnable_list_spelling() {
+fn only_nested_leaves_run_in_every_runnable_list_spelling() {
     for kind in ["run", "queue", "loop"] {
         let dir = tempfile::tempdir().unwrap();
         let doc = committed_session(dir.path(), kind, &live_rows());
         let state = preflight_json(dir.path(), &doc);
 
         let prompts = string_list(&state, "queue_prompts");
-        let parents: Vec<&String> = prompts.iter().filter(|p| p.starts_with(PARENT)).collect();
-        assert_eq!(parents.len(), 1, "{kind}: one parent head: {prompts:#?}");
-        for child in CHILDREN {
-            assert!(
-                parents[0].contains(child),
-                "{kind}: the head carries child {child:?}: {prompts:#?}"
-            );
-            assert!(
-                prompts
-                    .iter()
-                    .filter(|p| p.contains(child))
-                    .all(|p| p.starts_with(PARENT)),
-                "{kind}: child {child:?} must never be its own head: {prompts:#?}"
-            );
-        }
-
-        let dispatch = string_list(&state, "queue_subagent_dispatch");
-        // `agent:loop` is a recurring pass, not a subagent fan-out: it lists no
-        // dispatch work at all. Its heads are still one parent per item.
-        let fans_out = kind != "loop";
-        assert_eq!(
-            dispatch
-                .iter()
-                .filter(|item| item.starts_with(PARENT))
-                .count(),
-            usize::from(fans_out),
-            "{kind}: the parent is dispatchable exactly once: {dispatch:#?}"
-        );
-        for child in CHILDREN {
-            assert!(
-                dispatch
-                    .iter()
-                    .filter(|item| item.contains(child))
-                    .all(|item| item.starts_with(PARENT)),
-                "{kind}: child {child:?} is never dispatched on its own: {dispatch:#?}"
-            );
-        }
         assert!(
-            !fans_out || dispatch.iter().any(|item| item == "separate flat head"),
-            "{kind}: the flat sibling stays its own head: {dispatch:#?}"
+            prompts.iter().all(|item| item != PARENT),
+            "{kind}: the parent is context-only: {prompts:#?}"
         );
+        for child in CHILDREN {
+            assert!(
+                prompts.iter().any(|item| item == child),
+                "{kind}: leaf {child:?} is executable: {prompts:#?}"
+            );
+        }
         assert!(
             prompts.iter().any(|item| item == "separate flat head"),
-            "{kind}: the flat sibling stays its own head: {prompts:#?}"
+            "{kind}: the flat sibling stays executable: {prompts:#?}"
+        );
+
+        let dispatch = string_list(&state, "queue_subagent_dispatch");
+        assert!(
+            dispatch.iter().all(|item| item != PARENT),
+            "{kind}: the parent is never dispatched: {dispatch:#?}"
+        );
+        for child in CHILDREN {
+            assert!(
+                dispatch.iter().any(|item| item == child),
+                "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
+            );
+        }
+        assert_eq!(
+            dispatch.iter().any(|item| item == "separate flat head"),
+            kind != "loop",
+            "{kind}: the flat sibling follows the component policy: {dispatch:#?}"
         );
 
         // Tracked checklist rows keep their children in the item, never in the
@@ -234,21 +217,30 @@ fn a_parent_with_nested_rows_is_one_head_in_every_runnable_list_spelling() {
         }
     }
 }
-
 #[test]
-fn the_parent_is_claimable_by_its_line_and_its_brief_carries_the_children_verbatim() {
+fn a_leaf_is_claimable_and_its_brief_carries_parent_context() {
     let dir = tempfile::tempdir().unwrap();
     let doc = committed_session(dir.path(), "run", &live_rows());
     let path = doc.to_str().unwrap();
 
-    let brief = run_agent_doc(dir.path(), &["queue", "brief", path, "--item", PARENT]);
-    assert_ok(&brief, "queue brief");
+    let parent_brief = run_agent_doc(dir.path(), &["queue", "brief", path, "--item", PARENT]);
+    assert!(
+        !parent_brief.status.success(),
+        "a context parent must not resolve as a live queue head"
+    );
+
+    let brief = run_agent_doc(dir.path(), &["queue", "brief", path, "--item", CHILDREN[0]]);
+    assert_ok(&brief, "queue brief for the leaf");
     let brief = String::from_utf8_lossy(&brief.stdout).to_string();
-    assert!(brief.contains(&format!("> {PARENT}\n")), "{brief}");
+    let lineage = format!("{PARENT}: {}", CHILDREN[0]);
+    assert!(
+        brief.contains(&format!("> {lineage}\n")),
+        "the submitted prompt carries parent lineage: {brief}"
+    );
     for child in CHILDREN {
         assert!(
             brief.contains(child),
-            "brief must carry {child:?}:\n{brief}"
+            "the prompt tree carries {child:?}:\n{brief}"
         );
     }
 
@@ -260,49 +252,27 @@ fn the_parent_is_claimable_by_its_line_and_its_brief_carries_the_children_verbat
                 "claim",
                 path,
                 "--item",
-                PARENT,
+                CHILDREN[0],
                 "--owner",
                 "subagent:pmsync",
             ],
         ),
-        "queue claim on the parent line",
+        "queue claim on the leaf",
     );
     let body = run_body(&doc, "run");
     assert!(
         body.starts_with(&format!(
-            "- 🟡 [#subagent:pmsync#1] {PARENT}\n  - {}\n  - {}\n",
-            CHILDREN[0], CHILDREN[1]
+            "- {PARENT}\n  - 🟡 [#subagent:pmsync#1] {}\n",
+            CHILDREN[0]
         )),
-        "the parent carries the one lifecycle projection and the legacy child marker is retired:\n{body}"
+        "only the claimed leaf carries lifecycle projection:\n{body}"
     );
-    assert_eq!(
-        body.matches("[#subagent:").count(),
-        1,
-        "children never carry a projection of their own:\n{body}"
-    );
-
-    // The operator steers: edits one child and adds another.
-    let content = fs::read_to_string(&doc).unwrap();
-    let steered = content
-        .replace(CHILDREN[1], "This is the second subtask, now steered.")
-        .replace(
-            &format!("  - {}\n", CHILDREN[3]),
-            &format!("  - {}\n  - A brand new fifth subtask.\n", CHILDREN[3]),
-        );
-    assert_ne!(steered, content);
-    fs::write(&doc, &steered).unwrap();
 
     let state = preflight_json(dir.path(), &doc);
     let dispatch = string_list(&state, "queue_subagent_dispatch");
     assert!(
-        dispatch.iter().all(|item| !item.starts_with(PARENT)
-            && !item.contains("now steered")
-            && !item.contains("fifth subtask")),
-        "a claimed parent and its new or edited children are never new dispatch work: {dispatch:#?}"
-    );
-    assert!(
-        dispatch.iter().any(|item| item == "separate flat head"),
-        "{dispatch:#?}"
+        dispatch.iter().all(|item| item != CHILDREN[0]),
+        "the claimed leaf stays out of dispatch: {dispatch:#?}"
     );
 
     let claims = run_agent_doc(dir.path(), &["queue", "claims", path]);
@@ -311,27 +281,10 @@ fn the_parent_is_claimable_by_its_line_and_its_brief_carries_the_children_verbat
     let claims = claims.as_array().unwrap();
     assert_eq!(claims.len(), 1, "{claims:#?}");
     assert_eq!(claims[0]["owner"], "subagent:pmsync");
-    assert_eq!(
-        claims[0]["identity"]["key"],
-        PARENT.to_ascii_lowercase(),
-        "the claim identity is the parent line, stable across child edits"
-    );
-
-    // The steered brief is the live parent with its current children.
-    let brief = run_agent_doc(
-        dir.path(),
-        &["queue", "brief", path, "--item", PARENT, "--json"],
-    );
-    assert_ok(&brief, "queue brief after steering");
-    let brief: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
-    let item = brief["item"].as_str().unwrap();
-    assert!(item.starts_with(PARENT), "{item}");
-    assert!(item.contains("now steered"), "{item}");
-    assert!(item.contains("A brand new fifth subtask."), "{item}");
 }
 
 #[test]
-fn a_struck_parent_retires_its_children_with_it() {
+fn a_struck_parent_does_not_retire_its_leaves() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- ~~{PARENT}~~\n  - {}\n  - {}\n- separate flat head\n",
@@ -341,30 +294,19 @@ fn a_struck_parent_retires_its_children_with_it() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    for child in [CHILDREN[0], CHILDREN[1], PARENT] {
-        assert!(
-            prompts.iter().all(|p| !p.contains(child)),
-            "{child:?} is completed work: {prompts:#?}"
-        );
-        assert!(
-            dispatch.iter().all(|p| !p.contains(child)),
-            "{child:?} is completed work: {dispatch:#?}"
-        );
-    }
     assert!(
-        dispatch.iter().any(|item| item == "separate flat head"),
-        "{dispatch:#?}"
+        prompts.iter().all(|item| item != PARENT) && dispatch.iter().all(|item| item != PARENT),
+        "the struck parent is context-only: {prompts:#?} {dispatch:#?}"
     );
+    for child in [CHILDREN[0], CHILDREN[1]] {
+        assert!(prompts.iter().any(|item| item == child), "{prompts:#?}");
+        assert!(dispatch.iter().any(|item| item == child), "{dispatch:#?}");
+    }
 }
-
-/// `#struckparentkids` (sdk-demo.md, 2026-10-27): the operator wrote a new
-/// row under a parent the agent had already answered and struck. Before, the
-/// struck block swallowed it as completed work: no queue head, no dispatch,
-/// no idle wake. It is new work for that parent, so preflight lists the
-/// reopened block (verbatim, with the struck parent and answered child as
-/// context) as one dispatchable head, and the parent line claims it.
+/// A live row added beneath a struck parent is an executable leaf. The struck
+/// parent and answered sibling are context, not a reopened compound head.
 #[test]
-fn a_row_added_under_a_struck_parent_is_dispatched_as_new_work() {
+fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     let dir = tempfile::tempdir().unwrap();
     let parent = "#subagent-operator-request-handoff-integration-id";
     let answered = "Describe the choices in more detail. Why do we need a SBX/STG id?";
@@ -373,50 +315,34 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_new_work() {
     let doc = committed_session(dir.path(), "run", &closed);
     let path = doc.to_str().unwrap();
 
-    let state = preflight_json(dir.path(), &doc);
-    let dispatch = string_list(&state, "queue_subagent_dispatch");
-    assert!(
-        dispatch.iter().all(|item| !item.contains(parent)),
-        "a closed block is never work: {dispatch:#?}"
-    );
-
     let content = fs::read_to_string(&doc).unwrap();
-    let reopened_rows = format!("- ~~{parent}~~\n  - ~~{answered}~~\n  - {added}\n");
     fs::write(
         &doc,
         content.replace(
             &format!("- ~~{parent}~~\n  - ~~{answered}~~\n"),
-            &reopened_rows,
+            &format!("- ~~{parent}~~\n  - ~~{answered}~~\n  - {added}\n"),
         ),
     )
     .unwrap();
 
-    let head = format!("~~{parent}~~\n  - ~~{answered}~~\n  - {added}");
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
-    assert!(
-        prompts.iter().any(|item| item == &head),
-        "the new row is live work with its parent: {prompts:#?}"
-    );
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    assert!(
-        dispatch.iter().any(|item| item == &head),
-        "the reopened block is dispatchable: {dispatch:#?}"
-    );
+    assert!(prompts.iter().any(|item| item == added), "{prompts:#?}");
+    assert!(dispatch.iter().any(|item| item == added), "{dispatch:#?}");
+    assert!(dispatch.iter().all(|item| item != parent), "{dispatch:#?}");
 
-    let handle = format!("~~{parent}~~");
     let brief = run_agent_doc(
         dir.path(),
-        &["queue", "brief", path, "--item", &handle, "--json"],
+        &["queue", "brief", path, "--item", added, "--json"],
     );
-    assert_ok(&brief, "queue brief on the reopened parent line");
+    assert_ok(&brief, "queue brief on the added leaf");
     let brief: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
-    let item = brief["item"].as_str().unwrap();
-    assert!(item.contains(added), "{item}");
-    assert!(
-        item.contains(answered),
-        "the answered child is context: {item}"
-    );
+    assert_eq!(brief["item"], format!("{parent}: {added}"));
+    let preamble = brief["subagent_prompt_preamble"].as_str().unwrap();
+    assert!(preamble.contains(parent), "{preamble}");
+    assert!(preamble.contains(answered), "{preamble}");
+
     assert_ok(
         &run_agent_doc(
             dir.path(),
@@ -425,25 +351,23 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_new_work() {
                 "claim",
                 path,
                 "--item",
-                &handle,
+                added,
                 "--owner",
                 "subagent:reopen",
             ],
         ),
-        "queue claim on the reopened parent line",
+        "queue claim on the added leaf",
     );
     assert!(
-        run_body(&doc, "run").contains(&format!("[#subagent:reopen#1] ~~{parent}~~\n")),
+        run_body(&doc, "run").contains(&format!("  - 🟡 [#subagent:reopen#1] {added}\n")),
         "{}",
         run_body(&doc, "run")
     );
 }
 
-/// `#struckparentkids`: a whole-block strike that left the answered child
-/// unstruck (a 0.35.558 strike, as sdk-demo.md shows) stays closed, and
-/// preflight makes the document say so by striking the child.
+/// A struck context parent never projects completion onto a live leaf.
 #[test]
-fn a_struck_parent_over_an_unstruck_child_is_made_to_read_closed() {
+fn a_struck_parent_over_an_unstruck_child_keeps_the_child_live() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- ~~{PARENT}~~\n  - {}\n- separate flat head\n",
@@ -453,11 +377,11 @@ fn a_struck_parent_over_an_unstruck_child_is_made_to_read_closed() {
     let state = preflight_json(dir.path(), &doc);
     let dispatch = string_list(&state, "queue_subagent_dispatch");
     assert!(
-        dispatch.iter().all(|item| !item.contains(CHILDREN[0])),
+        dispatch.iter().any(|item| item == CHILDREN[0]),
         "{dispatch:#?}"
     );
     assert!(
-        run_body(&doc, "run").starts_with(&format!("- ~~{PARENT}~~\n  - ~~{}~~\n", CHILDREN[0])),
+        run_body(&doc, "run").starts_with(&format!("- ~~{PARENT}~~\n  - 📥 {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
@@ -638,13 +562,10 @@ fn claim_owners(dir: &std::path::Path, path: &str) -> Vec<String> {
         .collect()
 }
 
-/// `#nestedechostrike` (live, agent-doc-bugs.md 2026-10-27): the coordinator
-/// closed the reported pmsync row with the verbatim nested echo
-/// (`> **Queue prompt:** <parent>` plus one `>   - <child>` line per child).
-/// Each quoted line was compared with the whole multi-line head, so nothing
-/// struck and the row stayed ☑️ with its reported claim.
+/// A full-tree echo can answer every executable leaf, while the parent remains
+/// context and a reported leaf's claim ends with that leaf's strike.
 #[test]
-fn a_verbatim_nested_echo_closes_a_reported_parent_and_ends_its_claim() {
+fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- {PARENT}\n  - {}\n  - {}\n  - {}\n  - {}\n- separate flat head\n",
@@ -652,13 +573,12 @@ fn a_verbatim_nested_echo_closes_a_reported_parent_and_ends_its_claim() {
     );
     let doc = closeout_session(dir.path(), &rows, "- [ ] call the vendor\n");
     let path = doc.to_str().unwrap();
-    dispatch_and_report(dir.path(), path, PARENT, "subagent:pmsync");
+    dispatch_and_report(dir.path(), path, CHILDREN[0], "subagent:pmsync");
     assert!(
-        run_body(&doc, "run").starts_with(&format!("- ☑️ [#subagent:pmsync#1] {PARENT}\n")),
+        run_body(&doc, "run").contains(&format!("  - ☑️ [#subagent:pmsync#1] {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
-    assert_eq!(claim_owners(dir.path(), path), vec!["subagent:pmsync"]);
 
     preflight_json(dir.path(), &doc);
     let echo: String = CHILDREN
@@ -672,18 +592,20 @@ fn a_verbatim_nested_echo_closes_a_reported_parent_and_ends_its_claim() {
     assert_ok(&output, "respond");
 
     let body = run_body(&doc, "run");
+    assert!(!body.contains(&format!("- ~~{PARENT}~~")), "{body}");
     assert!(
-        body.starts_with(&format!("- ~~{PARENT}~~")),
-        "the nested echo strikes the parent:\n{body}"
+        body.contains(&format!("  - ~~{}~~", CHILDREN[0])),
+        "the reported leaf closes independently:\n{body}"
     );
+    for child in &CHILDREN[1..] {
+        assert!(
+            body.contains(child) && !body.contains(&format!("~~{child}~~")),
+            "an unselected sibling stays live:\n{body}"
+        );
+    }
     assert!(!body.contains("☑️"), "{body}");
-    assert!(body.contains("separate flat head\n"), "{body}");
-    assert!(
-        claim_owners(dir.path(), path).is_empty(),
-        "the reported attempt ended with the strike"
-    );
+    assert!(claim_owners(dir.path(), path).is_empty());
 }
-
 /// `#nestedechostrike` (the ahfe row): a reported `do [#id]` dispatch row whose
 /// id is an open Todo awaiting an operator check closes with
 /// `queue consume --ack-id`, which leaves the Todo open; `--done` would
@@ -733,16 +655,9 @@ fn answer_row_todo(state: char) -> String {
     )
 }
 
-/// `#queueoperatoranswer`: the operator answered a request by writing the request id as
-/// its own run row with the answer nested beneath it. The binary read the
-/// bare `[#id]` row and its nested answer as two heads, offered the answer as
-/// fresh dispatch work, and the first marker it stamped on the bare row made
-/// that row own its child: one row fewer, so every marker projection over the
-/// queue (claim, `report-complete`, `release`, preflight maintenance) failed
-/// with "changed item count". The answer row is one row keyed by the request
-/// id, is never dispatch work, and closes its request like
-/// `[#request-id]: <answer>`, after which the paused row's exact echo strikes
-/// it.
+/// A live answer leaf beneath a request-id context parent answers the request.
+/// It remains a distinct queue entry, but is not offered as unrelated dispatch
+/// while the live work row still carries the same request id.
 #[test]
 fn an_answer_row_nested_under_its_request_id_answers_the_request() {
     let dir = tempfile::tempdir().unwrap();
@@ -750,20 +665,17 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
         "- 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n- separate flat head\n- [#{REQUEST_ID}]\n  - {ANSWER}\n"
     );
     let doc = closeout_session(dir.path(), &rows, &answer_row_todo(' '));
-    let path = doc.to_str().unwrap();
 
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    for (what, list) in [("queue_prompts", &prompts), ("dispatch", &dispatch)] {
-        assert!(
-            list.iter().all(|item| !item.starts_with(ANSWER)),
-            "{what}: the nested answer is never its own head: {list:#?}"
-        );
-    }
     assert!(
-        dispatch.iter().all(|item| !item.contains(ANSWER)),
-        "the answer row is never fresh dispatch work: {dispatch:#?}"
+        prompts.iter().any(|item| item == ANSWER),
+        "the answer is an executable leaf: {prompts:#?}"
+    );
+    assert!(
+        dispatch.iter().any(|item| item == ANSWER),
+        "the answer leaf remains executable: {dispatch:#?}"
     );
     assert!(
         dispatch.iter().any(|item| item == "separate flat head"),
@@ -771,59 +683,15 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
     );
     let body = run_body(&doc, "run");
     assert!(
-        body.contains(&format!("[#{REQUEST_ID}]\n  - {ANSWER}\n")),
-        "the answer row and its nested answer stay one row, unmarked below its parent:\n{body}"
-    );
-    assert!(!body.contains("📥 I want"), "{body}");
-
-    // The worker that owns the request reports back; every marker projection
-    // over the queue now succeeds.
-    dispatch_and_report(dir.path(), path, PAUSED_ROW, "subagent:stalereplay");
-    let body = run_body(&doc, "run");
-    assert!(
-        body.starts_with(&format!(
-            "- 🙋☑️ [#subagent:stalereplay#1] {PAUSED_ROW} [#{REQUEST_ID}]\n"
-        )),
-        "{body}"
-    );
-
-    // The closeout echoes the paused row exactly as the Stop hook suggests.
-    // The nested answer completes the request's Todo in the same write, which
-    // clears 🙋, so the echo strikes the row and ends its reported claim.
-    let response = format!(
-        "<!-- patch:exchange -->\n### Re: stale replay — gpt-5\n\n> **Queue prompt:** 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n\nFixed; sync re-applies the latest state.\n<!-- /patch:exchange -->\n"
-    );
-    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
-    assert_ok(&output, "respond");
-
-    let after = fs::read_to_string(&doc).unwrap();
-    assert!(
-        after.contains(&answer_row_todo('x')),
-        "the nested answer completes the request's Todo:\n{after}"
-    );
-    let body = run_body(&doc, "run");
-    assert!(
-        body.starts_with(&format!("- ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
-        "the exact echo strikes the answered row:\n{body}"
-    );
-    assert!(
-        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - ~~{ANSWER}~~\n")),
-        "the applied answer row closes with its request:\n{body}"
-    );
-    assert!(!body.contains('🙋'), "{body}");
-    assert!(
-        claim_owners(dir.path(), path).is_empty(),
-        "the reported attempt ended with the strike"
+        body.contains(&format!("[#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
+        "the answer stays nested beneath its context parent:\n{body}"
     );
 }
 
-/// `#queueoperatoranswer`, the state the live document was left in: the request's Todo
-/// is closed but the paused row still shows `🙋`, the answer row was struck
-/// alone and its nested answer was projected `📥` as if it were a new head.
-/// Preflight clears the stale `🙋`, closes the nested answer with its struck
-/// parent, never dispatches it, and the exact echo then strikes the row.
+/// A struck context parent does not close a live projected answer leaf. Once
+/// the request Todo is already closed, that leaf remains ordinary queue work.
 #[test]
-fn a_struck_answer_row_with_a_projected_child_is_closed_work() {
+fn a_struck_answer_parent_keeps_its_projected_child_live() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n- separate flat head\n- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n"
@@ -835,16 +703,12 @@ fn a_struck_answer_row_with_a_projected_child_is_closed_work() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    for (what, list) in [("queue_prompts", &prompts), ("dispatch", &dispatch)] {
-        assert!(
-            list.iter().all(|item| !item.contains(ANSWER)),
-            "{what}: the struck answer is closed work: {list:#?}"
-        );
-    }
+    assert!(prompts.iter().any(|item| item == ANSWER), "{prompts:#?}");
+    assert!(dispatch.iter().any(|item| item == ANSWER), "{dispatch:#?}");
     let body = run_body(&doc, "run");
     assert!(
-        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - ~~{ANSWER}~~\n")),
-        "the struck answer row closes its nested answer too:\n{body}"
+        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n")),
+        "the struck parent leaves the answer leaf live:\n{body}"
     );
     assert!(
         !body.contains('🙋'),

@@ -63,10 +63,9 @@ pub fn normalize_admitted_free_text(text: &str) -> String {
 /// (`~~~prompt` / `---`) keeps its line structure: the backlog renders those as
 /// item continuation, and literal fenced examples must stay literal.
 ///
-/// `#nestedsubprompts`: a head's sub-prompt rows stay rows. The parent part is
-/// joined as above and the sub-prompt block follows it verbatim (without any
-/// legacy per-child projection), so the backlog item carries the children as
-/// its nested checklist instead of one flattened line.
+/// Compatibility: if an older caller supplies a folded `#nestedsubprompts`
+/// prompt, its child rows stay nested rather than flattening into prose.
+/// Canonical queue parsing admits one leaf at a time, in its authored slot.
 pub fn admitted_prompt_text(prompt: &crate::document_queue::QueuePrompt) -> String {
     if !prompt.multiline
         && let (head, Some(block)) =

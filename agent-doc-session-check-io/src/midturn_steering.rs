@@ -304,8 +304,7 @@ fn route_claimed_items(
                 row_keys
                     .iter()
                     .filter(|(display, _)| {
-                        agent_doc_element_queue::subprompts::head_without_subprompts(display)
-                            .trim()
+                        agent_doc_element_queue::subprompts::head_without_subprompts(display).trim()
                             == head
                     })
                     .collect()
@@ -1378,9 +1377,9 @@ pub fn observe_for_wake_with(file: &Path, carry: &mut WakeSettleCarry) -> Result
     // session, nor does a tag/marker-only re-tag (same work identity,
     // `#claimdispatchidentity`). An edit of its substance wakes the
     // coordinator, which forwards it to the owner (`#claimedsteerwake`).
-    // That includes a nested-body edit whose parent line is unchanged
-    // (`#nestedclaimsteer`): identity stays, the normalized text changes, and
-    // `head_without_subprompts` does not.
+    // For nested work, only an edit of the claimed leaf itself qualifies;
+    // edits that turn it into context or add descendants do not transfer the
+    // claim to those descendants (`#nestedclaimsteer`).
     let forwards_substance = |item: &SteeringItem| {
         if item.dispatch != core::SteeringDispatch::ForwardToOwner
             || item.change != core::SteeringChange::Edited
@@ -4253,20 +4252,19 @@ mod tests {
         assert_ne!(key_a, key_b);
     }
 
-    /// `#nestedsubprompts`: nested rows under a claimed free-text parent are
-    /// that parent's sub-prompts. Editing a child, or adding one new child, is
-    /// ONE edit of the parent, forwarded to the parent's owner. That child
-    /// does not surface as its own item or as new dispatch work, and the
-    /// claim stays on the parent. A second direct child added after the claim
-    /// is `#nestedclaimsteer` and is covered separately.
+    /// `#nestedsubprompts`: leaf rows are the claim and steering units. An edit
+    /// to a claimed leaf follows its owner, while a new sibling is independent
+    /// dispatch work carrying the shared parent only as context.
     #[test]
-    fn nested_subprompt_edit_or_addition_forwards_to_the_parent_owner() {
+    fn nested_leaf_edit_forwards_to_owner_and_new_sibling_dispatches() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
         let parent = "Sync PR and Jira state into this document.";
-        let head =
-            format!("{parent}\n  - So this is the first subtask.\n  - This is the second subtask.");
+        let first = "So this is the first subtask.";
+        let second = "This is the second subtask.";
+        let third = "A brand new third subtask.";
+        let head = format!("{parent}\n  - {first}\n  - {second}");
         let baseline = format!(
             "---\nagent_doc_steering_debounce_ms: 2500\n---\n# S\n\n<!-- agent:run subagents go -->\n- current task\n- {head}\n<!-- /agent:run -->\n"
         );
@@ -4282,68 +4280,51 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        // The coordinator claims the parent by its parent line alone.
-        agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pmsync", 3600).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&file, second, "subagent:pmsync", 3600).unwrap();
 
-        for (label, edited) in [
-            (
-                "child edited",
-                baseline.replace("second subtask.", "second subtask, now steered."),
-            ),
-            (
-                "child added",
-                baseline.replace(
-                    "  - This is the second subtask.\n",
-                    "  - This is the second subtask.\n  - A brand new third subtask.\n",
-                ),
-            ),
-        ] {
-            std::fs::write(&file, &edited).unwrap();
-            backdate(&file);
-            let hook = observe(&file, CONSUMER_HOOK, true)
-                .unwrap()
-                .unwrap_or_else(|| panic!("{label}: no steering observation"));
-            assert_eq!(
-                hook.items.len(),
-                1,
-                "{label}: one parent edit, never per-child items: {hook:?}"
-            );
-            let item = &hook.items[0];
-            assert_eq!(
-                item.change,
-                core::SteeringChange::Edited,
-                "{label}: {hook:?}"
-            );
-            assert_eq!(
-                item.dispatch,
-                core::SteeringDispatch::ForwardToOwner,
-                "{label}: {hook:?}"
-            );
-            assert_eq!(item.owner.as_deref(), Some("subagent:pmsync"), "{label}");
-            assert!(
-                item.verbatim.starts_with(parent),
-                "{label}: {}",
-                item.verbatim
-            );
-            let claimed =
-                agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &edited);
-            assert!(
-                claimed.claims(&item.verbatim),
-                "{label}: the claim stays on the parent"
-            );
-            // Reset to the baseline between cases so each is a single edit.
-            std::fs::write(&file, &baseline).unwrap();
-            backdate(&file);
-            let _ = observe(&file, CONSUMER_HOOK, true).unwrap();
-        }
+        let steered_text = "This is the second subtask, now steered.";
+        let edited = baseline.replace(second, steered_text);
+        std::fs::write(&file, &edited).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("claimed leaf edit");
+        assert_eq!(hook.items.len(), 1, "one leaf edit: {hook:?}");
+        let item = &hook.items[0];
+        assert_eq!(item.change, core::SteeringChange::Edited, "{hook:?}");
+        assert_eq!(
+            item.dispatch,
+            core::SteeringDispatch::ForwardToOwner,
+            "{hook:?}"
+        );
+        assert_eq!(item.owner.as_deref(), Some("subagent:pmsync"));
+        assert!(item.verbatim.contains(steered_text), "{}", item.verbatim);
+
+        let with_sibling = edited.replace(
+            &format!("  - {steered_text}\n"),
+            &format!("  - {steered_text}\n  - {third}\n"),
+        );
+        std::fs::write(&file, &with_sibling).unwrap();
+        backdate(&file);
+        let hook = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("new sibling leaf");
+        assert_eq!(hook.items.len(), 1, "one new leaf: {hook:?}");
+        let item = &hook.items[0];
+        assert_eq!(item.change, core::SteeringChange::Added, "{hook:?}");
+        assert_eq!(item.dispatch, core::SteeringDispatch::Subagent, "{hook:?}");
+        assert_eq!(
+            item.owner, None,
+            "the new leaf is not owned by the edited leaf's claim"
+        );
+        assert_eq!(item.verbatim, third);
     }
 
-    /// `#nestedclaimsteer`: the first direct child added after a claim steers
-    /// that claim. Each later direct child is its own head, at its authored
-    /// indent, and may route to another subagent with the parent's lineage.
-    /// The same split applies at every depth once that node is claimed.
+    /// `#nestedclaimsteer`: adding children turns the formerly executable row
+    /// into context. Its existing claim owns neither child; every leaf routes
+    /// independently with its full lineage, at every nesting depth.
     #[test]
-    fn later_nested_children_route_with_lineage_at_every_depth() {
+    fn nested_children_route_independently_with_lineage_at_every_depth() {
         let parent = "Sync PR and Jira state into this document.";
         let first = "First steer child stays with the parent.";
         let second = "Second route child gets its own worker.";
@@ -4376,71 +4357,38 @@ mod tests {
             let hook = observe(&file, CONSUMER_HOOK, true)
                 .unwrap()
                 .unwrap_or_else(|| panic!("{marker}: no steering observation"));
-            let steered = hook
-                .items
-                .iter()
-                .find(|item| item.change == core::SteeringChange::Edited)
-                .unwrap_or_else(|| panic!("{marker}: missing parent edit: {hook:?}"));
-            assert_eq!(
-                steered.dispatch,
-                core::SteeringDispatch::ForwardToOwner,
-                "{marker}: {hook:?}"
-            );
-            assert_eq!(
-                steered.owner.as_deref(),
-                Some("subagent:pmsync"),
-                "{marker}"
-            );
-            assert!(
-                steered.verbatim.starts_with(parent),
-                "{marker}: {}",
-                steered.verbatim
-            );
-            assert!(
-                steered.verbatim.contains(first),
-                "{marker}: {}",
-                steered.verbatim
-            );
-            assert!(
-                !steered.verbatim.contains(second),
-                "{marker}: {}",
-                steered.verbatim
-            );
-            let routed = hook
-                .items
-                .iter()
-                .find(|item| item.verbatim.contains(second))
-                .unwrap_or_else(|| panic!("{marker}: second child missing: {hook:?}"));
-            assert_eq!(
-                routed.change,
-                core::SteeringChange::Added,
-                "{marker}: {hook:?}"
-            );
-            assert_eq!(
-                routed.dispatch,
-                core::SteeringDispatch::Subagent,
-                "{marker}: {hook:?}"
-            );
+            assert_eq!(hook.items.len(), 2, "{marker}: {hook:?}");
+            for leaf in [first, second] {
+                let routed = hook
+                    .items
+                    .iter()
+                    .find(|item| item.verbatim == leaf)
+                    .unwrap_or_else(|| panic!("{marker}: {leaf} missing: {hook:?}"));
+                assert_eq!(routed.change, core::SteeringChange::Added, "{marker}");
+                assert_eq!(
+                    routed.dispatch,
+                    core::SteeringDispatch::Subagent,
+                    "{marker}: {hook:?}"
+                );
+                assert_eq!(routed.owner, None, "{marker}");
+            }
             assert!(edited.contains(&format!("\n  - {second}\n")), "{marker}");
             assert!(!edited.contains(&format!("\n- {second}\n")), "{marker}");
-            let claimed =
-                agent_doc_queue_io::queue_claim::claimed_items_for_content(&file, &edited);
-            assert!(claimed.claims(parent), "{marker}");
-            assert!(claimed.claims(&steered.verbatim), "{marker}");
-            assert!(!claimed.claims(second), "{marker}");
             let dispatch =
                 agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
                     &file, &edited,
                 )
                 .unwrap();
             assert!(
+                dispatch.iter().any(|head| head == first),
+                "{marker}: {dispatch:?}"
+            );
+            assert!(
                 dispatch.iter().any(|head| head == second),
                 "{marker}: {dispatch:?}"
             );
             assert!(
-                dispatch
-                    .iter()
-                    .all(|head| !head.contains(first) && head != parent),
+                dispatch.iter().all(|head| head != parent),
                 "{marker}: {dispatch:?}"
             );
             let auth = agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
@@ -4462,7 +4410,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
         let baseline = format!(
-            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# S\n\n<!-- agent:run subagents go -->\n- current task\n- {parent}\n<!-- /agent:run -->\n"
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# S\n\n<!-- agent:run subagents go -->\n- current task\n- {parent}\n  - {first}\n  - {second}\n<!-- /agent:run -->\n"
         );
         std::fs::write(&file, &baseline).unwrap();
         let cycle =
@@ -4476,16 +4424,7 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pmsync", 3600).unwrap();
-        let with_children = baseline.replace(
-            &format!("- {parent}\n"),
-            &format!("- {parent}\n  - {first}\n  - {second}\n"),
-        );
-        std::fs::write(&file, &with_children).unwrap();
-        backdate(&file);
-        observe(&file, CONSUMER_HOOK, true)
-            .unwrap()
-            .expect("two children");
+        let with_children = baseline.clone();
         agent_doc_queue_io::queue_claim::claim(&file, second, "subagent:route", 3600)
             .expect("routed sibling is its own claim target");
         let first_gc = "First grandchild steers the routed child.";
@@ -4499,26 +4438,21 @@ mod tests {
         let hook = observe(&file, CONSUMER_HOOK, true)
             .unwrap()
             .expect("grandchild steering");
-        let steered = hook
-            .items
-            .iter()
-            .find(|item| item.dispatch == core::SteeringDispatch::ForwardToOwner)
-            .unwrap_or_else(|| panic!("grandchild steer missing: {hook:?}"));
-        assert!(steered.verbatim.contains(second), "{}", steered.verbatim);
-        assert!(steered.verbatim.contains(first_gc), "{}", steered.verbatim);
-        assert!(
-            !steered.verbatim.contains(second_gc),
-            "{}",
-            steered.verbatim
-        );
-        assert_eq!(steered.owner.as_deref(), Some("subagent:route"));
-        let routed = hook
-            .items
-            .iter()
-            .find(|item| item.verbatim.contains(second_gc))
-            .unwrap_or_else(|| panic!("deeper head missing: {hook:?}"));
-        assert_eq!(routed.change, core::SteeringChange::Added);
-        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
+        assert_eq!(hook.items.len(), 2, "{hook:?}");
+        for leaf in [first_gc, second_gc] {
+            let routed = hook
+                .items
+                .iter()
+                .find(|item| item.verbatim == leaf)
+                .unwrap_or_else(|| panic!("deeper leaf missing: {leaf}: {hook:?}"));
+            assert_eq!(routed.change, core::SteeringChange::Added);
+            assert_eq!(
+                routed.dispatch,
+                core::SteeringDispatch::Subagent,
+                "{hook:?}"
+            );
+            assert_eq!(routed.owner, None);
+        }
         assert!(with_grandchildren.contains(&format!("\n    - {second_gc}\n")));
         assert!(!with_grandchildren.contains(&format!("\n- {second_gc}\n")));
         let auth = agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_content(
@@ -4540,8 +4474,8 @@ mod tests {
             agent_doc_queue_io::queue_claim::active_claims_for_content(&file, &with_grandchildren)
                 .unwrap();
         assert!(
-            claims.iter().any(|claim| claim.owner == "subagent:route"),
-            "{claims:?}"
+            claims.iter().all(|claim| claim.owner != "subagent:route"),
+            "the former leaf claim cannot own descendants: {claims:?}"
         );
         agent_doc_queue_io::queue_claim::prune_closed_claims(&file, &with_grandchildren).unwrap();
         let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
@@ -4549,23 +4483,24 @@ mod tests {
             stored
                 .claims
                 .iter()
-                .any(|claim| claim.owner == "subagent:route"),
-            "prune keeps the routed claim: {stored:?}"
+                .all(|claim| claim.owner != "subagent:route"),
+            "prune removes the claim after its row becomes context: {stored:?}"
         );
     }
 
-    /// A reported worker cannot receive more steering. The first direct child
-    /// added after report-complete must therefore become dispatchable, both on
-    /// a top-level claimed row and one nesting level deeper (`#nestedclaimsteer`).
+    /// A reported leaf worker cannot receive more steering. A later sibling or
+    /// descendant leaf therefore remains independently dispatchable at every
+    /// depth (`#nestedclaimsteer`).
     #[test]
     fn reported_nested_claim_routes_the_first_later_child_at_every_depth() {
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/169";
+        let original = "Review the pull request.";
         let follow_up = "Add backlog items into fpe.md.";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("api.md");
         let baseline = format!(
-            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n  - ~~{parent} #review~~\n<!-- /agent:run -->\n"
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n  - {original}\n  - ~~{parent} #review~~\n<!-- /agent:run -->\n"
         );
         std::fs::write(&file, &baseline).unwrap();
         let cycle =
@@ -4575,28 +4510,24 @@ mod tests {
             &file,
             &cycle.cycle_id,
             &baseline,
-            Some(parent),
+            Some(original),
             Vec::new(),
         )
         .unwrap();
         let (_, claim) =
-            agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pr169", 3600)
+            agent_doc_queue_io::queue_claim::claim(&file, original, "subagent:pr169", 3600)
                 .unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &file,
-            parent,
+            original,
             "subagent:pr169",
             "worker-pr169",
             3600,
             claim.generation,
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::report_attempt(
-            &file,
-            parent,
-            Some(claim.generation),
-        )
-        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(&file, original, Some(claim.generation))
+            .unwrap();
         let edited = baseline.replace(
             &format!("  - ~~{parent} #review~~\n"),
             &format!("  - ~~{parent} #review~~\n  - {follow_up}\n"),
@@ -4605,12 +4536,12 @@ mod tests {
         backdate(&file);
         let hook = observe(&file, CONSUMER_HOOK, true)
             .unwrap()
-            .expect("reported parent follow-up steering");
+            .expect("reported leaf follow-up steering");
         let routed = hook
             .items
             .iter()
             .find(|item| item.verbatim.contains(follow_up))
-            .unwrap_or_else(|| panic!("reported parent follow-up missing: {hook:?}"));
+            .unwrap_or_else(|| panic!("reported leaf follow-up missing: {hook:?}"));
         assert_eq!(routed.change, core::SteeringChange::Added);
         assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
         assert_eq!(routed.owner, None);
@@ -4619,7 +4550,10 @@ mod tests {
                 &file, &edited,
             )
             .unwrap();
-        assert!(dispatch.iter().any(|head| head == follow_up), "{dispatch:?}");
+        assert!(
+            dispatch.iter().any(|head| head == follow_up),
+            "{dispatch:?}"
+        );
 
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/174";
         let first = "Review the pull request.";
@@ -4629,41 +4563,14 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("api.md");
         let baseline = format!(
-            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n<!-- /agent:run -->\n"
+            "---\nagent_doc_steering_debounce_ms: 2500\n---\n# API\n\n<!-- agent:run subagents go -->\n- {parent}\n  - {first}\n  - {addressed}\n<!-- /agent:run -->\n"
         );
         std::fs::write(&file, &baseline).unwrap();
         let cycle =
             agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
                 .unwrap();
-        seed_for_cycle(
-            &file,
-            &cycle.cycle_id,
-            &baseline,
-            Some(parent),
-            Vec::new(),
-        )
-        .unwrap();
-        let (_, parent_claim) =
-            agent_doc_queue_io::queue_claim::claim(&file, parent, "subagent:pr174", 3600)
-                .unwrap();
-        agent_doc_queue_io::queue_claim::start_attempt(
-            &file,
-            parent,
-            "subagent:pr174",
-            "worker-pr174",
-            3600,
-            parent_claim.generation,
-        )
-        .unwrap();
-        let with_children = baseline.replace(
-            &format!("- {parent}\n"),
-            &format!("- {parent}\n  - {first}\n  - {addressed}\n"),
-        );
-        std::fs::write(&file, &with_children).unwrap();
-        backdate(&file);
-        observe(&file, CONSUMER_HOOK, true)
-            .unwrap()
-            .expect("nested address head");
+        seed_for_cycle(&file, &cycle.cycle_id, &baseline, Some(first), Vec::new()).unwrap();
+        let with_children = baseline.clone();
         let (_, address_claim) = agent_doc_queue_io::queue_claim::claim(
             &file,
             addressed,

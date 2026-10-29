@@ -534,8 +534,9 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
         out.replace_range(start..end, &render_multiline_item("---", &node.item.text));
         return Ok(out);
     }
-    // `#nestedsubprompts`: a struck parent keeps its sub-prompt block verbatim
-    // below the struck parent part; only the parent part carries the wrapper.
+    // Compatibility for a legacy folded node: keep its nested block verbatim
+    // while unstriking the parent part. Canonical nested rows are separate
+    // mutation nodes and do not enter this branch as one raw range.
     let (raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&source[start..end]);
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended

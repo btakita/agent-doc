@@ -4,9 +4,10 @@
 //!
 //! Hybrid syntax:
 //! - `- text` / `1. text` → list-item prompt; a free-text item also owns its
-//!   indented continuation lines up to the next blank line, list marker, or
+//!   non-list continuation lines up to the next blank line, list marker, or
 //!   queue-native line (`#queuecruft`,
-//!   `agent_doc_markdown_ast::overlay::queue_continuation_line`)
+//!   `agent_doc_markdown_ast::overlay::queue_continuation_line`). Indented list
+//!   items are separate tree entries: parents are context and only leaves run.
 //! - column-zero prose → a distinct bare free-text prompt; consecutive prose
 //!   and a directly following blockquote stay together (`#queuefreetextsplit`)
 //! - `~~~prompt` / `---` → multi-line prompt fence
@@ -420,67 +421,6 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
-            // `#nestedsubprompts`: a free-text row (live or struck) owns the
-            // nested free-text rows indented beneath it as its sub-prompts.
-            // The parent and its children are ONE entry: one head, one claim,
-            // one lifecycle projection, one strike. A subtree that contains a
-            // tracked directive is not folded (`#f1s3` groups stand).
-            if !rest.trim().is_empty()
-                && !is_reference_directive(rest)
-                && agent_doc_markdown_ast::overlay::queue_item_accepts_subprompts(rest)
-            {
-                let mut head_end = i + 1;
-                if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
-                    let mut continuation =
-                        agent_doc_markdown_ast::overlay::QueueContinuationState::default();
-                    while head_end < lines.len() && continuation.accepts_line(lines[head_end]) {
-                        head_end += 1;
-                    }
-                }
-                if let Some(block_end) =
-                    agent_doc_markdown_ast::overlay::queue_subprompt_block_end(&lines, i, head_end)
-                {
-                    let mut head_text = rest.to_string();
-                    for continuation in &lines[i + 1..head_end] {
-                        head_text.push('\n');
-                        head_text.push_str(continuation);
-                    }
-                    let block = lines[head_end..block_end].join("\n");
-                    // A struck parent retires its children with it: one
-                    // completed entry spanning the whole block. Its render
-                    // strikes the parent part and every live child
-                    // (`- ~~parent~~` + `  - ~~child~~`), exactly as a struck
-                    // flat row normalizes a `~x~` / annotated strike spelling
-                    // to `~~x~~`.
-                    //
-                    // `#struckparentkids`: a live child written beside struck
-                    // ones under a struck parent is new operator work for that
-                    // parent. The block is then ONE live head, verbatim (the
-                    // struck parent and children are its context), never a
-                    // completed entry that silently swallows the new row.
-                    let completed = parse_completed_inline(&head_text).filter(|_| {
-                        !agent_doc_element_queue::subprompts::struck_parent_block_reopens(&block)
-                    });
-                    let entry = match completed {
-                        Some(inner) => QueueEntry::Completed(QueuePrompt {
-                            text: format!("{inner}\n{block}"),
-                            multiline: false,
-                            indent,
-                            ordered_marker,
-                        }),
-                        None => QueueEntry::Prompt(QueuePrompt {
-                            text: format!("{head_text}\n{block}"),
-                            multiline: false,
-                            indent,
-                            ordered_marker,
-                        }),
-                    };
-                    entries.push((entry, span(start_i, block_end)));
-                    bare_prompt_allowed = true;
-                    i = block_end;
-                    continue;
-                }
-            }
             let entry = if rest.trim().is_empty() {
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
@@ -968,12 +908,10 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     }
                     out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
                     out.push(' ');
-                    // `#nestedsubprompts`: strike the parent part; the
-                    // sub-prompt block stays a Markdown list beneath it, and
-                    // every live child is struck with the parent
-                    // (`#struckparentkids`) so an answered child reads closed.
-                    // A reopened block's parent is already struck and is not
-                    // wrapped twice.
+                    // Compatibility for a legacy folded prompt: strike its
+                    // parent and retain the nested block. Canonical nested
+                    // rows are separate entries and reach this branch one at
+                    // a time.
                     let (head, block) =
                         agent_doc_element_queue::subprompts::split_subprompt_block(&p.text);
                     out.push_str("~~");
@@ -1955,7 +1893,23 @@ pub fn set_prompt_operator_actions(
 ) -> Option<Vec<QueueEntry>> {
     let mut updated = entries.to_vec();
     let mut changed = false;
-    for entry in &mut updated {
+    for index in 0..updated.len() {
+        let group_origin = if entry_is_group_parent(entries, index) {
+            let own_indent = entry_indent(&entries[index]).unwrap_or(0);
+            let end = entries[index + 1..]
+                .iter()
+                .position(|entry| entry_indent(entry).is_some_and(|indent| indent <= own_indent))
+                .map_or(entries.len(), |offset| index + 1 + offset);
+            let subtree = render(&entries[index..end]);
+            Some(
+                agent_doc_document::queue_projection::operator_request_origin_item(
+                    strip_queue_bullet(subtree.trim_end()),
+                ),
+            )
+        } else {
+            None
+        };
+        let entry = &mut updated[index];
         let (prompt, live) = match entry {
             QueueEntry::Prompt(prompt) => (prompt, true),
             QueueEntry::Completed(prompt) => (prompt, false),
@@ -1968,11 +1922,17 @@ pub fn set_prompt_operator_actions(
         if live {
             for (queue_item, request_id) in actions {
                 let request_id = request_id.to_ascii_lowercase();
-                if open_todo_ids.contains(&request_id)
-                    && agent_doc_document::queue_projection::operator_request_item_matches_row(
+                let direct_match =
+                    agent_doc_document::queue_projection::operator_request_item_matches_row(
                         &prompt.text,
                         queue_item,
-                    )
+                    );
+                let group_match = group_origin.as_deref().is_some_and(|origin| {
+                    agent_doc_document::queue_projection::operator_request_origin_item(queue_item)
+                        == origin
+                });
+                if open_todo_ids.contains(&request_id)
+                    && (direct_match || group_match)
                     && !ids.contains(&request_id)
                 {
                     ids.push(request_id);
@@ -3039,9 +2999,9 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
 /// A flat queue has every `indent == 0`, so no entry is ever a parent and this
 /// is a no-op — the pre-nesting behaviour is preserved exactly.
 pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
-    // `#nestedclaimsteer`: a row that already owns a sub-prompt block stays
-    // executable when a later, deeper routable head is visible. A `#queuenest`
-    // label has no folded block, so the indent scan below still applies.
+    // Compatibility: an older caller may still pass a pre-folded in-memory
+    // entry. Canonical document parsing never creates this shape; every list
+    // row is separate and the indentation scan below decides parenthood.
     if let Some(QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)) = entries.get(idx)
         && agent_doc_element_queue::subprompts::has_subprompts(&prompt.text)
     {
@@ -3072,7 +3032,9 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
 fn nest_row_work_text(text: &str) -> String {
     let unstruck = unwrap_nest_strike(text.trim());
     let projected = agent_doc_element_queue::strip_attempt_projection_prefix(unstruck);
-    strip_priority_markers(unwrap_nest_strike(projected.trim()))
+    strip_queue_effect_annotation(&strip_priority_markers(unwrap_nest_strike(
+        projected.trim(),
+    )))
 }
 
 fn unwrap_nest_strike(text: &str) -> &str {
@@ -3221,9 +3183,9 @@ pub fn nest_vector_at(entries: &[QueueEntry], index: usize, item_text: &str) -> 
 
 /// Nest vector of the row whose work text is `prompt_text`.
 ///
-/// `None` for a top-level row, a `#nestedsubprompts` folded head (one entry at
-/// indent 0), or text that is not in `entries`. Completed rows match too: the
-/// echo is embedded after the leaf is struck.
+/// `None` for a top-level row, a compatibility-era folded entry, or text that
+/// is not in `entries`. Completed rows match too: the echo is embedded after
+/// the leaf is struck.
 pub fn nest_vector_for_prompt_text(entries: &[QueueEntry], prompt_text: &str) -> Option<String> {
     let index = prompt_index_for_text(entries, prompt_text)?;
     nest_vector_at(entries, index, prompt_text)
@@ -5437,7 +5399,10 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(projected, "- ☑️ worker work ⟦published+local⟧\n");
-        assert_eq!(project_prompt_runtime_projections(&projected, &targets).unwrap(), None);
+        assert_eq!(
+            project_prompt_runtime_projections(&projected, &targets).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -8665,15 +8630,18 @@ mod tests {
         );
     }
 
-    /// A flat head and a `#nestedsubprompts` folded head have no nest vector.
+    /// A flat head has no vector; every nested free-text leaf carries lineage.
     #[test]
-    fn nest_vector_is_absent_for_flat_and_folded_heads() {
+    fn nest_vector_is_absent_for_flat_heads_and_present_for_nested_leaves() {
         let flat = parse("- ship the fix\n").unwrap();
         assert_eq!(nest_vector_for_prompt_text(&flat, "ship the fix"), None);
 
-        let folded = parse(SUBPROMPT_BODY).unwrap();
-        let head = prompts(&folded)[0].text.clone();
-        assert_eq!(nest_vector_for_prompt_text(&folded, &head), None);
+        let nested = parse(SUBPROMPT_BODY).unwrap();
+        assert!(entry_is_group_parent(&nested, 0));
+        assert_eq!(
+            nest_vector_for_prompt_text(&nested, "So this is the first subtask.").as_deref(),
+            Some("Sync PR and Jira state into this document.: So this is the first subtask.")
+        );
     }
 
     fn assert_nest_submission(submitted: &str, lineage: &str) {
@@ -8722,9 +8690,13 @@ mod tests {
             submitted_prompt_for_nth(&flat, "ship the fix", 0, |_| false),
             "ship the fix"
         );
-        let folded = parse(SUBPROMPT_BODY).unwrap();
-        let head = prompts(&folded)[0].text.clone();
-        assert_eq!(submitted_prompt_for_nth(&folded, &head, 0, |_| false), head);
+        let nested = parse(SUBPROMPT_BODY).unwrap();
+        let submitted =
+            submitted_prompt_for_nth(&nested, "So this is the first subtask.", 0, |_| false);
+        assert_nest_submission(
+            &submitted,
+            "Sync PR and Jira state into this document.: So this is the first subtask.",
+        );
 
         let multiline = vec![
             nest_row("root parent", 0),
@@ -8842,28 +8814,29 @@ mod tests {
         "- separate flat head\n",
     );
 
-    /// A free-text row owns the nested free-text rows beneath it: one entry,
-    /// one head, whose text carries every child verbatim, and whose span is
-    /// the overlay node's span (single segmentation truth).
+    /// Every free-text list row is a distinct entry and overlay node. The
+    /// parent becomes context; its nested leaves are independently executable.
     #[test]
-    fn nested_free_text_rows_are_one_head_with_subprompts() {
+    fn nested_free_text_rows_are_leaf_only_entries() {
         let spans = parse_spans(SUBPROMPT_BODY).unwrap();
-        assert_eq!(spans.len(), 2, "{spans:?}");
+        assert_eq!(spans.len(), 4, "{spans:?}");
         let QueueEntry::Prompt(parent) = &spans[0].0 else {
             panic!("{spans:?}");
         };
-        assert_eq!(
-            parent.text,
-            "Sync PR and Jira state into this document.\n  - So this is the first subtask.\n  - This is the second subtask.\n    wrapped onto a second line"
-        );
+        assert_eq!(parent.text, "Sync PR and Jira state into this document.");
         assert_eq!(parent.indent, 0);
         let entries = parse(SUBPROMPT_BODY).unwrap();
         assert_eq!(render(&entries), SUBPROMPT_BODY);
         let heads: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
-        assert_eq!(heads.len(), 2, "{heads:?}");
-        assert!(heads[0].starts_with("Sync PR"));
-        assert_eq!(heads[1], "separate flat head");
-        assert!((0..entries.len()).all(|i| !entry_is_group_parent(&entries, i)));
+        assert_eq!(
+            heads,
+            vec![
+                "So this is the first subtask.",
+                "This is the second subtask.\n    wrapped onto a second line",
+                "separate flat head",
+            ]
+        );
+        assert!(entry_is_group_parent(&entries, 0));
 
         let doc = format!("<!-- agent:run -->\n{SUBPROMPT_BODY}<!-- /agent:run -->\n");
         let body_start = doc.find('\n').unwrap() + 1;
@@ -8880,25 +8853,28 @@ mod tests {
     /// a child keeps the work identity, the overlay node key and the claim
     /// handle.
     #[test]
-    fn subprompt_edits_never_change_the_parent_identity() {
+    fn leaf_edits_never_turn_the_parent_back_into_executable_work() {
         let edited = SUBPROMPT_BODY
             .replace("second subtask.", "second subtask, steered.")
             .replace(
                 "- separate flat head\n",
                 "  - ~~So this is a new third subtask.~~\n- separate flat head\n",
             );
-        let text = |body: &str| prompts(&parse(body).unwrap())[0].text.clone();
-        let (before, after) = (text(SUBPROMPT_BODY), text(&edited));
-        assert_ne!(before, after);
+        let before_entries = parse(SUBPROMPT_BODY).unwrap();
+        let after_entries = parse(&edited).unwrap();
+        assert!(entry_is_group_parent(&before_entries, 0));
+        assert!(entry_is_group_parent(&after_entries, 0));
         assert_eq!(
-            agent_doc_element_queue::queue_head_identity(&before),
-            agent_doc_element_queue::queue_head_identity(&after)
+            prompts(&before_entries)[0].text,
+            "So this is the first subtask."
         );
         assert_eq!(
-            agent_doc_element_queue::queue_head_identity(&before),
-            agent_doc_element_queue::queue_head_identity(
-                "Sync PR and Jira state into this document."
-            )
+            prompts(&after_entries)[0].text,
+            "So this is the first subtask."
+        );
+        assert_ne!(
+            prompts(&before_entries)[1].text,
+            prompts(&after_entries)[1].text
         );
         let key = |body: &str| {
             let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
@@ -8908,18 +8884,15 @@ mod tests {
         };
         assert_eq!(key(SUBPROMPT_BODY), key(&edited));
         assert_eq!(
-            crate::queue_claim::claim_item_handle(&after),
-            "Sync PR and Jira state into this document."
+            crate::queue_claim::claim_item_handle(&prompts(&after_entries)[1].text),
+            "This is the second subtask, steered.\n    wrapped onto a second line"
         );
     }
 
-    /// A strike covers the parent and its children: the strike wraps the
-    /// parent part AND every live child (`#struckparentkids`), so an answered
-    /// child reads closed. The struck shape reads back as ONE completed entry,
-    /// renders byte for byte, and unstrike restores the live parent (the
-    /// children keep their strikes: no operator byte is guessed back).
+    /// Striking a context parent changes only that row. Its executable leaves
+    /// remain live and independently addressable.
     #[test]
-    fn striking_a_parent_retires_its_subprompts_with_it() {
+    fn striking_a_parent_never_retires_its_executable_leaves() {
         let doc = format!("<!-- agent:run -->\n{SUBPROMPT_BODY}<!-- /agent:run -->\n");
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
         let struck =
@@ -8927,9 +8900,9 @@ mod tests {
                 .unwrap();
         let struck_block = concat!(
             "- ~~Sync PR and Jira state into this document.~~\n",
-            "  - ~~So this is the first subtask.~~\n",
-            "  - ~~This is the second subtask.\n",
-            "    wrapped onto a second line~~\n",
+            "  - So this is the first subtask.\n",
+            "  - This is the second subtask.\n",
+            "    wrapped onto a second line\n",
         );
         assert!(struck.contains(struck_block), "{struck}");
         let body = &struck[struck.find('\n').unwrap() + 1..struck.find("<!-- /agent:run").unwrap()];
@@ -8938,18 +8911,23 @@ mod tests {
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
-        assert_eq!(entries.len(), 2, "{entries:?}");
+        assert_eq!(entries.len(), 4, "{entries:?}");
         assert_eq!(render(&entries), body);
         assert_eq!(
             prompts(&entries)
                 .iter()
                 .map(|p| p.text.as_str())
                 .collect::<Vec<_>>(),
-            vec!["separate flat head"]
+            vec![
+                "So this is the first subtask.",
+                "This is the second subtask.\n    wrapped onto a second line",
+                "separate flat head",
+            ]
         );
         let struck_nodes = agent_doc_markdown_ast::mutations::item_nodes(&struck, "queue").unwrap();
-        assert_eq!(struck_nodes.len(), 2);
+        assert_eq!(struck_nodes.len(), 4);
         assert!(struck_nodes[0].item.struck);
+        assert!(!struck_nodes[1].item.struck);
 
         let patch = agent_doc_markdown_ast::mutations::MutationNodePatch {
             component: "queue".to_string(),
@@ -8980,37 +8958,52 @@ mod tests {
             QueueEntry::Prompt(_)
         ));
 
-        // The entries-based completion path renders the same canonical shape.
+        // Completing only the parent entry likewise leaves every leaf alone.
         let QueueEntry::Prompt(live) = parse(SUBPROMPT_BODY).unwrap()[0].clone() else {
             unreachable!()
         };
-        assert_eq!(render(&[QueueEntry::Completed(live)]), struck_block);
+        assert_eq!(
+            render(&[QueueEntry::Completed(live)]),
+            "- ~~Sync PR and Jira state into this document.~~\n"
+        );
     }
 
     /// Any other strike spelling still retires the children with the parent:
     /// one completed entry whose render normalizes the strike spelling (as a
     /// struck flat row's does) and strikes the children with it.
     #[test]
-    fn a_non_canonical_parent_strike_retires_its_children() {
+    fn a_non_canonical_parent_strike_leaves_its_children_live() {
         let body =
             "- ~~parent~~ — auto-struck: answered (#ftstrike)\n  - child one\n  - child two\n";
         let entries = parse(body).unwrap();
-        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries.len(), 3, "{entries:?}");
         assert!(
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
-        assert!(prompts(&entries).is_empty(), "{entries:?}");
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["child one", "child two"]
+        );
         assert_eq!(
             render(&entries),
-            "- ~~parent~~\n  - ~~child one~~\n  - ~~child two~~\n"
+            "- ~~parent~~\n  - child one\n  - child two\n"
         );
         let doc = format!("<!-- agent:run -->\n{body}<!-- /agent:run -->\n");
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
-        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes.len(), 3);
         assert!(nodes[0].item.struck);
+        assert!(!nodes[1].item.struck);
+        assert!(!nodes[2].item.struck);
         let body_start = doc.find('\n').unwrap() + 1;
-        assert_eq!(nodes[0].item.end_byte - body_start, body.len());
+        assert_eq!(nodes[0].item.start_byte, body_start);
+        assert_eq!(
+            &doc[nodes[1].item.start_byte..nodes[1].item.end_byte],
+            "  - child one\n"
+        );
     }
 
     /// The `agent:run` block from `tasks/sdk/sdk-demo.md` (2026-10-27): a
@@ -9033,29 +9026,28 @@ mod tests {
     /// owns its child, and answering it closes the child visibly: the strike
     /// writes `  - ~~child~~`, never a struck parent over a live-looking child.
     #[test]
-    fn answering_a_bare_hashtag_parent_strikes_its_answered_child() {
+    fn answering_a_bare_hashtag_parent_strikes_only_its_answer_leaf() {
         let doc = run_doc(&format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n"));
         let entries = parse(run_body(&doc)).unwrap();
-        assert_eq!(entries.len(), 1, "one head, not a group: {entries:?}");
-        let QueueEntry::Prompt(head) = &entries[0] else {
-            panic!("{entries:?}");
-        };
         assert_eq!(
-            head.text,
-            format!("{STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}")
+            entries.len(),
+            2,
+            "a context parent and answer leaf: {entries:?}"
         );
+        assert!(entry_is_group_parent(&entries, 0));
+        assert_eq!(prompts(&entries)[0].text, ANSWERED_CHILD);
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
-        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes.len(), 2);
         let struck =
-            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[1].node_key)
                 .unwrap();
         assert_eq!(
             run_body(&struck),
-            format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n")
+            format!("- {STRUCK_PARENT_ID}\n  - ~~{ANSWERED_CHILD}~~\n")
         );
         let entries = parse(run_body(&struck)).unwrap();
         assert!(
-            matches!(entries[0], QueueEntry::Completed(_)),
+            matches!(entries[1], QueueEntry::Completed(_)),
             "{entries:?}"
         );
         assert!(prompts(&entries).is_empty());
@@ -9067,18 +9059,15 @@ mod tests {
     /// work identity, never the answered one; and striking it closes the new
     /// child too, after which the block is completed again.
     #[test]
-    fn a_row_added_under_a_closed_parent_reopens_it_as_live_work() {
+    fn a_row_added_under_a_closed_parent_is_a_new_live_leaf() {
         let body = format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n  - {NEW_CHILD}\n");
         let doc = run_doc(&body);
         let entries = parse(&body).unwrap();
-        assert_eq!(entries.len(), 1, "{entries:?}");
-        let QueueEntry::Prompt(head) = &entries[0] else {
-            panic!("the new child must not be swallowed by the strike: {entries:?}");
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        let QueueEntry::Prompt(head) = &entries[2] else {
+            panic!("the new child must be independent live work: {entries:?}");
         };
-        assert_eq!(
-            head.text,
-            format!("~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n  - {NEW_CHILD}")
-        );
+        assert_eq!(head.text, NEW_CHILD);
         assert_eq!(render(&entries), body);
         assert_eq!(prompts(&entries).len(), 1);
         assert_ne!(
@@ -9088,13 +9077,13 @@ mod tests {
         );
 
         let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
-        assert_eq!(nodes.len(), 1);
-        assert!(!nodes[0].item.struck, "{:#?}", nodes[0]);
+        assert_eq!(nodes.len(), 3);
+        assert!(!nodes[2].item.struck, "{:#?}", nodes[2]);
         let body_start = doc.find('\n').unwrap() + 1;
-        assert_eq!(nodes[0].item.end_byte - body_start, body.len());
+        assert_eq!(nodes[2].item.end_byte - body_start, body.len());
 
         let closed =
-            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[2].node_key)
                 .unwrap();
         assert_eq!(
             run_body(&closed),
@@ -9116,29 +9105,32 @@ mod tests {
     /// stays closed, and the projection pass makes it canonical by striking
     /// its children. A row written under it afterwards reopens it.
     #[test]
-    fn a_whole_block_strike_is_made_canonical_then_a_new_row_reopens_it() {
+    fn a_parent_strike_never_canonicalizes_or_swallows_live_leaves() {
         let legacy = format!("- ~~{STRUCK_PARENT_ID}~~\n  - {ANSWERED_CHILD}\n");
         let entries = parse(&legacy).unwrap();
         assert!(
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
-        let (projected, _) = project_prompt_runtime_projections(&legacy, &[])
-            .unwrap()
-            .expect("the projection strikes the answered child");
-        assert_eq!(
-            projected,
-            format!("- ~~{STRUCK_PARENT_ID}~~\n  - ~~{ANSWERED_CHILD}~~\n")
-        );
         assert!(
-            project_prompt_runtime_projections(&projected, &[])
+            project_prompt_runtime_projections(&legacy, &[])
                 .unwrap()
                 .is_none(),
-            "canonical shape is a fixed point"
+            "an unrelated parent strike never mutates a live leaf"
         );
-        let added = format!("{projected}  - {NEW_CHILD}\n");
+        let added = format!("{legacy}  - {NEW_CHILD}\n");
         let entries = parse(&added).unwrap();
-        assert!(matches!(entries[0], QueueEntry::Prompt(_)), "{entries:?}");
+        assert!(
+            matches!(entries[0], QueueEntry::Completed(_)),
+            "{entries:?}"
+        );
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec![ANSWERED_CHILD, NEW_CHILD]
+        );
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one
@@ -9154,10 +9146,10 @@ mod tests {
         assert_eq!(render(&entries), body);
     }
 
-    /// Lifecycle markers project onto the parent only, and a legacy child
-    /// marker (stamped when each child was its own head) is retired.
+    /// Lifecycle markers project onto executable leaves only; a stale marker on
+    /// the context parent and an unrelated sibling marker are retired.
     #[test]
-    fn lifecycle_projection_marks_the_parent_and_retires_child_markers() {
+    fn lifecycle_projection_marks_only_the_selected_leaf() {
         let body = concat!(
             "- 📥 Sync PR and Jira state into this document.\n",
             "  - 🚧 [#subagent:pmsync#1] So this is the first subtask.\n",
@@ -9179,8 +9171,8 @@ mod tests {
         assert_eq!(
             projected,
             concat!(
-                "- 🚧 Sync PR and Jira state into this document.\n",
-                "  - So this is the first subtask.\n",
+                "- Sync PR and Jira state into this document.\n",
+                "  - 🚧 So this is the first subtask.\n",
                 "  - This is the second subtask.\n",
             )
         );
@@ -9189,7 +9181,7 @@ mod tests {
     /// A bare `📥` on a sub-prompt child is the same legacy projection as an
     /// owner-stamped one. The parent keeps the head's marker (`#nestedsubprompts`).
     #[test]
-    fn a_bare_child_pending_marker_is_retired_with_the_parent() {
+    fn a_leaf_pending_marker_is_kept_while_the_parent_marker_is_retired() {
         let body = concat!(
             "- 📥 https://example.test/pull/164\n",
             "  - 📥 https://example.test/pull/164 #review\n",
@@ -9206,12 +9198,12 @@ mod tests {
             }],
         )
         .unwrap()
-        .expect("the child marker is retired");
+        .expect("the parent marker is retired");
         assert_eq!(
             projected,
             concat!(
-                "- 📥 https://example.test/pull/164\n",
-                "  - https://example.test/pull/164 #review\n",
+                "- https://example.test/pull/164\n",
+                "  - 📥 https://example.test/pull/164 #review\n",
             )
         );
     }
@@ -9285,15 +9277,21 @@ mod tests {
     /// An editor placeholder between children keeps the block together; a
     /// trailing one is dropped like any queue placeholder.
     #[test]
-    fn subprompt_placeholders_never_split_or_extend_the_parent() {
+    fn nested_placeholders_never_become_executable_leaves() {
         let middle = "- parent\n  - one\n  - \n  - two\n";
         let entries = parse(middle).unwrap();
-        assert_eq!(entries.len(), 1, "{entries:?}");
-        assert_eq!(prompts(&entries)[0].text, "parent\n  - one\n  - \n  - two");
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one", "two"]
+        );
 
         let trailing = parse("- parent\n  - one\n  -\n").unwrap();
         assert_eq!(prompts(&trailing).len(), 1);
-        assert_eq!(prompts(&trailing)[0].text, "parent\n  - one");
+        assert_eq!(prompts(&trailing)[0].text, "one");
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`
@@ -10563,9 +10561,9 @@ mod tests {
         );
     }
 
-    /// The brief collapses a nested run item, parent and sub-prompts, into the
-    /// packet `queue_item`. That string is not the row's work identity. The
-    /// request id still lands on the run row.
+    /// A request packet may retain the whole prompt tree as origin context.
+    /// That string is not an executable leaf's work identity; a visible
+    /// request marker on the parent remains context-only.
     #[test]
     fn operator_request_on_a_nested_run_item_stays_on_the_row() {
         let row = concat!(
@@ -10766,11 +10764,13 @@ mod tests {
         ] {
             let close = if prefix == "~~" { "~~" } else { "" };
             let answer = format!("- {prefix}[#{REQUEST}]{close}\n  - I want sync.\n");
+            let parsed = parse(&answer).unwrap();
             assert_eq!(
-                parse(&answer).unwrap().len(),
-                1,
-                "an answer row owns its nested answer: {answer:?}"
+                parsed.len(),
+                2,
+                "an answer parent and leaf stay distinct: {answer:?}"
             );
+            assert!(entry_is_group_parent(&parsed, 0));
             let tracked = format!("- {prefix}[#alpha]{close}\n  - child\n");
             assert_eq!(
                 parse(&tracked).unwrap().len(),
@@ -10798,15 +10798,13 @@ mod tests {
             "- 🙋🚧 [#subagent:stalereplay#1] {paused}\n- ☑️ [#subagent:cell#1] third row\n- [#{REQUEST}]\n  - I want sync to use the latest state.\n"
         );
         let entries = parse(&body).unwrap();
-        assert_eq!(entries.len(), 3, "{entries:#?}");
-        let answer_row = match &entries[2] {
+        assert_eq!(entries.len(), 4, "{entries:#?}");
+        assert!(entry_is_group_parent(&entries, 2));
+        let answer_row = match &entries[3] {
             QueueEntry::Prompt(prompt) => prompt.text.clone(),
-            other => panic!("the answer row is one live entry: {other:?}"),
+            other => panic!("the answer leaf is one live entry: {other:?}"),
         };
-        assert_eq!(
-            answer_row,
-            format!("[#{REQUEST}]\n  - I want sync to use the latest state.")
-        );
+        assert_eq!(answer_row, "I want sync to use the latest state.");
 
         let (projected, after) = project_prompt_runtime_projections(
             &body,
@@ -10832,12 +10830,12 @@ mod tests {
         )
         .expect("the projection keeps every row")
         .expect("the markers change");
-        assert_eq!(after.len(), 3, "{projected}");
+        assert_eq!(after.len(), 4, "{projected}");
         assert!(
             projected.ends_with(&format!(
-                "- 📥 [#{REQUEST}]\n  - I want sync to use the latest state.\n"
+                "- [#{REQUEST}]\n  - 📥 I want sync to use the latest state.\n"
             )),
-            "the marker lands on the answer row, never on its nested answer:\n{projected}"
+            "the marker lands on the executable answer leaf, never its parent:\n{projected}"
         );
         project_prompts_in_progress(&projected, std::slice::from_ref(&paused))
             .expect("a later in-progress projection keeps the row count too");

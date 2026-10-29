@@ -1062,6 +1062,50 @@ pub struct AnsweredFreeTextStrikeDecision {
     pub inline_vetoed_heads: Vec<String>,
 }
 
+/// Whether one mutation node is context for a deeper queue row.
+///
+/// The markdown overlay exposes every nested list row as its own mutation
+/// node.  A parent row is therefore recognizable from the indentation of the
+/// following rows in the same component: the first list row before the tree
+/// returns to this depth makes this row context-only.  Keep this check beside
+/// the reactive strike projection so an answer can close leaves without ever
+/// consuming their parent context.
+fn mutation_node_is_group_parent(
+    source: &str,
+    nodes: &[agent_doc_markdown_ast::mutations::MutationItemNode],
+    index: usize,
+) -> bool {
+    let Some(node) = nodes.get(index) else {
+        return false;
+    };
+    let indent = |node: &agent_doc_markdown_ast::mutations::MutationItemNode| {
+        (node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::ListItem).then(|| {
+            source[node.item.start_byte..]
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take_while(|ch| matches!(ch, ' ' | '\t'))
+                .count()
+        })
+    };
+    let Some(own_indent) = indent(node) else {
+        return false;
+    };
+    for later in nodes.iter().skip(index + 1) {
+        // Item indexes restart at each component occurrence.
+        if later.index <= node.index {
+            break;
+        }
+        match indent(later) {
+            Some(later_indent) if later_indent > own_indent => return true,
+            Some(_) => return false,
+            None => continue,
+        }
+    }
+    false
+}
+
 /// [`answered_free_text_head_node_keys_with_authority`] plus the
 /// `#subagentinlineveto` rule.
 ///
@@ -1164,8 +1208,14 @@ pub fn answered_free_text_strike_decision(
     };
     let mut struck_texts = already_applied;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
-    for node in nodes {
+    for (node_index, node) in nodes.iter().enumerate() {
         if node.item.struck || is_loop_queue_node(&node.node_key) {
+            continue;
+        }
+        // A row with descendants is their context, not executable work.  Its
+        // prose may appear in a submitted nest vector, but that must never turn
+        // the parent into an answered queue head.
+        if mutation_node_is_group_parent(content, &nodes, node_index) {
             continue;
         }
         let text = node.item.text.trim();
@@ -1247,7 +1297,7 @@ pub fn answered_free_text_strike_decision(
             continue;
         }
         struck_texts.insert(normalize_queue_prompt_text(text));
-        decision.node_keys.push(node.node_key);
+        decision.node_keys.push(node.node_key.clone());
     }
     Ok(decision)
 }
@@ -3165,11 +3215,9 @@ mod tests {
     }
 
     /// `#nestedechostrike` (live, agent-doc-bugs.md 2026-10-27): a free-text
-    /// parent with nested sub-prompts is ONE head whose text is the parent plus
-    /// its children. The closeout echoed it verbatim (`> **Queue prompt:**
-    /// <parent>` then one `>   - <child>` line per child), and the per-line
-    /// echo matcher compared each quoted line with the whole multi-line head,
-    /// so the reported row never struck.
+    /// parent with nested sub-prompts is context for independent leaves. A
+    /// full-tree closeout echo answers the executable leaves;
+    /// the parent remains context and is never itself consumed.
     const NESTED_ECHO_DOC: &str = concat!(
         "---\nqueue_active: true\n---\n\n",
         "<!-- agent:run subagents go -->\n",
@@ -3179,11 +3227,7 @@ mod tests {
         "- later free-text work stays queued\n",
         "<!-- /agent:run -->\n",
     );
-    const NESTED_ECHO_PARENT: &str = concat!(
-        "Sync PR and Jira state into a document element.\n",
-        "  - So this is the first subtask.\n",
-        "  - This is the second subtask.",
-    );
+    const NESTED_ECHO_FIRST_LEAF: &str = "So this is the first subtask.";
     const NESTED_ECHO_ANSWER: &str = concat!(
         "### Re: PM sync — opus\n\n",
         "> **Queue prompt:** Sync PR and Jira state into a document element.\n",
@@ -3193,8 +3237,8 @@ mod tests {
     );
 
     #[test]
-    fn nestedechostrike_verbatim_nested_echo_strikes_claimed_parent() {
-        for claimed in [Vec::new(), vec![NESTED_ECHO_PARENT.to_string()]] {
+    fn nestedechostrike_verbatim_nested_echo_strikes_only_leaves() {
+        for claimed in [Vec::new(), vec![NESTED_ECHO_FIRST_LEAF.to_string()]] {
             let keys = answered_free_text_head_node_keys_with_claims(
                 NESTED_ECHO_DOC,
                 NESTED_ECHO_ANSWER,
@@ -3202,7 +3246,7 @@ mod tests {
                 &claimed,
             )
             .unwrap();
-            assert_eq!(keys.len(), 1, "claimed={claimed:?}: {keys:?}");
+            assert_eq!(keys.len(), 2, "claimed={claimed:?}: {keys:?}");
             let projected = project_answered_free_text_strike_with_claims(
                 NESTED_ECHO_DOC,
                 NESTED_ECHO_ANSWER,
@@ -3212,9 +3256,16 @@ mod tests {
             .unwrap()
             .expect("the nested echo projects a strike");
             assert!(
+                projected.target_content.contains(
+                    "- ☑️ [#subagent:pmsync#1] Sync PR and Jira state into a document element.\n"
+                ),
+                "{}",
+                projected.target_content
+            );
+            assert!(
                 projected
                     .target_content
-                    .contains("~~Sync PR and Jira state into a document element.~~"),
+                    .contains("  - ~~So this is the first subtask.~~ — auto-struck:"),
                 "{}",
                 projected.target_content
             );
@@ -3228,12 +3279,12 @@ mod tests {
         }
     }
 
-    /// The parent line alone, or one child alone, is not the nested head's
-    /// echo; and a response that quotes the nested head and defers it stays
-    /// queued.
+    /// Each child is independently executable. A child-only echo closes that
+    /// leaf, a partial tree closes only the echoed leaf, and a response that
+    /// defers the tree keeps every leaf queued.
     #[test]
     fn nestedechostrike_partial_or_deferred_nested_echo_does_not_strike() {
-        let claimed = vec![NESTED_ECHO_PARENT.to_string()];
+        let claimed = vec![NESTED_ECHO_FIRST_LEAF.to_string()];
         let keys = |response: &str| {
             answered_free_text_head_node_keys_with_claims(
                 NESTED_ECHO_DOC,
@@ -3248,16 +3299,17 @@ mod tests {
             "> **Queue prompt:** So this is the first subtask.\n\n",
             "Done.\n",
         );
-        assert!(keys(child_only).is_empty(), "a child echo is not the head");
+        assert_eq!(keys(child_only).len(), 1, "a child echo closes that leaf");
         let missing_child = concat!(
             "### Re: PM sync — opus\n\n",
             "> **Queue prompt:** Sync PR and Jira state into a document element.\n",
             ">   - So this is the first subtask.\n\n",
             "Done.\n",
         );
-        assert!(
-            keys(missing_child).is_empty(),
-            "an echo missing a child is not the verbatim head"
+        assert_eq!(
+            keys(missing_child).len(),
+            1,
+            "a partial tree closes only the echoed leaf"
         );
         let deferred = concat!(
             "### Re: PM sync — opus\n\n",
@@ -3274,8 +3326,9 @@ mod tests {
 
     /// Live shape (agent-doc-bugs.md 2026-10-28): `release + publish` names the
     /// subagent work it must contain. Those `Include #subagent:` children are
-    /// release context, not sub-prompts. Echoing the whole block struck the
-    /// row while `#subagent:nestedlineage` was still a live queue row.
+    /// executable leaves beneath a context-only release parent. The leaf that
+    /// names an open subagent remains queued while an unrelated include leaf
+    /// may close.
     const RELEASE_INCLUDE_OPEN_DOC: &str = concat!(
         "---\nqueue_active: true\n---\n\n",
         "<!-- agent:run subagents go -->\n",
@@ -3316,9 +3369,10 @@ mod tests {
                 &claimed,
             )
             .unwrap();
-            assert!(
-                keys.is_empty(),
-                "claimed={claimed:?}: an open include keeps the row queued: {keys:?}"
+            assert_eq!(
+                keys.len(),
+                1,
+                "claimed={claimed:?}: only the unrelated include leaf closes: {keys:?}"
             );
             let projected = project_answered_free_text_strike_with_claims(
                 RELEASE_INCLUDE_OPEN_DOC,
@@ -3327,9 +3381,18 @@ mod tests {
                 &claimed,
             )
             .unwrap();
+            let projected = projected.expect("the unrelated include leaf closes");
             assert!(
-                projected.is_none(),
-                "claimed={claimed:?}: the echo must not strike: {projected:?}"
+                projected.target_content.contains("- release + publish\n"),
+                "the parent remains context: {}",
+                projected.target_content
+            );
+            assert!(
+                projected
+                    .target_content
+                    .contains("  - Include #subagent:nestedlineage\n"),
+                "the open include leaf remains queued: {}",
+                projected.target_content
             );
         }
         assert!(
@@ -3342,9 +3405,8 @@ mod tests {
         );
     }
 
-    /// Once every named include is done, the same verbatim echo strikes the
-    /// parent and its include lines together. `nestvector` and `nestedproject`
-    /// are already absent; a struck `nestedlineage` row is done too.
+    /// Once every named include is done, the same verbatim echo strikes both
+    /// executable include leaves while leaving their parent as context.
     #[test]
     fn nestedechostrike_release_include_echo_strikes_when_every_include_is_done() {
         let done = RELEASE_INCLUDE_OPEN_DOC.replace(
@@ -3363,7 +3425,7 @@ mod tests {
                 &claimed,
             )
             .unwrap();
-            assert_eq!(keys.len(), 1, "claimed={claimed:?}: {keys:?}");
+            assert_eq!(keys.len(), 2, "claimed={claimed:?}: {keys:?}");
             let projected = project_answered_free_text_strike_with_claims(
                 &done,
                 RELEASE_INCLUDE_ECHO,
@@ -3373,7 +3435,7 @@ mod tests {
             .unwrap()
             .expect("a done include lets the verbatim echo strike");
             assert!(
-                projected.target_content.contains("~~release + publish~~"),
+                projected.target_content.contains("- release + publish\n"),
                 "{}",
                 projected.target_content
             );
@@ -3403,10 +3465,7 @@ mod tests {
         "- 📥 later free-text work stays queued\n",
         "<!-- /agent:run -->\n",
     );
-    const INLINE_VETO_HEAD: &str = concat!(
-        "https://github.com/example/docs/pull/74/changes\n",
-        "  - The ADR links are malformed.",
-    );
+    const INLINE_VETO_HEAD: &str = "The ADR links are malformed.";
     const INLINE_VETO_ANSWER: &str = concat!(
         "### Re: PR 74 links — opus\n\n",
         "> **Queue prompt:** https://github.com/example/docs/pull/74/changes\n",
@@ -3428,7 +3487,7 @@ mod tests {
         .unwrap();
         assert!(
             decision.node_keys.is_empty(),
-            "an inline answer must not close a subagents dispatch head: {decision:?}"
+            "an inline answer must not close a dispatched leaf: {decision:?}"
         );
         assert_eq!(decision.inline_vetoed_heads, dispatch);
         let (projection, vetoed) = project_answered_free_text_strike_with_dispatch(
@@ -3475,7 +3534,7 @@ mod tests {
         assert!(
             projection
                 .target_content
-                .contains("~~https://github.com/example/docs/pull/74/changes~~"),
+                .contains("  - ~~The ADR links are malformed.~~ — auto-struck:"),
             "{}",
             projection.target_content
         );

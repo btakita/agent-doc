@@ -1,10 +1,9 @@
 //! Claim-ledger view of `#nestedclaimsteer`.
 //!
-//! The document parse stays folded. While a guard is installed, live-head and
-//! dispatch readers expand a claimed row: the first post-claim direct child
-//! stays in the parent, and each later direct child is its own entry. An
-//! empty guard is the identity. Projection and render of the parsed entries
-//! never go through this view.
+//! Queue parsing is leaf-only: nested list items are already distinct entries
+//! and parents are context labels. This compatibility view still expands any
+//! folded prompt read from an older in-memory representation while leaving the
+//! canonical flat tree unchanged.
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -205,15 +204,16 @@ mod tests {
         assert_eq!(document_queue::render(&expanded), body);
         let prompts = document_queue::prompts(&expanded);
         assert_eq!(prompts.len(), 2);
-        assert!(has_subprompts(&prompts[0].text));
-        assert!(!entry_is_group_parent(&expanded, 0));
+        assert!(!has_subprompts(&prompts[0].text));
+        assert!(entry_is_group_parent(&expanded, 0));
+        assert_eq!(prompts[0].text, "alpha");
         assert_eq!(prompts[1].text, "beta");
         assert_eq!(prompts[1].indent, 2);
         let nest = document_queue::nest_vector_for_prompt_text(&expanded, "beta").unwrap();
         assert_eq!(nest, "Parent: beta");
-        assert!(
-            document_queue::nest_vector_for_prompt_text(&entries, "Parent\n  - alpha\n  - beta")
-                .is_none()
+        assert_eq!(
+            document_queue::nest_vector_for_prompt_text(&entries, "alpha").as_deref(),
+            Some("Parent: alpha")
         );
     }
 
@@ -224,6 +224,7 @@ mod tests {
         let expanded = expand_entries(entries.clone(), &[parent_snapshot("Parent")]);
         assert_eq!(document_queue::render(&expanded), body);
         let prompts = document_queue::prompts(&expanded);
+        assert_eq!(prompts[0].ordered_marker.as_deref(), Some("1."));
         assert_eq!(prompts[1].ordered_marker.as_deref(), Some("2."));
     }
 
@@ -248,14 +249,14 @@ mod tests {
             "{:?}",
             prompts.iter().map(|p| &p.text).collect::<Vec<_>>()
         );
-        assert_eq!(prompts[0].text, "Parent\n  - alpha");
-        assert_eq!(prompts[1].text, "beta\n    - first gc");
-        assert_eq!(prompts[1].indent, 2);
+        assert_eq!(prompts[0].text, "alpha");
+        assert_eq!(prompts[1].text, "first gc");
+        assert_eq!(prompts[1].indent, 4);
         assert_eq!(prompts[2].text, "second gc");
         assert_eq!(prompts[2].indent, 4);
         let nest = document_queue::nest_vector_for_prompt_text(&expanded, "second gc").unwrap();
         assert_eq!(nest, "Parent: beta: second gc");
-        assert!(!entry_is_group_parent(&expanded, 1));
+        assert!(entry_is_group_parent(&expanded, 2));
     }
 
     #[test]

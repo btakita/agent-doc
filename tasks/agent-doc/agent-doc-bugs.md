@@ -698,6 +698,26 @@ Main is `1bbc28a6a9`. The installed binary sha256 is `03b775ac10f60cf6c6c11dc32c
 
 The expected fix is installed. `agent:run id="api-prs"` has 17 inbox rows. Bare `#rebase` matches nine live heads, and bare `#fix-ci` matches more than one row, so those claims stay ambiguous until each head is named by its nest vector. That matcher is `1bbc28a6a980994cc9d5332746ab1ee82ad606bd`, which is `origin/main` and the installed binary. The installed sha256 is `03b775ac10f60cf6c6c11dc32c8d42ce3eeab1a69e45d6e6ce209220be4f4b7f`. `agent-doc --version` is `agent-doc 0.35.560`. No newer fix for these rows is on main. No product change was made.
 
+### Re: run markers and silent delivery — grok-4.7 · 2026-10-29T09:34-04:00
+
+> **Queue prompt:** Why are there many agent:run items with 📥 in api.md? Is the state out of sync or do we need another emoji to represent another state?
+
+📥 means pending: an executable head with no claim, report, or completion evidence. No new emoji. The claim ledger matches the other markers. Of the 26 inbox rows, 17 have no current claim. Nine were painted pending even though they are not heads: seven group labels and two sub-prompt children. The next projection drops pending from a group label and retires a bare child lifecycle marker. A pin on a child stays. A real claim or report on a label still projects. That fix is `d6cf730618` on the release checkout. api.md was not edited.
+
+> **Queue prompt:** Does a "refusal" strand the state of a agent:run item? Is this why there are so many run items that are stuck iwth 📥 in api.md?
+
+No. A refused queue claim returns before it opens the claim ledger. Exit 1 writes nothing: no ledger row, no worker slot, and no blocked marker. The document bytes stay as they were. The same short leaf fails again for the same ambiguity. The exact nest-vector line still claims. A pending marker with no claim can be claimed again.
+
+That refusal is not why the api.md rows show 📥. Those rows have no claim stamp. Rows that were claimed show a reported or lost marker. Projection on main was also painting pending on group labels and sub-prompt children. That display bug is the group-label fix above.
+
+> **Queue prompt:** Remove Editor Plugin dialog since this is a normal/routine operation: [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering
+
+The routine steering-delivery dialog is removed. Handing an update to the turn already running no longer opens a JetBrains notification or a VS Code status hint. Interrupt-and-clear and interrupt-and-restart confirmations stay. The route still logs the line, clears a saved route-failure file, and records the dispatch as proven. Release checkout commit `8b79aa1601` (`fix(editor): keep steering delivery silent`) is the cherry-pick of `f2ded4fc` from `fix/remove-editor-plugin-dialog`. JetBrains `TerminalUtilTest` 95 tests and `RouteOutcomeTest` 6 tests passed. VS Code `commandPlane` 6 tests passed. `agent-doc-editor-surface` route_outcome 4 passed and `agent-doc-editor-surface-io` 1 passed.
+
+> **Queue prompt:** release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
+
+**Deferred:** Both named commits are on origin/main (`9c09d2aadc` and `1bbc28a6a9`). The release checkout `feat/release-readiness` is two commits ahead of origin/main: `d6cf730618` and `8b79aa1601`. The `0.35.561` version projection is uncommitted. `v0.35.561` is not tagged. origin/main is `1bbc28a6a9`. Publication has not run. The never-refused worker `01a187cf-45ec-7340-862c-a8ffb442e2db` is running, so the tag stays uncut.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -705,9 +725,22 @@ The expected fix is installed. `agent:run id="api-prs"` has 17 inbox rows. Bare 
 - 📥 [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
 - 📥 do [#grok-live-editor]
-  - 🚧 [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
-- ~~In api.md agent:run id=api-prs, there are many 📥 items. Have we installed the expected fix or is the install pending?~~ — auto-struck: answered this cycle (#ftstrike)
+  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
+- ☑️ [#subagent:releaseinclude#2] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
+- ~~Why are there many agent:run items with 📥 in api.md? Is the state out of sync or do we need another emoji to represent another state?~~ — auto-struck: answered this cycle (#ftstrike)
+---
+🚧 [#subagent:runnorefuse#1] agent:run items should never be refused. From api.md session:
+```
+Yes. The queue claim for a shared #rebase row is refused when several pull requests use that same      9:12 AM   █
+text. Nine live rows match it, on pull requests 717, 758, 763, and 767, so those claims exited 1 and             █
+no worker started. Pull request 767's section has rebase rows and no #review row. The short #review              █
+claim is held by pull request 763. GitHub showed 0 reviews and 0 review comments on https://                     █
+github.com/haiven-dev/haiven-api/pull/767. The head was 958dbf52dfca2a499f47320db72d86a62d77622d on
+agent/studio-integration-redirects-20261026, base sdk-dev. mergeable came back UNKNOWN.
+```
+---
+- ~~Does a "refusal" strand the state of a agent:run item? Is this why there are so many run items that are stuck iwth 📥 in api.md?~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Remove Editor Plugin dialog since this is a normal/routine operation: [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

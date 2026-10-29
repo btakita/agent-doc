@@ -1219,6 +1219,50 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 > **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 
 **Deferred:** Choice (6) on `#recent-run-affordance` already records this. Say when to build it.
+
+### Re: Inbox marker is a choice — grok-4.7 · 2026-10-29T14:30-04:00
+
+The two notes in this plan stay open. Annotation, worker-reported remains the recorded local-vs-published choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Choice (6) on `#recent-run-affordance` remains the recorded recency note: a timestamp annotation plus highlights for the newest three, or a numeric recency glyph that carries that order. Say when to build either one.
+
+`subagent:inboxterminal` generation 1 reported back. Worker `01a188df-8bd1-7bf1-938a-d7bb1d907c05` left `fix/inbox-not-terminal` at `7b44d8bb2890fb636b4579862ff64a5bd15d5e28`, the same commit as `origin/main`. No files changed. `make check` was not run. The branch was not pushed. Worktree: `/home/brian/worktrees/agent-doc-inboxterminal`.
+
+The worker prompt ended at "or Does this mean the subprompt is in a bad state?" The live row continues with a reliable error emoji, making `📥` unambiguous, and keeping a turn from ending while prompts are `📥`. Those later sentences were outside the worker prompt, so the two choices below leave them for the implementation turn after you pick.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records timestamp annotation plus highlights for the newest three, or a numeric recency glyph that carries that order. Say when to build it.
+
+[#subagent-operator-request-inbox-terminal-reading] subagent operator request
+- *queue_item:*
+  - In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` should not be a terminal state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state?
+- *kind:* question
+- *blocking:* true
+- *request:*
+  - Which reading should a closeout adopt when it would leave a nested `#address` or `#rebase: #address` row at `📥`?
+- *context:*
+  - On `origin/main` `7b44d8bb28`, `subprompt_row_is_eligible` rejects both strings.
+  - `strip_intent_tags` reduces `#rebase: #address` to the bare id `#address`, and `QueueItemIdentity::from_prompt` treats a bare `#id` as id-backed.
+  - The parent stays a group label, and each row stays its own executable leaf.
+  - With no claim, report receipt, or completion cell, projection paints `📥`, whose legend meaning is ready to run.
+  - A folded sub-prompt is the other law: a child never carries its own lifecycle marker, and the next projection pass strips a bare `📥`.
+  - These two strings are not on that folded path, so the leaf law says another turn, while the sub-prompt law would call the same marker a bad projection.
+  - Deleting that `📥` at closeout has to adopt one of those laws. Keeping the leaf keeps `📥` until a later turn. Folding, striking, or reclassifying the row treats `📥` as a projection closeout must not commit.
+- *choices:*
+  - **Start a new turn**: Keep the nested row as its own pending head. `📥` means ready to run, and a later turn claims it. Closeout of a different row may commit while this row is still `📥`.
+  - **The subprompt is in a bad state**: Do not commit that `📥`. Treat the row as a sub-prompt or as failed work, and remove the pending marker in the same turn.
+
+> **Queue prompt:** In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
+
+**Deferred:** Worker `01a188df-8bd1-7bf1-938a-d7bb1d907c05` returned a blocking choice. No commit was made. Pick **Start a new turn** or **The subprompt is in a bad state**.
+
+`subagent:checkedsubprompt` (`01a188de-5bf6-7fb0-be78-cf27940e3ced`), `subagent:leafcontext` (`01a188e5-ad81-70d0-8926-43381e563159`), and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work. No second worker is started for them.
+
+Changed paths: none. Commands: `queue report-complete` generation 1 exited 0; `repair-projection` was already synchronized. Verification: the branch has no new commit, so `make check` was not run. Confidence: the choice is recorded and not built. Escalation: pick one reading before any implementation.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
@@ -1234,7 +1278,7 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 - 🙋☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
 - 🚧 [#subagent:checkedsubprompt#1] In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.
-- 🚧 [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
+- ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
 - 🚧 [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable.
 - 🚧 [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
 <!-- /agent:run -->

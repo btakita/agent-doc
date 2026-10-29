@@ -834,6 +834,34 @@ fn first_submitted_group_in_document(
     None
 }
 
+/// Submit a selected group parent with its nested authorization/context rows.
+///
+/// This is continuation-only: ordinary queue submission still treats a
+/// top-level row as its literal text. Direct continuations can select a
+/// top-level tracked directive whose children carry operator-request answers;
+/// omitting its tree loses the scope the operator supplied.
+fn first_submitted_group_in_document(
+    content: &str,
+    head_text: &str,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    for entries in parsed_queue_bodies(content) {
+        for (index, entry) in entries.iter().enumerate() {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if !crate::document_queue::entry_is_group_parent(&entries, index)
+                || !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                || skip(&prompt.text)
+            {
+                continue;
+            }
+            return crate::document_queue::submitted_group_prompt_at(&entries, index);
+        }
+    }
+    None
+}
+
 /// Prompt text to submit for `head_text` (`#nestsubmit`).
 ///
 /// A nested leaf becomes its nest vector plus the entire prompt tree of the

@@ -3884,6 +3884,8 @@ fn sync_tmux_layout_ffi_invocation(
         column_order: Default::default(),
         actor_bindings: Vec::new(),
         client_id,
+        unstarted_session_bootstrap: false,
+        layout_authority: None,
     }
 }
 

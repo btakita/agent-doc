@@ -266,6 +266,21 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     /// pre-lane caller's payload is byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    /// GH #382: manual sync of Remote Dev flat evidence for a document with no
+    /// started agent session. Honored only when this command may create a pane,
+    /// names one focus, and its columns are empty or that focus alone. A forged
+    /// flag cannot replace a live session or publish a multi-file flat vector.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub unstarted_session_bootstrap: bool,
+    /// Present only when the JetBrains Client's measured-layout lease is live
+    /// (GH #376 token, reused by GH #382). An absent authority does not wait
+    /// for a forward that will not arrive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_authority: Option<String>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -14125,6 +14140,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             };
 
         assert!(invocation("manual", false).routes_created_panes());
@@ -14147,6 +14165,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             provenance: PaneLayoutProvenance::default(),
         }
@@ -14448,6 +14469,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             None,
         );
@@ -14529,6 +14553,9 @@ mod tests {
                     column_order: Default::default(),
                     actor_bindings: Vec::new(),
                     client_id: None,
+
+                    unstarted_session_bootstrap: false,
+                    layout_authority: None,
                 },
                 source_plane_version: None,
                 provenance: PaneLayoutProvenance::default(),
@@ -14627,6 +14654,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             None,
         );
@@ -14659,6 +14689,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             None,
         );
@@ -26859,6 +26892,9 @@ revised operator request
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             source_plane_version: None,
             provenance: PaneLayoutProvenance::default(),
@@ -27691,6 +27727,8 @@ mod gh278_latest_focus_tests {
             column_order: agent_doc_tmux::LayoutColumnOrder::Retained,
             actor_bindings: Vec::new(),
             client_id: None,
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         }
     }
 

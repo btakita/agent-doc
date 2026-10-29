@@ -386,5 +386,20 @@ class SurfaceCommandReferenceTest {
         assertTrue(thread in 0 until snapshot.indexOf("LayoutDetector.detectEditorLayout("))
         assertTrue(snapshot.indexOf("deriveSyncLayout(") in thread until snapshot.indexOf("CpRouteClient.submitSyncTmuxLayout("))
         assertTrue(byReference.indexOf("Thread {") in 0 until byReference.indexOf("deriveSyncLayout("))
+        val refuse = snapshot.substringAfter("ExactVisibleSyncDecision.RefuseUnknownLayout ->")
+            .substringBefore("ExactVisibleSyncDecision.RefuseStaleFocusProjection")
+        assertTrue(refuse.contains("EditorLayoutEvidence.Remote"))
+        assertTrue(refuse.contains("!request.noAutostart"))
+        assertTrue(refuse.contains("unstartedSessionBootstrap = true"))
+        assertTrue(refuse.contains("columnOrder = \"unknown\""))
+        assertTrue(refuse.contains("exactVisible = false"))
+        assertTrue(
+            refuse.indexOf("EditorLayoutEvidence.Remote") < refuse.indexOf("UNKNOWN_LAYOUT_MESSAGE"),
+        )
+        assertTrue(refuse.contains("awaitNativeGeneration(request)"))
+        assertTrue(
+            refuse.indexOf("awaitNativeGeneration(request)") <
+                refuse.indexOf("CpRouteClient.submitSyncTmuxLayout("),
+        )
     }
 }

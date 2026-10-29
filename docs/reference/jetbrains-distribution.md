@@ -152,7 +152,11 @@ authenticated same-generation surface publication is classified
 `readiness=blocked` with
 `readiness_reason=frontend_authority_absent_or_generation_mismatched` and
 `geometry_reason=flat_evidence_has_no_column_geometry`. Structural routing stays
-blocked and preserves the existing tmux layout. A retry cannot load an absent or incompatible client
+blocked and preserves the existing tmux layout. The exception is a manual Sync Tmux Layout of a
+document that has no started agent session (GH #382): that command starts the session from the
+focused document alone, or from the installation's measured columns when they already show it,
+and still does not reconstruct columns from the flat selection list. A document that already has
+a started session keeps the refusal. A retry cannot load an absent or incompatible client
 module, and flat evidence cannot safely reconstruct editor columns. Verify that
 both peers report the exact same plugin version, restart both, and retry only
 after the two-sided install is ready. Marketplace hosting is the automatic way

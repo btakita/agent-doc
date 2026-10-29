@@ -567,6 +567,55 @@ class SyncLayoutAction : ImplAction {
                     when (val decision = snapshot.decision) {
                         is ExactVisibleSyncDecision.Publish -> decision.columns
                         ExactVisibleSyncDecision.RefuseUnknownLayout -> {
+                            // GH #382: Remote Dev flat evidence for a manual sync starts the
+                            // focused document instead of showing the install-plugin refusal.
+                            // A local unreadable split still refuses (GH #154).
+                            if (layoutEvidence is LayoutDetector.EditorLayoutEvidence.Remote &&
+                                !request.noAutostart
+                            ) {
+                                LOG.info(
+                                    "[sync] remote flat evidence starts an unstarted session " +
+                                        "file=${request.focusedFile} " +
+                                        "reason=flat_evidence_has_no_column_geometry " +
+                                        "action=start_session columns=1",
+                                )
+                                if (prepareTerminalFirst(request, projectRoot)) return@newThread
+                                if (!awaitNativeGeneration(request)) return@newThread
+                                val layoutAuthority =
+                                    if (RemoteClientLayoutAuthority.isActive(request.project)) {
+                                        "frontend_measured"
+                                    } else {
+                                        null
+                                    }
+                                val receipt = CpRouteClient.submitSyncTmuxLayout(
+                                    projectRoot = projectRoot,
+                                    columnsJson = GSON.toJson(listOf(request.focusedFile)),
+                                    window = null,
+                                    focus = request.focusedFile,
+                                    noAutostart = false,
+                                    exactVisible = false,
+                                    callerKind = syncCallerKind(request.noAutostart, request.callerKind),
+                                    columnOrder = "unknown",
+                                    unstartedSessionBootstrap = true,
+                                    layoutAuthority = layoutAuthority,
+                                )
+                                if (receipt.exitCode != 0) {
+                                    LOG.warn(
+                                        "[sync] Project Controller projection failed projectRoot=$projectRoot " +
+                                            "focus=${request.focusedFile} output=${receipt.output}",
+                                    )
+                                    request.notifyFailure(
+                                        SurfaceCommandReference.refusalMessage(receipt.output)
+                                            ?: syncFailureMessage(receipt.output),
+                                    )
+                                } else {
+                                    LOG.info(
+                                        "[sync] Project Controller projection completed: " +
+                                            receipt.output.take(500),
+                                    )
+                                }
+                                return@newThread
+                            }
                             LOG.warn("[sync] refusing exact-visible layout because editor columns are unknown")
                             request.notifyFailure(SurfaceCommandReference.UNKNOWN_LAYOUT_MESSAGE)
                             return@newThread

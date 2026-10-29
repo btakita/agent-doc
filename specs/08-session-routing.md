@@ -260,6 +260,25 @@ Source for the payload's `client_id` (pure derivation in
   `surface_reference_unknown_layout`, and a foreground sync whose focus is in no
   column as `surface_reference_stale_focus`, with the sentences the editor
   used when it made these decisions itself.
+  A foreground manual sync (`caller_kind` `manual` or `projection`, and not
+  `no_autostart`) of that unknown split, for a focused document with no started
+  agent session, does not emit `surface_reference_unknown_layout` (GH #382). A
+  started session is an actor record that is not `Closed` and has a pane id.
+  The command publishes one unknown-order column containing only that document
+  so the existing manual create-and-route boundary can start the session. When
+  the command's installation already has a measured forward
+  (`jetbrains-rd@<installation>`) that shows the document, those columns replace
+  the one-column bootstrap and are published as editor order. The controller
+  awaits that forward for at most five seconds only when the command names
+  `layout_authority=frontend_measured`; an absent authority does not wait. A
+  retained desired snapshot is republished unchanged, including the refusal
+  when the focus is absent from it. A started session, a background or
+  `no_autostart` sync, an empty focus, and any payload whose columns are not
+  empty or that one focus document keep the unknown-layout refusal. The
+  plugin's `--col` snapshot fallback makes the same one-document submit only
+  for Remote Dev flat evidence; a local unreadable split still refuses before
+  publication (GH #154). Flat visible, selected, or open lists are never
+  reconstructed into columns.
   `controller_sync_surface_reference_resolved` logs the resolution.
 
 A reference resolves only to a live endpoint whose retained sequence is at
@@ -564,7 +583,10 @@ focus-only. Equal observed and requested widths do not prove editor membership
 or left-to-right assignment, so a one-for-one or complete-width replacement is
 still refused rather than filling tmux slots from an unordered visible set.
 Manual `Sync Tmux Layout` likewise refuses unknown geometry with `surface_reference_unknown_layout`
-and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence.
+and names `flat_evidence_has_no_column_geometry` for Remote Dev flat evidence,
+except the GH #382 session start above: a document with no started agent
+session is one unknown-order column (or the installation's measured columns
+when they show it), not a reconstruction of the flat selection list.
 That flat evidence is the causal boundary from GH #360: the backend knew only an
 unordered selected-file set while the missing frontend module was the sole
 source of editor column membership and order. Combining the set with live tmux

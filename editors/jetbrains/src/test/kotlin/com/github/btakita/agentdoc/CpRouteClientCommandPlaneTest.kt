@@ -282,6 +282,30 @@ class CpRouteClientCommandPlaneTest {
         assertEquals("manual", payload.get("caller_kind").asString)
         assertEquals("editor", payload.get("column_order").asString)
         assertEquals("jetbrains@test-pid:1", payload.get("client_id").asString)
+        assertFalse(payload.has("unstarted_session_bootstrap"))
+        assertFalse(payload.has("layout_authority"))
+
+        val bootstrap = CpRouteClient.syncTmuxLayoutCommandSubmitRequest(
+            projectRoot = "/proj",
+            columnsJson = """["/proj/tasks/one.md"]""",
+            window = null,
+            focus = "/proj/tasks/one.md",
+            noAutostart = false,
+            exactVisible = false,
+            commandId = "cmd-bootstrap",
+            columnOrder = "unknown",
+            unstartedSessionBootstrap = true,
+            layoutAuthority = "frontend_measured",
+        )
+        val bootstrapPayload = inlinePayload(
+            JsonParser.parseString(bootstrap.get("diagnostic_payload").asString)
+                .asJsonObject
+                .getAsJsonObject("CommandSubmit"),
+        )
+        assertEquals(true, bootstrapPayload.get("unstarted_session_bootstrap").asBoolean)
+        assertEquals("frontend_measured", bootstrapPayload.get("layout_authority").asString)
+        assertEquals("unknown", bootstrapPayload.get("column_order").asString)
+        assertEquals(1, bootstrapPayload.getAsJsonArray("columns").size())
     }
 
     @Test

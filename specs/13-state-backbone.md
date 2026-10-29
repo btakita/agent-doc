@@ -566,6 +566,12 @@ decide it.
   the expected absence of geometry into a user-facing failure. The pure
   `SurfaceCommandReference` decision owns this table; action callers only apply
   its typed result (`Reference`, `PreserveRetainedLayout`, or rollout fallback).
+  The exception is a manual Sync of a document with no started agent session
+  under Remote Dev flat evidence (GH #382): that command starts the session
+  from one focus column, or from the installation's measured columns when they
+  show the document, instead of surfacing the two-token install refusal. A
+  started session and a local unreadable split still refuse, and flat lists
+  are still not reconstructed into columns.
 
 ## Regression Rule
 

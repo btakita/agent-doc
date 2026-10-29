@@ -4615,6 +4615,8 @@ fn automatic_layout_sync_invocation(
         column_order: Default::default(),
         actor_bindings: Vec::new(),
         client_id: None,
+        unstarted_session_bootstrap: false,
+        layout_authority: None,
     }
 }
 
@@ -15121,6 +15123,9 @@ fn editor_route_layout_invocation(
         column_order: Default::default(),
         actor_bindings: Vec::new(),
         client_id: None,
+
+        unstarted_session_bootstrap: false,
+        layout_authority: None,
     })
 }
 
@@ -29670,6 +29675,278 @@ fn resolve_surface_layout_reference(
     Ok(retained.expect("resolved reference has a retained surface"))
 }
 
+/// How long a manual sync waits for a measured forward that the plugin says
+/// is live. Absent authority does not wait (GH #382). This is shorter than
+/// the 35s manual command timeout so a missing forward still starts the session.
+const UNSTARTED_SYNC_MEASURED_LAYOUT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+enum UnstartedSessionBootstrapDecision {
+    /// Publish one focus column, or measured columns that already show it.
+    Apply,
+    /// The flag matched, but a started session keeps the unknown-layout refusal.
+    StartedSession,
+    /// The flag is absent or the payload is not a one-focus manual sync.
+    Ignore,
+}
+
+/// GH #382: the flag is honored only for a foreground manual/projection sync
+/// whose columns are empty or exactly the focused document, and only when
+/// that document has no started agent session.
+fn unstarted_session_bootstrap_decision(
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+    project_root: &Path,
+    started_agent_session: bool,
+) -> UnstartedSessionBootstrapDecision {
+    let Some(focus) = invocation
+        .focus
+        .as_deref()
+        .map(str::trim)
+        .filter(|focus| !focus.is_empty())
+    else {
+        return UnstartedSessionBootstrapDecision::Ignore;
+    };
+    if !invocation.unstarted_session_bootstrap || !invocation.routes_created_panes() {
+        return UnstartedSessionBootstrapDecision::Ignore;
+    }
+    let focus_id = canonical_layout_document_id(project_root, focus);
+    let one_focus_column = match invocation.columns.as_slice() {
+        [] => true,
+        [only] => {
+            let files = only
+                .split(',')
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .collect::<Vec<_>>();
+            !files.is_empty()
+                && files
+                    .iter()
+                    .all(|file| canonical_layout_document_id(project_root, file) == focus_id)
+        }
+        _ => false,
+    };
+    if !one_focus_column {
+        return UnstartedSessionBootstrapDecision::Ignore;
+    }
+    if started_agent_session {
+        UnstartedSessionBootstrapDecision::StartedSession
+    } else {
+        UnstartedSessionBootstrapDecision::Apply
+    }
+}
+
+fn document_has_started_agent_session(
+    runtime: &ControllerRuntime,
+    project_root: &Path,
+    document: &str,
+) -> bool {
+    let document_id = canonical_layout_document_id(project_root, document);
+    match runtime.actor_record(&document_id) {
+        Ok(Some(record)) => {
+            record.state != agent_doc_controller::actor::ActorState::Closed
+                && !record.pane_id.trim().is_empty()
+        }
+        _ => false,
+    }
+}
+
+fn route_layout_columns(layout: &agent_doc_editor_surface::SurfaceRouteLayout) -> Vec<String> {
+    layout
+        .layout_args
+        .chunks(2)
+        .filter(|pair| pair.first().map(String::as_str) == Some("--col"))
+        .filter_map(|pair| pair.get(1).cloned())
+        .filter(|column| !column.trim().is_empty())
+        .collect()
+}
+
+fn sync_expected_documents(
+    project_root: &Path,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> Vec<String> {
+    layout_sync_state_expected_documents(
+        project_root,
+        &ControllerTmuxLayoutSyncStateInvocation {
+            columns: invocation.columns.clone(),
+            window: invocation.window.clone(),
+            focus: invocation.focus.clone(),
+        },
+    )
+}
+
+/// Non-blocking measured-column lookup, awaiting at most
+/// [`UNSTARTED_SYNC_MEASURED_LAYOUT_WAIT`] when the command names
+/// `layout_authority=frontend_measured`.
+fn measured_layout_for_unstarted_sync(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &ControllerTmuxLayoutSyncInvocation,
+) -> Option<agent_doc_editor_surface::SurfaceRouteLayout> {
+    let installation = invocation
+        .client_id
+        .as_deref()
+        .and_then(agent_doc_editor_surface::editor_installation)?;
+    let focus = invocation
+        .focus
+        .as_deref()
+        .map(str::trim)
+        .filter(|focus| !focus.is_empty())?;
+    let project_root = &bootstrap.project_root;
+    let focus_id = canonical_layout_document_id(project_root, focus);
+    let holds_routed = |file: &str| canonical_layout_document_id(project_root, file) == focus_id;
+    let graph = &runtime.editor_surface_graph;
+    let started = std::time::Instant::now();
+    let measured = match graph.measured_route_layout(
+        project_root,
+        installation,
+        &holds_routed,
+        std::time::Instant::now(),
+    ) {
+        Some(measured) => measured,
+        None => {
+            if invocation.layout_authority.as_deref()
+                != Some(agent_doc_editor_surface::ROUTE_LAYOUT_AUTHORITY_FRONTEND_MEASURED)
+            {
+                return None;
+            }
+            graph.await_measured_route_layout(
+                project_root,
+                installation,
+                &holds_routed,
+                std::time::Instant::now() + UNSTARTED_SYNC_MEASURED_LAYOUT_WAIT,
+            )?
+        }
+    };
+    agent_doc_ops_log_io::log_op(
+        project_root,
+        &format!(
+            "sync_tmux_layout_unstarted_session_measured file={focus} client={} surface={} sequence={} columns={} waited_ms={}",
+            measured.client_id,
+            measured.surface_id,
+            measured.sequence,
+            route_layout_columns(&measured.layout).len(),
+            started.elapsed().as_millis(),
+        ),
+    );
+    Some(measured.layout)
+}
+
+/// GH #382: an unknown-order manual sync with no retained snapshot starts the
+/// unstarted document instead of refusing. A retained snapshot is copied
+/// unchanged. A started session keeps `surface_reference_unknown_layout`.
+fn resolve_incomplete_frontend_layout(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: &mut ControllerTmuxLayoutSyncInvocation,
+    incoming_order: &mut agent_doc_tmux::LayoutColumnOrder,
+    desired_columns: &mut Vec<String>,
+    retained: Option<&PaneLayoutDesired>,
+) -> Result<()> {
+    if let Some(retained) = retained {
+        invocation.columns = retained.invocation.columns.clone();
+        invocation.column_order = retained.invocation.column_order;
+        *desired_columns = retained.invocation.columns.clone();
+        return Ok(());
+    }
+    let started = invocation.focus.as_deref().is_some_and(|focus| {
+        document_has_started_agent_session(runtime, &bootstrap.project_root, focus)
+    });
+    match unstarted_session_bootstrap_decision(invocation, &bootstrap.project_root, started) {
+        UnstartedSessionBootstrapDecision::Ignore => anyhow::bail!(
+            "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot; \
+             reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
+             frontend_readiness=blocked; frontend_readiness_reason={}; \
+             remedy={}, then retry Run Agent Doc",
+            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
+            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
+        ),
+        UnstartedSessionBootstrapDecision::StartedSession => {
+            anyhow::bail!(
+                "{}",
+                agent_doc_editor_surface::SurfaceReferenceRefusal::UnknownLayout.diagnostic()
+            )
+        }
+        UnstartedSessionBootstrapDecision::Apply => {}
+    }
+    if let Some(layout) = measured_layout_for_unstarted_sync(bootstrap, runtime, invocation) {
+        let columns = route_layout_columns(&layout);
+        if !columns.is_empty() {
+            let eligibility = runtime.main_layout_eligibility();
+            let mut measured = invocation.clone();
+            measured.columns =
+                main_layout_eligible_columns(&bootstrap.project_root, &eligibility, &columns);
+            measured.columns =
+                collapse_duplicate_pane_layout_columns(&bootstrap.project_root, &measured);
+            let expected = sync_expected_documents(&bootstrap.project_root, &measured);
+            if !expected.is_empty()
+                && pane_layout_foreground_focus_matches_columns(
+                    &bootstrap.project_root,
+                    &measured,
+                    &expected,
+                )
+            {
+                invocation.columns = measured.columns;
+                invocation.column_order = layout_column_order_from_surface(layout.column_order);
+                *incoming_order = invocation.column_order;
+                *desired_columns = expected;
+                return Ok(());
+            }
+        }
+    }
+    let focus = invocation
+        .focus
+        .as_deref()
+        .map(str::trim)
+        .filter(|focus| !focus.is_empty())
+        .context("unstarted session bootstrap requires a focused document")?
+        .to_string();
+    invocation.columns = vec![focus.clone()];
+    invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+    *desired_columns = sync_expected_documents(&bootstrap.project_root, invocation);
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "sync_tmux_layout_unstarted_session_bootstrap file={focus} reason=flat_evidence_has_no_column_geometry action=start_session columns=1"
+        ),
+    );
+    Ok(())
+}
+
+/// A foreground manual sync of a column-less surface, for a document with no
+/// started agent session, becomes a one-column bootstrap instead of
+/// `surface_reference_unknown_layout` (GH #382).
+fn unstarted_session_surface_reference_bootstrap(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    invocation: ControllerTmuxLayoutSyncInvocation,
+    surface: &agent_doc_editor_surface::EditorSurface,
+    reference: &agent_doc_editor_surface::SurfaceLayoutReference,
+) -> Option<ControllerTmuxLayoutSyncInvocation> {
+    if !invocation.routes_created_panes() {
+        return None;
+    }
+    let focus = surface.focused.trim();
+    if focus.is_empty()
+        || document_has_started_agent_session(runtime, &bootstrap.project_root, focus)
+    {
+        return None;
+    }
+    let mut invocation = invocation;
+    invocation.columns = vec![focus.to_string()];
+    invocation.column_order = agent_doc_tmux::LayoutColumnOrder::Unknown;
+    invocation.focus = Some(focus.to_string());
+    invocation.unstarted_session_bootstrap = true;
+    agent_doc_ops_log_io::log_op(
+        &bootstrap.project_root,
+        &format!(
+            "controller_sync_unstarted_session_bootstrap client={} surface={} min_sequence={} file={focus} reason=flat_evidence_has_no_column_geometry action=start_session columns=1",
+            invocation.client_id.as_deref().unwrap_or("none"),
+            reference.surface_id,
+            reference.min_sequence,
+        ),
+    );
+    Some(invocation)
+}
+
 /// Parse a `sync_tmux_layout` payload. A payload naming a
 /// `surface_reference` carries no columns of its own: with a runtime they are
 /// derived here from the retained surface `Source`, exactly the shape the
@@ -29705,18 +29982,38 @@ fn sync_tmux_layout_invocation_from_payload(
         invocation.client_id.as_deref(),
         &reference,
     )?;
-    let layout = agent_doc_editor_surface::sync_layout_from_surface(
+    let layout = match agent_doc_editor_surface::sync_layout_from_surface(
         &retained.surface,
         !invocation.no_autostart,
-    )
-    .map_err(|refusal| {
-        surface_reference_refused(
-            bootstrap,
-            invocation.client_id.as_deref(),
-            &reference,
-            refusal,
-        )
-    })?;
+    ) {
+        Ok(layout) => layout,
+        Err(agent_doc_editor_surface::SurfaceReferenceRefusal::UnknownLayout) => {
+            let client_id = invocation.client_id.clone();
+            if let Some(bootstrapped) = unstarted_session_surface_reference_bootstrap(
+                bootstrap,
+                runtime,
+                invocation,
+                &retained.surface,
+                &reference,
+            ) {
+                return Ok(bootstrapped);
+            }
+            return Err(surface_reference_refused(
+                bootstrap,
+                client_id.as_deref(),
+                &reference,
+                agent_doc_editor_surface::SurfaceReferenceRefusal::UnknownLayout,
+            ));
+        }
+        Err(refusal) => {
+            return Err(surface_reference_refused(
+                bootstrap,
+                invocation.client_id.as_deref(),
+                &reference,
+                refusal,
+            ));
+        }
+    };
     agent_doc_ops_log_io::log_op(
         &bootstrap.project_root,
         &format!(
@@ -36276,6 +36573,9 @@ mod desktop_editor_focus_tests {
             column_order: Default::default(),
             actor_bindings: Vec::new(),
             client_id: None,
+
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         };
         assert!(suppress_inactive_automatic_layout_focus(
             &mut automatic,
@@ -36628,7 +36928,7 @@ fn publish_pane_layout_desired_invocation_in_lane(
         document_is_main_layout_eligible(&bootstrap.project_root, &eligibility, document)
     });
     let retained = graph.desired();
-    let incoming_order = invocation.column_order;
+    let mut incoming_order = invocation.column_order;
     let mut desired_columns = layout_sync_state_expected_documents(
         &bootstrap.project_root,
         &ControllerTmuxLayoutSyncStateInvocation {
@@ -36642,19 +36942,18 @@ fn publish_pane_layout_desired_invocation_in_lane(
     // exists. Such input may carry a focus intent only when that document is already present in
     // the retained vector. Positive tmux geometry is an effect receipt, not editor-layout
     // authority: equal widths still do not identify which editor document belongs in which slot.
-    let incomplete_frontend_fallback = incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor;
+    let mut incomplete_frontend_fallback =
+        incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor;
     if incomplete_frontend_fallback {
-        let retained = retained.as_ref().context(format!(
-            "sync_tmux_layout deferred: incomplete frontend layout has no authoritative snapshot; \
-             reason=flat_evidence_has_no_column_geometry; frontend_publisher=unavailable; \
-             frontend_readiness=blocked; frontend_readiness_reason={}; \
-             remedy={}, then retry Run Agent Doc",
-            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS,
-            agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY,
-        ))?;
-        invocation.columns = retained.invocation.columns.clone();
-        invocation.column_order = retained.invocation.column_order;
-        desired_columns = retained.invocation.columns.clone();
+        resolve_incomplete_frontend_layout(
+            bootstrap,
+            runtime,
+            &mut invocation,
+            &mut incoming_order,
+            &mut desired_columns,
+            retained.as_ref(),
+        )?;
+        incomplete_frontend_fallback = incoming_order != agent_doc_tmux::LayoutColumnOrder::Editor;
     }
     anyhow::ensure!(
         !desired_columns.is_empty(),
@@ -37564,6 +37863,8 @@ mod tmux_layout_effect_state_dispatch_tests {
             column_order: Default::default(),
             actor_bindings: Vec::new(),
             client_id: None,
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         }
     }
 
@@ -41778,6 +42079,8 @@ mod tests {
             column_order: agent_doc_tmux::LayoutColumnOrder::Unknown,
             actor_bindings: Vec::new(),
             client_id: None,
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         }
     }
 
@@ -47724,6 +48027,9 @@ mod tests {
             column_order: Default::default(),
             actor_bindings: Vec::new(),
             client_id: None,
+
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         };
         let message_json = state_plane_snapshot_message_json(
             42,
@@ -51767,6 +52073,9 @@ mod tests {
             actor_bindings: Vec::new(),
             column_order: Default::default(),
             client_id: None,
+
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         };
         assert_eq!(editor_route_focus_refusal(&invocation, "/repo/a.md"), None);
         let refusal = editor_route_focus_refusal(&invocation, "/repo/z.md").unwrap();
@@ -52968,6 +53277,9 @@ mod tests {
                 column_order: Default::default(),
                 actor_bindings: Vec::new(),
                 client_id: None,
+
+                unstarted_session_bootstrap: false,
+                layout_authority: None,
             },
             provenance: PaneLayoutProvenance::default(),
         };
@@ -55141,6 +55453,9 @@ mod tests {
             column_order: Default::default(),
             actor_bindings: Vec::new(),
             client_id: None,
+
+            unstarted_session_bootstrap: false,
+            layout_authority: None,
         };
         let old = graph.set_desired(invocation.clone(), None);
         graph.record_structural_assignment(
@@ -55459,6 +55774,9 @@ mod tests {
                     column_order: Default::default(),
                     actor_bindings: Vec::new(),
                     client_id: None,
+
+                    unstarted_session_bootstrap: false,
+                    layout_authority: None,
                 })
                 .unwrap(),
             ),

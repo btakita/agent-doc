@@ -213,34 +213,84 @@ fn sync_by_reference_fails_closed_without_a_usable_source() {
         "{stale:#}"
     );
 
-    // An unknown split is published as `columns=[]`; a sync refuses it rather
-    // than guessing columns from the visible set.
+    // An unknown split is published as `columns=[]`. A foreground manual sync
+    // of a document with no started agent session bootstraps that one document
+    // (GH #382) instead of guessing the visible set or refusing.
     let mut unknown = split(&[&[&a], &[&b]], &a, SurfaceColumnOrder::Editor);
     unknown.columns.clear();
     fixture.observe(4, unknown);
-    let refused = fixture
+    let bootstrapped = fixture
         .resolve_sync(&fixture.sync_payload(4, false))
+        .unwrap();
+    assert_eq!(bootstrapped.columns, vec![a.clone()]);
+    assert_eq!(bootstrapped.focus.as_deref(), Some(a.as_str()));
+    assert_eq!(
+        bootstrapped.column_order,
+        agent_doc_tmux::LayoutColumnOrder::Unknown
+    );
+    assert!(bootstrapped.unstarted_session_bootstrap);
+    assert!(bootstrapped.routes_created_panes());
+    assert_ne!(bootstrapped.columns, vec![a.clone(), b.clone()]);
+
+    let background = fixture
+        .resolve_sync(&fixture.sync_payload(4, true))
         .unwrap_err();
-    let refused = format!("{refused:#}");
+    let background = format!("{background:#}");
     assert!(
-        refused.contains("surface_reference_unknown_layout: Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry)"),
-        "{refused}"
+        background.contains("surface_reference_unknown_layout: Remote Dev frontend structural routing is not ready (frontend_authority_absent_or_generation_mismatched; flat_evidence_has_no_column_geometry)"),
+        "{background}"
     );
     assert!(
-        refused.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
-        "{refused}"
+        background.contains(FRONTEND_AUTHORITY_UNAVAILABLE_REMEDY),
+        "{background}"
     );
     assert!(
-        refused.contains(
+        background.contains(
             "restarting only the Remote Dev backend cannot replace its already-loaded frontend module"
         ),
-        "{refused}"
+        "{background}"
     );
     assert!(
-        refused.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS),
-        "{refused}"
+        background.contains(agent_doc_editor_surface::FRONTEND_AUTHORITY_UNAVAILABLE_READINESS),
+        "{background}"
     );
-    assert!(refused.contains("then retry Sync Tmux Layout"), "{refused}");
+    assert!(
+        background.contains("then retry Sync Tmux Layout"),
+        "{background}"
+    );
+
+    let document_id = canonical_layout_document_id(&fixture.bootstrap.project_root, &a);
+    fixture
+        .runtime
+        .actor_graph
+        .set(std::collections::BTreeMap::from([(
+            document_id,
+            agent_doc_controller::actor::ActorRecord {
+                document_id: canonical_layout_document_id(&fixture.bootstrap.project_root, &a),
+                session_id: "session-%1".to_string(),
+                generation: 7,
+                pane_id: "%1".to_string(),
+                window_id: "@1".to_string(),
+                harness: "codex".to_string(),
+                state: agent_doc_controller::actor::ActorState::Ready,
+                last_transition: agent_doc_controller::actor::ActorLastTransition {
+                    caller: "test".to_string(),
+                    reason: "started".to_string(),
+                    timestamp: 1,
+                    prior_generation: 6,
+                    new_generation: 7,
+                },
+            },
+        )]));
+    let started = fixture
+        .resolve_sync(&fixture.sync_payload(4, false))
+        .unwrap_err();
+    let started = format!("{started:#}");
+    assert!(
+        started.contains("surface_reference_unknown_layout"),
+        "{started}"
+    );
+    assert!(started.contains("then retry Sync Tmux Layout"), "{started}");
 
     let no_client = serde_json::json!({
         "project_root": fixture.bootstrap.project_root,
@@ -292,6 +342,178 @@ fn explicit_col_publication_is_unchanged() {
     let resolved = fixture.resolve_sync(&payload).unwrap();
     let plain: ControllerTmuxLayoutSyncInvocation = serde_json::from_str(&payload).unwrap();
     assert_eq!(resolved, plain);
+}
+
+fn started_actor(
+    document_id: &str,
+    state: agent_doc_controller::actor::ActorState,
+    pane_id: &str,
+) -> agent_doc_controller::actor::ActorRecord {
+    agent_doc_controller::actor::ActorRecord {
+        document_id: document_id.to_string(),
+        session_id: format!("session-{pane_id}"),
+        generation: 7,
+        pane_id: pane_id.to_string(),
+        window_id: "@1".to_string(),
+        harness: "codex".to_string(),
+        state,
+        last_transition: agent_doc_controller::actor::ActorLastTransition {
+            caller: "test".to_string(),
+            reason: "started".to_string(),
+            timestamp: 1,
+            prior_generation: 6,
+            new_generation: 7,
+        },
+    }
+}
+
+fn manual_bootstrap_invocation(
+    focus: &str,
+    columns: Vec<String>,
+) -> ControllerTmuxLayoutSyncInvocation {
+    ControllerTmuxLayoutSyncInvocation {
+        columns,
+        window: None,
+        focus: Some(focus.to_string()),
+        no_autostart: false,
+        exact_visible: false,
+        caller_kind: "manual".to_string(),
+        column_order: agent_doc_tmux::LayoutColumnOrder::Unknown,
+        actor_bindings: Vec::new(),
+        client_id: None,
+        unstarted_session_bootstrap: true,
+        layout_authority: None,
+    }
+}
+
+#[test]
+fn bootstrap_decision_accepts_only_one_unstarted_focus_column() {
+    let root = std::path::PathBuf::from("/proj");
+    let focus = "/proj/a.md";
+    let mut invocation = manual_bootstrap_invocation(focus, vec![focus.to_string()]);
+    assert!(matches!(
+        unstarted_session_bootstrap_decision(&invocation, &root, false),
+        UnstartedSessionBootstrapDecision::Apply
+    ));
+    assert!(matches!(
+        unstarted_session_bootstrap_decision(&invocation, &root, true),
+        UnstartedSessionBootstrapDecision::StartedSession
+    ));
+    invocation.columns = vec![focus.to_string(), "/proj/b.md".to_string()];
+    assert!(matches!(
+        unstarted_session_bootstrap_decision(&invocation, &root, false),
+        UnstartedSessionBootstrapDecision::Ignore
+    ));
+    invocation.columns.clear();
+    invocation.no_autostart = true;
+    assert!(matches!(
+        unstarted_session_bootstrap_decision(&invocation, &root, false),
+        UnstartedSessionBootstrapDecision::Ignore
+    ));
+    invocation.unstarted_session_bootstrap = false;
+    invocation.no_autostart = false;
+    invocation.columns = vec![focus.to_string()];
+    assert!(matches!(
+        unstarted_session_bootstrap_decision(&invocation, &root, false),
+        UnstartedSessionBootstrapDecision::Ignore
+    ));
+}
+
+#[test]
+fn closed_or_unbound_actor_is_not_a_started_agent_session() {
+    let fixture = Fixture::new();
+    let document = fixture.doc("a.md");
+    let document_id = canonical_layout_document_id(&fixture.bootstrap.project_root, &document);
+    let cases = [
+        agent_doc_controller::actor::ActorState::Closed,
+        agent_doc_controller::actor::ActorState::Ready,
+    ];
+    fixture
+        .runtime
+        .actor_graph
+        .set(std::collections::BTreeMap::from([(
+            document_id.clone(),
+            started_actor(&document_id, cases[0], "%1"),
+        )]));
+    assert!(!document_has_started_agent_session(
+        fixture.runtime.as_ref(),
+        &fixture.bootstrap.project_root,
+        &document,
+    ));
+    let mut unbound = started_actor(&document_id, cases[1], "");
+    unbound.pane_id.clear();
+    fixture
+        .runtime
+        .actor_graph
+        .set(std::collections::BTreeMap::from([(
+            document_id.clone(),
+            unbound,
+        )]));
+    assert!(!document_has_started_agent_session(
+        fixture.runtime.as_ref(),
+        &fixture.bootstrap.project_root,
+        &document,
+    ));
+    fixture
+        .runtime
+        .actor_graph
+        .set(std::collections::BTreeMap::from([(
+            document_id,
+            started_actor(
+                &canonical_layout_document_id(&fixture.bootstrap.project_root, &document),
+                agent_doc_controller::actor::ActorState::Starting,
+                "%2",
+            ),
+        )]));
+    assert!(document_has_started_agent_session(
+        fixture.runtime.as_ref(),
+        &fixture.bootstrap.project_root,
+        &document,
+    ));
+}
+
+#[test]
+fn unstarted_manual_sync_publishes_one_focus_column_without_a_retained_snapshot() {
+    let fixture = Fixture::new();
+    let path = fixture.bootstrap.project_root.join("a.md");
+    std::fs::write(&path, "---\nagent_doc_session: s\n---\n# s\n").unwrap();
+    let focus = path.canonicalize().unwrap().display().to_string();
+    let (desired, applied) = publish_pane_layout_desired_invocation(
+        &fixture.bootstrap,
+        fixture.runtime.as_ref(),
+        manual_bootstrap_invocation(&focus, vec![focus.clone()]),
+        None,
+        PaneLayoutPublication::FreshIntent,
+        PaneLayoutPublisher::Command,
+    )
+    .unwrap();
+    assert_eq!(applied.columns, vec![focus.clone()]);
+    assert_eq!(desired.invocation.columns, vec![focus]);
+    assert_eq!(
+        applied.column_order,
+        agent_doc_tmux::LayoutColumnOrder::Unknown
+    );
+}
+
+#[test]
+fn forged_bootstrap_flag_keeps_the_incomplete_frontend_deferral() {
+    let fixture = Fixture::new();
+    let error = publish_pane_layout_desired_invocation(
+        &fixture.bootstrap,
+        fixture.runtime.as_ref(),
+        manual_bootstrap_invocation("/proj/a.md", vec!["/proj/a.md".into(), "/proj/b.md".into()]),
+        None,
+        PaneLayoutPublication::FreshIntent,
+        PaneLayoutPublisher::Command,
+    )
+    .unwrap_err();
+    let error = format!("{error:#}");
+    assert!(
+        error.contains("incomplete frontend layout has no authoritative snapshot"),
+        "{error}"
+    );
+    assert!(error.contains("then retry Run Agent Doc"), "{error}");
+    assert!(!error.contains("then retry Sync Tmux Layout"), "{error}");
 }
 
 #[test]

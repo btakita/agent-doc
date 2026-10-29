@@ -907,6 +907,8 @@ internal object CpRouteClient {
         callerKind: String,
         columnOrder: String? = null,
         surfaceReference: SurfaceLayoutReference? = null,
+        unstartedSessionBootstrap: Boolean = false,
+        layoutAuthority: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
@@ -923,6 +925,8 @@ internal object CpRouteClient {
             commandId = commandId,
             controllerCommand = ProjectControllerCommand.EditorCommandSubmitAsync.token,
             surfaceReference = surfaceReference,
+            unstartedSessionBootstrap = unstartedSessionBootstrap,
+            layoutAuthority = layoutAuthority,
         )
         return try {
             replayIdempotentControllerCommandOnce(
@@ -1326,6 +1330,8 @@ internal fun editorCommandAwaitRequest(
         clientId: String? = null,
         controllerCommand: String = "editor_command_submit",
         surfaceReference: SurfaceLayoutReference? = null,
+        unstartedSessionBootstrap: Boolean = false,
+        layoutAuthority: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("project_root", projectRoot)
@@ -1339,6 +1345,10 @@ internal fun editorCommandAwaitRequest(
             payload.add("columns", JsonParser.parseString(columnsJson).asJsonArray)
             focus?.let { payload.addProperty("focus", it) }
             columnOrder?.let { payload.addProperty("column_order", it) }
+            if (unstartedSessionBootstrap) {
+                payload.addProperty("unstarted_session_bootstrap", true)
+            }
+            layoutAuthority?.let { payload.addProperty("layout_authority", it) }
         }
         window?.let { payload.addProperty("window", it) }
         payload.addProperty("no_autostart", noAutostart)

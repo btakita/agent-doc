@@ -111,6 +111,8 @@ Idempotency key: `"<project-root>:sync"`.
 | `exact_visible` | boolean | Require the exact visible layout |
 | `no_autostart` | boolean | Do not autostart a session |
 | `caller_kind` | string | `"claim"`, `"run"`, `"automatic"`, or `"manual"` |
+| `unstarted_session_bootstrap` | boolean, optional | GH #382. Manual Remote Dev flat evidence for a document with no started agent session. Honored only when the command may create a pane and the columns are empty or that one focus document. Omitted when false |
+| `layout_authority` | string, optional | `frontend_measured` only while the JetBrains Client measured-layout lease is live. The controller then waits at most five seconds for that installation's measured columns. Omitted when the authority is absent |
 
 ### `agent-doc.focus_document_pane.v1`
 

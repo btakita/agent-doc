@@ -1696,6 +1696,83 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
         .is_some_and(|vector| response_defers_free_text_head(response_body, &vector))
 }
 
+/// The operator-visible reason a quoted `head_text` stayed unanswered
+/// (`#promptsurface`).
+///
+/// `None` when the response does not defer that head. The reason is the
+/// deferral paragraph with the `**Deferred…**` lead and bold markers removed.
+pub fn queue_head_deferral_reason(response_body: &str, head_text: &str) -> Option<String> {
+    let response_body = direct_response_text(response_body);
+    let blocks: Vec<&str> = response_body.split("\n\n").collect();
+    let index = blocks
+        .iter()
+        .rposition(|block| block_quotes_free_text_head(block, head_text))?;
+    if !deferral_scope_has_marker(&blocks, index) {
+        return None;
+    }
+    let prose = |block: &str| {
+        block
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('>'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let statement = if let Some(next) = blocks
+        .iter()
+        .skip(index + 1)
+        .find(|block| !block_is_operator_note_quote(block))
+    {
+        let next = prose(next);
+        if deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
+            || text_states_deferral(&block_lead_statement(&next))
+        {
+            if deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER) {
+                next
+            } else {
+                block_lead_statement(&next)
+            }
+        } else {
+            prose(blocks[index])
+        }
+    } else {
+        prose(blocks[index])
+    };
+    let reason = sanitize_deferral_reason(&statement);
+    if reason.is_empty() {
+        Some("this prompt was not answered".to_string())
+    } else {
+        Some(reason)
+    }
+}
+
+fn sanitize_deferral_reason(statement: &str) -> String {
+    let mut text = statement.trim().to_string();
+    if text.to_ascii_lowercase().starts_with("**deferred")
+        && let Some(close) = text[2..].find("**")
+    {
+        text = text[2 + close + 2..].trim().to_string();
+    }
+    let mut kept = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let trimmed = trimmed.split("<!--").next().unwrap_or(trimmed).trim();
+        if trimmed.is_empty() {
+            if line.trim().starts_with("<!--") {
+                break;
+            }
+            continue;
+        }
+        if !kept.is_empty() {
+            kept.push(' ');
+        }
+        kept.push_str(trimmed);
+    }
+    kept.replace("**", " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// [`latest_free_text_head_echo_is_deferral`] across the bare head and its nest vector.
 ///
 /// The later of the two echoes is the current statement. An older deferral does

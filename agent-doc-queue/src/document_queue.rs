@@ -4443,7 +4443,8 @@ type ConvergenceKey = (
     QueueItemLifecycle,
 );
 
-fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
+fn convergence_identity_at(entries: &[QueueEntry], index: usize) -> Option<ConvergenceKey> {
+    let entry = entries.get(index)?;
     let prompt = match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
         _ => return None,
@@ -4452,32 +4453,60 @@ fn convergence_identity(entry: &QueueEntry) -> Option<ConvergenceKey> {
     // Effect ids distinguish exact claim/receipt targets but not authored
     // multiplicity. Otherwise a replay could append a fresh id and evade the
     // snapshot allowance that guards intentional duplicates.
-    let identity = match head_shape(prompt) {
-        HeadShape::FreeText => queue_effect_family_identity(prompt),
-        _ => agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text),
-    };
+    //
+    // `#promptsurface`: a nested non-tracked leaf (`#review` under one pull
+    // request, `#review` under another) is that parent's nest vector, not the
+    // document-wide id of the bare leaf. Convergence that keyed the leaf alone
+    // deleted the still-unanswered copy when another parent struck or reopened
+    // the same tag.
+    let identity =
+        nested_leaf_convergence_identity(entries, index, prompt).unwrap_or_else(
+            || match head_shape(prompt) {
+                HeadShape::FreeText => queue_effect_family_identity(prompt),
+                _ => agent_doc_element_queue::QueueItemIdentity::from_prompt(&prompt.text),
+            },
+        );
     Some((identity, head_shape(prompt), lifecycle))
 }
 
-fn queue_item_identity(entry: &QueueEntry) -> Option<agent_doc_element_queue::QueueItemIdentity> {
-    let prompt = match entry {
-        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => p,
-        _ => return None,
-    };
+fn queue_item_identity_at(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    let prompt = prompt_of(entries.get(index)?)?;
+    if let Some(identity) = nested_leaf_convergence_identity(entries, index, prompt) {
+        return Some(identity);
+    }
     Some(agent_doc_element_queue::QueueItemIdentity::from_prompt(
         &prompt.text,
     ))
+}
+
+/// Nest-vector identity of a nested executable leaf that is not a tracked
+/// directive. `None` for a top-level row, a group label, and a tracked
+/// directive, which keep [`QueueItemIdentity::from_prompt`].
+fn nested_leaf_convergence_identity(
+    entries: &[QueueEntry],
+    index: usize,
+    prompt: &QueuePrompt,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    let bare = strip_in_progress_marker(prompt.text.trim());
+    let lineage = lineage_claim_text(entries, index)?;
+    if lineage == bare {
+        return None;
+    }
+    Some(crate::queue_claim::claim_identity(&lineage))
 }
 
 fn snapshot_struck_representatives(
     snapshot_entries: &[QueueEntry],
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, QueueEntry> {
     let mut struck = std::collections::HashMap::new();
-    for entry in snapshot_entries {
+    for (index, entry) in snapshot_entries.iter().enumerate() {
         if !matches!(entry, QueueEntry::Completed(_)) {
             continue;
         }
-        if let Some(identity) = queue_item_identity(entry) {
+        if let Some(identity) = queue_item_identity_at(snapshot_entries, index) {
             struck.entry(identity).or_insert_with(|| entry.clone());
         }
     }
@@ -4489,8 +4518,9 @@ fn current_struck_identities(
 ) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
     entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Completed(_)))
+        .filter_map(|(index, _)| queue_item_identity_at(entries, index))
         .collect()
 }
 
@@ -4616,8 +4646,9 @@ pub fn operator_rearmed_queue_identities(
     let snapshot_struck = snapshot_struck_representatives(snapshot_entries);
     operator_entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(|(index, _)| queue_item_identity_at(operator_entries, index))
         .filter(|identity| snapshot_struck.contains_key(identity))
         .collect()
 }
@@ -4642,8 +4673,9 @@ pub fn live_snapshot_struck_identities(
     }
     entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
-        .filter_map(queue_item_identity)
+        .enumerate()
+        .filter(|(_, entry)| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(|(index, _)| queue_item_identity_at(entries, index))
         .filter(|identity| snapshot_struck.contains_key(identity))
         .collect()
 }
@@ -4678,17 +4710,60 @@ pub fn operator_retyped_queue_identities(
             let Ok(entries) = parse(line) else {
                 continue;
             };
-            for entry in &entries {
-                if let QueueEntry::Prompt(_) = entry
-                    && let Some(identity) = queue_item_identity(entry)
-                    && snapshot_struck.contains_key(&identity)
-                {
+            for (index, entry) in entries.iter().enumerate() {
+                let QueueEntry::Prompt(prompt) = entry else {
+                    continue;
+                };
+                let Some(identity) = queue_item_identity_at(&entries, index) else {
+                    continue;
+                };
+                if snapshot_struck.contains_key(&identity) {
+                    // The typed line is already that identity. A top-level
+                    // `#review` re-arms only the top-level id, not every nested
+                    // copy of the same leaf.
                     retyped.insert(identity);
+                    continue;
+                }
+                // A typed `  - #review` has no parent in this one-line parse.
+                // When exactly one snapshot-struck nest identity has that leaf,
+                // the keystrokes re-arm that parent. Several struck parents
+                // are ambiguous and are not evidence.
+                if let Some(bridged) = unique_struck_nest_identity(&snapshot_struck, prompt) {
+                    retyped.insert(bridged);
                 }
             }
         }
     }
     retyped
+}
+
+/// The one snapshot-struck nest identity whose leaf work is `prompt`'s work.
+///
+/// `None` when none match, or when more than one parent is struck: a typed
+/// leaf with no parent in the inserted line does not choose among them.
+fn unique_struck_nest_identity(
+    snapshot_struck: &std::collections::HashMap<
+        agent_doc_element_queue::QueueItemIdentity,
+        QueueEntry,
+    >,
+    prompt: &QueuePrompt,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    let leaf = nest_row_work_text(&prompt.text);
+    if leaf.is_empty() {
+        return None;
+    }
+    let leaf_identity = agent_doc_element_queue::QueueItemIdentity::from_prompt(&leaf);
+    let mut matched = snapshot_struck.iter().filter_map(|(identity, struck)| {
+        let struck_prompt = prompt_of(struck)?;
+        if nest_row_work_text(&struck_prompt.text) != leaf {
+            return None;
+        }
+        // A top-level row shares `from_prompt` of its leaf and is handled by
+        // the direct match. What remains is a nest vector.
+        (identity != &leaf_identity).then(|| identity.clone())
+    });
+    let first = matched.next()?;
+    matched.next().is_none().then_some(first)
 }
 
 /// [`converge_queue_via_lifecycle`] with operator re-arm evidence
@@ -4716,16 +4791,16 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     // again"), not stale re-emits of the struck one.
     let mut snapshot_live_allowance =
         std::collections::HashMap::<agent_doc_element_queue::QueueItemIdentity, usize>::new();
-    for entry in snapshot_entries {
+    for (index, entry) in snapshot_entries.iter().enumerate() {
         if let QueueEntry::Prompt(_) = entry
-            && let Some(identity) = queue_item_identity(entry)
+            && let Some(identity) = queue_item_identity_at(snapshot_entries, index)
         {
             *snapshot_live_allowance.entry(identity).or_insert(0) += 1;
         }
     }
     let mut lifecycle_changed = false;
     let mut entries_for_convergence = Vec::with_capacity(entries.len());
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         // `#qstruckbaredup`: a concurrent editor/closeout merge can preserve the
         // operator's just-typed bare queue line as tolerant `Freeform` while the
         // queue projection inserts and later strikes the actionable `- ...`
@@ -4746,7 +4821,7 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
             }
         }
         if let QueueEntry::Prompt(_) = entry
-            && let Some(identity) = queue_item_identity(entry)
+            && let Some(identity) = queue_item_identity_at(entries, index)
             && let Some(struck_entry) = snapshot_struck.get(&identity)
         {
             let represented =
@@ -4781,8 +4856,8 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     // This is exactly `dedup_free_text_heads`'s snapshot-authored-count guard,
     // now applied uniformly to every identity shape.
     let mut authored: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
-    for entry in snapshot_entries {
-        if let Some(key) = convergence_identity(entry) {
+    for (index, _) in snapshot_entries.iter().enumerate() {
+        if let Some(key) = convergence_identity_at(snapshot_entries, index) {
             *authored.entry(key).or_insert(0) += 1;
         }
     }
@@ -4864,7 +4939,7 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     let mut changed = lifecycle_changed;
 
     for (idx, entry) in entries.iter().enumerate() {
-        let Some(key) = convergence_identity(entry) else {
+        let Some(key) = convergence_identity_at(&entries, idx) else {
             // Non-prompt entry (fence / preset / dispatch / freeform): position-
             // and content-stable, never a convergence target.
             converged.push(entry.clone());
@@ -9803,8 +9878,9 @@ mod tests {
         let snapshot = vec![c("release + publish"), p("do [#open]"), c("do [#done]")];
         let all_struck: std::collections::HashSet<_> = snapshot
             .iter()
-            .filter(|entry| matches!(entry, QueueEntry::Completed(_)))
-            .filter_map(queue_item_identity)
+            .enumerate()
+            .filter(|(_, entry)| matches!(entry, QueueEntry::Completed(_)))
+            .filter_map(|(index, _)| queue_item_identity_at(&snapshot, index))
             .collect();
         let converge_with = |entries: &[QueueEntry], rearmed| {
             converge_queue_via_lifecycle_with_operator_rearmed(
@@ -9837,6 +9913,87 @@ mod tests {
             converge_with(&unstruck, &all_struck),
             converge_with(&unstruck, &none_rearmed),
             "a contested head: evidence decides between live and re-struck"
+        );
+    }
+
+    /// `#promptsurface`: a nested `#review` is that parent's nest vector.
+    /// Striking or reopening one parent must not drop the other parent's live
+    /// copy, and a typed leaf re-arms the one struck parent it names.
+    #[test]
+    fn nested_review_under_another_parent_survives_a_struck_sibling() {
+        let snapshot = "\
+- https://github.com/haiven-dev/haiven-api/pull/763
+  - ~~#review~~
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
+  - #review
+";
+        let current = "\
+- https://github.com/haiven-dev/haiven-api/pull/763
+  - #review
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
+  - #review
+";
+        let snapshot_entries = parse(snapshot).unwrap();
+        let rendered = render(&converge(&parse(current).unwrap(), &snapshot_entries));
+        assert!(
+            rendered
+                .contains("https://github.com/haiven-dev/haiven-api/pull/763\n  - ~~#review~~\n"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "https://github.com/haiven-dev/haiven-api/pull/767\n  - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~\n  - #review\n"
+            ),
+            "{rendered}"
+        );
+
+        let added = "\
+- https://github.com/haiven-dev/haiven-api/pull/763
+  - ~~#review~~
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - #review
+";
+        let only_struck = "\
+- https://github.com/haiven-dev/haiven-api/pull/763
+  - ~~#review~~
+";
+        let kept = render(&converge(
+            &parse(added).unwrap(),
+            &parse(only_struck).unwrap(),
+        ));
+        assert!(
+            kept.contains("https://github.com/haiven-dev/haiven-api/pull/767\n  - #review\n"),
+            "{kept}"
+        );
+        assert!(
+            kept.contains("https://github.com/haiven-dev/haiven-api/pull/763\n  - ~~#review~~\n"),
+            "{kept}"
+        );
+
+        let retyped =
+            operator_retyped_queue_identities(&snapshot_entries, &["  - #review".to_string()]);
+        assert_eq!(retyped.len(), 1, "{retyped:?}");
+        assert_eq!(
+            retyped.iter().next().unwrap(),
+            &crate::queue_claim::claim_identity(
+                "https://github.com/haiven-dev/haiven-api/pull/763: #review"
+            )
+        );
+        let both_struck = "\
+- https://github.com/haiven-dev/haiven-api/pull/763
+  - ~~#review~~
+- https://github.com/haiven-dev/haiven-api/pull/767
+  - ~~#review~~
+";
+        assert!(
+            operator_retyped_queue_identities(
+                &parse(both_struck).unwrap(),
+                &["  - #review".to_string()],
+            )
+            .is_empty(),
+            "several struck parents are not one re-arm"
         );
     }
 

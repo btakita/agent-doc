@@ -1237,6 +1237,7 @@ fn strike_free_text_queue_heads_with_proof(
     let Some(projected) = projected else {
         return Ok(0);
     };
+    let unanswered = projected.unanswered;
     let keys = projected.node_keys;
     let new_document = projected.target_content;
 
@@ -1293,15 +1294,30 @@ fn strike_free_text_queue_heads_with_proof(
         save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
     }
 
-    match proof {
-        AnswerPresenceProof::Materialized => eprintln!(
-            "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
-            keys.len()
-        ),
-        AnswerPresenceProof::CommittedHeadingReplay => eprintln!(
-            "[queue] struck {} free-text head(s) already answered under a committed heading (#qresiduewedge)",
-            keys.len()
-        ),
+    if keys.is_empty() && unanswered {
+        eprintln!(
+            "[queue] kept a quoted prompt unanswered and marked the row ⟦unanswered: (#promptsurface)"
+        );
+    } else {
+        match proof {
+            AnswerPresenceProof::Materialized => eprintln!(
+                "[queue] struck {} answered free-text head(s) by response match (#ftstrike)",
+                keys.len()
+            ),
+            AnswerPresenceProof::CommittedHeadingReplay => eprintln!(
+                "[queue] struck {} free-text head(s) already answered under a committed heading (#qresiduewedge)",
+                keys.len()
+            ),
+        }
+    }
+    if unanswered {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_prompt_unanswered file={} #promptsurface",
+                file.display()
+            ),
+        );
     }
     agent_doc_ops_log_io::log_op(
         file,
@@ -7002,7 +7018,22 @@ mod core_tests {
 
         let struck = strike_answered_free_text_queue_heads(&doc, &response, true).unwrap();
         assert_eq!(struck, 0, "a deferred echo keeps the head queued");
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+        let after = std::fs::read_to_string(&doc).unwrap();
+        assert_ne!(
+            after, before,
+            "the unanswered reason is written onto the row"
+        );
+        assert!(
+            after.contains(
+                "- ⟦unanswered: dispatched to subagent:altshiftmenu in its own worktree; the fix has not landed.⟧ Alt+Shift+Menu does not open the agent-doc action menu in the JB plugin\n"
+            ),
+            "the deferred head stays live and names why it was not answered:\n{after}"
+        );
+        assert!(
+            !after.contains("~~"),
+            "a deferral must not strike the row:\n{after}"
+        );
+        assert!(after.contains("- do [#laterwork]\n"), "{after}");
         let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
         assert_eq!(ledger.claims.len(), 1, "the claim stays");
         assert_eq!(ledger.claims[0].owner, "subagent:altshiftmenu");

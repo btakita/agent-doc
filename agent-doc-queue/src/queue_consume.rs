@@ -40,6 +40,8 @@ pub const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
 pub struct AnsweredFreeTextStrikeProjection {
     pub node_keys: Vec<String>,
     pub target_content: String,
+    /// `#promptsurface`: the target marks a quoted head the response did not answer.
+    pub unanswered: bool,
 }
 
 pub struct QueueConsumptionPlan {
@@ -1060,6 +1062,20 @@ pub struct AnsweredFreeTextStrikeDecision {
     /// `subagents` attribute owns them for dispatch and no worker claim attempt
     /// exists. They stay queued and the caller reports them loudly.
     pub inline_vetoed_heads: Vec<String>,
+    /// Quoted heads the response deferred. They stay live, and the projection
+    /// marks each row with `⟦unanswered: …⟧` (`#promptsurface`).
+    pub deferred: Vec<DeferredQueueHead>,
+}
+
+/// A live queue row a response quoted and then said it did not answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeferredQueueHead {
+    /// Marker-stripped work text of the row.
+    pub work: String,
+    /// Nest-vector claim key when the row is a nested leaf; otherwise `None`.
+    pub lineage: Option<String>,
+    /// Operator-visible reason, already stripped of the `**Deferred:**` lead.
+    pub reason: String,
 }
 
 /// [`answered_free_text_head_node_keys_with_authority`] plus the
@@ -1164,11 +1180,17 @@ pub fn answered_free_text_strike_decision(
     };
     let mut struck_texts = already_applied;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    let mut work_seen: HashMap<String, usize> = HashMap::new();
     for node in nodes {
+        let text = node.item.text.trim();
+        let work = deferral_work_text(text);
+        let occurrence = work_seen.get(&work).copied().unwrap_or(0);
+        if !work.is_empty() {
+            *work_seen.entry(work.clone()).or_insert(0) += 1;
+        }
         if node.item.struck || is_loop_queue_node(&node.node_key) {
             continue;
         }
-        let text = node.item.text.trim();
         if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, text)
         {
             continue;
@@ -1185,6 +1207,29 @@ pub fn answered_free_text_strike_decision(
         if agent_doc_document::queue_projection::operator_action_holds_row(text, &open_todo_ids) {
             continue;
         }
+        // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
+        // that it answered the head, not proof. When the response says next to
+        // that quote that the head is still outstanding, believe the sentence
+        // over the echo and leave it queued. A nest-vector quote is that leaf's
+        // echo (`#nestvector`). `#promptsurface`: the same deferral names the
+        // row, including when another parent shares the leaf text and the
+        // first-match vector would point at the wrong row. This sits ahead of
+        // the answered-head gate so a quote the gate cannot see still stays
+        // queued and visible.
+        let lineage = queue_row_lineage_at_occurrence(content, text, occurrence);
+        let specific_reason = deferral_reason_for_row(response_body, text, lineage.as_deref());
+        if crate::queue_response::response_defers_queue_head(content, response_body, text)
+            || specific_reason.is_some()
+        {
+            if let Some(reason) = specific_reason {
+                decision.deferred.push(DeferredQueueHead {
+                    work: deferral_work_text(text),
+                    lineage: lineage.clone(),
+                    reason,
+                });
+            }
+            continue;
+        }
         if struck_texts.contains(&normalize_queue_prompt_text(text)) {
             continue;
         }
@@ -1192,27 +1237,31 @@ pub fn answered_free_text_strike_decision(
         // was selected for this cycle. It is not evidence that the response
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
+        // `#promptsurface`: this row's own nest vector is that proof even when
+        // an earlier sibling shares the leaf and the first-match vector is
+        // the other parent.
+        let lineage_echo = lineage.as_deref().is_some_and(|lineage| {
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(
+                response_body,
+                lineage,
+            )
+        });
         let has_explicit_answer_evidence =
             crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text)
                 || crate::queue_response::response_explicitly_echoes_nest_vector(
                     content,
                     response_body,
                     text,
-                );
-        if !crate::queue_response::queue_head_answered_by_response_with_claim(
-            content,
-            response_body,
-            text,
-            claimed.claims(text),
-        ) {
-            continue;
-        }
-        // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
-        // that it answered the head, not proof. When the response says next to
-        // that quote that the head is still outstanding, believe the sentence
-        // over the echo and leave it queued. A nest-vector quote is that leaf's
-        // echo (`#nestvector`).
-        if crate::queue_response::response_defers_queue_head(content, response_body, text) {
+                )
+                || lineage_echo;
+        if !lineage_echo
+            && !crate::queue_response::queue_head_answered_by_response_with_claim(
+                content,
+                response_body,
+                text,
+                claimed.claims(text),
+            )
+        {
             continue;
         }
         // Formal post-baseline closeout rule:
@@ -1700,10 +1749,186 @@ pub fn project_answered_free_text_strike_with_dispatch(
         selected_heads,
         dispatch_owned_heads,
     )?;
-    Ok((
-        project_free_text_strike_of_node_keys(content, decision.node_keys)?,
-        decision.inline_vetoed_heads,
-    ))
+    let strike = project_free_text_strike_of_node_keys(content, decision.node_keys)?;
+    let base = strike
+        .as_ref()
+        .map(|projection| projection.target_content.as_str())
+        .unwrap_or(content);
+    let annotated = project_unanswered_annotations(base, &decision.deferred)?;
+    let projection = match (strike, annotated) {
+        (Some(mut projection), Some(content)) => {
+            projection.target_content = content;
+            projection.unanswered = true;
+            Some(projection)
+        }
+        (Some(projection), None) => Some(projection),
+        (None, Some(content)) => Some(AnsweredFreeTextStrikeProjection {
+            node_keys: Vec::new(),
+            target_content: content,
+            unanswered: true,
+        }),
+        (None, None) => None,
+    };
+    Ok((projection, decision.inline_vetoed_heads))
+}
+
+/// Work text used to pair a deferred quote with one queue row (`#promptsurface`).
+fn deferral_work_text(text: &str) -> String {
+    let trimmed = text.trim();
+    let unwrapped = trimmed
+        .strip_prefix("~~")
+        .and_then(|rest| rest.strip_suffix("~~"))
+        .map(str::trim)
+        .filter(|inner| !inner.is_empty())
+        .unwrap_or(trimmed);
+    agent_doc_element_queue::strip_attempt_projection_prefix(unwrapped)
+        .trim()
+        .to_string()
+}
+
+/// Nest-vector claim key of the `occurrence`th queue row whose work is `row_text`.
+///
+/// Struck and live rows both count, in document order, so a later live
+/// `#review` is not paired with an earlier parent's struck `#review`.
+fn queue_row_lineage_at_occurrence(
+    content: &str,
+    row_text: &str,
+    occurrence: usize,
+) -> Option<String> {
+    let work = deferral_work_text(row_text);
+    if work.is_empty() {
+        return None;
+    }
+    let components = element::parse(content).ok()?;
+    let mut seen = 0usize;
+    for component in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let entries = document_queue::parse(component.content(content)).ok()?;
+        for (index, entry) in entries.iter().enumerate() {
+            let (QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)) = entry else {
+                continue;
+            };
+            if deferral_work_text(&prompt.text) != work {
+                continue;
+            }
+            if seen == occurrence {
+                let lineage = document_queue::lineage_claim_text(&entries, index)?;
+                if lineage.trim() == work {
+                    return None;
+                }
+                return Some(lineage);
+            }
+            seen += 1;
+        }
+    }
+    None
+}
+
+/// Reason this row's own quote was deferred, or `None` when it was not.
+///
+/// A nested leaf matches its own nest vector. The bare leaf matches too, so a
+/// quote of either form names the row. A vector quote does not name a sibling
+/// that only shares the leaf text.
+fn deferral_reason_for_row(
+    response_body: &str,
+    row_text: &str,
+    lineage: Option<&str>,
+) -> Option<String> {
+    let work = deferral_work_text(row_text);
+    if let Some(lineage) = lineage
+        && lineage != work
+        && let Some(reason) =
+            crate::queue_response::queue_head_deferral_reason(response_body, lineage)
+    {
+        return Some(reason);
+    }
+    crate::queue_response::queue_head_deferral_reason(response_body, &work).or_else(|| {
+        (work != row_text.trim())
+            .then(|| crate::queue_response::queue_head_deferral_reason(response_body, row_text))
+            .flatten()
+    })
+}
+
+fn entry_matches_deferred(
+    entries: &[QueueEntry],
+    index: usize,
+    prompt: &document_queue::QueuePrompt,
+    deferred: &DeferredQueueHead,
+) -> bool {
+    let work = deferral_work_text(&prompt.text);
+    if let Some(lineage) = deferred.lineage.as_deref()
+        && lineage != deferred.work
+    {
+        return document_queue::lineage_claim_text(entries, index)
+            .is_some_and(|row| row == lineage || row.eq_ignore_ascii_case(lineage));
+    }
+    !deferred.work.is_empty() && work == deferred.work
+}
+
+/// Mark each deferred live prompt with `⟦unanswered: …⟧`. `None` when the
+/// document already carries that reason (`#promptsurface`).
+fn project_unanswered_annotations(
+    content: &str,
+    deferred: &[DeferredQueueHead],
+) -> Result<Option<String>> {
+    if deferred.is_empty() {
+        return Ok(None);
+    }
+    let mut updated = content.to_string();
+    let mut changed = false;
+    let queue_indexes: Vec<usize> = element::parse(&updated)?
+        .iter()
+        .enumerate()
+        .filter(|(_, component)| component.name == "queue")
+        .map(|(index, _)| index)
+        .collect();
+    for index in queue_indexes.into_iter().rev() {
+        let components = element::parse(&updated)?;
+        let Some(component) = components.get(index) else {
+            continue;
+        };
+        if component.name != "queue" {
+            continue;
+        }
+        let body = component.content(&updated).to_string();
+        let mut entries = document_queue::parse(&body)?;
+        let mut updates = Vec::new();
+        for (entry_index, entry) in entries.iter().enumerate() {
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if document_queue::entry_is_group_parent(&entries, entry_index) {
+                continue;
+            }
+            let Some(reason) = deferred
+                .iter()
+                .find(|deferred| entry_matches_deferred(&entries, entry_index, prompt, deferred))
+                .map(|deferred| deferred.reason.as_str())
+            else {
+                continue;
+            };
+            let next = agent_doc_element_queue::apply_unanswered_annotation(&prompt.text, reason);
+            if next != prompt.text {
+                updates.push((entry_index, next));
+            }
+        }
+        if updates.is_empty() {
+            continue;
+        }
+        for (entry_index, next) in updates {
+            if let QueueEntry::Prompt(prompt) = &mut entries[entry_index] {
+                prompt.text = next;
+            }
+        }
+        let rendered = document_queue::render(&entries);
+        if rendered != body {
+            updated = component.replace_content(&updated, &rendered);
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(updated))
 }
 
 /// `#qresiduewedge`: the answered-head strike for a response the replay guard
@@ -1872,6 +2097,7 @@ fn project_free_text_strike_of_node_keys(
     Ok(Some(AnsweredFreeTextStrikeProjection {
         node_keys,
         target_content,
+        unanswered: false,
     }))
 }
 
@@ -3131,6 +3357,125 @@ mod tests {
                 .is_empty(),
             "a head only dispatched this cycle is not answered"
         );
+    }
+
+    /// `#promptsurface`: a quoted head the response defers stays live, and the
+    /// row names why. A second projection of the same deferral is a no-op. A
+    /// later answer strikes the row and drops the annotation.
+    #[test]
+    fn deferred_quote_marks_the_row_unanswered_until_a_real_answer() {
+        let (projected, vetoed) = project_answered_free_text_strike_with_dispatch(
+            DEFERSTRIKE_DOC,
+            DEFERSTRIKE_DEFERRAL,
+            Some(DEFERSTRIKE_DOC),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(vetoed.is_empty());
+        let projected = projected.expect("deferral marks the row");
+        assert!(projected.node_keys.is_empty(), "{:?}", projected.node_keys);
+        assert!(projected.unanswered);
+        assert!(projected.target_content.contains(
+            "⟦unanswered: this release has not happened yet. It is claimed by me (`coordinator:integration`) and waits for the six in-flight branches. Keep this head open until then.⟧ release + publish"
+        ));
+        let (again, _) = project_answered_free_text_strike_with_dispatch(
+            &projected.target_content,
+            DEFERSTRIKE_DEFERRAL,
+            Some(DEFERSTRIKE_DOC),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(
+            again.is_none(),
+            "the same deferral does not stack a second mark"
+        );
+
+        let (answered, _) = project_answered_free_text_strike_with_dispatch(
+            &projected.target_content,
+            DEFERSTRIKE_ANSWER,
+            Some(DEFERSTRIKE_DOC),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        let answered = answered.expect("a real answer strikes");
+        assert!(!answered.node_keys.is_empty());
+        assert!(!answered.target_content.contains("⟦unanswered:"));
+        assert!(answered.target_content.contains("~~release + publish~~"));
+    }
+
+    /// `#promptsurface`: a nest-vector quote of one parent's `#review` marks
+    /// that row and leaves the other parent's struck `#review` alone.
+    #[test]
+    fn deferred_nested_review_names_the_parent_that_was_quoted() {
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/763\n",
+            "  - ~~#review~~\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/767\n",
+            "  - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~\n",
+            "  - #review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review\n\n",
+            "**Deferred:** this cycle's plan did not dispatch that pending row. It stays queued.\n",
+        );
+        let (projected, _) = project_answered_free_text_strike_with_dispatch(
+            doc,
+            response,
+            Some(doc),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        let projected = projected.expect("the quoted leaf stays visible");
+        assert!(projected.node_keys.is_empty());
+        assert!(projected.unanswered);
+        assert!(projected.target_content.contains(
+            "  - ⟦unanswered: this cycle's plan did not dispatch that pending row. It stays queued.⟧ #review\n"
+        ));
+        assert!(projected.target_content.contains("  - ~~#review~~\n"));
+        assert!(
+            !projected
+                .target_content
+                .contains("pull/763\n  - ⟦unanswered:")
+        );
+        let (again, _) = project_answered_free_text_strike_with_dispatch(
+            &projected.target_content,
+            response,
+            Some(doc),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert!(again.is_none());
+
+        let answer = concat!(
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review\n\n",
+            "Reviewed the pull request and left the findings.\n",
+        );
+        let (struck, _) = project_answered_free_text_strike_with_dispatch(
+            &projected.target_content,
+            answer,
+            Some(doc),
+            &[],
+            &[],
+            &[],
+        )
+        .unwrap();
+        let struck = struck.expect("a later answer strikes the leaf");
+        assert!(!struck.node_keys.is_empty());
+        assert!(!struck.target_content.contains("⟦unanswered:"));
+        assert!(struck.target_content.contains("  - ~~#review~~\n"));
     }
 
     /// `#claimstrike`: the strike selection judges the response alone. A
@@ -5085,8 +5430,10 @@ Old.
                 "the echoed unclaimed row strikes:\n{target}"
             );
             assert!(
-                target.contains("- ☑️ [#subagent:cellrepair#1] one-time repair"),
-                "the **Deferred:** row stays live (#deferstrike):\n{target}"
+                target.contains(
+                    "- ☑️ [#subagent:cellrepair#1] ⟦unanswered: the branch waits for your decision on the command name.⟧ one-time repair"
+                ),
+                "the **Deferred:** row stays live and names why (#deferstrike, #promptsurface):\n{target}"
             );
             assert!(
                 target.contains("- 🚧 [#subagent:doctorexit#1]"),

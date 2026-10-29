@@ -5899,6 +5899,9 @@ struct AnsweredFreeTextQueueStrikeProjection {
     /// `#subagentinlineveto`: answered heads kept queued because a
     /// `subagents` attribute owns them and no worker attempt backs them.
     inline_vetoed_heads: Vec<String>,
+    /// `#promptsurface`: the target only marks a quoted head the response
+    /// left unanswered. `node_keys` stays empty, and the row still writes.
+    annotates_unanswered: bool,
     error: Option<String>,
 }
 
@@ -5908,7 +5911,7 @@ impl AnsweredFreeTextQueueStrikeProjection {
             && self.file.is_some()
             && !self.projection_id.is_empty()
             && self.target_content != self.expected_content
-            && !self.node_keys.is_empty()
+            && (!self.node_keys.is_empty() || self.annotates_unanswered)
     }
 }
 
@@ -7792,12 +7795,15 @@ impl ControllerDocumentGraphs {
                                 ..AnsweredFreeTextQueueStrikeProjection::default()
                             };
                         };
-                        let projection_id = agent_doc_hash::content_hash(&format!(
+                        let mut projection_id = agent_doc_hash::content_hash(&format!(
                             "{}:{}:{}",
                             captured.response_sha256,
                             observation.content_hash,
                             target.node_keys.join(",")
                         ));
+                        if target.unanswered {
+                            projection_id.push_str(":unanswered");
+                        }
                         AnsweredFreeTextQueueStrikeProjection {
                             file: Some(observation.file),
                             expected_content: observation.content,
@@ -7812,6 +7818,7 @@ impl ControllerDocumentGraphs {
                             selected_heads: observation.selected_heads,
                             dispatch_owned_heads: observation.dispatch_owned_heads,
                             inline_vetoed_heads,
+                            annotates_unanswered: target.unanswered,
                             error: None,
                         }
                     }

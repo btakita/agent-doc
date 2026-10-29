@@ -434,8 +434,9 @@ context from the parsed queue AST, including a sibling branch that is not on
 the lineage path. An example lineage is
 `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` use that vector when the leaf is not a tracked directive,
 so the same bare `#tag` under another parent is different work
-(`#nestlistlineage`). The dispatch list shows the leaf when its text is unique,
-and the vector when the same leaf is live under another parent. A short
+(`#nestlistlineage`). The dispatch list shows the nest vector for a nested
+non-tracked leaf even when that leaf text is unique, because the bare leaf is
+a different claim than `parent: #leaf`. A short
 `--item` leaf that names one live row still claims that row. A short leaf that
 names several rows is not a refusal and does not drop any row: `queue claim`
 binds the first unclaimed row by its parent lineage, and each other row stays
@@ -454,7 +455,10 @@ quote alone reads as "answered" and strikes the head. To keep it queued, follow 
 `**Deferred:**` (any `**Deferred…**` lead, such as `**Deferred, not done:**`,
 counts) and says what it waits for. Plain phrasing such as "not done yet", "keep
 this head open", "dispatched to a subagent" or "waits for" in the quote's paragraph
-is also read as a deferral, but the bold lead is the contract.
+is also read as a deferral, but the bold lead is the contract. The row stays
+live and carries `⟦unanswered: …⟧` with that reason (`#promptsurface`), so a
+prompt that was not answered does not disappear. A quote of the nest vector or
+of the leaf still names that leaf.
 
 **Claimed heads (`#claimstrike`).** A worker claim (`agent-doc queue claim <FILE>
 --item "<head>" --owner subagent:<label>`) says who owns the work; it does not keep

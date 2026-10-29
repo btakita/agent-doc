@@ -18,6 +18,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **A group label and a sub-prompt child are not pending work.** A nesting group label carries no `📥`. The next projection removes a pending marker from a group label. A claim, report, or completion on that row still projects. A sub-prompt child carries no lifecycle marker of its own, and a bare `📥` on a child is removed. An operator pin on a child stays.
 - **A routine steering delivery stays silent.** Handing an update to the turn already running does not open a JetBrains notification or a VS Code status hint. Interrupt-and-clear and interrupt-and-restart confirmations stay.
 - **A shared `agent:run` leaf is claimed by its parent lineage.** A short leaf that names one live row still claims that row. A short leaf that names several rows is not a refusal and does not drop any row. `queue claim` binds the first unclaimed row by its parent lineage, and each other row stays live for its own `root: …: item`.
+- **A prompt that was not answered stays visible.** A nested `#review` or `#rebase` is keyed by its parent, so one parent's struck or reopened copy cannot drop the other. `queue_subagent_dispatch` lists that nest vector even when the leaf text is unique. A quoted head the response defers stays live, and the row carries `⟦unanswered: …⟧` naming why.
 
 ## 0.35.560
 

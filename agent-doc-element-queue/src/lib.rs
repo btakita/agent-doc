@@ -343,6 +343,95 @@ fn strip_operator_action_glyph(trimmed: &str) -> Option<&str> {
         .map(|(_, rest)| rest)
 }
 
+/// Opening delimiter of the unanswered-prompt annotation (`#promptsurface`).
+///
+/// A quoted head the response does not answer stays a live row, and the row
+/// carries `⟦unanswered: <reason>⟧` so the operator can see why. The token is
+/// projection: identity, claims, and strikes strip it.
+pub const UNANSWERED_ANNOTATION_OPEN: &str = "⟦unanswered: ";
+/// Closing delimiter of [`UNANSWERED_ANNOTATION_OPEN`].
+pub const UNANSWERED_ANNOTATION_CLOSE: &str = "⟧";
+
+/// A leading `⟦unanswered: ...⟧` annotation, the reason a prompt stayed queued.
+pub fn strip_unanswered_annotation_token(trimmed: &str) -> Option<&str> {
+    let after_open = trimmed.strip_prefix(UNANSWERED_ANNOTATION_OPEN)?;
+    let close = after_open.find(UNANSWERED_ANNOTATION_CLOSE)?;
+    if after_open[..close].contains(['\n', '\r']) {
+        return None;
+    }
+    Some(&after_open[close + UNANSWERED_ANNOTATION_CLOSE.len()..])
+}
+
+/// The canonical `⟦unanswered: <reason>⟧` token. The reason is one line, at
+/// most 160 characters, and cannot carry the annotation's own delimiters.
+pub fn format_unanswered_annotation(reason: &str) -> String {
+    let mut clean = String::new();
+    for ch in reason.chars() {
+        if matches!(ch, '⟦' | '⟧' | '\n' | '\r' | '\t') {
+            clean.push(' ');
+        } else {
+            clean.push(ch);
+        }
+    }
+    let mut collapsed = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() > 160 {
+        collapsed = collapsed.chars().take(160).collect();
+    }
+    if collapsed.is_empty() {
+        collapsed = "this prompt was not answered".to_string();
+    }
+    format!("{UNANSWERED_ANNOTATION_OPEN}{collapsed}{UNANSWERED_ANNOTATION_CLOSE}")
+}
+
+/// `text` with every `⟦unanswered: …⟧` token removed.
+pub fn remove_unanswered_annotations(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(idx) = rest.find(UNANSWERED_ANNOTATION_OPEN) {
+        let (before, token_at) = rest.split_at(idx);
+        let Some(stripped) = strip_unanswered_annotation_token(token_at) else {
+            out.push_str(&rest[..idx + UNANSWERED_ANNOTATION_OPEN.len()]);
+            rest = &rest[idx + UNANSWERED_ANNOTATION_OPEN.len()..];
+            continue;
+        };
+        out.push_str(before);
+        rest = stripped;
+        if out.is_empty() || (out.ends_with(' ') && rest.starts_with(' ')) {
+            rest = rest.trim_start();
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Put `⟦unanswered: reason⟧` on `row_text` after its lifecycle prefix.
+///
+/// An annotation that is already present is replaced, so a second closeout of
+/// the same deferral does not stack a second token. Lifecycle markers and pins
+/// stay in front of the reason.
+pub fn apply_unanswered_annotation(row_text: &str, reason: &str) -> String {
+    let annotation = format_unanswered_annotation(reason);
+    let cleaned = remove_unanswered_annotations(row_text);
+    let work = strip_attempt_projection_prefix(&cleaned);
+    let trimmed = cleaned.trim_start();
+    let lead_ws_len = cleaned.len() - trimmed.len();
+    let prefix_in_trimmed = trimmed.len() - work.len();
+    let prefix = &cleaned[..lead_ws_len + prefix_in_trimmed];
+    let mut out = String::new();
+    out.push_str(prefix);
+    if !prefix.is_empty() && !prefix.ends_with(char::is_whitespace) {
+        out.push(' ');
+    }
+    out.push_str(&annotation);
+    if !work.is_empty() {
+        if !out.ends_with(char::is_whitespace) {
+            out.push(' ');
+        }
+        out.push_str(work);
+    }
+    out
+}
+
 /// Strip ONE leading binary-owned projection token from `trimmed`: a
 /// lifecycle/priority marker (configured or default spelling) or an
 /// exact-attempt owner annotation (`[#<owner>#<generation>]`, or the legacy
@@ -409,6 +498,9 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         })
         .max_by_key(|(len, _)| *len)
         .map(|(_, rest)| rest)
+        // `#promptsurface`: `⟦unanswered: …⟧` names why a prompt stayed queued.
+        // It is projection, never work identity.
+        .or_else(|| strip_unanswered_annotation_token(trimmed))
         // `#queueblocked`: the blocker annotation that follows `⛔`
         // (`⛔ ⟦blocked by a, b⟧`) is projection, never work identity.
         .or_else(|| strip_blocked_annotation_token(trimmed))
@@ -750,6 +842,34 @@ mod tests {
         assert!(super::DESCRIPTOR.matches_name("queue"));
         assert!(super::DESCRIPTOR.matches_name("run"));
         assert!(super::DESCRIPTOR.matches_name("loop"));
+    }
+
+    /// `#promptsurface`: the unanswered reason sits after the lifecycle prefix
+    /// and is not part of the work text a strike keeps.
+    #[test]
+    fn unanswered_annotation_is_projection() {
+        assert_eq!(
+            super::apply_unanswered_annotation("#review", "not dispatched"),
+            "⟦unanswered: not dispatched⟧ #review"
+        );
+        assert_eq!(
+            super::apply_unanswered_annotation("📥 #review", "not dispatched"),
+            "📥 ⟦unanswered: not dispatched⟧ #review"
+        );
+        let marked = super::apply_unanswered_annotation("📥 #review", "not dispatched");
+        assert_eq!(
+            super::apply_unanswered_annotation(&marked, "not dispatched"),
+            marked
+        );
+        let bare = super::apply_unanswered_annotation("#review", "not dispatched");
+        assert_eq!(
+            super::apply_unanswered_annotation(&bare, "not dispatched"),
+            bare
+        );
+        assert_eq!(super::strip_priority_markers(&marked), "#review");
+        assert_eq!(super::strip_attempt_projection_prefix(&marked), "#review");
+        assert_eq!(super::struck_work_text(&marked), "#review");
+        assert_eq!(super::render_struck_row_body(&marked), "~~#review~~");
     }
 
     /// `#queueblocked`: the blocked marker and its blocker annotation are

@@ -86,13 +86,23 @@ fn executable_row_keys(content: &str) -> Vec<(String, String)> {
 
 /// The string `queue_subagent_dispatch` lists for a lineage claim key.
 ///
-/// A unique leaf is listed as that leaf. The same leaf under two parents stays
-/// the nest vector, so the two heads do not collapse (`#nestlistlineage`).
-/// Claim identity and the submitted prompt stay the vector either way.
+/// A nested non-tracked leaf is listed as its nest vector even when that leaf
+/// text is unique (`#promptsurface`). The bare leaf is a different claim
+/// (`#review` is id `review`) than `parent: #review`, and listing the bare
+/// leaf made a plan defer work the document still had queued. A leaf whose
+/// claim identity already equals its lineage (a top-level row, a tracked
+/// directive) stays the unique display, and a shared leaf stays the vector
+/// (`#nestlistlineage`). Claim identity and the submitted prompt stay the
+/// vector either way.
 fn visible_dispatch_head(keys: &[(String, String)], lineage_head: &str) -> String {
     let Some((display, _)) = keys.iter().find(|(_, lineage)| lineage == lineage_head) else {
         return lineage_head.to_string();
     };
+    if agent_doc_queue::queue_claim::claim_identity(display)
+        != agent_doc_queue::queue_claim::claim_identity(lineage_head)
+    {
+        return lineage_head.to_string();
+    }
     let unique = keys.iter().filter(|(other, _)| other == display).count() == 1;
     if unique {
         display.clone()
@@ -625,7 +635,7 @@ mod tests {
             .to_string();
         std::fs::write(&unique_file, &unique).unwrap();
         let listed = pending_subagent_dispatch_for_content(&unique_file, &unique).unwrap();
-        assert_eq!(listed, vec!["#rebase".to_string()]);
+        assert_eq!(listed, vec![api.to_string()]);
         let (_, claim) =
             crate::queue_claim::claim(&unique_file, "#rebase", "subagent:a", 600).unwrap();
         assert_eq!(claim.item_text, api);

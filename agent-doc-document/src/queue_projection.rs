@@ -1208,6 +1208,14 @@ pub fn strip_priority_markers(text: &str) -> String {
     let mut observed_owner = None::<QueueOwnerProjection>;
     loop {
         let trimmed = t.trim_start();
+        // `#promptsurface`: the unanswered reason is projection. Stripping it
+        // here keeps answer matching on the work text. `strip_in_progress_marker`
+        // does not call this, so a lifecycle re-projection leaves the reason
+        // on the row.
+        if let Some(rest) = agent_doc_element_queue::strip_unanswered_annotation_token(trimmed) {
+            t = rest.trim_start();
+            continue;
+        }
         let stripped = strip_lifecycle_prefix(trimmed)
             .or_else(|| strip_operator_action_prefix(trimmed).map(|(_, rest)| rest))
             .or_else(|| {
@@ -1875,11 +1883,20 @@ mod tests {
             QueueLifecycleMarker::Blocked,
             &blockers,
         );
-        assert_eq!(blocked, "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]");
-        assert_eq!(lifecycle_marker(&blocked), Some(QueueLifecycleMarker::Blocked));
+        assert_eq!(
+            blocked,
+            "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]"
+        );
+        assert_eq!(
+            lifecycle_marker(&blocked),
+            Some(QueueLifecycleMarker::Blocked)
+        );
         assert_eq!(blocked_marker_ids(&blocked), vec!["sbx", "deploy"]);
         assert_eq!(strip_priority_markers(&blocked), "do [#stg]");
-        assert_eq!(strip_in_progress_marker(&blocked), ":round_pushpin: do [#stg]");
+        assert_eq!(
+            strip_in_progress_marker(&blocked),
+            ":round_pushpin: do [#stg]"
+        );
         // Repaint replaces the token, including a changed blocker list.
         assert_eq!(
             apply_lifecycle_marker_with_blockers(
@@ -1901,7 +1918,10 @@ mod tests {
             "🙋⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg] [#subagent-operator-request-x]"
         );
         // A bare annotation left behind by a hand edit is still projection.
-        assert_eq!(strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"), "do [#stg]");
+        assert_eq!(
+            strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"),
+            "do [#stg]"
+        );
         // An operator's own prose is never read as the annotation.
         assert_eq!(
             strip_priority_markers("⟦blocked by sbx do [#stg]"),

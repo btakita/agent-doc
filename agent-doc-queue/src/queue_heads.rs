@@ -203,7 +203,7 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
     let queue_head_display = display_queue_prompt_text(&queue_head);
     if crate::queue_response::response_defers_queue_head(content, response, &queue_head) {
         return Ok(format!(
-            "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."
+            "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. The row is marked `⟦unanswered:`. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."
         ));
     }
     let expansions = crate::queue_response::queue_prompt_preset_expansions(content, &queue_head);

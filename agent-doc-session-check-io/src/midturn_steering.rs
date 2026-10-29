@@ -304,8 +304,7 @@ fn route_claimed_items(
                 row_keys
                     .iter()
                     .filter(|(display, _)| {
-                        agent_doc_element_queue::subprompts::head_without_subprompts(display)
-                            .trim()
+                        agent_doc_element_queue::subprompts::head_without_subprompts(display).trim()
                             == head
                     })
                     .collect()
@@ -4432,9 +4431,10 @@ mod tests {
                     &file, &edited,
                 )
                 .unwrap();
+            let lineage = format!("{parent}: {second}");
             assert!(
-                dispatch.iter().any(|head| head == second),
-                "{marker}: {dispatch:?}"
+                dispatch.iter().any(|head| head == &lineage),
+                "{marker}: a unique nested leaf is listed as its nest vector (`#promptsurface`): {dispatch:?}"
             );
             assert!(
                 dispatch

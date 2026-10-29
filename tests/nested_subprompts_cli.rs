@@ -478,8 +478,10 @@ fn tracked_children_keep_the_group_shape() {
         "a tracked child stays its own head (`#f1s3` group): {dispatch:#?}"
     );
     assert!(
-        dispatch.iter().any(|item| item == "remember the logs"),
-        "a unique nested leaf is dispatched as that leaf; its lineage stays on the submitted prompt: {dispatch:#?}"
+        dispatch
+            .iter()
+            .any(|item| item == "alpha epic: remember the logs"),
+        "a unique nested leaf is listed as its nest vector (`#promptsurface`): {dispatch:#?}"
     );
     assert!(
         dispatch.iter().all(|item| item != "alpha epic"),

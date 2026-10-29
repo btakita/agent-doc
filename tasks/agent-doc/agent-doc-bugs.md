@@ -792,8 +792,19 @@ The choice is `#reviewpublish-marker` on the todo list. Implementation of the ma
 `do [#repeatsamepreset]` is running as `subagent:repeatsamepreset` generation 1, worker `01a18857-f82b-70d2-af77-6bec593812e6`, on branch `fix/repeat-same-preset` in `/home/brian/worktrees/agent-doc-repeatsamepreset` (base `7b44d8bb28`).
 
 Each `#rebase` or `#review` submitted under the same parent is a new piece of work. The worker owns the spec, the tests, and a push of that branch.
+> **Queue prompt:** As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.
 
-<!-- agent:boundary:2162575b -->
+### Re: Typed prompt stays one row — grok-4.7 · 2026-10-29T11:49-04:00
+
+`subagent:runduplicate` generation 1 finished. Branch `fix/run-prompt-duplicated-while-typing` is `252d6b78285bced9f5a2b7fe6498e317412fd5c9` and matches `origin/fix/run-prompt-duplicated-while-typing`. `main` was not pushed.
+
+A prompt still being typed, including one already delivered as mid-turn steering, stayed as a second live `agent:run` row when queue item keys collided and the flat body merge kept both inserts. Closeout now drops that revision twin, including a one-closer insertion such as `published changes ()` beside `published changes (like a review or a code change)`, before that fallback.
+
+Files: `agent-doc-merge/src/crdt.rs`, `agent-doc-merge/src/revision_twin.rs`, `specs/14-realtime-workflow.md`. Private-name scan of the added diff was clean. `cargo test -p agent-doc-merge --lib` reported 452 passed, 0 failed, 1 ignored. `cargo test -p agent-doc-document-realtime --lib typingdupe_stale_typing_snapshot` reported 1 passed. This closeout did not run `make check`.
+
+`subagent:reviewpublish` generation 1 already has its operator-request packet in the exchange. The row stays an operator action until you pick the marker: annotation, icons, observe git and GitHub, or another rule.
+
+<!-- agent:boundary:8c86816f -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -803,7 +814,7 @@ Each `#rebase` or `#review` submitted under the same parent is a new piece of wo
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
-- 🚧 [#subagent:runduplicate#1] As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.
+- ~~As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:responseid#1] Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
 ---
 🚧 [#subagent:promptsurface#1] agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:

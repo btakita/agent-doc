@@ -253,9 +253,11 @@ Source for the payload's `client_id` (pure derivation in
 - `sync_tmux_layout`: the payload carries no `columns`, `column_order`, or
   `focus`. The controller takes the surface's columns in the automatic
   `SurfaceIntent::Sync` shape (one comma-joined entry per column), its
-  `column_order`, and its focus. A connected frontend's authoritative column
-  vector is propagated unchanged as the desired tmux effect; retained backend
-  state cannot reorder or reconstruct it (GH #343). An unknown split (`columns=[]`)
+  `column_order`, and its focus. When a column contains multiple session-document
+  tabs, its focused member is the tmux pane representative even when it is not
+  first in that comma-joined entry. This selection preserves the connected
+  frontend's authoritative column grouping and left-to-right order; retained
+  backend state cannot reorder or reconstruct that vector (GH #343). An unknown split (`columns=[]`)
   is refused as
   `surface_reference_unknown_layout`, and a foreground sync whose focus is in no
   column as `surface_reference_stale_focus`, with the sentences the editor

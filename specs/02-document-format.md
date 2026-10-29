@@ -814,8 +814,10 @@ and its marker carries bare `priority` by default. Existing `agent:todo` markers
 remain unchanged. To maximize visible content in a tmux view pane, each generated
 level-two heading shares its line with its component opening tag (for example,
 `## Run <!-- agent:run priority subagents clear -->`); the runnable-work heading
-is `## Run`, not `## Queue`. Existing document headings and markers are not
-rewritten. The `transfer`/`extract` target scaffold follows the same layout and
+is `## Run`, not `## Queue`. That `agent:run` marker does not carry `go`,
+`start`, `pause`, or `stop`, and the scaffold does not write `queue:`. A queue
+with no control already runs in go-mode (`#queuegodefault`). Existing document
+headings and markers are not rewritten. The `transfer`/`extract` target scaffold follows the same layout and
 order, and reuses a heading the source wrote on a component's opener line
 (`#extractlayout`, `specs/07-focused-extract.md`). The scaffold's `agent:status` body is the one-line queue marker legend
 (`Queue markers: 📥 pending · … ([legend](…#queue-markers))`), which every
@@ -938,7 +940,7 @@ Tracked-work extraction is Markdown-structural. Checklist-shaped text inside fen
 
 **Prompt-preset attribute alias (`#presetattralias`).** `presets=` is a recognized compatibility alias for the canonical prompt-component `preset=` attribute on `agent:run` and `agent:exchange`; it is not an unknown-attribute typo. Every preset consumer, including subagent authorization, queue selection, continuation, and realtime steering, reads the same effective value. When both spellings carry nonempty values, canonical `preset=` wins. An empty alias has the same no-default meaning as `preset=""` when the other spelling is absent. Binary marker rewrites preserve the operator's spelling.
 
-One or more `agent:run` components hold batches of prompts consumed sequentially. The default template scaffolds one unkeyed `<!-- agent:run priority subagents clear -->` queue between `exchange` and `backlog`; it stable-sorts id-backed work by source priority, dispatches eligible heads to background subagents, and explicitly declares fresh-context clearing. The unkeyed shape remains the implicit `default` queue. Existing explicitly authored queue markers retain their attributes and behavior; this default applies when Agent Doc creates a new scaffold.
+One or more `agent:run` components hold batches of prompts consumed sequentially. The default template scaffolds one unkeyed `<!-- agent:run priority subagents clear -->` queue between `exchange` and `backlog`; it stable-sorts id-backed work by source priority, dispatches eligible heads to background subagents, and explicitly declares fresh-context clearing. The marker omits `go` (and `start`, `pause`, and `stop`) and the scaffold writes no `queue:` field, because a queue with no control already runs in go-mode (`#queuegodefault`). The unkeyed shape remains the implicit `default` queue. Existing explicitly authored queue markers retain their attributes and behavior; this default applies when Agent Doc creates a new scaffold.
 
 **Syntax:** hybrid list items and fenced prompts.
 

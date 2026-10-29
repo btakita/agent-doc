@@ -241,6 +241,7 @@ pub(crate) fn render_component_section(
 const TARGET_SCAFFOLD_COMPONENTS: &[(&str, &str)] = &[
     ("status", " patch=replace"),
     ("exchange", " patch=append"),
+    // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     ("run", " priority subagents clear"),
     ("todo", " priority"),
     ("backlog", " priority queue"),

@@ -83,7 +83,7 @@ without making an agent manually copy managed document regions.
   level-two heading on the same line as its opening marker, in the default
   template order (`## Status <!-- agent:status patch=replace -->`,
   `## Exchange <!-- agent:exchange patch=append -->`,
-  `## Run <!-- agent:run priority subagents clear -->`,
+  `## Run <!-- agent:run priority subagents clear -->` (no `go`; go-mode is the default),
   `## Todo <!-- agent:todo priority -->`,
   `## Backlog <!-- agent:backlog priority queue -->`, `## Review`, `## Icebox`,
   `## Done`, `## Notes`). The runnable-work component is `agent:run` headed

@@ -7,6 +7,7 @@ const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
 const DEFAULT_TEMPLATE_COMPONENTS_AFTER_STATUS: &str = concat!(
     "\n## Exchange <!-- agent:exchange patch=append -->\n",
     "<!-- /agent:exchange -->\n",
+    // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     "\n## Run <!-- agent:run priority subagents clear -->\n",
     "<!-- /agent:run -->\n",
     "\n## Todo <!-- agent:todo priority -->\n",
@@ -117,6 +118,17 @@ fn insert_default_component(
 mod tests {
     use super::*;
 
+    /// Go-mode is the default (`#queuegodefault`), so a new `agent:run` must
+    /// not carry `go`, `start`, `pause`, or `stop`.
+    fn assert_default_run_omits_queue_control(component: &agent_doc_element::element::Component) {
+        for token in ["go", "start", "pause", "stop"] {
+            assert!(
+                !component.attrs.contains_key(token),
+                "default agent:run scaffold must not carry `{token}`"
+            );
+        }
+    }
+
     #[test]
     fn empty_markdown_scaffold_uses_template_crdt_shell() {
         assert!(should_scaffold_empty_markdown(" \n", Some("md")));
@@ -198,6 +210,11 @@ mod tests {
             Some("")
         );
         assert_eq!(components[2].attrs.len(), 3);
+        assert_default_run_omits_queue_control(&components[2]);
+        assert!(
+            !scaffold.contains("\nqueue:"),
+            "the scaffold must not write queue: go; absence is already go-mode"
+        );
         let todo = components
             .iter()
             .find(|component| component.name == "todo")
@@ -298,6 +315,12 @@ mod tests {
             .expect("default scaffold must contain queue");
         assert_eq!(queue.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(queue.attrs.get("subagents").map(String::as_str), Some(""));
+        assert_eq!(queue.attrs.get("clear").map(String::as_str), Some(""));
+        assert_default_run_omits_queue_control(&queue);
+        assert!(
+            !scaffolded.contains("\nqueue:"),
+            "scaffolding a component-less template must not add queue: go"
+        );
     }
 
     #[test]

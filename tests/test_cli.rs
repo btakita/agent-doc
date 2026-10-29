@@ -1265,6 +1265,28 @@ fn test_codex_shared_closeout_spec_invariants() {
 }
 
 #[test]
+fn test_grok_live_editor_refresh_spec_invariants() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let agent_backend = fs::read_to_string(root.join("specs/05-agent-backend.md")).unwrap();
+
+    assert!(
+        agent_backend.contains("Live editor plan refresh (`#grok-live-editor`)")
+            && agent_backend.contains("process-scoped queue-region `Source`")
+            && agent_backend.contains("document-scoped `Computed`")
+            && agent_backend.contains("An `Effect` reacts"),
+        "Grok live refresh must remain an event-driven projection of the shared document graph"
+    );
+    assert!(
+        agent_backend.contains("implementations must not add a polling")
+            && agent_backend.contains("loop, watch stale disk metadata")
+            && agent_backend.contains("operator draft is protected")
+            && agent_backend.contains("owner generation plus authoritative revision and")
+            && agent_backend.contains("`agent_doc_plan` resolves the current live CRDT cut"),
+        "Grok live refresh must preserve authority, draft safety, and exactly-once delivery boundaries"
+    );
+}
+
+#[test]
 fn realtime_workflow_spec_pins_lazily_backed_authority() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let realtime = fs::read_to_string(root.join("specs/14-realtime-workflow.md")).unwrap();

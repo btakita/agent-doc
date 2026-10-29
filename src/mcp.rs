@@ -1115,6 +1115,62 @@ impl McpProtocolError {
 mod tests {
     use super::*;
 
+    struct LiveEditorFixture {
+        file: PathBuf,
+        identity: String,
+        replica: agent_doc_merge::crdt_sync::ReplicaState,
+    }
+
+    impl LiveEditorFixture {
+        fn new(file: &Path, editor_id: &str, content: &str) -> Self {
+            let file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            agent_doc_test_support::seed_reliable_sync_editor_registration(
+                &file,
+                editor_id,
+                &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+            );
+            let identity = format!("{editor_id}:{}", file.display());
+            let (client_id, bootstrap) =
+                agent_doc_crdt_relay_io::register_replica_for_file(&file, &identity)
+                    .expect("test editor should register through the CRDT relay")
+                    .expect("test editor should remain attached");
+            let replica =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+                    .expect("test editor should decode the relay bootstrap");
+            let fixture = Self {
+                file,
+                identity,
+                replica,
+            };
+            fixture.publish(content);
+            fixture
+        }
+
+        fn publish(&self, content: &str) {
+            let current = self.replica.text();
+            self.replica
+                .apply_local_edit(0, current.len() as u32, content);
+            agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                &self.file,
+                &self.identity,
+                &self.replica.encode_state(),
+            )
+            .expect("test editor should publish through the CRDT relay")
+            .expect("test editor update should be accepted");
+        }
+    }
+
+    impl Drop for LiveEditorFixture {
+        fn drop(&mut self) {
+            agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                &self.file,
+                &self.identity,
+                std::process::id(),
+            )
+            .expect("test editor should deregister from the CRDT relay");
+        }
+    }
+
     fn response_for(request: Value) -> Value {
         handle_message(&request.to_string()).expect("request should produce response")
     }
@@ -1419,7 +1475,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_admit_then_plan_returns_queue_subagent_dispatch_contract() {
+    fn connected_plan_includes_live_editor_queue_rows_while_disk_is_stale() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
@@ -1464,6 +1520,17 @@ Done.
         }));
         assert_eq!(admit["result"]["isError"], false);
 
+        let live_content = content.replace(
+            "- Align the Close button.\n",
+            "- Align the Close button.\n- Wire the live refresh.\n",
+        );
+        let _editor = LiveEditorFixture::new(&file, "grok-live-plan", &live_content);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            content,
+            "the regression requires the disk copy to remain stale"
+        );
+
         let plan = response_for(json!({
             "jsonrpc": "2.0",
             "id": 41,
@@ -1482,7 +1549,7 @@ Done.
                 .as_array()
                 .expect("dispatch list")
                 .len(),
-            2
+            3
         );
         assert_eq!(
             contract["queue_subagent_dispatch"][0]["item"],
@@ -1499,6 +1566,16 @@ Done.
                 .as_str()
                 .unwrap()
                 .contains("queue start")
+        );
+        assert_eq!(
+            contract["queue_subagent_dispatch"][2]["item"],
+            "Wire the live refresh.",
+            "the next plan must project the newly runnable live-editor row"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            content,
+            "planning must not require the editor replica to save to disk"
         );
     }
 

@@ -229,8 +229,8 @@ class ShellRegistrationOwnershipTest {
 
     /**
      * Per-platform-object state: every user-data key the implementation uses is a shell key, and
-     * the one that carried an implementation class (the highlight identity) now carries JDK
-     * values. `putUserData` call sites stay measured, since their values cannot be typed here.
+     * the highlight identity and recent-row dismissal state carry only JDK values.
+     * `putUserData` call sites stay measured, since their values cannot be typed here.
      */
     @Test
     fun `implementation user data uses shell keys and JDK values`() {
@@ -244,6 +244,8 @@ class ShellRegistrationOwnershipTest {
                 "agent-doc.visual.highlighter" to "Boolean",
                 "agent-doc.visual.highlight-identity" to "List<Any?>",
                 "agent-doc.visual.tracked-highlighters" to "List<RangeHighlighter>",
+                "agent-doc.visual.recency-state" to "MutableMap<String, Any>",
+                "agent-doc.visual.recency-caret-listener" to "Boolean",
             ),
             keys,
         )

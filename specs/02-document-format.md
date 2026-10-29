@@ -1148,6 +1148,22 @@ is a no-op, and the `#ftstrike` note is never added twice. A struck row whose
 code spans look wrong is showing its own operator text. For example, a row that
 quotes another row in single backticks, where the quoted row holds its own
 backtick spans, pairs its backticks the same way before and after the strike.
-Quote such text with a longer backtick run (```` `` … `` ````) instead. Known
-gap: work text that begins or ends with `~`, or ends with `\`, does not render
+Quote such text with a longer backtick run (```` `` … `` ````) instead.
+
+**Addressed-at annotation and recent-row projection (`#recentrunmarkers`).**
+Every closeout transition that changes a visible single-line queue row from
+live to struck appends one canonical UTC annotation,
+`⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧`, outside the strike wrapper and after
+any `#ftstrike` note. The timestamp is derived from the turn cycle start, so
+retrying or recomputing the same cycle is idempotent; a row that already has
+the annotation is never restamped. The annotation is durable evidence, not
+work identity or lifecycle state, and therefore remains in the markdown.
+Editors sort all annotated rows across the document's queue components and
+derive `①`, `②`, and `③` for the newest three, with strongest-to-weakest row
+highlights. Moving the caret onto one of those rows acknowledges only that
+editor's transient highlight. It does not remove the annotation or rank, and
+the transient acknowledgements reset when the derived top-three projection
+changes.
+
+Known gap: work text that begins or ends with `~`, or ends with `\`, does not render
 as a strike (a leading `~` turns `~~~…` into a fenced code block).

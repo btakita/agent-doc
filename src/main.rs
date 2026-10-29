@@ -472,9 +472,13 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 );
                 match &result {
                     Ok(()) => {
-                        if let Ok(Some(snapshot)) =
-                            agent_doc_snapshot_io::load_document_baseline(&file)
-                            && let Ok(Some(snapshot_target)) =
+                        let snapshot_projection = (|| -> anyhow::Result<()> {
+                            let Some(snapshot) =
+                                agent_doc_snapshot_io::load_document_baseline(&file)?
+                            else {
+                                return Ok(());
+                            };
+                            let Some(snapshot_target) =
                                 agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch(
                                     &snapshot,
                                     &invocation.response_body,
@@ -482,15 +486,24 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                     &invocation.claimed_heads,
                                     &invocation.selected_heads,
                                     &invocation.dispatch_owned_heads,
-                                )
-                                .map(|(projected, _)| projected)
-                            && let Err(error) =
-                                agent_doc_snapshot_io::checkpoint_document_baseline(
-                                    &file,
+                                )?.0
+                            else {
+                                return Ok(());
+                            };
+                            let snapshot_target_content =
+                                agent_doc_queue::queue_recency::annotate_newly_struck_rows(
+                                    &snapshot,
                                     &snapshot_target.target_content,
-                                    agent_doc_ops_log_io::log_op,
-                                )
-                        {
+                                    &invocation.addressed_at,
+                                )?;
+                            agent_doc_snapshot_io::checkpoint_document_baseline(
+                                &file,
+                                &snapshot_target_content,
+                                agent_doc_ops_log_io::log_op,
+                            )?;
+                            Ok(())
+                        })();
+                        if let Err(error) = snapshot_projection {
                             eprintln!(
                                 "[queue] answered free-text snapshot projection failed for {}: {error}",
                                 file.display()

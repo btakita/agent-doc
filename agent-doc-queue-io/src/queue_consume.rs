@@ -25,6 +25,7 @@ use agent_doc_queue::{
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
         strike_all_noise_queue_heads,
     },
+    queue_recency::annotate_newly_struck_rows,
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
         queue_prompt_text_is_free_text,
@@ -1056,6 +1057,31 @@ fn now_millis() -> u64 {
         .unwrap_or(0)
 }
 
+/// The turn start is a stable, durable timestamp source for every recomputation
+/// of a queue strike. A wall-clock read inside the reactive projection would
+/// produce a different target whenever another source invalidated the graph.
+fn addressed_at_for_current_cycle(file: &Path) -> String {
+    let cycle_secs = agent_doc_cycle_state_io::load(file)
+        .ok()
+        .flatten()
+        .and_then(|state| cycle_started_secs(&state.cycle_id));
+    let secs = cycle_secs.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0)
+    });
+    agent_doc_turn::turn_status::format_rfc3339_utc_secs(secs)
+}
+
+fn cycle_started_secs(cycle_id: &str) -> Option<u64> {
+    cycle_id
+        .strip_prefix("cycle-")?
+        .parse::<u128>()
+        .ok()
+        .map(|millis| (millis / 1_000).min(u128::from(u64::MAX)) as u64)
+}
+
 /// Strike every free-text queue head that the committed `response_body` answers,
 /// regardless of position (#ftstrike). The normal leading-head consume only
 /// strikes a contiguous leading run and stops at an id-backed head, so a free-text
@@ -1238,7 +1264,9 @@ fn strike_free_text_queue_heads_with_proof(
         return Ok(0);
     };
     let keys = projected.node_keys;
-    let new_document = projected.target_content;
+    let addressed_at = addressed_at_for_current_cycle(file);
+    let new_document =
+        annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
     // strike them by the snapshot's own node keys (keys are position/hash derived
@@ -1246,7 +1274,11 @@ fn strike_free_text_queue_heads_with_proof(
     // converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "free-text strike snapshot sync") {
         Some(snap) => match project(&snap) {
-            Ok((snapshot, _)) => snapshot.map(|projected| projected.target_content),
+            Ok((snapshot, _)) => snapshot
+                .map(|projected| {
+                    annotate_newly_struck_rows(&snap, &projected.target_content, &addressed_at)
+                })
+                .transpose()?,
             Err(err) => {
                 log_snapshot_recovery_warning(file, "free-text strike snapshot sync", err);
                 None
@@ -3062,6 +3094,13 @@ fn plan_queue_prompt_consumption_inner(
         log_snapshot_sync_skipped(file, "queue consume snapshot sync", "snapshot is missing");
     }
 
+    let addressed_at = addressed_at_for_current_cycle(file);
+    current = annotate_newly_struck_rows(content, &current, &addressed_at)?;
+    if let Some(snap) = snapshot_content {
+        new_snap = annotate_newly_struck_rows(snap, &new_snap, &addressed_at)?;
+        save_snapshot |= new_snap != snap;
+    }
+
     Ok(Some(QueueConsumptionPlan {
         consumed_text,
         consumed_texts,
@@ -3772,6 +3811,12 @@ mod core_tests {
         assert!(
             !plan.new_document.contains("~~[#fccd]"),
             "the open id-backed head must not be struck by a free-text consume"
+        );
+        assert_eq!(
+            plan.new_document.matches("⟦addressed-at:").count(),
+            1,
+            "the newly struck row gets one durable recency annotation: {}",
+            plan.new_document
         );
         assert_eq!(plan.new_document.matches("> **Queue prompt:**").count(), 1);
     }
@@ -6213,7 +6258,9 @@ mod core_tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~duplicate prose~~\n- duplicate prose\n- keep\n"),
+            result.contains(
+                "- ~~duplicate prose~~ — auto-struck: addressed this cycle ⟦addressed-at:"
+            ) && result.contains("Z⟧\n- duplicate prose\n- keep\n"),
             "only the first duplicate prompt should be struck:\n{result}"
         );
         assert_eq!(outcome.consumed_count, 1);
@@ -6745,6 +6792,11 @@ mod core_tests {
             updated.contains("~~ — auto-struck: answered this cycle (#ftstrike)"),
             "note must sit outside the ~~…~~ wrapper:\n{updated}"
         );
+        assert_eq!(
+            updated.matches("⟦addressed-at:").count(),
+            2,
+            "both newly struck rows retain a durable addressed-at annotation:\n{updated}"
+        );
         // Idempotent: a second pass strikes nothing more and adds no second note.
         let again = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
         assert_eq!(again, 0, "already-struck heads must not be re-struck");
@@ -6755,6 +6807,11 @@ mod core_tests {
                 .count(),
             2,
             "the note must not be duplicated on re-strike:\n{after_again}"
+        );
+        assert_eq!(
+            after_again.matches("⟦addressed-at:").count(),
+            2,
+            "the addressed-at annotation must not be duplicated on re-strike:\n{after_again}"
         );
         // Zero-drift: nothing was written into an exchange component.
         let exchange = element::parse(&after_again)

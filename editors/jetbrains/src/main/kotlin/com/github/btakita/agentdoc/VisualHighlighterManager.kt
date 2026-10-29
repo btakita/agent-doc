@@ -9,11 +9,14 @@ import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.DefaultLanguageHighlighterColors
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.CaretEvent
+import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryEvent
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.markup.EffectType
+import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.editor.markup.RangeHighlighter
@@ -31,13 +34,16 @@ import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import java.awt.Color
 import java.awt.Font
+import java.awt.Graphics
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.Icon
 import javax.swing.SwingUtilities
+import javax.swing.UIManager
 
 /**
  * What one agent-doc range highlighter covers and how it paints. [attributes] is
@@ -103,6 +109,49 @@ internal fun <H> planVisualHighlightReconcile(
     return VisualHighlightPlan(remove, add)
 }
 
+internal fun recentPresentationKinds(kind: String, dismissed: Boolean): List<String> {
+    val rank = kind.removePrefix("recent_").toIntOrNull()?.takeIf { it in 1..3 }
+        ?: return listOf(kind)
+    return buildList {
+        add("recent_rank_$rank")
+        if (!dismissed) add("recent_highlight_$rank")
+    }
+}
+
+private class RecencyRankIcon(
+    private val glyph: String,
+    private val color: Color,
+) : Icon {
+    override fun getIconWidth(): Int = 16
+    override fun getIconHeight(): Int = 16
+
+    override fun paintIcon(component: java.awt.Component?, graphics: Graphics, x: Int, y: Int) {
+        val font = (UIManager.getFont("Label.font") ?: Font(Font.SANS_SERIF, Font.PLAIN, 12))
+            .deriveFont(Font.BOLD, 13f)
+        graphics.font = font
+        graphics.color = color
+        val metrics = graphics.fontMetrics
+        graphics.drawString(
+            glyph,
+            x + (iconWidth - metrics.stringWidth(glyph)) / 2,
+            y + (iconHeight - metrics.height) / 2 + metrics.ascent,
+        )
+    }
+}
+
+private class RecencyRankGutterRenderer(
+    private val rank: Int,
+    private val color: Color,
+) : GutterIconRenderer() {
+    override fun getIcon(): Icon = RecencyRankIcon(listOf("①", "②", "③")[rank - 1], color)
+    override fun getTooltipText(): String =
+        "${listOf("Newest", "Second-newest", "Third-newest")[rank - 1]} recently addressed agent-doc row"
+    override fun getAlignment(): Alignment = Alignment.LEFT
+    override fun equals(other: Any?): Boolean =
+        other is RecencyRankGutterRenderer && other.rank == rank && other.color == color
+    override fun hashCode(): Int = 31 * rank + color.hashCode()
+}
+
 class VisualHighlighterManager private constructor(private val project: Project) : Disposable {
     private val LOG = com.intellij.openapi.diagnostic.Logger.getInstance(VisualHighlighterManager::class.java)
 
@@ -140,6 +189,7 @@ class VisualHighlighterManager private constructor(private val project: Project)
         GenerationListeners.addEditorFactoryListener(object : EditorFactoryListener {
             override fun editorCreated(event: EditorFactoryEvent) {
                 if (!isMarkdown(event.editor.document)) return
+                installCaretDismissal(event.editor)
                 scheduleRefresh(event.editor.document)
             }
         }, this)
@@ -221,7 +271,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private fun refreshAll() {
         EditorFactory.getInstance().allEditors
             .filter { it.project == project }
-            .forEach { scheduleRefresh(it.document) }
+            .forEach {
+                installCaretDismissal(it)
+                scheduleRefresh(it.document)
+            }
     }
 
     fun refreshFile(file: VirtualFile) {
@@ -339,18 +392,29 @@ class VisualHighlighterManager private constructor(private val project: Project)
 
         val markup = editor.markupModel
         val textLength = editor.document.textLength
+        val documentText = editor.document.text
         val attrsByKind = HashMap<String, TextAttributes>()
+        val recentIds = tokens
+            .filter { it.kind.startsWith("recent_") }
+            .sortedBy { it.kind }
+            .mapNotNull { recentTokenId(documentText, it.start, it.end) }
+        val recencyState = recencyState(editor, recentIds)
+        @Suppress("UNCHECKED_CAST")
+        val dismissed = recencyState["dismissed"] as MutableSet<String>
         val desired =
             tokens
                 .filter { it.end > it.start && it.end <= textLength }
-                .map { token ->
-                    VisualHighlightKey(
-                        start = token.start,
-                        end = token.end,
-                        layer = layerFor(token.kind),
-                        kind = token.kind,
-                        attributes = attrsByKind.getOrPut(token.kind) { attrsFor(editor, token.kind) },
-                    )
+                .flatMap { token ->
+                    val id = recentTokenId(documentText, token.start, token.end)
+                    recentPresentationKinds(token.kind, id != null && id in dismissed).map { kind ->
+                        VisualHighlightKey(
+                            start = token.start,
+                            end = token.end,
+                            layer = layerFor(kind),
+                            kind = kind,
+                            attributes = attrsByKind.getOrPut(kind) { attrsFor(editor, kind) },
+                        )
+                    }
                 }
         // First refresh of this editor: nothing is tracked yet, so sweep any
         // agent-doc highlighter it carries (one full pass) before reconciling.
@@ -380,9 +444,77 @@ class VisualHighlighterManager private constructor(private val project: Project)
             )
             highlighter.putUserData(HIGHLIGHTER_KEY, true)
             highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key.toUserData())
+            if (key.kind.startsWith("recent_rank_")) {
+                val rank = key.kind.removePrefix("recent_rank_").toInt()
+                highlighter.gutterIconRenderer = RecencyRankGutterRenderer(
+                    rank,
+                    editor.colorsScheme.defaultForeground,
+                )
+            }
             next.add(highlighter)
         }
         editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, next)
+    }
+
+    private fun installCaretDismissal(editor: Editor) {
+        if (editor.getUserData(RECENCY_CARET_LISTENER_KEY) == true) return
+        editor.putUserData(RECENCY_CARET_LISTENER_KEY, true)
+        editor.caretModel.addCaretListener(object : CaretListener {
+            override fun caretPositionChanged(event: CaretEvent) {
+                dismissRecentHighlightAt(
+                    event.editor,
+                    event.caret?.offset ?: event.editor.caretModel.offset,
+                )
+            }
+        }, this)
+    }
+
+    /**
+     * Visiting a recent row acknowledges only its transient background wash.
+     * The gutter rank and durable document annotation remain untouched.
+     */
+    private fun dismissRecentHighlightAt(editor: Editor, offset: Int) {
+        val tracked = editor.getUserData(TRACKED_HIGHLIGHTERS_KEY) ?: return
+        val matching = tracked.filter { highlighter ->
+            val key = highlighter.visualHighlightKey() ?: return@filter false
+            key.kind.startsWith("recent_highlight_") && offset >= key.start && offset <= key.end
+        }
+        if (matching.isEmpty()) return
+
+        val state = editor.getUserData(RECENCY_STATE_KEY) ?: return
+        @Suppress("UNCHECKED_CAST")
+        val dismissed = state["dismissed"] as? MutableSet<String> ?: return
+        val documentText = editor.document.text
+        matching.forEach { highlighter ->
+            recentTokenId(documentText, highlighter.startOffset, highlighter.endOffset)?.let(dismissed::add)
+            if (highlighter.isValid) editor.markupModel.removeHighlighter(highlighter)
+        }
+        val removed = matching.toHashSet()
+        editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, tracked.filterNot(removed::contains))
+    }
+
+    /** Reset transient acknowledgements only when the editor-derived top three changes. */
+    private fun recencyState(editor: Editor, projection: List<String>): MutableMap<String, Any> {
+        val existing = editor.getUserData(RECENCY_STATE_KEY)
+        @Suppress("UNCHECKED_CAST")
+        val existingProjection = existing?.get("projection") as? List<String>
+        if (existing != null && existingProjection == projection) return existing
+
+        val replacement: MutableMap<String, Any> = hashMapOf(
+            "projection" to ArrayList(projection),
+            "dismissed" to HashSet<String>(),
+        )
+        editor.putUserData(RECENCY_STATE_KEY, replacement)
+        return replacement
+    }
+
+    private fun recentTokenId(text: String, start: Int, end: Int): String? {
+        if (start !in 0..text.length || end !in start..text.length) return null
+        val annotationStart = text.indexOf(ADDRESSED_AT_PREFIX, start)
+        if (annotationStart < start || annotationStart >= end) return null
+        val annotationEnd = text.indexOf('⟧', annotationStart + ADDRESSED_AT_PREFIX.length)
+        if (annotationEnd < 0 || annotationEnd >= end) return null
+        return text.substring(annotationStart, annotationEnd + 1)
     }
 
     /** The identity this highlighter was created with, or null once it no longer matches it. */
@@ -479,6 +611,15 @@ class VisualHighlighterManager private constructor(private val project: Project)
             ).apply {
                 fontType = MarkdownStyleSettings.fontStyleFor(kind, Font.BOLD)
             }
+            "recent_highlight_1", "recent_highlight_2", "recent_highlight_3" -> baseAttrs(null).apply {
+                val rank = kind.removePrefix("recent_highlight_").toInt()
+                val ratio = listOf(0.24f, 0.16f, 0.10f)[rank - 1]
+                val accent = editor.colorsScheme
+                    .getAttributes(DefaultLanguageHighlighterColors.FUNCTION_DECLARATION)
+                    ?.foregroundColor ?: editor.colorsScheme.defaultForeground
+                backgroundColor = blend(editor.colorsScheme.defaultBackground, accent, ratio)
+            }
+            "recent_rank_1", "recent_rank_2", "recent_rank_3" -> TextAttributes()
             "tracked_id" -> baseAttrs(
                 editor.colorsScheme.getAttributes(DefaultLanguageHighlighterColors.CONSTANT)
             ).apply {
@@ -502,6 +643,8 @@ class VisualHighlighterManager private constructor(private val project: Project)
     private fun layerFor(kind: String): Int =
         when (kind) {
             "component_body", "scratch_comment_body" -> HighlighterLayer.ADDITIONAL_SYNTAX - 1
+            "recent_highlight_1", "recent_highlight_2", "recent_highlight_3" ->
+                HighlighterLayer.ADDITIONAL_SYNTAX + 1
             else -> HighlighterLayer.ADDITIONAL_SYNTAX
         }
 
@@ -528,7 +671,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
         private val HIGHLIGHTER_KEY = GenerationKeys.create<Boolean>("agent-doc.visual.highlighter")
         private val HIGHLIGHT_IDENTITY_KEY = GenerationKeys.create<List<Any?>>("agent-doc.visual.highlight-identity")
         private val TRACKED_HIGHLIGHTERS_KEY = GenerationKeys.create<List<RangeHighlighter>>("agent-doc.visual.tracked-highlighters")
+        private val RECENCY_STATE_KEY = GenerationKeys.create<MutableMap<String, Any>>("agent-doc.visual.recency-state")
+        private val RECENCY_CARET_LISTENER_KEY = GenerationKeys.create<Boolean>("agent-doc.visual.recency-caret-listener")
         private val INSTANCES = ConcurrentHashMap<Project, VisualHighlighterManager>()
+        private const val ADDRESSED_AT_PREFIX = "⟦addressed-at:"
 
         /** Share of the theme foreground mixed into a component body's background. */
         internal const val COMPONENT_BODY_TINT = 0.08f

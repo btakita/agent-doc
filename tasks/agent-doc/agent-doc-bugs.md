@@ -853,7 +853,72 @@ Each new `### Re:` response gets `⟦response:<12 lowercase hex>⟧`. The same t
 I checked the commit against `7b44d8bb28`. The private-name scan of added lines was clean. The worker reported `cargo test --lib` on the twelve touched crates: 3549 passed, 0 failed, 1 ignored. This closeout did not re-run that suite, `make check`, or `make install`. The branch is not merged.
 
 `WORKER_BRIEF.txt` stays untracked.
-<!-- agent:boundary:0ee619e8 -->
+### Re: Subagent completed: `subagent:responseid` returned work for queue item “Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.” — agent-doc
+<!-- agent-doc-subagent-response sha256=bfee78c83bcd7e0d590411a1e79bf88581c95750bad1a23b57d7105f70f9a544 -->
+> **Subagent response:**
+>
+> Branch `fix/response-surrogate-id` is pushed to `origin` at `ab92736a43de910a8bf9166af5142fd383d30f55`. `WORKER_BRIEF.txt` is still untracked. Main was not pushed.
+>
+> Each newly materialized `### Re:` response gets a stable `⟦response:<12 lowercase hex>⟧` id. That same id is appended to the heading, the exchange prompt it answers, and the struck `agent:run` / `agent:loop` / `agent:queue` row. Historical responses with no token are left unchanged. The token is outside queue-work, response-cell, prompt-node, claim, and `(HEAD)` identity.
+>
+> **Commit:** `ab92736a43de910a8bf9166af5142fd383d30f55` — `fix: give each new response a stable surrogate id`
+>
+> **Files (24):**
+> - `agent-doc-markdown-ast/src/response_surrogate.rs` (new)
+> - `agent-doc-markdown-ast/src/lib.rs`
+> - `agent-doc-markdown-ast/src/exchange_tree.rs`
+> - `agent-doc-markdown-ast/src/mutations.rs`
+> - `agent-doc-markdown-ast/src/overlay.rs`
+> - `agent-doc-element-queue/src/lib.rs`
+> - `agent-doc-element-queue/src/subprompts.rs`
+> - `agent-doc-document/src/queue_projection.rs`
+> - `agent-doc-merge/src/crdt.rs`
+> - `agent-doc-merge/src/document_cell_merge.rs`
+> - `agent-doc-diff/src/lib.rs`
+> - `agent-doc-queue/src/document_queue.rs`
+> - `agent-doc-queue/src/queue_consume.rs`
+> - `agent-doc-queue/src/queue_response.rs`
+> - `agent-doc-queue-io/src/queue_consume.rs`
+> - `agent-doc-template/src/lib.rs`
+> - `agent-doc-template/src/template.rs`
+> - `agent-doc-template-io/src/lib.rs`
+> - `agent-doc-ffi/src/lib.rs`
+> - `agent-doc-turn/src/response_replay.rs`
+> - `agent-doc-document-realtime/src/write_policy.rs`
+> - `specs/02-document-format.md`
+> - `specs/07-closeout-commands.md`
+> - `specs/07-orchestration-commands.md`
+>
+> **Tests** (`cargo test --lib` on the twelve touched crates, exit 0):
+>
+> | Crate | Result |
+> |---|---|
+> | agent-doc-diff | 205 passed |
+> | agent-doc-document | 226 passed |
+> | agent-doc-document-realtime | 418 passed |
+> | agent-doc-element-queue | 35 passed |
+> | agent-doc-ffi | 19 passed |
+> | agent-doc-markdown-ast | 86 passed |
+> | agent-doc-merge | 447 passed, 1 ignored |
+> | agent-doc-queue | 1035 passed |
+> | agent-doc-queue-io | 273 passed |
+> | agent-doc-template | 261 passed |
+> | agent-doc-template-io | 83 passed |
+> | agent-doc-turn | 461 passed |
+>
+> **3549 passed, 0 failed, 1 ignored.** No follow-up queue heads.
+<!-- agent-doc-subagent-completion key=d2f56ea54d14349537f97e112ee22bfcd9289e7340c76793972e566f841b0ca8 -->
+> **Queue prompt:** Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
+> **Queue prompt:** If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+### Re: Icon pair is pencil and up-arrow — grok-4.7 · 2026-10-29T12:26-04:00
+
+`✎` for changed locally, and `⬆` for published. A row that was published and then edited again shows both, `✎⬆`. Ordinary rows stay unmarked. These two do not reuse the lifecycle glyphs `📥` `🚧` `☑️` `🙋`.
+
+`⟦local⟧` and `⟦published⟧` remain the clearer form, and they match the annotation line you added. The same rule applies: worker-reported, alone or together, only when `queue report-complete` records that state.
+
+`subagent:reviewpublish` generation 1 has exited, so this answer is recorded here. Worker `01a18839-8b85-7601-9741-6333916b1f50` is not running, and this edit stays on that claim. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`. No marker is implemented.
+<!-- agent:boundary:8c335c48 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -861,10 +926,9 @@ I checked the commit against `7b44d8bb28`. The private-name scan of added lines 
   - ~~Where does this file live? My Coder agent is asking.~~
 - do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
-- ~~As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.~~ — auto-struck: answered this cycle (#ftstrike)
+  - Annotation, worker-reported
+  - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 ---
 🚧 [#subagent:promptsurface#1] agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
 ```

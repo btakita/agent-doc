@@ -804,7 +804,46 @@ Files: `agent-doc-merge/src/crdt.rs`, `agent-doc-merge/src/revision_twin.rs`, `s
 
 `subagent:reviewpublish` generation 1 already has its operator-request packet in the exchange. The row stays an operator action until you pick the marker: annotation, icons, observe git and GitHub, or another rule.
 
-<!-- agent:boundary:8c86816f -->
+### Re: Subagent completed: `subagent:runduplicate` returned work for queue item “As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.” — agent-doc
+<!-- agent-doc-subagent-response sha256=874f122ce2492415c504ad7ab97c654a3ce04d4b9b96e0712dbc19275d832465 -->
+> **Subagent response:**
+>
+> Branch `fix/run-prompt-duplicated-while-typing` is on `252d6b78285bced9f5a2b7fe6498e317412fd5c9` and tracks `origin/fix/run-prompt-duplicated-while-typing`. The push was a new-branch fast-forward. `main` was not pushed.
+>
+> A prompt still being typed, including one already delivered as mid-turn steering, was kept as a second live `agent:run` row when queue item keys collided and the flat body merge kept both inserts. Closeout now projects that revision twin, including a one-closer insertion such as `published changes ()` beside `published changes (like a review or a code change)`, out of the agent side before that fallback.
+>
+> Files changed:
+>
+> - `agent-doc-merge/src/crdt.rs`
+> - `agent-doc-merge/src/revision_twin.rs`
+> - `specs/14-realtime-workflow.md`
+>
+> `cargo test -p agent-doc-merge --lib -- --test-threads=8` finished in 30.75s: 452 passed, 0 failed, 1 ignored, 0 measured, 0 filtered out. These passed inside that run:
+>
+> - `crdt::tests::closer_cut_is_not_a_second_row_when_queue_item_keys_collide`
+> - `crdt::tests::baseline_closer_cut_is_replaced_by_the_live_typed_run_prompt`
+> - `crdt::tests::typed_run_prompt_inserted_before_a_closer_is_not_a_second_live_row`
+> - `crdt::tests::typed_run_prompt_stays_one_row_when_closeout_also_strikes`
+> - `revision_twin::tests::insertion_before_a_typed_closer_is_one_revision`
+>
+> `cargo test -p agent-doc-document-realtime --lib typingdupe_stale_typing_snapshot -- --test-threads=8` finished in 0.01s: 1 passed, 0 failed, 0 ignored, 417 filtered out. The passing test is `write_policy::tests::typingdupe_stale_typing_snapshot_in_a_retained_target_is_not_rebased_beside_the_finished_line`.
+>
+> No follow-up queue heads. `WORKER_BRIEF.txt` stays untracked.
+<!-- agent-doc-subagent-completion key=76c959c605f685595b894e6d61b467d9c391a368531f7df951a0c70985ca99d9 -->
+> **Queue prompt:** As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.
+> **Chat prompt (#chatprompt):** I'm updating the presets. I'm unsure whether the repeated #review and #rebase rejections is a prompt preset issue, an agent-doc issue, or both.
+
+### Re: Repeated presets are both layers — grok-4.7 · 2026-10-29T12:00-04:00
+
+Both. The preset tells a worker when one claimed item is finished. Agent-doc decides whether a second copy is its own item and whether a closeout removes it.
+
+The ancestor preset in `/home/brian/work/btakita/agent-loop/.agent-doc/project.md` already says a `#review` of an older commit does not finish the item. `#rebase` there is still `rebase + fix merge conflicts: #push`, with no sentence that an earlier rebase leaves a later copy unfinished.
+
+Haiven sessions use the nearer map in `/home/brian/work/btakita/agent-loop/src/haiven-dev/.agent-doc/project.md`. Its `#review` is `Write a review of the current head and post it as a plain comment. Do not approve unless the line says approve. Review using ~/.agents/skills/pr-review/SKILL.md`. That override hides the ancestor older-commit sentence. That file has `#rebase-conflicts` as `rebase + fix merge conflicts` and no `#rebase` key.
+
+Those sentences cannot keep two identical leaves as two claims. A short claim binds one remaining head. A closeout that answers one leaf can remove the same words under another parent. Commit `46525385` of `tasks/api.md` still had the inbox `#review` under pull 767. Commit `477a8d7e` removed that child while recording the review for pull 763. That split is backlog `#reviewrebase-repeat`: a plan, with the fix left unimplemented. The same-parent rejection is `do [#repeatsamepreset]`, running as worker `01a18857-f82b-70d2-af77-6bec593812e6` on `fix/repeat-same-preset`.
+
+<!-- agent:boundary:c5cd2054 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->

@@ -308,8 +308,8 @@ pub fn load_ledger_following(file: &Path, content: &str) -> Result<QueueClaimLed
     Ok(ledger)
 }
 
-/// Active-claim baselines for `#nestedclaimsteer`. Follow runs on the folded
-/// rows; the oldest `followed_from` text is the claim-time row.
+/// Compatibility baselines for an older folded `#nestedclaimsteer` entry.
+/// Canonical parsed trees are already leaf-only.
 pub fn nested_claim_steer_snapshots(
     file: &Path,
     content: &str,
@@ -419,9 +419,7 @@ pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String>
     }
 }
 
-/// Folded resolve missed. Try the `#nestedclaimsteer` view so a routed sibling
-/// is claimable by its own line. The parent line still resolves on the folded
-/// head first, which is what the initial claim stores.
+/// Compatibility fallback for an older folded `#nestedclaimsteer` view.
 fn resolve_expanded_claim_target(
     file: &Path,
     item: &str,

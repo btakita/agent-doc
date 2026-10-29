@@ -255,8 +255,8 @@ impl QueueBlock<'_> {
         ) {
             return QueueNodeState::Paused;
         }
-        // `#nestedclaimsteer`: a child split out of a claimed parent is its own
-        // head. Judge availability on that view when a steer guard is installed.
+        // `#nestedclaimsteer`: canonical children are independent heads. The
+        // installed view remains only for older folded in-memory entries.
         // `#nestlistlineage`: a nested leaf's claim key is its nest vector, so
         // the match reads the full list before any row is dropped.
         let entries = crate::nested_claim_steer::expand_slice_if_installed(&self.entries);
@@ -1531,7 +1531,7 @@ mod tests {
     }
 
     /// Three `agent:run` sections: the first has only claimed work, an
-    /// operator-gated folded head, and a group label. That queue is paused,
+    /// operator-gated leaf, and a group label. That queue is paused,
     /// so the next independent queue is the runnable work. `after=` still waits.
     #[test]
     fn operator_or_label_only_queue_does_not_hide_a_later_run() {

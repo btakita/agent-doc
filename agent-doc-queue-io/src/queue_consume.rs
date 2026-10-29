@@ -6670,7 +6670,7 @@ mod core_tests {
 
     /// `#subagentinlineveto` (live, haiven-dev sdk-demo.md 2026-10-28T03:22Z):
     /// under `<!-- agent:run priority subagents go -->` preflight listed the
-    /// PR #74 row for dispatch, the coordinator fixed it inline and echoed it,
+    /// PR #74 leaf for dispatch, the coordinator fixed it inline and echoed it,
     /// and the closeout struck it as done. The row must stay queued (and be
     /// reported) until a worker claim backs it.
     #[test]
@@ -6704,11 +6704,8 @@ mod core_tests {
         .unwrap();
         assert_eq!(
             crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(&doc, &content),
-            vec![
-                "https://github.com/example/docs/pull/74/changes\n  - The ADR links are malformed."
-                    .to_string()
-            ],
-            "the unclaimed row is owned by the subagents dispatch"
+            vec!["The ADR links are malformed.".to_string()],
+            "the unclaimed leaf is owned by the subagents dispatch"
         );
 
         let struck = strike_answered_free_text_queue_heads(&doc, response, true).unwrap();
@@ -6727,7 +6724,7 @@ mod core_tests {
         // worker's result closes it as before (`#claimstrike`).
         crate::queue_claim::claim(
             &doc,
-            "https://github.com/example/docs/pull/74/changes",
+            "The ADR links are malformed.",
             "subagent:pr74-links",
             3600,
         )

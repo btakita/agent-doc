@@ -751,7 +751,7 @@ fn lineage_matches_head(lineage: &str, head_text: &str) -> bool {
 }
 
 /// Display nest vector of `prompt_text` (`#nestvector`), or `None` when the row
-/// is top-level, folded into its parent (`#nestedsubprompts`), or absent.
+/// is top-level, present only inside a legacy folded parent, or absent.
 ///
 /// The row is sought in every tree element (`agent:run` / `agent:loop`,
 /// `agent:review`, `agent:backlog`, `agent:icebox`, `agent:github`,
@@ -915,7 +915,7 @@ pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<Strin
         .collect()
 }
 
-/// The live row named by `head_text`, including folded sub-prompts.
+/// The live row named by `head_text`, with legacy folded-row compatibility.
 ///
 /// A nest-vector head resolves to the row under that parent
 /// (`#nestlistlineage`).
@@ -1160,18 +1160,11 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
         return false;
     }
 
-    // `#nestedechostrike`: a head with nested sub-prompts (`#nestedsubprompts`)
-    // is one head whose text is the parent row plus its child rows, and its
-    // verbatim echo spans one quoted line per row (`> **Queue prompt:** <parent>`
-    // then `>   - <child>`). Matching each quoted line alone against the whole
-    // multi-line head could never succeed, so a claimed nested head never
-    // struck. The echo is matched as a contiguous run of quoted lines inside one
-    // labeled echo: the run must start at a line boundary and cover the head
-    // exactly, so a quote of the parent alone, or of one child, is not its echo.
-    // A child that begins with `Include #subagent:` is release context, not a
-    // sub-prompt. This matcher still recognizes that verbatim echo;
-    // [`release_include_context_is_open`] refuses it while any named include
-    // is a live queue row.
+    // `#nestedechostrike`: retain exact multi-line echo matching for legacy
+    // folded heads and fenced prompts. Canonical nested queues are leaf-only,
+    // so each child can also match and close independently. An
+    // `Include #subagent:` leaf is refused by
+    // [`release_include_context_is_open`] while its named worker is live.
     let head_lines = head_echo_line_count(&head_clean);
     let mut run: Vec<String> = Vec::new();
     let mut in_queue_prompt_echo = false;
@@ -1272,7 +1265,12 @@ const SUBAGENT_LABEL_TOKEN: &str = "#subagent:";
 /// Any other nested child is a sub-prompt, not release context.
 fn release_include_subagent_labels(head_text: &str) -> Vec<String> {
     let mut labels = Vec::new();
-    for row in agent_doc_element_queue::subprompts::subprompt_rows(head_text) {
+    // A release row used to own its indented include block as one folded head.
+    // With leaf-only queues each `Include ...` row is itself the executable
+    // head, so inspect both the head and any compatibility-era folded rows.
+    for row in std::iter::once(head_text.to_string()).chain(
+        agent_doc_element_queue::subprompts::subprompt_rows(head_text),
+    ) {
         let work = include_row_work(&row);
         if !work.starts_with(RELEASE_INCLUDE_PREFIX) {
             continue;

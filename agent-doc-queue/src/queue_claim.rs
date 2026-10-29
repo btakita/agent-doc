@@ -178,13 +178,12 @@ pub struct QueueClaim {
     /// field existed: its follows are unattributable and never repaired.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub followed_generation: u64,
-    /// Authored row when this attempt was claimed, including nested children
-    /// then present.
+    /// Authored row when this attempt was claimed.
     ///
     /// A nest-vector `item_text` is the claim key and has no sub-prompt block.
-    /// Steering measures later children against this row (`#nestedclaimsteer`,
-    /// `#nestlistlineage`). `None` when `item_text` is already that row, or
-    /// for a claim stored before the field existed.
+    /// Legacy folded-entry steering may measure children against this row;
+    /// canonical leaf-only parsing never transfers the claim to descendants.
+    /// `None` when `item_text` is already that row, or for an older claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_time_row: Option<String>,
 }
@@ -483,6 +482,10 @@ pub struct ClaimQueueRows {
     /// Claim keys parallel to `rows` (`#nestlistlineage`). Empty when the
     /// view was built from display rows only; follow then keys `rows`.
     pub claim_texts: Vec<String>,
+    /// Claim keys for rows that are now context-only because they have live
+    /// descendants. A claim anchored on one of these rows must not follow onto
+    /// its first child when the row ceases to be executable.
+    pub context_claim_texts: Vec<String>,
     /// Work texts of the queue's struck (completed) rows, markers and any
     /// baked-in auto-struck note removed.
     pub struck: Vec<String>,
@@ -502,6 +505,7 @@ impl ClaimQueueView {
                 queue_id: None,
                 rows: rows.to_vec(),
                 claim_texts: Vec::new(),
+                context_claim_texts: Vec::new(),
                 struck: Vec::new(),
             }],
         }
@@ -529,10 +533,31 @@ impl ClaimQueueView {
                     })
                     .collect::<Vec<_>>();
                 let (rows, claim_texts) = paired.into_iter().unzip();
+                let context_claim_texts = block
+                    .entries
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| {
+                        document_queue::entry_is_group_parent(&block.entries, *index)
+                    })
+                    .flat_map(|(index, entry)| match entry {
+                        QueueEntry::Prompt(prompt) => {
+                            let bare = document_queue::lineage_claim_text(&block.entries, index);
+                            let nested = document_queue::nest_vector_at(
+                                &block.entries,
+                                index,
+                                prompt.text.trim(),
+                            );
+                            [bare, nested].into_iter().flatten().collect::<Vec<_>>()
+                        }
+                        _ => Vec::new(),
+                    })
+                    .collect();
                 ClaimQueueRows {
                     queue_id: Some(block.id.clone()),
                     rows,
                     claim_texts,
+                    context_claim_texts,
                     struck: block
                         .entries
                         .iter()
@@ -1823,6 +1848,11 @@ impl QueueClaimLedger {
             .collect();
         let live: Vec<QueueItemIdentity> =
             claim_keys.iter().map(|head| claim_identity(head)).collect();
+        let context: HashSet<QueueItemIdentity> = queue
+            .context_claim_texts
+            .iter()
+            .map(|head| claim_identity(head))
+            .collect();
         let families: Vec<QueueItemIdentity> = claim_keys
             .iter()
             .map(|head| effect_family_identity(head))
@@ -1910,6 +1940,11 @@ impl QueueClaimLedger {
         let mut proposals: Vec<(usize, usize)> = Vec::new();
         for (claim_idx, claim) in self.claims.iter().enumerate() {
             if !members[claim_idx] || !claim.blocks_dispatch(now_secs) {
+                continue;
+            }
+            if context.contains(&claim.identity) {
+                // A row that acquired children is now lineage context, not an
+                // edited executable row. Its claim owns no descendant.
                 continue;
             }
             let lines = &descendants[claim_idx];
@@ -2271,18 +2306,17 @@ pub fn claim_identity_at(
 /// `claim_identity` keys `do [#id]` plus any further text as id `id`, the same
 /// identity as the parent row `do [#id]`. A cell matches a row only when the
 /// completion-heading form of its item equals that form of the row's own work
-/// (attempt-projection prefix stripped), or of that work's parent line when
-/// the row carries nested sub-prompts. A one-line row whose text is the cell
-/// item still matches. A longer line that only shares the tracked id does not.
+/// (attempt-projection prefix stripped). The parent-line fallback is retained
+/// only for a legacy folded row; canonical context parents never reach this
+/// executable-row predicate. A longer line sharing only the id does not match.
 pub fn completion_evidence_matches_row(cell_item: &str, row_text: &str) -> bool {
     let cell = agent_doc_document::subagent_completion::heading_item_text(cell_item);
     let (full, head) = completion_row_heading_forms(row_text);
     cell == full || cell == head
 }
 
-/// Heading forms of a row's own work: the whole work text, and its parent
-/// line when nested sub-prompts follow. Both have the attempt-projection
-/// prefix removed first.
+/// Heading forms of a row's own work, plus the parent-line compatibility form
+/// for a legacy folded row. Both remove the attempt projection first.
 fn completion_row_heading_forms(row_text: &str) -> (String, String) {
     let stripped = agent_doc_element_queue::strip_attempt_projection_prefix(row_text).trim();
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(stripped).trim();
@@ -2321,9 +2355,9 @@ pub fn completion_attestation_key(
 /// collapses to `#id`; an id mentioned later in free text remains verbatim so
 /// dispatch, admission, and closeout agree on the line's identity (GH #182).
 ///
-/// A head with nested sub-prompts (`#nestedsubprompts`) is handled by its
-/// parent part alone: the identity ignores the children, so the handle stays
-/// valid while the operator edits or adds child rows.
+/// A legacy folded head keeps its parent handle for compatibility. Canonical
+/// nested work passes one executable leaf here; its lineage is resolved by the
+/// queue view before this display handle is formed.
 pub fn claim_item_handle(item: &str) -> String {
     match claim_identity(item) {
         QueueItemIdentity::Id(id) => format!("#{id}"),
@@ -2749,7 +2783,7 @@ mod tests {
     use super::*;
 
     /// `#nestlistlineage`: the contracts/162 `#rebase` child is not the
-    /// haiven-api PR 767 `#rebase` child. A folded `push` stays out of the key.
+    /// haiven-api PR 767 `#rebase` child. Its `push` leaf owns the deeper key.
     /// A top-level `#rebase` and a nested `do [#id]` stay id-backed.
     #[test]
     fn nested_rebase_under_different_parents_is_different_work() {
@@ -2771,16 +2805,20 @@ mod tests {
         let mut keys = Vec::new();
         for index in crate::document_queue::executable_prompt_indexes(&entries) {
             let text = crate::document_queue::lineage_claim_text(&entries, index).unwrap();
-            if text == "#rebase" || text.ends_with(": #rebase") || text.contains("do [#child]") {
+            if text == "#rebase"
+                || text.ends_with(": #rebase")
+                || text.ends_with(": push")
+                || text.contains("do [#child]")
+            {
                 keys.push((text, claim_identity_at(&entries, index).unwrap()));
             }
         }
-        let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase";
+        let api = "https://github.com/haiven-dev/haiven-api/pull/767: #rebase: push";
         let contracts = "https://github.com/haiven-dev/haiven-contracts/pull/162: #rebase";
         let epic = "#epic: #rebase";
         assert!(
             keys.iter().any(|(text, _)| text == api),
-            "folded push stays out of the key: {keys:?}"
+            "only the push leaf is executable, with complete lineage: {keys:?}"
         );
         let identity = |needle: &str| {
             keys.iter()
@@ -2817,7 +2855,6 @@ mod tests {
             )
         );
         let heads = vec![api.to_string(), contracts.to_string()];
-        assert_eq!(resolve_claim_target("#rebase", &heads).unwrap(), api);
         assert_eq!(
             resolve_claim_target("#rebase", &[contracts.to_string()]).unwrap(),
             contracts
@@ -3776,6 +3813,40 @@ mod tests {
                 )
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_claimed_leaf_that_acquires_children_becomes_context_not_the_first_child() {
+        let now = 100;
+        let parent = "Parent request";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(parent, "subagent:parent", now, 3600);
+        let initial = format!("<!-- agent:queue -->\n- {parent}\n<!-- /agent:queue -->\n");
+        let initial_view = ClaimQueueView::from_content(&initial).unwrap();
+        assert!(
+            ledger
+                .follow_edits_in_view(now, &initial_view)
+                .followed
+                .is_empty()
+        );
+
+        let nested = format!(
+            "<!-- agent:queue -->\n- {parent}\n  - first leaf\n  - second leaf\n<!-- /agent:queue -->\n"
+        );
+        let nested_view = ClaimQueueView::from_content(&nested).unwrap();
+        assert_eq!(
+            nested_view.queues[0].context_claim_texts,
+            vec![parent.to_string()]
+        );
+        assert!(
+            ledger
+                .follow_edits_in_view(now + 1, &nested_view)
+                .followed
+                .is_empty()
+        );
+        assert_eq!(ledger.claims[0].item_text, parent);
+        assert_eq!(ledger.claims[0].identity, claim_identity(parent));
+        assert!(ledger.claims[0].followed_from.is_empty());
     }
 
     fn strings(lines: &[&str]) -> Vec<String> {

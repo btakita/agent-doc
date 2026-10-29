@@ -467,8 +467,8 @@ pub fn subagent_authorization_for_content_submitted(
     )
 }
 
-/// Folded resolve missed. A `#nestedclaimsteer` sibling is a live head only
-/// while the claim-ledger view is installed, so try that after the folded miss.
+/// Compatibility fallback for a sibling exposed from an older folded
+/// `#nestedclaimsteer` entry.
 fn expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
     let _guard = crate::queue_claim::steer_guard_for(file, content)?;
     let heads =

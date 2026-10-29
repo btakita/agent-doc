@@ -3611,10 +3611,7 @@ mod tests {
         assert_eq!(item.source, SteeringSource::Queue);
         assert_eq!(item.change, SteeringChange::Added);
         assert_eq!(item.dispatch, SteeringDispatch::DrainAfterCurrent);
-        assert_eq!(
-            item.verbatim,
-            "~~#req-integration-id~~\n  - ~~Why do we need a SBX/STG id?~~\n  - We moved onto project templates."
-        );
+        assert_eq!(item.verbatim, "We moved onto project templates.");
         let scoped = current.replace(
             "<!-- agent:queue -->",
             "<!-- agent:queue preset=\"#subagents\" -->",
@@ -3622,9 +3619,9 @@ mod tests {
         let reference = vec!["current task".to_string()];
         assert_eq!(
             subagent_dispatch_heads(&scoped, Some(&reference)),
-            vec![item.verbatim.clone()]
+            vec!["#req-integration-id: We moved onto project templates."]
         );
-        // The closed block alone is never work.
+        // The closed context and its closed child alone are never work.
         let closed_scoped = baseline.replace(
             "<!-- agent:queue -->",
             "<!-- agent:queue preset=\"#subagents\" -->",

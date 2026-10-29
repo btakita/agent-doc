@@ -285,9 +285,16 @@ pub fn subagent_authorization_with_presets(
     for (name, source) in queue_preset_names(content, components) {
         push_preset(&name, source);
     }
-    for (name, _) in
-        crate::queue_response::queue_prompt_preset_expansions_with_presets(item, presets_map)
-    {
+    // A nested leaf inherits its parent lineage as prompt context. Resolve
+    // preset tokens from that lineage as well as from the leaf itself; after
+    // parents became context-only, looking at `item` alone silently dropped a
+    // parent `#review` / `#rebase` authorization from the dispatched leaf.
+    let item_preset_scope = crate::queue_response::nest_vector_in_document(content, item)
+        .unwrap_or_else(|| item.into());
+    for (name, _) in crate::queue_response::queue_prompt_preset_expansions_with_presets(
+        &item_preset_scope,
+        presets_map,
+    ) {
         push_preset(&name, PresetSource::Item);
     }
 
@@ -632,6 +639,17 @@ fn render_preamble(
         && let Some(row) = crate::queue_response::queue_row_text_for_head(content, &auth.item)
     {
         outward = nested_outward_action_lines(&row);
+        if outward.is_empty()
+            && !agent_doc_element_queue::subprompts::subprompt_row_is_struck(&auth.item)
+            && crate::queue_response::nest_vector_in_document(content, &auth.item).is_some()
+        {
+            let row = agent_doc_element_queue::strip_attempt_projection_prefix(&row);
+            let row = crate::document_queue::strip_queue_effect_annotation(row.trim());
+            let row = row.trim().to_string();
+            if !row.is_empty() && line_names_outward_action(&row) {
+                outward.push(row);
+            }
+        }
     }
     if !outward.is_empty() {
         out.push_str(
@@ -1391,7 +1409,7 @@ agent_doc_format: template
         );
         let rebase = "#rebase [#subagent-operator-request-pr767-rebase-push]\n  - push ⟦effect:1⟧";
         let content = doc(fm, "subagents", &[rebase], &[]);
-        let preamble = subagent_authorization("doc.md", &content, rebase).subagent_prompt_preamble;
+        let preamble = subagent_authorization("doc.md", &content, "push").subagent_prompt_preamble;
         assert!(preamble.contains("> push\n"), "{preamble}");
         assert!(
             !preamble.contains("> push ⟦effect:"),
@@ -1411,7 +1429,7 @@ agent_doc_format: template
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/162";
         let nested = format!("{parent}\n  - #rebase\n    - push ⟦effect:2⟧");
         let content = doc(fm, "subagents", &[&nested], &[]);
-        let lineage = format!("{parent}: #rebase");
+        let lineage = format!("{parent}: #rebase: push");
         let preamble =
             subagent_authorization("doc.md", &content, &lineage).subagent_prompt_preamble;
         assert!(
@@ -1420,26 +1438,27 @@ agent_doc_format: template
         );
         assert!(
             preamble.contains("> push\n"),
-            "a folded push on the located row is still authorization: {preamble}"
+            "the executable push leaf is operator authorization: {preamble}"
         );
 
         let review = "#review\n  - I don't see the review on github. publish";
         let content = doc(fm, "subagents", &[review], &[]);
-        let preamble = subagent_authorization("doc.md", &content, review).subagent_prompt_preamble;
+        let review_leaf = "I don't see the review on github. publish";
+        let preamble =
+            subagent_authorization("doc.md", &content, review_leaf).subagent_prompt_preamble;
         assert!(
             preamble.contains("> I don't see the review on github. publish"),
             "{preamble}"
         );
         assert!(preamble.contains("plain comment"), "{preamble}");
         assert_eq!(
-            subagent_authorization("doc.md", &content, review).status,
+            subagent_authorization("doc.md", &content, review_leaf).status,
             AuthorizationStatus::Resolved
         );
 
         let unresolved = "#rebase\n  - push";
         let content = doc("", "subagents preset=\"#rebase\"", &[unresolved], &[]);
-        let preamble =
-            subagent_authorization("doc.md", &content, unresolved).subagent_prompt_preamble;
+        let preamble = subagent_authorization("doc.md", &content, "push").subagent_prompt_preamble;
         assert!(
             preamble.contains(UNRESOLVED_AUTHORIZATION_MARKER),
             "{preamble}"
@@ -1456,8 +1475,14 @@ agent_doc_format: template
             "#review\n  - read the diff",
         ] {
             let content = doc(fm, "subagents", &[inert], &[]);
+            let leaf = inert
+                .lines()
+                .nth(1)
+                .unwrap()
+                .trim()
+                .trim_start_matches("- ");
             let preamble =
-                subagent_authorization("doc.md", &content, inert).subagent_prompt_preamble;
+                subagent_authorization("doc.md", &content, leaf).subagent_prompt_preamble;
             assert!(
                 !preamble.contains("effective directives"),
                 "{inert}\n{preamble}"

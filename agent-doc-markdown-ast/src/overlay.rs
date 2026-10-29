@@ -507,9 +507,9 @@ fn starts_with_operator_request_id(work: &str) -> bool {
 }
 
 /// True when a runnable list row whose content (after its bullet) is
-/// `item_content` can own nested sub-prompt rows (`#nestedsubprompts`): a
-/// free-text row, live or struck. A tracked-id directive never does; its
-/// nested rows keep the `#queuenest` / `#f1s3` group semantics.
+/// Compatibility predicate for callers that still inspect a legacy folded
+/// sub-prompt block. Canonical component parsing emits every list row as its
+/// own item and does not use this predicate to fold nested rows.
 ///
 /// The decision reads the row's work, not its projection prefix
 /// ([`queue_item_work_text`]), so a lifecycle or `🙋` marker never changes
@@ -527,9 +527,7 @@ pub fn queue_item_accepts_subprompts(item_content: &str) -> bool {
         .is_some_and(|work| !work.starts_with("[#") || starts_with_operator_request_id(work))
 }
 
-/// End (exclusive line index) of the sub-prompt block owned by the runnable
-/// list row at `lines[parent]`, when that block starts at `lines[from]`
-/// (`#nestedsubprompts`).
+/// End (exclusive line index) of a legacy foldable sub-prompt block.
 ///
 /// `from` is the first line after the parent row and its `#queuecruft`
 /// continuation. The block is the maximal run of lines that are either
@@ -547,9 +545,8 @@ pub fn queue_item_accepts_subprompts(item_content: &str) -> bool {
 /// `preset`, `dispatch`): a subtree with tracked work is a `#f1s3` group, not
 /// one prompt, so nothing is folded and the legacy leaf-head shape stands.
 ///
-/// Both queue enumerators (`components` here and
-/// `agent_doc_queue::document_queue::parse_spans`) call this one rule, so they
-/// segment a parent and its children identically.
+/// Retained for compatibility helpers and tests; canonical queue enumerators
+/// now segment every list row independently.
 pub fn queue_subprompt_block_end(lines: &[&str], parent: usize, from: usize) -> Option<usize> {
     use agent_doc_element_queue::subprompts::{
         line_indent_width, list_item_content, subprompt_row_is_eligible,
@@ -833,10 +830,9 @@ fn classify(content: &str) -> ItemKind {
 
 fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Item {
     let raw = raw_line_content.trim().to_string();
-    // `#nestedsubprompts`: a runnable row that absorbed nested sub-prompt rows
-    // is struck, pinned, classified and keyed by its parent part alone. The
-    // sub-prompt block rides along in `text` verbatim, so a child edit is an
-    // edit of the same node, never a new node.
+    // Compatibility for a caller that passes a legacy folded row. Canonical
+    // component parsing calls this once per list row, so `subprompt_block` is
+    // absent and every child has its own node.
     let (head_raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&raw);
     let mut body = head_raw.trim();
@@ -1166,8 +1162,8 @@ pub fn components(source: &str) -> Vec<Component> {
     let mut out: Vec<Component> = Vec::new();
     let mut open: Option<Component> = None;
 
-    // `#nestedsubprompts`: sub-prompt folding needs to look ahead over the
-    // lines below a row, so walk an indexed line table.
+    // Walk an indexed line table so continuation and marker ranges retain
+    // exact source offsets.
     let raw_lines: Vec<&str> = source.split_inclusive('\n').collect();
     let content_lines: Vec<&str> = raw_lines
         .iter()
@@ -1187,9 +1183,6 @@ pub fn components(source: &str) -> Vec<Component> {
     // `#queuecruft`: byte offset where the open queue list item's content
     // starts, while that item still accepts continuation lines.
     let mut continuable_item: Option<(usize, QueueContinuationState)> = None;
-    // `#nestedsubprompts`: `(content start byte, parent line index)` of the
-    // last runnable free-text row, while nested sub-prompt rows may follow it.
-    let mut subprompt_parent: Option<(usize, usize)> = None;
     let mut line_index = 0usize;
     while line_index < raw_lines.len() {
         let index = line_index;
@@ -1199,7 +1192,6 @@ pub fn components(source: &str) -> Vec<Component> {
         offset = line_start + line.len();
         if markers.in_code(line_start) {
             continuable_item = None;
-            subprompt_parent = None;
             continue;
         }
         let content = content_lines[index];
@@ -1215,24 +1207,6 @@ pub fn components(source: &str) -> Vec<Component> {
                 continue;
             }
             continuable_item = None;
-        }
-
-        if let Some((raw_start, parent_index)) = subprompt_parent.take()
-            && let Some(end) = queue_subprompt_block_end(&content_lines, parent_index, index)
-            && (index..end).all(|j| !markers.in_code(line_offsets[j]))
-            && let Some(comp) = open.as_mut()
-            && let Some(last) = comp.items.last_mut()
-        {
-            let last_line = end - 1;
-            let joined =
-                &source[raw_start..line_offsets[last_line] + content_lines[last_line].len()];
-            *last = parse_item(
-                joined,
-                last.start_byte,
-                line_offsets[last_line] + raw_lines[last_line].len(),
-            );
-            line_index = end;
-            continue;
         }
 
         if let Some(name) = markers.close_at(line_start, trimmed) {
@@ -1281,9 +1255,6 @@ pub fn components(source: &str) -> Vec<Component> {
             let raw_start = line_start + (content.len() - item_content.len());
             if is_runnable_component(&comp.name) && queue_item_accepts_continuation(item_content) {
                 continuable_item = Some((raw_start, QueueContinuationState::default()));
-            }
-            if is_runnable_component(&comp.name) && queue_item_accepts_subprompts(item_content) {
-                subprompt_parent = Some((raw_start, index));
             }
         }
     }

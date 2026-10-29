@@ -1075,39 +1075,6 @@ The row is that nested answers under the marker prompt and the recency prompt di
 ### Re: Nested answers stay on their rows — grok-4.7 · 2026-10-29T13:29-04:00
 
 `subagent:reviewpublish` generation 1 and `subagent:recentrun` generation 1 stay operator actions. Their workers have exited. The plan-ingestion fix is the running `subagent:answersinplan` row.
-
-### Re: Subagent completed: `subagent:answersinplan` returned work for queue item “I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.” — agent-doc
-<!-- agent-doc-subagent-response sha256=23f01667d3bb16c92cd1d7f5461951955cd6893923dd4828aed10cded6da22cb -->
-> **Subagent response:**
->
-> Nested operator answers under blocking request rows are now part of `agent-doc plan`. The branch is pushed and the worktree is clean.
->
-> - **Branch:** `fix/operator-answers-in-plan`
-> - **Commit:** `ce407521928f18b22bd127b063eb45bb0f3c0f67`
-> - **Remote:** `origin/fix/operator-answers-in-plan` (new branch, no force-push)
->
-> A live nested row under a work row that still carries a blocking `[#subagent-operator-request-...]` annotation (`🙋`, or an open todo that owns that id) is that request’s answer. `operator_request_answers` reports `request_id`, `queue_item`, and the nested answer text. On a plan with no other diff, `task_class` is `operator_request_answers`, `prompt_targets` repeats each answer, and there is no `no_changes` blocker. The row is not dispatched and the todo is not checked.
->
-> The plan test uses the live wording. The review answer is `Annotation, worker-reported` plus the icon question. The recency answer is the timestamp-highlight / numeric-glyph line. The marker design and the recency design are not implemented.
->
-> **Files changed:**
->
-> - `agent-doc-document/src/queue_projection.rs`
-> - `agent-doc-queue/src/queue_continuation.rs`
-> - `src/plan.rs`
-> - `specs/02-document-format.md`
-> - `specs/07-orchestration-commands.md`
-> - `specs/07-closeout-commands.md`
->
-> **Tests (all exit 0):**
->
-> - `cargo test -p agent-doc-document --lib nested_lines_under_a_blocking_request_row_are_the_answer` — 1 passed, 226 filtered out
-> - `cargo test -p agent-doc-document --lib nested_operator_answer_row_is_a_local_answer` — 1 passed, 226 filtered out
-> - `cargo test -p agent-doc-queue --lib blocking_operator_request_answers_report_nested_lines_under_the_work_row` — 1 passed, 1034 filtered out
-> - `cargo test --bin agent-doc -- plan::tests::` — 60 passed, 1259 filtered out
->
-> No follow-up queue heads. `make install` was not run.
-<!-- agent-doc-subagent-completion key=a597c10ad2e79da0e791fb5e3abab9370c9cafd19bc46e03935042c44179280f -->
 > **Queue prompt:** I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.
 
 ### Re: Nested answers enter the plan — grok-4.7 · 2026-10-29T13:46-04:00
@@ -1137,7 +1104,30 @@ JetBrains packages were already current: IDE 263 `0.2.891` at IntelliJ IDEA 2026
 > **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 
 **Deferred:** Choice (6) on `#recent-run-affordance` already records this. A timestamp annotation can highlight the newest three rows, and a numeric recency glyph can carry that order. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
-<!-- agent:boundary:1a130bc0 -->
+> **Queue prompt:** I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.
+>   - Run `make install` so we can test locally.
+
+### Re: Install row closes with its note — grok-4.7 · 2026-10-29T14:00-04:00
+
+The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recorded above. Main stays at `7b44d8bb28`. The branch is unmerged.
+
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
+
+**Deferred:** Striking this row would remove the nested lines Annotation, worker-reported and the icon question. Those stay until you say to build the annotation, the icons, or both. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?
+
+**Deferred:** Striking this row would remove the timestamp and numeric-glyph note. Choice (6) on `#recent-run-affordance` already records it. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+**Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+**Deferred:** Choice (6) on `#recent-run-affordance` already records numbered highlights for the newest three rows, or a numeric recency glyph that carries that order.
+<!-- agent:boundary:3ac59bec -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -1150,8 +1140,8 @@ JetBrains packages were already current: IDE 263 `0.2.891` at IntelliJ IDEA 2026
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
-- ☑️ [#subagent:answersinplan#1] I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.
-  - Run `make install` so we can test locally.
+- ~~I made answers to the prompts in agent-doc-bugs.md, but agent-doc did not add them to the plan.~~
+  - ~~Run `make install` so we can test locally.~~
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

@@ -739,7 +739,6 @@ Those eighteen plan claims exited 1 because each command used `--item '#rebase'`
 > **Queue prompt:** release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 
 **Deferred:** Both named commits are on origin/main (`9c09d2aadc` and `1bbc28a6a9`). `feat/release-readiness` is five commits ahead of origin/main, ending at `f058fa029d`. The `0.35.561` version projection is uncommitted. `make check` is running. `v0.35.561` is not tagged, and publication has not run.
-
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -750,8 +749,8 @@ Those eighteen plan claims exited 1 because each command used `--item '#rebase'`
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
 - ☑️ [#subagent:releaseinclude#2] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 - ~~Why are there many agent:run items with 📥 in api.md? Is the state out of sync or do we need another emoji to represent another state?~~ — auto-struck: answered this cycle (#ftstrike)
----
-☑️ [#subagent:runnorefuse#1] agent:run items should never be refused. From api.md session:
+~~~done
+agent:run items should never be refused. From api.md session:
 ```
 Yes. The queue claim for a shared #rebase row is refused when several pull requests use that same      9:12 AM   █
 text. Nine live rows match it, on pull requests 717, 758, 763, and 767, so those claims exited 1 and             █
@@ -760,10 +759,10 @@ claim is held by pull request 763. GitHub showed 0 reviews and 0 review comments
 github.com/haiven-dev/haiven-api/pull/767. The head was 958dbf52dfca2a499f47320db72d86a62d77622d on
 agent/studio-integration-redirects-20261026, base sdk-dev. mergeable came back UNKNOWN.
 ```
----
+~~~
 - ~~Does a "refusal" strand the state of a agent:run item? Is this why there are so many run items that are stuck iwth 📥 in api.md?~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~Remove Editor Plugin dialog since this is a normal/routine operation: [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
-- ☑️ [#subagent:claimexit1#1] In api.md, a turn shows `All 18 plan claims exited 1, so no worker started. I am recording the three chat prompts and the current PR 767 git state in the closeout.`: I believe this is related to the stranded 📥. Why are the claims exiting 1? Can we discern a reason and use certain reasons to update the state so we don't have stranded items with 📥 only to exit 1 during every turn? Also I added https://github.com/haiven-dev/haiven-api/pull/762 > #rebase, but agent-doc did nothing...presumably because it had an exit 1.
+- ~~In api.md, a turn shows `All 18 plan claims exited 1, so no worker started. I am recording the three chat prompts and the current PR 767 git state in the closeout.`: I believe this is related to the stranded 📥. Why are the claims exiting 1? Can we discern a reason and use certain reasons to update the state so we don't have stranded items with 📥 only to exit 1 during every turn? Also I added https://github.com/haiven-dev/haiven-api/pull/762 > #rebase, but agent-doc did nothing...presumably because it had an exit 1.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

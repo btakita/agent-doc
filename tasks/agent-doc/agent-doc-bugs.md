@@ -640,6 +640,12 @@ Commit `1bbc28a6a9` is on main. A nested free-text leaf is keyed by its parent l
 
 **Deferred:** dispatched to `subagent:releasepublish` generation 6, worker `01a1862f-3e2a-7931-92a7-515ece65f9c3`, in `/home/brian/worktrees/agent-doc-releasepublish`. That worker reports whether `origin/main` is ready. The coordinator cuts the release after that report. The published release remains `v0.35.560`.
 
+### Re: release stays uncut while CI runs — grok-4.7 · 2026-10-29T01:46-04:00
+
+> **Queue prompt:** release + publish
+
+`origin/main` is `1bbc28a6a9`, 24 commits after tag `v0.35.560` (`bd971e9b87`). `9c09d2aadc` and `1bbc28a6a9` are both on that tip. Book run `40823503452` succeeded. Pages run `40823503419` succeeded. CI run `40823503416` is in progress on `make check`. The package version in the tree is still `0.35.560`. No release was cut. The published release remains `v0.35.560`.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
@@ -652,7 +658,7 @@ Commit `1bbc28a6a9` is on main. A nested free-text leaf is keyed by its parent l
 - ~~Run Agent Doc on api.md: I added agent:run id="contract-prs": The session keeps on stalling. There are 3 `agent:run` elements. It seems like the agent-doc plan is giving the agent nothing to do.~~ — auto-struck: answered this cycle (#ftstrike)
 - 🚧 [#subagent:releaseinclude#1] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 - ~~Will #subagent:contractprsstall allow all 3 agent:run elements to be processed, even if an earlier agent:run is PAUSED? If not, it should...and implement fix in a subagent.~~ — auto-struck: answered this cycle (#ftstrike)
-- 🚧 [#subagent:releasepublish#6] release + publish
+- ~~release + publish~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

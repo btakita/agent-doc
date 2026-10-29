@@ -100,14 +100,43 @@ pub fn admitted_prompt_text(prompt: &crate::document_queue::QueuePrompt) -> Stri
 /// backlog id, however long it has been quiet: a coined id is durable, and a
 /// half-typed stub plus the operator's finished line beside it is a meaningless
 /// item and a duplicate. The line stays free text until it reads finished.
+///
+/// An opening question sentence with more text after it is the same prompt
+/// target as a line that ends with `?` (`#freetextqueue`). `Is this tree still
+/// blocked? If not, update the head run item.` is one backlog task. A question
+/// later in a prose paragraph is not.
 pub fn free_text_prompt_is_backlog_task(text: &str) -> bool {
     let trimmed = normalize_admitted_free_text(text);
     !trimmed.is_empty()
         && !trimmed.starts_with('/')
         && !trimmed.starts_with('#')
         && !crate::queue_heads::is_do_directive(&trimmed)
-        && agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
+        && (agent_doc_prompt_lines::text_line_looks_like_prompt_target(&trimmed)
+            || line_has_interior_question(&trimmed))
         && !free_text_looks_unfinished(&trimmed)
+}
+
+/// The item opens with a question sentence and then continues.
+///
+/// A query-string `?` (`https://host/path?x=1`) has no whitespace after it and
+/// is not a sentence. A `.` or `!` before that `?` means the question is not
+/// the opening sentence, so a prose paragraph that asks something later stays
+/// prose. A line that ends with `?` is already a prompt target.
+fn line_has_interior_question(text: &str) -> bool {
+    let Some(idx) = text.find('?') else {
+        return false;
+    };
+    let before = &text[..idx];
+    if before.chars().any(|ch| matches!(ch, '.' | '!')) {
+        return false;
+    }
+    let before_has_word = before
+        .chars()
+        .rev()
+        .find(|ch| !ch.is_whitespace())
+        .is_some_and(|ch| ch.is_alphanumeric());
+    let after = &text[idx + 1..];
+    before_has_word && after.starts_with(char::is_whitespace) && !after.trim().is_empty()
 }
 
 /// The shared typing gate's structural verdict (`#steeringtypinggate`):
@@ -562,15 +591,19 @@ pub struct FreeTextAdmission {
 }
 
 /// Exact lineage receipt of one promoted free-text queue head
-/// (`#freetextqueue`): admission minted backlog `id` from `source_text` and
-/// removed that queue line. Claims follow this receipt to the `do [#id]` head;
-/// no text-similarity guess is involved.
+/// (`#freetextqueue`): admission minted backlog `id` from `source_text`.
+/// A top-level head is removed and re-added as `do [#id]`. A nested
+/// `#queuenest` leaf stays in its tree slot (`nest_in_place`). Claims follow
+/// this receipt to the `do [#id]` head; no text-similarity guess is involved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeTextPromotion {
     /// The queue line's prompt text as it stood before promotion.
     pub source_text: String,
     /// The lowercase backlog id minted (or matched) for it.
     pub id: String,
+    /// Replace this nested leaf in place. A top-level head is dropped so the
+    /// backlog mirror can prepend `do [#id]`.
+    pub nest_in_place: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -601,6 +634,10 @@ impl PreparedFreeTextAdmission {
         let mut queue_entries = self.queue_entries;
         let queued_ids = match execution {
             FreeTextAdmissionExecution::Goal => {
+                // Nested leaves stay in `queue_entries` so Queue mode can
+                // replace them in place. Goal still removes the free text and
+                // inserts `/goal`, matching a top-level admission.
+                drop_nested_promoted_free_text(&mut queue_entries, &self.promotions);
                 let command = goal_command_for_ids(&self.unique_ids);
                 if !goal_command_already_queued(&queue_entries, &self.unique_ids) {
                     queue_entries.insert(
@@ -622,10 +659,13 @@ impl PreparedFreeTextAdmission {
                 Vec::new()
             }
             FreeTextAdmissionExecution::Queue => {
+                // Snapshot before the in-place `do [#id]` exists, or the new
+                // nested id is omitted from `queued_ids` (`#qrepeatid`).
                 let before_ids: HashSet<String> = queue_entries
                     .iter()
                     .filter_map(crate::queue_projection::queue_entry_do_id)
                     .collect();
+                replace_nested_free_text_in_place(&mut queue_entries, &self.promotions);
                 let synced = crate::document_queue::sync_backlog_into_queue(
                     &queue_entries,
                     &self.unique_ids,
@@ -900,31 +940,49 @@ fn prepare_free_text_admission_for_queue(
         .cloned()
         .collect::<HashSet<_>>();
     let mut promotions = Vec::new();
+    let mut placed_nested_ids = HashSet::new();
     let queue_entries = entries
         .iter()
-        .filter(|entry| {
-            if !queue_entry_is_admitted_free_text(entry, queue_scope) {
-                return true;
-            }
+        .filter_map(|entry| {
             let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
-                return true;
+                return Some((*entry).clone());
             };
             let key = crate::queue_response::normalize_for_answer_match(
                 &normalize_admitted_free_text(&prompt.text),
             );
-            if !admitted_keys.contains(&key) {
-                return true;
+            if key.is_empty() || !admitted_keys.contains(&key) {
+                return Some(entry.clone());
             }
-            // `#freetextqueue`: the exact promotion receipt for this head.
-            if let Some(id) = id_by_text.get(&key) {
-                promotions.push(FreeTextPromotion {
-                    source_text: prompt.text.clone(),
-                    id: id.trim().to_ascii_lowercase(),
-                });
+            let nested = prompt.indent > 0;
+            let in_scope = queue_scope.allows_prompt(&prompt.text);
+            // A top-level row outside this pass stays authored text. A nested
+            // leaf is the tree slot the id replaces, including when only the
+            // exchange prompt was in scope (`#queuenest`, `#freetextqueue`).
+            if !in_scope && !nested {
+                return Some(entry.clone());
             }
-            false
+            let Some(id) = id_by_text.get(&key) else {
+                return Some(entry.clone());
+            };
+            let id = id.trim().to_ascii_lowercase();
+            if id.is_empty() {
+                return Some(entry.clone());
+            }
+            promotions.push(FreeTextPromotion {
+                source_text: prompt.text.clone(),
+                id: id.clone(),
+                nest_in_place: nested,
+            });
+            if !nested {
+                return None;
+            }
+            // One id, one nested row. A later copy of the same text would be a
+            // second head for the same backlog item.
+            if !placed_nested_ids.insert(id) {
+                return None;
+            }
+            Some(entry.clone())
         })
-        .cloned()
         .collect();
 
     Ok(Some(PreparedFreeTextAdmission {
@@ -950,6 +1008,53 @@ pub fn append_empty_agent_component(content: &str, name: &str) -> String {
     out.push_str(name);
     out.push_str(" -->\n");
     out
+}
+
+/// Replace each nested free-text leaf with `do [#id]` at the same indent.
+///
+/// The backlog mirror then sees the id and does not prepend a second
+/// top-level row (`#queuenest`, `#freetextqueue`).
+fn replace_nested_free_text_in_place(
+    entries: &mut Vec<crate::document_queue::QueueEntry>,
+    promotions: &[FreeTextPromotion],
+) {
+    let mut placed = HashSet::new();
+    let mut index = 0;
+    while index < entries.len() {
+        let replacement_id = match &entries[index] {
+            crate::document_queue::QueueEntry::Prompt(prompt) if prompt.indent > 0 => promotions
+                .iter()
+                .find(|promotion| promotion.nest_in_place && promotion.source_text == prompt.text)
+                .map(|promotion| promotion.id.clone()),
+            _ => None,
+        };
+        let Some(id) = replacement_id else {
+            index += 1;
+            continue;
+        };
+        if !placed.insert(id.clone()) {
+            entries.remove(index);
+            continue;
+        }
+        if let crate::document_queue::QueueEntry::Prompt(prompt) = &mut entries[index] {
+            prompt.text = format!("do [#{id}]");
+            prompt.multiline = false;
+        }
+        index += 1;
+    }
+}
+
+/// Goal execution removes nested free text instead of leaving it beside `/goal`.
+fn drop_nested_promoted_free_text(
+    entries: &mut Vec<crate::document_queue::QueueEntry>,
+    promotions: &[FreeTextPromotion],
+) {
+    entries.retain(|entry| match entry {
+        crate::document_queue::QueueEntry::Prompt(prompt) if prompt.indent > 0 => !promotions
+            .iter()
+            .any(|promotion| promotion.nest_in_place && promotion.source_text == prompt.text),
+        _ => true,
+    });
 }
 
 pub fn queue_entry_is_admitted_free_text(
@@ -1148,6 +1253,12 @@ mod tests {
         assert!(!free_text_prompt_is_backlog_task("/clear"));
         assert!(!free_text_prompt_is_backlog_task("#setup"));
         assert!(!free_text_prompt_is_backlog_task("do [#setup]"));
+        assert!(free_text_prompt_is_backlog_task(
+            "Is this tree still blocked? If not, update the head run item."
+        ));
+        assert!(!free_text_prompt_is_backlog_task(
+            "The duplicate happened again as I was typing. Should we diff line by line? Do we still have race conditions?\n#spec-test-build-install-commit-push"
+        ));
     }
 
     #[test]
@@ -1421,6 +1532,119 @@ mod tests {
             crate::document_queue::QueueEntry::Prompt(prompt)
                 if prompt.text == "Implement checkout setup"
         )));
+    }
+
+    /// A nested free-text leaf under a tracked `do [#id]` parent stays in that
+    /// tree slot when admission mints a backlog id (`#freetextqueue`,
+    /// `#queuenest`). Lifting it to a top-level `do [#id]` leaves the original
+    /// text in place or wakes the parent, and both dispatch.
+    #[test]
+    fn nested_free_text_under_tracked_parent_stays_in_the_tree() {
+        const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
+        let content = concat!(
+            "<!-- agent:run subagents priority go -->\n",
+            "- do [#push] [#subagent-operator-request-push-target]\n",
+            "  - Is this tree still blocked? If not, update the head run item.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        assert!(
+            free_text_prompt_is_backlog_task(CHILD),
+            "the reported nested prompt must be admissible backlog work"
+        );
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .expect("nested free text is admitted");
+        assert_eq!(prepared.admitted_count, 1);
+        assert_eq!(prepared.unique_ids.len(), 1);
+        let id = prepared.unique_ids[0].clone();
+
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+        let rendered = crate::document_queue::render(&queue_entries);
+
+        assert!(
+            rendered.contains(&format!("  - do [#{id}]\n")),
+            "the minted id must replace the free text at the same indent:\n{rendered}"
+        );
+        assert_eq!(
+            rendered.matches(&format!("do [#{id}]")).count(),
+            1,
+            "one nested child is one queue row, not a second top-level row:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains(CHILD),
+            "the free text must not remain beside the minted id:\n{rendered}"
+        );
+        let parent = queue_entries.iter().position(|entry| {
+            matches!(
+                entry,
+                crate::document_queue::QueueEntry::Prompt(prompt)
+                    if prompt.indent == 0 && prompt.text.contains("do [#push]")
+            )
+        });
+        let parent = parent.expect("tracked parent stays");
+        assert!(
+            crate::document_queue::entry_is_group_parent(&queue_entries, parent),
+            "the parent stays a non-executable group label"
+        );
+        let heads = crate::document_queue::prompts(&queue_entries);
+        assert_eq!(
+            heads.len(),
+            1,
+            "one nested child produces one dispatch, not two: {heads:?}"
+        );
+        assert_eq!(heads[0].text, format!("do [#{id}]"));
+        assert!(heads[0].is_nested());
+    }
+
+    /// The same child typed again as the exchange prompt must not mint a second
+    /// top-level row while the nested copy stays live. An active queue admits
+    /// no queue-origin row (`FreeTextAdmissionScope::None`); the exchange text
+    /// is the admission.
+    #[test]
+    fn exchange_prompt_matching_nested_free_text_replaces_that_row() {
+        const CHILD: &str = "Is this tree still blocked? If not, update the head run item.";
+        let content = concat!(
+            "<!-- agent:run subagents priority go -->\n",
+            "- do [#push] [#subagent-operator-request-push-target]\n",
+            "  - Is this tree still blocked? If not, update the head run item.\n",
+            "<!-- /agent:run -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            Some(CHILD),
+            &FreeTextAdmissionScope::None,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .expect("exchange prompt admits the nested child");
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+        let rendered = crate::document_queue::render(&queue_entries);
+        let heads = crate::document_queue::prompts(&queue_entries);
+
+        assert_eq!(
+            rendered.matches(&format!("do [#{id}]")).count(),
+            1,
+            "{rendered}"
+        );
+        assert!(!rendered.contains(CHILD), "{rendered}");
+        assert_eq!(heads.len(), 1, "{heads:?}\n{rendered}");
+        assert_eq!(heads[0].text, format!("do [#{id}]"));
+        assert!(heads[0].is_nested());
     }
 
     /// GH #310: admission is addressed by the selected queue id. A blocked or

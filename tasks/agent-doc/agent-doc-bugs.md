@@ -3,7 +3,7 @@ agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: f08cd727-ebd1-4b95-8305-635688e2d56c
   codex: 01a17616-9ddc-7ee0-86df-a42c74605356
-agent: grok
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -1405,6 +1405,23 @@ Five reported rows stay open. Each one is blocked on an operator pick. Striking 
 `subagent:planrange` (`01a188fe-f39b-7f00-b821-812d845e6c8a`) and `subagent:lostrestart` (`01a188e5-ad81-70d0-8926-43443988ca39`) are still at work.
 
 Changed paths: none. Commands: this closeout is `finalize` only. Verification: no product diff in this turn. Confidence: each named row is blocked on the operator pick above. Escalation: pick those readings before any of those five rows is built or struck.
+
+### Re: Issue watch and row-state affordances — gpt-5 · 2026-10-29T15:49-04:00
+
+> **Queue prompt:** Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+
+The open list has three issues. After excluding #40 and #45, the only new untracked issue is [#385, fence-leading free-text queue heads are not struck by a labeled verbatim echo](https://github.com/btakita/agent-doc/issues/385). I added it to both backlog and queue as `#gh385fencehead`, with the issue's required same-line/next-line label coverage and its negative cases.
+
+> **Queue prompt:** Annotation, worker-reported
+> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+Keep **Annotation, worker-reported** as the canonical source of truth. I recommend `⟦local⟧`, `⟦published⟧`, and `⟦published+local⟧`; the last state means the row was published and then changed locally again. The editor can derive compact glyphs from those annotations: `✎` for local, `⇧` for published, and `✎⇧` for published plus a newer local delta. `⇧` reads more like push/upload than a plain up-arrow, while the annotation, legend, and tooltip remove ambiguity. I captured that implementation as recommended backlog item `#reviewpublishmarkers` and completed the two decision TODOs.
+
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+Use the timestamp annotation as durable truth and derive numeric editor glyphs `①`, `②`, and `③`, where `①` is the most recently addressed row. Match those ranks with three highlight strengths. Moving the caret onto a row can clear its transient highlight without deleting the timestamp or rank evidence; ranks are recomputed when another turn is addressed. I captured this as recommended backlog item `#recentrunmarkers` and completed the two recency decision TODOs.
+
+Changed paths: task state in `tasks/agent-doc/agent-doc-bugs.md`; the required version gate also refreshed installed agent-doc skill/runbook mirrors. Commands: agent-doc read/plan, the live GitHub issue check, and this granular backlog/TODO closeout. Verification: the repository currently shows three open issues, exclusions #40 and #45 leave only #385, and the live document search found no existing #385 URL. Confidence: high. Escalation: none; these implementation items are queued rather than built in this choice-response cycle.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
@@ -1413,10 +1430,10 @@ Changed paths: none. Commands: this closeout is `finalize` only. Verification: n
   - ~~Where does this file live? My Coder agent is asking.~~
 - do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
+- ☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
   - Annotation, worker-reported
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
-- 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+- ☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 - 🙋☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
 - ~~In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.~~ — auto-struck: answered this cycle (#ftstrike)
@@ -1424,10 +1441,13 @@ Changed paths: none. Commands: this closeout is `finalize` only. Verification: n
 - 🙋☑️ [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]
 - 🚧 [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
 - 🚧 [#subagent:planrange#1] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
+- do [#gh385fencehead]
+- do [#reviewpublishmarkers]
+- do [#recentrunmarkers]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->
@@ -1462,6 +1482,9 @@ Changed paths: none. Commands: this closeout is `finalize` only. Verification: n
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#gh385fencehead] Fix GH #385 (https://github.com/btakita/agent-doc/issues/385): let a labeled verbatim Queue prompt echo strike a fence-leading free-text head; keep trailing-only and unlabeled blockquotes non-matching; add regression coverage for same-line and next-line label shapes.
+- [ ] [#reviewpublishmarkers] [recommended] Implement worker-reported local/published state as canonical annotations (local, published, published+local) with derived editor glyphs ✎, ⇧, and ✎⇧ plus a legend or tooltip; source decision #reviewpublish-marker.
+- [ ] [#recentrunmarkers] [recommended] Implement addressed-at timestamp annotations with editor-derived ①/②/③ recency ranks and highlights for the newest three rows; caret navigation clears only the transient highlight; source decision #recent-run-affordance.
 - [ ] [#subagents-fanout] A bare subagents attribute on agent:run, with no =N cap, is a fan-out: every eligible head in every such run is dispatched in the same cycle, each to its own subagent. agent-doc plan still returns parallelizable false and a one-item queue_subagent_dispatch, so a coordinator holds the other live heads. Observed 2026-10-29 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md cycle cycle-1793299293224. That document has three runs, id=main, id=api-prs, and id=contracts-prs, each marked subagents with no cap. After the haiven-api pull 767 review was already running, a fresh plan set task_class queue_subagent_dispatch, dispatch_mode manual, parallelizable false, and listed only https://github.com/haiven-dev/haiven-api/pull/762: #review. queue brief at the same time still named other live heads, including the haiven-contracts pull 169 row whose child is Add backlog items into fpe.md. and the haiven-contracts pull 174 address row whose new child is respond to the review in the PR. Create a plan. Do not implement the fix in that plan.
 - [ ] [#reviewrebase-repeat] Each copy of a nested review or rebase preset in one prompt tree must run again, including when the same words already ran under another parent. A short claim binds one remaining head, and the closeout that answers one leaf removes the same text under a different parent. On 2026-10-29, /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md commit 46525385 still had an inbox review child under https://github.com/haiven-dev/haiven-api/pull/767. Commit 477a8d7e removed that child while recording the review for https://github.com/haiven-dev/haiven-api/pull/763. Create a plan. Do not implement the fix in that plan.
 - [ ] [#grok-live-editor] Grok Build should see live agent-doc editor changes. A Grok session reads the CRDT document only when it calls agent_doc_admit, agent_doc_plan, agent_doc_read, or agent_doc_finalize, or when it pulls agent-doc steering. The Read tool sees disk, which trails the editor replica. Queue rows the operator adds during a turn stay invisible until the next pull, so the coordinator dispatches only the rows the last plan listed and the operator sees idle inbox rows. Expected: while a Grok pane owns a session, converged editor ops (new queue rows, strikes, claim projection) are pushed into that session, and the next plan includes the newly runnable rows without waiting for another user message. Observed 2026-10-28 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md: the operator asked why only two subagents were running while more queue rows were visible. The prior plan queue_subagent_dispatch listed only those two.

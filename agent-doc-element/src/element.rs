@@ -312,7 +312,7 @@ impl fmt::Display for ComponentParseError {
             ),
             Self::Unclosed { name, line } => write!(
                 f,
-                "unclosed component: <!-- agent:{name} --> without matching close (opening marker at line {line})"
+                "unclosed component: the component has no close `/agent:{name}` (opening marker at line {line})"
             ),
         }
     }
@@ -2939,7 +2939,30 @@ beta
     fn unmatched_open_error() {
         let doc = "<!-- agent:orphan -->\nContent\n";
         let err = parse(doc).unwrap_err();
-        assert!(err.to_string().contains("unclosed component"));
+        assert_eq!(
+            err.to_string(),
+            "unclosed component: the component has no close `/agent:orphan` (opening marker at line 1)"
+        );
+    }
+
+    #[test]
+    fn unclosed_run_names_the_missing_close_and_not_a_bare_opener() {
+        let open = "<!-- agent:run id=\"contracts-prs\" subagents priority go -->\n- row\n";
+        let message = parse(open).unwrap_err().to_string();
+        assert_eq!(
+            message,
+            "unclosed component: the component has no close `/agent:run` (opening marker at line 1)"
+        );
+        // A later `<!-- agent:run -->` is another opener. It is not the close
+        // the section is missing, so the document stays unclosed.
+        let slashless = format!("{open}<!-- agent:run -->\n");
+        let slashless_message = parse(&slashless).unwrap_err().to_string();
+        assert_eq!(
+            slashless_message,
+            "unclosed component: the component has no close `/agent:run` (opening marker at line 3)"
+        );
+        let closed = format!("{open}<!-- /agent:run -->\n");
+        assert!(parse(&closed).is_ok(), "only the slashed close ends the run");
     }
 
     #[test]
@@ -4640,7 +4663,7 @@ Agreed:\n- **On by default for an active queue.**\n{prose}\
         let tail_line = tail.lines().count();
         let message = parse(&tail).expect_err("trailing opener").to_string();
         assert!(
-            message.contains("unclosed component: <!-- agent:queue -->")
+            message.contains("the component has no close `/agent:queue`")
                 && message.contains(&format!("opening marker at line {tail_line}")),
             "{message}"
         );

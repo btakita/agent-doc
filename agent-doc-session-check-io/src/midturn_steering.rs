@@ -1818,10 +1818,13 @@ pub fn emit_closeout_steering(file: &Path, writer: &mut impl std::io::Write) {
     }
 }
 
-/// Harness `PostToolUse` payload fields this hook reads. Claude Code and Codex
-/// both send `session_id` and `cwd`.
+/// Harness `PostToolUse` payload fields this hook reads. Claude Code, Codex,
+/// and Grok Build send `session_id` and `cwd`. Grok also sends camelCase
+/// `sessionId`. Grok names a subagent with `subagentType` (and may alias
+/// `subagent_type`); Claude Code uses `agent_id`.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PostToolUseInput {
+    #[serde(alias = "sessionId")]
     pub session_id: String,
     pub cwd: String,
     /// Claude Code sets `agent_id` (and `agent_type`) only when the tool call
@@ -1830,16 +1833,22 @@ pub struct PostToolUseInput {
     /// steering leaked into (and was consumed by) its subagents' tool calls.
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Grok Build sets `subagentType` inside a subagent and omits it on the
+    /// main session. It is not in Grok's snake_case alias list.
+    #[serde(default, alias = "subagentType")]
+    pub subagent_type: Option<String>,
 }
 
 impl PostToolUseInput {
     /// The tool call ran inside a subagent, not the turn that owns the
     /// document (`#steerowneronly`).
     pub fn is_subagent(&self) -> bool {
-        self.agent_id
-            .as_deref()
-            .is_some_and(|id| !id.trim().is_empty())
+        nonempty_id(&self.agent_id) || nonempty_id(&self.subagent_type)
     }
+}
+
+fn nonempty_id(value: &Option<String>) -> bool {
+    value.as_deref().is_some_and(|id| !id.trim().is_empty())
 }
 
 /// Resolve the document this harness session is driving, from the binding
@@ -2149,6 +2158,26 @@ mod tests {
             )
             .expect("test editor should deregister from the CRDT relay");
         }
+    }
+
+    #[test]
+    fn grok_subagent_type_marks_a_child_call_without_agent_id() {
+        let camel: PostToolUseInput = serde_json::from_str(
+            r#"{"sessionId":"s","cwd":"/tmp","subagentType":"general-purpose"}"#,
+        )
+        .unwrap();
+        assert_eq!(camel.session_id, "s");
+        assert!(camel.is_subagent());
+        let snake: PostToolUseInput =
+            serde_json::from_str(r#"{"session_id":"s","cwd":"/tmp","subagent_type":"general"}"#)
+                .unwrap();
+        assert!(snake.is_subagent());
+        let owner: PostToolUseInput =
+            serde_json::from_str(r#"{"session_id":"s","cwd":"/tmp"}"#).unwrap();
+        assert!(!owner.is_subagent());
+        let blank: PostToolUseInput =
+            serde_json::from_str(r#"{"session_id":"s","cwd":"/tmp","subagentType":"  "}"#).unwrap();
+        assert!(!blank.is_subagent());
     }
 
     #[test]

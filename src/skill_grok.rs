@@ -8,7 +8,7 @@ fn content() -> String {
     let rendered = render_skill(
         agent_kit::detect::Environment::Generic,
         "Interactive markdown session. TRIGGER: agent-doc <file>, or a bare `/agent-doc` / `agent-doc` (the file this tmux pane claims). Requires binary admission and committed closeout.",
-        "## Invocation\n\nSubmit `agent-doc <FILE>` in Grok Build. With no FILE (`/agent-doc` or `agent-doc` alone), call connected `agent_doc_admit` without `file`: the binary admits the document this tmux pane claims and returns it as `file`; use that path as FILE for the whole cycle. If it refuses (not in tmux, no claim, several claims), report its reason and stop; never guess a document. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.\n\nGrok lifecycle hooks are notifications: stdout cannot inject admission context or continue the turn. Successful MCP admission is the required checkpoint. Use connected `agent_doc_finalize` for closeout. If MCP tools are absent, install with `agent-doc skill install --harness grok`, then enable/trust the project MCP server in Grok. Never bypass refused admission.\n\nThe connected plan is the queue-lifecycle contract. When `queue_subagent_dispatch` is non-empty, dispatch it immediately without waiting for another operator prompt. For each entry, run its `claim_command`, call Grok's native `spawn_subagent` with `background=true` and the authorization preamble verbatim at the start of the worker prompt, then run its `start_command` with the returned `subagent_id`. Give repository-writing workers separate external worktrees. Use `get_command_or_subagent_output` for completion. Do not substitute `agent-doc orchestrate` while native `spawn_subagent` is available. When `queue_dispatch_acknowledgement_required` is non-empty, an earlier claim has no worker binding: run its exact `start_command` if spawn succeeded, or its `release_command` to requeue if no worker was spawned. These fields are actionable even when `prompt_targets` is empty; never call that `no_changes` or resume the item inline.\n\nAfter a committed finalize, follow its queue-continuation fields in the same turn, admitting and completing each next actionable head. Do not end while a drainable head remains. Do not run another session-check after a successful connected finalize.",
+        "## Invocation\n\nSubmit `agent-doc <FILE>` in Grok Build. With no FILE (`/agent-doc` or `agent-doc` alone), call connected `agent_doc_admit` without `file`: the binary admits the document this tmux pane claims and returns it as `file`; use that path as FILE for the whole cycle. If it refuses (not in tmux, no claim, several claims), report its reason and stop; never guess a document. Read this skill, call connected `agent_doc_admit` for FILE, then read the document and run `agent-doc plan <FILE>`. Never recursively launch `agent-doc <FILE>` from a shell.\n\nGrok's UserPromptSubmit hook cannot inject admission context or continue the turn: an allowing prompt hook's stdout is discarded. Successful MCP admission is the required checkpoint. Use connected `agent_doc_finalize` for closeout. If MCP tools are absent, install with `agent-doc skill install --harness grok`, then enable/trust the project MCP server in Grok. Never bypass refused admission.\n\nWhile this Grok session owns the document, the project PostToolUse hook (`agent-doc hook steering-post-tool-use` in `.grok/hooks/agent-doc-steering.json`) pushes settled operator steering from the live editor replica into the running turn: new queue rows, claimed-row strikes, and claim-forwarded edits. That is the same real-time steering Claude Code and Codex receive through PostToolUse and OpenCode receives by polling `agent-doc steering <FILE>` while its turn runs. The Read tool sees disk, which trails the editor replica; do not trust it for queue state. On that additionalContext, re-call connected `agent_doc_plan` for FILE in the same turn and dispatch every new `queue_subagent_dispatch` row without waiting for another user message. `agent-doc steering <FILE>` remains the monitor path and OpenCode's in-turn delivery; do not ignore hook additionalContext in favor of a poll.\n\nThe connected plan is the queue-lifecycle contract. When `queue_subagent_dispatch` is non-empty, dispatch it immediately without waiting for another operator prompt. For each entry, run its `claim_command`, call Grok's native `spawn_subagent` with `background=true` and the authorization preamble verbatim at the start of the worker prompt, then run its `start_command` with the returned `subagent_id`. Give repository-writing workers separate external worktrees. Use `get_command_or_subagent_output` for completion. Do not substitute `agent-doc orchestrate` while native `spawn_subagent` is available. When `queue_dispatch_acknowledgement_required` is non-empty, an earlier claim has no worker binding: run its exact `start_command` if spawn succeeded, or its `release_command` to requeue if no worker was spawned. These fields are actionable even when `prompt_targets` is empty; never call that `no_changes` or resume the item inline.\n\nAfter a committed finalize, follow its queue-continuation fields in the same turn, admitting and completing each next actionable head. Do not end while a drainable head remains. Do not run another session-check after a successful connected finalize.",
     );
     let mut result = String::new();
     for line in rendered.lines() {
@@ -47,6 +47,23 @@ fn serve_args() -> toml::Value {
     toml::Value::Array(vec!["mcp".into(), "serve".into()])
 }
 
+const STEERING_HOOK_REL: &str = ".grok/hooks/agent-doc-steering.json";
+
+/// Project PostToolUse steering hook. Grok loads every `.grok/hooks/*.json`
+/// matcher group. This file is ours; other hooks stay in their own files.
+fn steering_hook_document() -> String {
+    let mut hooks = serde_json::Map::new();
+    ensure_codex_hook_command(
+        &mut hooks,
+        "PostToolUse",
+        STEERING_POSTTOOLUSE_COMMAND,
+        None,
+        Some(STEERING_HOOK_TIMEOUT_SECS),
+    );
+    let root = serde_json::json!({ "hooks": hooks });
+    ensure_trailing_newline(&serde_json::to_string_pretty(&root).expect("steering hook json"))
+}
+
 /// The pre-`#grokmcpserveargs` installer entry. Current binaries accept bare
 /// `agent-doc mcp` as a compatibility alias, but installs remain explicit.
 fn is_legacy_mcp_entry(entry: &toml::Value) -> bool {
@@ -66,8 +83,8 @@ pub fn install(root: Option<&Path>) -> Result<bool> {
     std::fs::create_dir_all(&dir)?;
     let skill_path = dir.join("SKILL.md");
     let skill_content = content();
-    let skill_updated = std::fs::read_to_string(&skill_path)
-        .map_or(true, |existing| existing != skill_content);
+    let skill_updated =
+        std::fs::read_to_string(&skill_path).map_or(true, |existing| existing != skill_content);
     write_if_changed(&skill_path, &skill_content)?;
     install_bundle(&dir.join("runbooks"), BUNDLED_RUNBOOKS)?;
     install_bundle(&dir.join("okf"), BUNDLED_OKF)?;
@@ -110,6 +127,11 @@ pub fn install(root: Option<&Path>) -> Result<bool> {
     if changed {
         write_if_changed(&path, &toml::to_string_pretty(&config)?)?;
     }
+    let hook_path = base.join(STEERING_HOOK_REL);
+    if let Some(parent) = hook_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    write_if_changed(&hook_path, &steering_hook_document())?;
     eprintln!(
         "[Grok Build] installed skill v{VERSION} -> {}",
         dir.display()
@@ -153,6 +175,15 @@ pub(super) fn audit(base: &Path) -> Result<()> {
                 config_path.display()
             );
         }
+    }
+    let hook_path = base.join(STEERING_HOOK_REL);
+    if std::fs::read_to_string(&hook_path).ok().as_deref()
+        != Some(steering_hook_document().as_str())
+    {
+        anyhow::bail!(
+            "stale or missing Grok steering hook {}; run agent-doc skill install --harness grok",
+            hook_path.display()
+        );
     }
     for (subdir, bundle) in [("runbooks", BUNDLED_RUNBOOKS), ("okf", BUNDLED_OKF)] {
         for (name, expected) in bundle {
@@ -214,6 +245,9 @@ mod tests {
         );
         assert!(text.contains("argument-hint: \"[file]\""));
         assert!(text.contains("agent_doc_finalize"));
+        assert!(text.contains("PostToolUse"));
+        assert!(text.contains("re-call connected `agent_doc_plan`"));
+        assert!(!text.contains("lifecycle hooks are notifications"));
         assert!(text.contains("`queue_subagent_dispatch`"));
         assert!(text.contains("`queue_dispatch_acknowledgement_required`"));
         assert!(text.contains("`spawn_subagent`"));
@@ -310,5 +344,34 @@ mod tests {
         assert!(auto_loop.contains("`spawn_subagent(background=true)`"));
         assert!(auto_loop.contains("automatic on the first admitted cycle"));
         audit(dir.path()).unwrap();
+    }
+
+    #[test]
+    fn install_writes_the_post_tool_use_steering_hook_and_audit_rejects_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        install(Some(dir.path())).unwrap();
+        let hook_path = dir.path().join(STEERING_HOOK_REL);
+        let raw = std::fs::read_to_string(&hook_path).unwrap();
+        let hook: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let handler = &hook["hooks"]["PostToolUse"][0]["hooks"][0];
+        assert_eq!(handler["type"], "command");
+        assert_eq!(handler["command"], STEERING_POSTTOOLUSE_COMMAND);
+        assert_eq!(
+            handler["timeout"].as_u64(),
+            Some(STEERING_HOOK_TIMEOUT_SECS)
+        );
+        assert!(hook["hooks"]["PostToolUse"][0].get("matcher").is_none());
+        assert!(raw.ends_with('\n'));
+        let installed = raw.clone();
+        install(Some(dir.path())).unwrap();
+        assert_eq!(std::fs::read_to_string(&hook_path).unwrap(), installed);
+        std::fs::remove_file(&hook_path).unwrap();
+        let missing = audit(dir.path()).unwrap_err().to_string();
+        assert!(missing.contains("steering hook"), "{missing}");
+        std::fs::create_dir_all(hook_path.parent().unwrap()).unwrap();
+        std::fs::write(&hook_path, "{}\n").unwrap();
+        let stale = audit(dir.path()).unwrap_err().to_string();
+        assert!(stale.contains("steering hook"), "{stale}");
+        assert!(check(Some(dir.path())).is_err());
     }
 }

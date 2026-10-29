@@ -98,7 +98,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   committed in HEAD. Genuine integrity failures still exit nonzero as
   `INTERRUPTED`.
 - **Mid-turn steering (`#midturn-steering`):** steering no longer waits for
-  closeout. After every tool call the PostToolUse hook (Claude Code, Codex)
+  closeout. After every tool call the PostToolUse hook (Claude Code, Codex, and Grok Build)
   hands the running turn new operator edits as `[agent-doc] operator steering
   arrived mid-turn`, each item verbatim with a typed `dispatch`. Edits pass the
   typing gate first (`#steeringtypinggate`, shared with preflight admission):
@@ -172,11 +172,17 @@ and the pending granular-flags-only rule. This runbook carries the rest.
     touches a repo give it its own worktree outside the IDE-watched project and
     never run two subagents against one repo checkout. Keep working the current
     item yourself and record the dispatch in your response.
-  OpenCode, Grok Build, Cursor, and other hook-less harnesses poll
+  OpenCode, Cursor, and other hook-less harnesses poll
   `agent-doc steering <FILE>` (`--json` for the typed form) between
-  long-running steps; that poll is their delivery channel, so it advances. To
-  inspect steering without consuming it (an operator, a monitor, another
-  agent), always use `agent-doc steering --peek <FILE>`.
+  long-running steps; that poll is their delivery channel, so it advances,
+  and it carries the same settled items the PostToolUse hook pushes to
+  Claude Code, Codex, and Grok Build.
+  Grok Build receives that push in the running turn.
+  On that context, re-call connected `agent_doc_plan` in the same turn.
+  For a hook harness the poll remains the monitor path. To inspect steering
+  without consuming
+  it (an operator, a monitor, another agent), always use
+  `agent-doc steering --peek <FILE>`.
   After closeout (`#steeringafterclose`) the hook keeps reporting new edits,
   framed as next-cycle queue work, while the same harness turn runs (for
   example while you wait on subagents). When the turn ends and the pane is

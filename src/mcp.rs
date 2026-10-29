@@ -503,6 +503,20 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
         agent_doc_snapshot_io::load_document_baseline,
         agent_doc_ops_log_io::log_op,
     )?;
+    // Grok's PostToolUse steering hook resolves the document from this ledger.
+    // A missing or failed bind must not fail admission; the hook stays silent
+    // until a later admit records the session.
+    if let Ok(session_id) = std::env::var("GROK_SESSION_ID")
+        && let Err(err) = agent_doc_codex_hook_io::bind_grok_admitted_session(&file, &session_id)
+    {
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "grok_session_bind_error file={} error={err:#}",
+                file.display()
+            ),
+        );
+    }
     let mut structured = json!({
         "ok": true,
         "file": file.display().to_string(),
@@ -1416,6 +1430,51 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&file).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::PreflightStarted);
+    }
+
+    #[test]
+    fn grok_admit_binds_the_session_the_steering_hook_reads() {
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
+        let key = "GROK_SESSION_ID";
+        let prev = std::env::var(key).ok();
+        unsafe { std::env::set_var(key, "grok-admit-session") };
+        let result = std::panic::catch_unwind(|| {
+            let dir = tempfile::TempDir::new().unwrap();
+            let root = dir.path();
+            std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+            let file = root.join("session.md");
+            std::fs::write(
+                &file,
+                "---\nagent_doc_session: sid-1\n---\n\n# Session\n\n❯ Please inspect\n",
+            )
+            .unwrap();
+            let response = response_for(json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_doc_admit",
+                    "arguments": { "file": file.display().to_string() }
+                }
+            }));
+            assert_eq!(response["result"]["isError"], false);
+            let state = agent_doc_codex_hook_io::load_state(root, "grok-admit-session")
+                .unwrap()
+                .expect("admit records GROK_SESSION_ID");
+            assert_eq!(
+                state.harness,
+                Some(agent_doc_codex_hook_io::HookHarness::Grok)
+            );
+            assert_eq!(state.preflight_admitted, Some(true));
+            assert!(state.last_prompt.starts_with("agent-doc "));
+            assert!(!state.recorded_by_codex_or_legacy());
+        });
+        if let Some(prev) = prev {
+            unsafe { std::env::set_var(key, prev) };
+        } else {
+            unsafe { std::env::remove_var(key) };
+        }
+        result.expect("admit bind assertion");
     }
 
     #[test]

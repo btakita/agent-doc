@@ -36,6 +36,24 @@ project config from failing closed before the skill can migrate it. Install
 rewrites only those args to the explicit canonical form, and the skill audit
 (`skill check --harness grok`) rejects the legacy shape.
 
+Project install also writes `.grok/hooks/agent-doc-steering.json`: a
+matcher-less `PostToolUse` command hook, `agent-doc hook steering-post-tool-use`,
+timeout 10. Grok Build 1.0.62 and later delivers that hook's `additionalContext`
+into the running turn. UserPromptSubmit still cannot inject admission, so
+admission stays connected `agent_doc_admit`. Admit binds `GROK_SESSION_ID` to
+the admitted document so the hook can resolve the session; a bind failure does
+not fail admission. A tool call inside a Grok subagent (`subagentType`, or
+`subagent_type`) does not consume the owner's steering. The settled steering is
+the same surface Claude Code and Codex deliver through PostToolUse and OpenCode
+delivers by polling `agent-doc steering` while the turn runs — new queue
+rows, claimed-row strikes, and claim-forwarded edits — read from the live CRDT
+replica, not from disk. On that context the coordinator re-calls connected
+`agent_doc_plan` in the same turn, and the new runnable `queue_subagent_dispatch`
+rows are included without another user message. OpenCode's busy adapter is
+poll-and-command-boundary, so that poll is its delivery and it advances.
+`agent-doc steering` also stays the monitor path for other hookless harnesses.
+The skill audit rejects a missing or stale steering hook file.
+
 ## Trait
 
 `fn send(prompt, session_id, fork, model) -> (text, session_id)`

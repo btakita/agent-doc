@@ -38,18 +38,27 @@ pane or shell preflight. Continue actionable queue heads in the same turn after
 committed closeout; do not run another session-check after a terminal connected
 finalize.
 
-Grok lifecycle hooks are notifications, so a passive edit is not pushed into
-the turn (`#midturn-steering`): poll `agent-doc steering <FILE>` between long
-steps (inspect without consuming with `agent-doc steering --peek <FILE>`), and
-read the steering block in the connected finalize's terminal report. An
-explicit `Run Agent Doc` while this turn is running is different
-(`#routesyncsteer`): route submits the latest diff since the last send into
-the composer as one mid-turn follow-up. With `ui.follow_up_behavior = "steer"`
-that follow-up is injected into this turn at the next safe gap; with `"queue"`
-it waits until the turn ends. Handle that diff as operator steering. Do not
-start a second turn. When the turn ends, the supervisor wakes the idle Grok
-pane for settled, unsurfaced, unclaimed steering (`#steeringwake`) through the
-same guarded idle dispatch.
+Grok's UserPromptSubmit hook cannot inject admission context. Its PostToolUse
+hook can (`#midturn-steering`, `#steeringharnessparity`): while this pane owns
+the session, settled steering from the live editor replica — new queue rows,
+claimed-row strikes, and claim-forwarded edits — is pushed into the turn as
+`additionalContext`. That is the same real-time steering Claude Code and Codex
+receive through PostToolUse and OpenCode receives by polling
+`agent-doc steering <FILE>` while its turn runs. The Read tool sees disk, which
+trails that replica. On that context, re-call connected `agent_doc_plan <FILE>`
+in the same turn and dispatch the new `queue_subagent_dispatch` rows without
+another user message. Inspect without consuming with
+`agent-doc steering --peek <FILE>`. For OpenCode the poll is the in-turn
+delivery and it advances; it remains the monitor path for other hookless
+harnesses. The connected finalize's terminal report still carries anything the
+hook did not surface. An explicit `Run Agent Doc` while this turn is running
+is a separate path (`#routesyncsteer`): route submits the latest diff since
+the last send into the composer as one mid-turn follow-up. With
+`ui.follow_up_behavior = "steer"` that follow-up is injected into this turn
+at the next safe gap; with `"queue"` it waits until the turn ends. Handle
+that diff as operator steering. Do not start a second turn. When the turn
+ends, the supervisor wakes the idle Grok pane for settled, unsurfaced,
+unclaimed steering (`#steeringwake`) through the same guarded idle dispatch.
 
 Routing reuses the supervisor lifecycle and document-bound resume UUID.
 Readiness requires a complete empty Grok composer with no live cancel/stop

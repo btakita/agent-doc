@@ -78,13 +78,14 @@ pub struct SessionState {
     pub session_id: String,
     #[serde(default)]
     pub identity_origin: SessionIdentityOrigin,
-    /// Harness whose `UserPromptSubmit` hook recorded this binding.
+    /// Harness that recorded this binding.
     ///
-    /// Claude Code and Codex share this ledger, and both
-    /// supply a `session_id`, but only a Codex thread id may ever reach
-    /// `codex resume <id>`. `None` is a row written before the tag existed (or
-    /// an external prompt); readers that launch a harness must treat it as
-    /// unproven rather than as the caller's harness.
+    /// Claude Code and Codex record it from `UserPromptSubmit`. Grok Build
+    /// records it from connected `agent_doc_admit`, because an allowing
+    /// UserPromptSubmit hook cannot inject context. Only a Codex thread id
+    /// may ever reach `codex resume <id>`. `None` is a row written before the
+    /// tag existed (or an external prompt); readers that launch a harness must
+    /// treat it as unproven rather than as the caller's harness.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<HookHarness>,
     pub doc_path: String,
@@ -109,12 +110,13 @@ pub struct SessionState {
     pub updated_at: u64,
 }
 
-/// Harness that delivered a `UserPromptSubmit` hook payload.
+/// Harness that recorded a session-to-document binding.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HookHarness {
     Claude,
     Codex,
+    Grok,
 }
 
 impl HookHarness {
@@ -122,6 +124,7 @@ impl HookHarness {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Grok => "grok",
         }
     }
 }
@@ -138,6 +141,8 @@ pub enum SessionIdentityOrigin {
 
 impl SessionState {
     /// Whether a Codex resume may consider this row.
+    ///
+    /// `HookHarness::Grok` is a Grok session id, never a Codex thread.
     pub fn recorded_by_codex_or_legacy(&self) -> bool {
         matches!(self.harness, None | Some(HookHarness::Codex))
     }
@@ -424,6 +429,42 @@ pub fn apply_user_prompt_submit_for_harness(
         last_prompt_cycle,
         preflight_admitted: None,
         updated_at: now,
+    };
+    for root in roots {
+        save_state(&root, &state)?;
+    }
+    Ok(())
+}
+
+/// Bind the Grok session that just admitted `file`.
+///
+/// The PostToolUse steering hook resolves its document from this ledger. Grok
+/// has no UserPromptSubmit injection, so admit is the write. An empty session
+/// id is a no-op. The stored prompt is an `agent-doc <file>` invocation, so
+/// the row is not Codex writeback debt, and [`HookHarness::Grok`] is not a
+/// Codex resume id.
+pub fn bind_grok_admitted_session(file: &Path, session_id: &str) -> Result<()> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Ok(());
+    }
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let roots = tracking_roots(&canonical, Some(&canonical));
+    if roots.is_empty() {
+        return Ok(());
+    }
+    let state = SessionState {
+        session_id: session_id.to_string(),
+        identity_origin: SessionIdentityOrigin::HarnessHook,
+        harness: Some(HookHarness::Grok),
+        doc_path: canonical.display().to_string(),
+        last_turn_id: String::new(),
+        last_prompt: format!("agent-doc {}", canonical.display()),
+        last_auto_queue_head: None,
+        last_context_clear_at: None,
+        last_prompt_cycle: prompt_cycle_observation(&canonical)?,
+        preflight_admitted: Some(true),
+        updated_at: now_secs(),
     };
     for root in roots {
         save_state(&root, &state)?;
@@ -1667,7 +1708,11 @@ mod tests {
 
         assert_ne!(first_id, second_id);
         let entries = ledger_entries(&dir, &doc);
-        assert_eq!(entries.len(), 1, "duplicate text remains ledger-deduplicated");
+        assert_eq!(
+            entries.len(),
+            1,
+            "duplicate text remains ledger-deduplicated"
+        );
         assert_eq!(entries[0].surrogate_id, second_id);
     }
 
@@ -2413,6 +2458,34 @@ agent-doc {}\n",
         assert_eq!(legacy.harness, None);
         assert!(legacy.recorded_by_codex_or_legacy());
         assert!(!claude.recorded_by_codex_or_legacy());
+    }
+
+    #[test]
+    fn bind_grok_admitted_session_is_not_a_codex_resume_id() {
+        let dir = setup_project();
+        let doc = write_doc(&dir);
+        track_doc(&dir, &doc, "turn-1");
+        bind_grok_admitted_session(&doc, "  ").unwrap();
+        assert!(load_state(dir.path(), "").unwrap().is_none());
+
+        bind_grok_admitted_session(&doc, "grok-session").unwrap();
+        let mut grok = load_state(dir.path(), "grok-session").unwrap().unwrap();
+        assert_eq!(grok.harness, Some(HookHarness::Grok));
+        assert_eq!(grok.identity_origin, SessionIdentityOrigin::HarnessHook);
+        assert_eq!(grok.preflight_admitted, Some(true));
+        assert!(grok.last_prompt.starts_with("agent-doc "));
+        assert!(prompt_writeback_debt(&grok, "").is_none());
+        assert!(!grok.recorded_by_codex_or_legacy());
+        grok.updated_at += 10;
+        save_state(dir.path(), &grok).unwrap();
+        assert_eq!(
+            load_latest_prompt_state_for_file(&doc)
+                .unwrap()
+                .unwrap()
+                .session_id,
+            "codex-session",
+            "the newer Grok binding must not become a Codex resume id"
+        );
     }
 
     #[test]

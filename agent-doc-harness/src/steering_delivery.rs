@@ -59,9 +59,10 @@ pub struct SteeringDeliveryAdapter {
 /// Every harness agent-doc supports, by canonical binary name.
 pub const SUPPORTED_HARNESSES: [&str; 5] = ["claude", "codex", "opencode", "grok", "cursor"];
 
-/// `#routesyncsteer`: Grok Build cannot inject hook context into a running
-/// turn, so an explicit Run Agent Doc submits the latest document diff into
-/// the composer. Every other harness keeps its hook or poll delivery.
+/// `#routesyncsteer`: an explicit Run Agent Doc on a running Grok turn
+/// submits the latest document diff into the composer. Passive settled
+/// steering still arrives through PostToolUse. Every other harness keeps
+/// its hook or poll delivery.
 pub fn explicit_running_turn_send_is_composer_diff(harness: &str) -> bool {
     steering_delivery_adapter(harness).harness == "grok"
 }
@@ -111,11 +112,12 @@ pub fn steering_delivery_adapter(harness: &str) -> SteeringDeliveryAdapter {
         },
         "grok" | "grok-build" => SteeringDeliveryAdapter {
             harness: "grok",
-            // Grok Build lifecycle hooks are notifications: stdout cannot
-            // inject context into the running turn. An explicit Run Agent Doc
-            // while that turn is busy therefore types the latest diff into
-            // the composer (`#routesyncsteer`); passive delivery stays a poll.
-            busy: BusyDelivery::PollAndCommandBoundary,
+            // Grok Build 1.0.62+ delivers PostToolUse `additionalContext` in
+            // the same turn. UserPromptSubmit still discards an allowing
+            // hook's stdout, so admission stays the connected MCP call.
+            // An explicit Run Agent Doc while the turn is busy still types
+            // the latest diff into the composer (`#routesyncsteer`).
+            busy: BusyDelivery::PostToolUseHook,
             idle: IdleDelivery::SupervisorTrigger,
             // `grok -p <PROMPT>` is its single-turn headless mode.
             classifier: Some(ClassifierCli {
@@ -192,7 +194,15 @@ mod tests {
             steering_delivery_adapter("codex").busy,
             BusyDelivery::PostToolUseHook
         );
-        for harness in ["opencode", "grok", "cursor"] {
+        assert_eq!(
+            steering_delivery_adapter("grok").busy,
+            BusyDelivery::PostToolUseHook
+        );
+        assert_eq!(
+            steering_delivery_adapter("grok-build").busy,
+            BusyDelivery::PostToolUseHook
+        );
+        for harness in ["opencode", "cursor"] {
             assert_eq!(
                 steering_delivery_adapter(harness).busy,
                 BusyDelivery::PollAndCommandBoundary,

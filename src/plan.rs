@@ -1787,6 +1787,310 @@ Done.
         );
     }
 
+    struct LiveEditor {
+        file: std::path::PathBuf,
+        identity: String,
+        replica: agent_doc_merge::crdt_sync::ReplicaState,
+    }
+
+    impl LiveEditor {
+        fn new(file: &std::path::Path, editor_id: &str, content: &str) -> Self {
+            let file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+            agent_doc_test_support::seed_reliable_sync_editor_registration(
+                &file,
+                editor_id,
+                &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
+            );
+            let identity = format!("{editor_id}:{}", file.display());
+            let (client_id, bootstrap) =
+                agent_doc_crdt_relay_io::register_replica_for_file(&file, &identity)
+                    .expect("test editor should register")
+                    .expect("test editor should remain attached");
+            let replica =
+                agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
+                    .expect("test editor should decode the relay bootstrap");
+            let editor = Self {
+                file,
+                identity,
+                replica,
+            };
+            editor.publish(content);
+            editor
+        }
+
+        fn publish(&self, content: &str) {
+            let current = self.replica.text();
+            self.replica
+                .apply_local_edit(0, current.len() as u32, content);
+            agent_doc_crdt_relay_io::relay_replica_update_for_file(
+                &self.file,
+                &self.identity,
+                &self.replica.encode_state(),
+            )
+            .expect("test editor should publish")
+            .expect("test editor update should be accepted");
+        }
+    }
+
+    impl Drop for LiveEditor {
+        fn drop(&mut self) {
+            agent_doc_crdt_relay_io::deregister_editor_replica_for_file(
+                &self.file,
+                &self.identity,
+                std::process::id(),
+            )
+            .expect("test editor should deregister");
+        }
+    }
+
+    fn steering_context(payload: &str) -> Option<String> {
+        agent_doc_session_check_io::midturn_steering::post_tool_use_response(payload)
+            .expect("hook decision")
+            .map(|value| {
+                value["hookSpecificOutput"]["additionalContext"]
+                    .as_str()
+                    .expect("additionalContext")
+                    .to_string()
+            })
+    }
+
+    fn hook_payload(
+        root: &std::path::Path,
+        session_key: &str,
+        session_id: &str,
+        subagent: bool,
+    ) -> String {
+        let mut payload = serde_json::Map::new();
+        payload.insert(
+            session_key.to_string(),
+            serde_json::Value::String(session_id.to_string()),
+        );
+        payload.insert(
+            "cwd".to_string(),
+            serde_json::Value::String(root.display().to_string()),
+        );
+        payload.insert(
+            "tool_name".to_string(),
+            serde_json::Value::String("Bash".to_string()),
+        );
+        if subagent {
+            payload.insert(
+                "subagentType".to_string(),
+                serde_json::Value::String("general-purpose".to_string()),
+            );
+        }
+        serde_json::Value::Object(payload).to_string()
+    }
+
+    fn normalize_steering(text: &str, file: &std::path::Path) -> String {
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        text.replace(&canonical.display().to_string(), "<FILE>")
+            .replace(&file.display().to_string(), "<FILE>")
+    }
+
+    /// `#steeringharnessparity`: a queue row added, and a claimed row struck,
+    /// while disk stays stale, reaches Claude, Codex, and Grok through the
+    /// same PostToolUse context. OpenCode has no PostToolUse channel; its
+    /// busy delivery is the consuming `agent-doc steering` poll, and that
+    /// render matches the hook. The next plan on each document reads that
+    /// live cut.
+    #[test]
+    fn live_editor_steering_matches_across_claude_codex_grok_and_opencode() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let claimed = "release + publish: include issue 348";
+        let baseline = format!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent_doc_steering_debounce_ms: 0\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nDone.\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue priority subagents go -->\n- Fix the claim button.\n- {claimed}\n<!-- /agent:queue -->\n"
+        );
+        let live = baseline.replace(&format!("- {claimed}\n"), "- Align the parity button.\n");
+
+        let arm = |name: &str, editor_id: &str| {
+            let file = dir.path().join(name);
+            std::fs::write(&file, &baseline).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &file,
+                &baseline,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let editor = LiveEditor::new(&file, editor_id, &baseline);
+            let cycle =
+                agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                    .unwrap();
+            agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+                &file,
+                &cycle.cycle_id,
+                &baseline,
+                Some("Fix the claim button."),
+                Vec::new(),
+            )
+            .unwrap();
+            let (_, claim) =
+                agent_doc_queue_io::queue_claim::claim(&file, claimed, "subagent:parity-348", 3600)
+                    .unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &file,
+                claimed,
+                "subagent:parity-348",
+                "parity-worker",
+                3600,
+                claim.generation,
+            )
+            .unwrap();
+            // A whole-buffer relay replace is not provenance for cancelling a
+            // claimed row. The operator delete has to be a captured editor op
+            // replayed onto this cycle's baseline.
+            let removed = format!("- {claimed}\n");
+            let added = "- Align the parity button.\n";
+            let offset = baseline.find(&removed).expect("claimed row");
+            let ops = vec![
+                agent_doc_merge::crdt::EditorOp::Delete {
+                    offset,
+                    len: removed.len(),
+                },
+                agent_doc_merge::crdt::EditorOp::Insert {
+                    offset,
+                    text: added.to_string(),
+                },
+            ];
+            assert_eq!(
+                agent_doc_merge::crdt::replay_editor_ops(&baseline, &ops).as_deref(),
+                Some(live.as_str())
+            );
+            agent_doc_op_capture_io::record_editor_ops(
+                &file,
+                &agent_doc_hash::content_hash(&baseline),
+                ops,
+            )
+            .unwrap();
+            editor.publish(&live);
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+            (file, editor)
+        };
+        let (grok_file, _grok_editor) = arm("grok.md", "grok-parity");
+        let (claude_file, _claude_editor) = arm("claude.md", "claude-parity");
+        let (codex_file, _codex_editor) = arm("codex.md", "codex-parity");
+        let (opencode_file, _opencode_editor) = arm("opencode.md", "opencode-parity");
+
+        agent_doc_codex_hook_io::bind_grok_admitted_session(&grok_file, "grok-session").unwrap();
+        let bind_hook = |file: &std::path::Path, session_id: &str, harness| {
+            agent_doc_codex_hook_io::apply_user_prompt_submit_for_harness(
+                &agent_doc_codex_hook_io::UserPromptSubmitInput {
+                    session_id: session_id.into(),
+                    turn_id: String::new(),
+                    cwd: dir.path().display().to_string(),
+                    prompt: format!("agent-doc {}", file.display()),
+                },
+                harness,
+            )
+            .unwrap();
+        };
+        bind_hook(
+            &claude_file,
+            "claude-session",
+            agent_doc_codex_hook_io::HookHarness::Claude,
+        );
+        bind_hook(
+            &codex_file,
+            "codex-session",
+            agent_doc_codex_hook_io::HookHarness::Codex,
+        );
+        assert_eq!(
+            agent_doc_harness::steering_delivery::steering_delivery_adapter("opencode").busy,
+            agent_doc_harness::steering_delivery::BusyDelivery::PollAndCommandBoundary,
+            "OpenCode stays on the poll; the test compares that delivery"
+        );
+
+        assert!(
+            steering_context(&hook_payload(dir.path(), "session_id", "unbound", false)).is_none(),
+            "an unbound session stays silent"
+        );
+        assert!(
+            steering_context(&hook_payload(dir.path(), "sessionId", "grok-session", true))
+                .is_none(),
+            "a Grok subagentType tool call must not consume the owner watermark"
+        );
+
+        let mut delivered = Vec::new();
+        for (label, file, key, session) in [
+            ("Grok", &grok_file, "sessionId", "grok-session"),
+            ("Claude", &claude_file, "session_id", "claude-session"),
+            ("Codex", &codex_file, "session_id", "codex-session"),
+        ] {
+            let text = steering_context(&hook_payload(dir.path(), key, session, false))
+                .unwrap_or_else(|| panic!("{label} owner hook"));
+            assert!(
+                steering_context(&hook_payload(dir.path(), key, session, false)).is_none(),
+                "{label} must consume the delivered steering"
+            );
+            delivered.push((label, text, file.clone()));
+        }
+        let opencode = agent_doc_session_check_io::midturn_steering::observe(
+            &opencode_file,
+            agent_doc_session_check_io::midturn_steering::CONSUMER_CLI,
+            true,
+        )
+        .unwrap()
+        .expect("OpenCode poll")
+        .render()
+        .expect("OpenCode steering");
+        assert!(
+            agent_doc_session_check_io::midturn_steering::observe(
+                &opencode_file,
+                agent_doc_session_check_io::midturn_steering::CONSUMER_CLI,
+                true,
+            )
+            .unwrap()
+            .is_none(),
+            "the OpenCode poll must consume the delivered steering"
+        );
+        delivered.push(("OpenCode", opencode, opencode_file.clone()));
+
+        for (label, text, _) in &delivered {
+            assert!(text.contains("Align the parity button."), "{label}: {text}");
+            assert!(text.contains("dispatch=cancel_claimed"), "{label}: {text}");
+            assert!(text.contains("dispatch=subagent"), "{label}: {text}");
+        }
+        let expected = normalize_steering(&delivered[0].1, &delivered[0].2);
+        for (label, text, file) in &delivered[1..] {
+            assert_eq!(
+                normalize_steering(text, file),
+                expected,
+                "{label} steering must match {}",
+                delivered[0].0
+            );
+        }
+
+        let items = |plan: &DispatchPlan| {
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.clone())
+                .collect::<Vec<_>>()
+        };
+        let mut plans = Vec::new();
+        for (label, _, file) in &delivered {
+            plans.push((*label, items(&build(file).unwrap())));
+            let on_disk = std::fs::read_to_string(file.as_path()).unwrap();
+            assert_eq!(on_disk, baseline, "{label} disk must stay stale");
+        }
+        for (label, plan_items) in &plans[1..] {
+            assert_eq!(plan_items, &plans[0].1, "{label} plan");
+        }
+        assert!(
+            plans[0]
+                .1
+                .iter()
+                .any(|item| item == "Align the parity button."),
+            "{:?}",
+            plans[0].1
+        );
+        assert!(
+            plans[0].1.iter().all(|item| !item.contains(claimed)),
+            "the struck claimed row must leave the next plan: {:?}",
+            plans[0].1
+        );
+    }
+
     #[test]
     fn connected_plan_keeps_new_subagent_heads_out_of_inline_targets() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");

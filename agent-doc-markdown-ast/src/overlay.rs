@@ -852,9 +852,16 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
     // struck parent reopens the block as one live node (the same rule
     // `document_queue::parse_spans` applies), so the strike/consume path can
     // close it again once the new child is answered.
+    // `#checkeddecisionsubprompt`: a struck decision parent with any live
+    // child also stays live, even when no sibling is struck. Pass `head_raw`
+    // so the decision id inside `~~` is still visible.
     if struck
-        && subprompt_block
-            .is_some_and(agent_doc_element_queue::subprompts::struck_parent_block_reopens)
+        && subprompt_block.is_some_and(|block| {
+            agent_doc_element_queue::subprompts::struck_parent_block_reopens(block)
+                || agent_doc_element_queue::subprompts::struck_decision_parent_keeps_live_child(
+                    head_raw, block,
+                )
+        })
     {
         struck = false;
     }

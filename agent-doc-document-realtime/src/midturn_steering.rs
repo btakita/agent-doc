@@ -3559,6 +3559,52 @@ mod tests {
         assert_eq!(live, vec!["https://example.com/pull/759".to_string()]);
     }
 
+    /// `#checkeddecisionsubprompt`: a subprompt under a `☑️` decision parent is
+    /// dispatch work on its own. The parent's check mark and request id stay
+    /// on the parent head. `🙋☑️` does not release the child.
+    #[test]
+    fn a_subprompt_under_a_checked_decision_parent_is_dispatch_work() {
+        let parent =
+            "☑️ [#subagent:fix-ci#2] publish the contracts [#subagent-operator-request-contracts]";
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents -->\n- {parent}\n  - ~~already answered~~\n  - Commit and fast-forward push\n<!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let (_, eligible, live) = queue_attr_subagent_heads(&content).unwrap();
+        assert!(
+            eligible
+                .iter()
+                .any(|head| head.contains("Commit and fast-forward push")),
+            "{eligible:?}"
+        );
+        assert!(
+            live.iter()
+                .any(|head| head.contains("publish the contracts")
+                    && !head.contains("Commit and fast-forward push")),
+            "{live:?}"
+        );
+        let child = eligible
+            .iter()
+            .find(|head| head.contains("Commit and fast-forward push"))
+            .unwrap();
+        assert!(
+            !child.trim_start().starts_with("☑️"),
+            "the check mark stays on the parent: {child}"
+        );
+        let held = content.replace(
+            &format!("- {parent}"),
+            "- 🙋☑️ publish the contracts [#subagent-operator-request-contracts]",
+        );
+        // An operator-gated-only queue is not selected for dispatch.
+        if let Some((_, eligible, _)) = queue_attr_subagent_heads(&held) {
+            assert!(
+                !eligible
+                    .iter()
+                    .any(|head| head.contains("Commit and fast-forward push")),
+                "{eligible:?}"
+            );
+        }
+    }
+
     /// `#struckparentkids`: a row the operator writes under a closed
     /// (struck) parent is new work, not an inert edit of a completed entry:
     /// steering surfaces the reopened block once, verbatim with its parent,

@@ -12,8 +12,11 @@
 //! ```
 //!
 //! is ONE queue head. Its text is the parent row followed by the child rows,
-//! verbatim; the children are never independent heads, never dispatched on
-//! their own, and never carry a lifecycle projection of their own.
+//! verbatim; the children are never independent heads in the parsed document,
+//! and never carry a lifecycle projection of their own. The drain and dispatch
+//! view releases live children of a checked decision parent
+//! (`#checkeddecisionsubprompt`); this module still keeps that block intact
+//! for parse and render.
 //!
 //! A later direct sibling can still surface as its own head after the parent
 //! is claimed (`#nestedclaimsteer`). That is a claim-ledger view over this
@@ -208,6 +211,170 @@ pub fn struck_parent_block_reopens(block: &str) -> bool {
         }
     }
     struck && live
+}
+
+/// Reserved operator-request annotation that a work row carries as its
+/// decision id (`[#subagent-operator-request-…]`).
+///
+/// The id is the trailing unquoted annotation, and work text precedes it.
+/// A row that is only the request id is an operator answer, not this
+/// annotation. A strike wrapper does not hide the id.
+pub fn text_carries_decision_id(text: &str) -> bool {
+    let unwrapped = unwrap_struck_parent(text.trim());
+    // Projection (`☑️`, `[#owner#N]`, `🙋`) is not work. A row whose
+    // remainder is only the request id is an answer, not a decision annotation.
+    let work = super::strip_attempt_projection_prefix(unwrapped).trim();
+    trailing_decision_annotation(work)
+}
+
+fn trailing_decision_annotation(text: &str) -> bool {
+    let code_ranges = agent_doc_element::element::find_code_ranges(text);
+    for (start, _) in text.rmatch_indices("[#") {
+        if code_ranges
+            .iter()
+            .any(|(range_start, range_end)| start >= *range_start && start < *range_end)
+        {
+            continue;
+        }
+        if start > 0
+            && !text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace)
+        {
+            continue;
+        }
+        let after_open = &text[start + 2..];
+        let Some((id, after)) = after_open.split_once(']') else {
+            continue;
+        };
+        if !is_reserved_request_id(id) {
+            continue;
+        }
+        if !(after.is_empty() || after.trim_start().starts_with(':')) {
+            continue;
+        }
+        return start > 0 && !text[..start].trim().is_empty();
+    }
+    false
+}
+
+fn is_reserved_request_id(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    let mut chars = id.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        && id.starts_with("subagent-operator-request-")
+}
+
+/// True when `head` is a strikethrough parent line (`~~…~~`, `~…~`, or the
+/// annotated `#qstrikenote` tail).
+pub fn parent_line_is_struck(head: &str) -> bool {
+    let trimmed = head.trim();
+    if trimmed.starts_with("~~") {
+        return unwrap_struck_parent(trimmed) != trimmed;
+    }
+    let Some(inner) = trimmed
+        .strip_prefix('~')
+        .and_then(|rest| rest.strip_suffix('~'))
+    else {
+        return false;
+    };
+    !inner.trim().is_empty()
+}
+
+fn strip_reported_marker(trimmed: &str) -> Option<&str> {
+    let icons = agent_doc_queue_icons::queue_icons();
+    [icons.reported.as_str(), "☑️", "📫", "📤"]
+        .into_iter()
+        .filter(|marker| !marker.is_empty())
+        .filter_map(|marker| trimmed.strip_prefix(marker))
+        .min_by_key(|rest| rest.len())
+}
+
+/// A parent the operator reads as blocked on its decision (`#checkeddecisionsubprompt`).
+///
+/// It shows a reported marker (`☑️`, or the legacy `📫` / `📤` spelling),
+/// carries a trailing `[#subagent-operator-request-…]` annotation, and has
+/// no `🙋`. `🙋☑️` is a different hold and is not this state.
+pub fn checked_decision_parent_head(head: &str) -> bool {
+    let head = head.trim();
+    if parent_line_is_struck(head) || !text_carries_decision_id(head) {
+        return false;
+    }
+    let mut rest = head.trim_start();
+    let mut saw_reported = false;
+    let mut saw_operator = false;
+    loop {
+        if let Some((_, after)) = super::leading_pin(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = super::strip_operator_action_glyph(rest) {
+            saw_operator = true;
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = super::strip_owner_annotation_token(rest) {
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_reported_marker(rest) {
+            saw_reported = true;
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = super::strip_lifecycle_token(rest)
+            .or_else(|| super::strip_blocked_annotation_token(rest))
+        {
+            rest = after.trim_start();
+            continue;
+        }
+        break;
+    }
+    saw_reported && !saw_operator
+}
+
+/// True when `block` holds a non-empty sub-prompt row that is not struck.
+pub fn block_has_live_subprompt(block: &str) -> bool {
+    for line in block.lines() {
+        let Some(content) = list_item_content(line) else {
+            continue;
+        };
+        if content.trim().is_empty() {
+            continue;
+        }
+        if !subprompt_row_is_struck(content) {
+            return true;
+        }
+    }
+    false
+}
+
+/// A struck work row that still carries its decision id keeps a live child
+/// (`#checkeddecisionsubprompt`).
+///
+/// Closing the checked parent strikes the parent part and leaves that child
+/// unstruck. The block stays live while the child does. An answer row that
+/// is only `[#subagent-operator-request-…]` is not this shape: a whole-block
+/// strike of that row stays closed.
+pub fn struck_decision_parent_keeps_live_child(parent_head: &str, block: &str) -> bool {
+    parent_line_is_struck(parent_head)
+        && text_carries_decision_id(parent_head)
+        && block_has_live_subprompt(block)
+}
+
+/// Whether drain and dispatch readers release this row's live direct children.
+pub fn prompt_releases_live_subprompts(text: &str) -> bool {
+    let (head, Some(block)) = split_subprompt_block(text) else {
+        return false;
+    };
+    block_has_live_subprompt(block)
+        && (checked_decision_parent_head(head)
+            || struck_decision_parent_keeps_live_child(head, block))
 }
 
 /// Strike every live child row of a sub-prompt block (`#struckparentkids`).
@@ -452,5 +619,60 @@ mod tests {
             None
         );
         assert_eq!(strip_subprompt_projections("flat"), None);
+    }
+
+    /// `#checkeddecisionsubprompt`: `☑️` plus a trailing request id and no `🙋`
+    /// is the decision-blocked parent. `🙋☑️`, a bare work id, an answer row,
+    /// and a request id inside code are not.
+    #[test]
+    fn checked_decision_parent_is_reported_plus_request_id_without_operator_glyph() {
+        let decision = "☑️ [#subagent:fix-ci#2] #fix-ci https://example.test/pull/765 [#subagent-operator-request-pr765]";
+        assert!(checked_decision_parent_head(decision));
+        assert!(text_carries_decision_id(decision));
+        assert!(checked_decision_parent_head(
+            "📫 [#subagent:fix-ci#2] publish the contracts [#subagent-operator-request-contracts]"
+        ));
+        assert!(checked_decision_parent_head(
+            "📌 ☑️ publish the contracts [#subagent-operator-request-contracts]"
+        ));
+        assert!(!checked_decision_parent_head(
+            "🙋☑️ publish the contracts [#subagent-operator-request-contracts]"
+        ));
+        assert!(!checked_decision_parent_head(
+            "☑️ [#subagent:session#5] do [#publish-session-contracts]"
+        ));
+        assert!(!checked_decision_parent_head(
+            "☑️ [#subagent-operator-request-contracts]"
+        ));
+        assert!(!checked_decision_parent_head(
+            "☑️ why did `- [#subagent-operator-request-contracts]: yes` truncate?"
+        ));
+        assert!(!text_carries_decision_id(
+            "[#subagent-operator-request-contracts]"
+        ));
+        assert!(text_carries_decision_id(
+            "~~publish the contracts [#subagent-operator-request-contracts]~~"
+        ));
+        assert!(struck_decision_parent_keeps_live_child(
+            "~~publish the contracts [#subagent-operator-request-contracts]~~",
+            "  - Commit and fast-forward push"
+        ));
+        assert!(!struck_decision_parent_keeps_live_child(
+            "~~[#subagent-operator-request-contracts]~~",
+            "  - the answer"
+        ));
+        assert!(!struck_decision_parent_keeps_live_child(
+            "~~publish the contracts [#subagent-operator-request-contracts]~~",
+            "  - ~~already done~~"
+        ));
+        let folded = format!("{decision}\n  - ~~already done~~\n  - Commit and fast-forward push");
+        assert!(prompt_releases_live_subprompts(&folded));
+        assert!(!prompt_releases_live_subprompts(
+            "☑️ publish the contracts\n  - Commit and fast-forward push"
+        ));
+        assert!(block_has_live_subprompt(
+            "  - ~~already done~~\n  - Commit and fast-forward push"
+        ));
+        assert!(!block_has_live_subprompt("  - ~~already done~~\n  - "));
     }
 }

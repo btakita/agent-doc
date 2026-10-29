@@ -458,8 +458,15 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     // parent. The block is then ONE live head, verbatim (the
                     // struck parent and children are its context), never a
                     // completed entry that silently swallows the new row.
+                    // `#checkeddecisionsubprompt`: striking a checked decision
+                    // parent leaves its live child unstruck. That block is not
+                    // a whole-block completion while the child is live.
                     let completed = parse_completed_inline(&head_text).filter(|_| {
                         !agent_doc_element_queue::subprompts::struck_parent_block_reopens(&block)
+                            && !agent_doc_element_queue::subprompts::struck_decision_parent_keeps_live_child(
+                                &head_text,
+                                &block,
+                            )
                     });
                     let entry = match completed {
                         Some(inner) => QueueEntry::Completed(QueuePrompt {
@@ -2994,10 +3001,22 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
         return false;
     };
+    // `#checkeddecisionsubprompt`: releasing a live subprompt leaves the
+    // checked parent beside a deeper free-text row. That parent is still the
+    // checked head, not a `#queuenest` label. A tracked child keeps the group.
+    let checked_decision = entries.get(idx).and_then(prompt_of).is_some_and(|prompt| {
+        agent_doc_element_queue::subprompts::checked_decision_parent_head(&prompt.text)
+    });
     for later in entries.iter().skip(idx + 1) {
         match entry_indent(later) {
             // Deeper than us before we returned to our own depth: we are a parent.
-            Some(indent) if indent > own_indent => return true,
+            Some(indent) if indent > own_indent => {
+                if !checked_decision
+                    || prompt_of(later).is_some_and(|prompt| row_is_tracked_directive(&prompt.text))
+                {
+                    return true;
+                }
+            }
             // Back to our depth or shallower: our subtree ended without a child.
             Some(_) => return false,
             // Non-item entries (fences, presets, freeform) neither open nor close
@@ -3090,7 +3109,18 @@ fn ancestor_label(prompt: &QueuePrompt) -> String {
         .unwrap_or(first);
     match agent_doc_element_queue::queue_head_identity(identity_line) {
         agent_doc_element_queue::QueueItemIdentity::Id(id) => format!("#{id}"),
-        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => first.to_string(),
+        // A trailing `[#subagent-operator-request-…]` is the parent's decision
+        // annotation. Leaving it on the ancestor makes `ancestor: child` parse
+        // as that annotation's answer, so the child's claim collapses into the
+        // parent (`#checkeddecisionsubprompt`).
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
+            let work = agent_doc_element_queue::strip_priority_markers(first);
+            if work.is_empty() {
+                first.to_string()
+            } else {
+                work
+            }
+        }
     }
 }
 
@@ -9019,6 +9049,60 @@ mod tests {
         let added = format!("{projected}  - {NEW_CHILD}\n");
         let entries = parse(&added).unwrap();
         assert!(matches!(entries[0], QueueEntry::Prompt(_)), "{entries:?}");
+    }
+
+    /// `#checkeddecisionsubprompt`: closing a `☑️` parent that carries a
+    /// decision id leaves the new subprompt unstruck, and both enumerators
+    /// keep the block live. A second strike closes the child. A whole-block
+    /// strike that has no decision id stays completed.
+    #[test]
+    fn striking_a_checked_decision_parent_keeps_its_live_subprompt() {
+        let parent = "☑️ [#subagent:fix-ci#2] #fix-ci https://example.test/pull/765 [#subagent-operator-request-pr765]";
+        let child = "Commit and fast-forward push";
+        let body = format!("- {parent}\n  - ~~already answered~~\n  - {child}\n");
+        let entries = parse(&body).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(matches!(entries[0], QueueEntry::Prompt(_)));
+        assert_eq!(render(&entries), body);
+
+        let doc = run_doc(&body);
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&doc, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(!nodes[0].item.struck);
+        let struck =
+            agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
+                .unwrap();
+        let struck_body = run_body(&struck);
+        assert!(
+            struck_body.contains(&format!("  - {child}\n")),
+            "{struck_body}"
+        );
+        assert!(
+            !struck_body.contains(&format!("~~{child}~~")),
+            "{struck_body}"
+        );
+        let entries = parse(struck_body).unwrap();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(
+            matches!(entries[0], QueueEntry::Prompt(_)),
+            "a live child under the struck decision parent stays a prompt: {entries:?}"
+        );
+        let nodes = agent_doc_markdown_ast::mutations::item_nodes(&struck, "queue").unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert!(!nodes[0].item.struck, "{:#?}", nodes[0].item);
+
+        let closed =
+            agent_doc_markdown_ast::mutations::consume_node(&struck, "queue", &nodes[0].node_key)
+                .unwrap();
+        assert!(
+            run_body(&closed).contains(&format!("~~{child}~~")),
+            "{}",
+            run_body(&closed)
+        );
+        assert!(matches!(
+            parse(run_body(&closed)).unwrap()[0],
+            QueueEntry::Completed(_)
+        ));
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one

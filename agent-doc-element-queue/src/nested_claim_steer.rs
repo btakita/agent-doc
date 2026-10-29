@@ -10,7 +10,7 @@
 use std::borrow::Cow;
 
 use crate::strip_attempt_projection_prefix;
-use crate::subprompts::{list_item_content, split_subprompt_block};
+use crate::subprompts::{self, list_item_content, split_subprompt_block};
 
 /// One direct child of a folded sub-prompt block.
 ///
@@ -161,6 +161,43 @@ pub fn split_nested_claim_steer<'a>(current: &'a str, claim_time: &str) -> Neste
     }
 }
 
+/// Live direct children a checked decision parent must not swallow
+/// (`#checkeddecisionsubprompt`).
+///
+/// `None` when the row keeps the ordinary fold. The returned parent text
+/// keeps struck and empty children in their original order. Each released
+/// child is one direct row, including its deeper lines. The first live
+/// child is released too: it is new work, not claim steering.
+pub fn release_checked_decision_subprompts(text: &str) -> Option<(String, Vec<DirectSubprompt>)> {
+    if !subprompts::prompt_releases_live_subprompts(text) {
+        return None;
+    }
+    let mut released = Vec::new();
+    let mut kept = Vec::new();
+    for child in direct_subprompts(text) {
+        if direct_child_is_live(&child) {
+            released.push(child);
+        } else {
+            kept.push(child.source_block);
+        }
+    }
+    if released.is_empty() {
+        return None;
+    }
+    let (parent, _) = split_subprompt_block(text);
+    let mut parent_text = parent.to_string();
+    for block in kept {
+        parent_text.push('\n');
+        parent_text.push_str(&block);
+    }
+    Some((parent_text, released))
+}
+
+fn direct_child_is_live(child: &DirectSubprompt) -> bool {
+    let first = child.head_text.lines().next().unwrap_or("");
+    !first.trim().is_empty() && !subprompts::subprompt_row_is_struck(first)
+}
+
 fn child_key(head_text: &str) -> String {
     let first = head_text.lines().next().unwrap_or("");
     strip_attempt_projection_prefix(first)
@@ -220,6 +257,26 @@ fn split_space_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#checkeddecisionsubprompt`: the first live child is released. A struck
+    /// sibling stays on the parent. `🙋☑️` releases nothing.
+    #[test]
+    fn a_checked_decision_parent_releases_every_live_child() {
+        let text = "☑️ publish the contracts [#subagent-operator-request-contracts]\n  - ~~already answered~~\n  - Commit and fast-forward push\n  - and ship the tag";
+        let (parent, released) = release_checked_decision_subprompts(text).unwrap();
+        assert_eq!(
+            parent,
+            "☑️ publish the contracts [#subagent-operator-request-contracts]\n  - ~~already answered~~"
+        );
+        assert_eq!(released.len(), 2);
+        assert_eq!(released[0].head_text, "Commit and fast-forward push");
+        assert_eq!(released[0].indent, 2);
+        assert_eq!(released[1].head_text, "and ship the tag");
+        assert!(release_checked_decision_subprompts(
+            "🙋☑️ publish the contracts [#subagent-operator-request-contracts]\n  - Commit and fast-forward push"
+        )
+        .is_none());
+    }
 
     #[test]
     fn claim_marker_on_the_parent_is_not_a_direct_child() {

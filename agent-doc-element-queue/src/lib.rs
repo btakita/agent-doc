@@ -611,9 +611,19 @@ pub fn struck_work_text(text: &str) -> &str {
 /// `#struckparentkids`); an already-struck parent (a reopened block) is not
 /// struck twice. The queue enumerators read that shape back as one completed
 /// item.
+///
+/// A checked decision parent (`#checkeddecisionsubprompt`) is the exception:
+/// while the parent still shows `☑️` and its decision id and no `🙋`, the
+/// strike leaves the sub-prompt block unchanged so a live child stays new
+/// work. A later strike, once `☑️` is gone, strikes those children.
 pub fn render_struck_row_body(text: &str) -> String {
     let (head, block) = subprompts::split_subprompt_block(text);
     match block {
+        Some(block) if subprompts::checked_decision_parent_head(head) => format!(
+            "~~{}~~\n{}",
+            subprompts::unwrap_struck_parent(struck_work_text(head)),
+            block
+        ),
         Some(block) => format!(
             "~~{}~~\n{}",
             subprompts::unwrap_struck_parent(struck_work_text(head)),
@@ -761,6 +771,26 @@ mod tests {
         assert_eq!(super::strip_priority_markers(row), "do [#stg]");
         assert_eq!(super::strip_attempt_projection_prefix(row), "do [#stg]");
         assert_eq!(super::render_struck_row_body(row), "~~do [#stg]~~");
+        // `#checkeddecisionsubprompt`: the first strike of a checked decision
+        // parent leaves the live child. The next strike, with `☑️` gone,
+        // closes that child. A checked row without the decision id still
+        // closes its children on the first strike.
+        let checked = "☑️ [#subagent:fix#2] publish the contracts [#subagent-operator-request-contracts]\n  - Commit and fast-forward push";
+        let once = super::render_struck_row_body(checked);
+        assert_eq!(
+            once,
+            "~~publish the contracts [#subagent-operator-request-contracts]~~\n  - Commit and fast-forward push"
+        );
+        assert_eq!(
+            super::render_struck_row_body(&once),
+            "~~publish the contracts [#subagent-operator-request-contracts]~~\n  - ~~Commit and fast-forward push~~"
+        );
+        assert_eq!(
+            super::render_struck_row_body(
+                "☑️ [#subagent:fix#2] publish the contracts\n  - Commit and fast-forward push"
+            ),
+            "~~publish the contracts~~\n  - ~~Commit and fast-forward push~~"
+        );
         assert_eq!(
             super::queue_head_identity(row),
             super::queue_head_identity("do [#stg]")

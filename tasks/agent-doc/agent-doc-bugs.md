@@ -785,8 +785,15 @@ The row asks for errors during a prompt to be surfaced, using the `#review` of h
   - **Other**: The operator specifies the tokens, the row rule, and the source of truth.
 
 The choice is `#reviewpublish-marker` on the todo list. Implementation of the marker starts from the option you pick.
+> **Chat prompt (#chatprompt):** Steering: I may prompt `#rebase` or `#review` multiple times under the same parent item in the nested list. This would lead to a duplicate prompt. I want the "duplicate" prompt to be acted on every single time I submit it. I don't want duplicate prompts to be rejected.
 
-<!-- agent:boundary:2701ccd9 -->
+### Re: Repeated presets stay actionable — grok-4.7 · 2026-10-29T11:47-04:00
+
+`do [#repeatsamepreset]` is running as `subagent:repeatsamepreset` generation 1, worker `01a18857-f82b-70d2-af77-6bec593812e6`, on branch `fix/repeat-same-preset` in `/home/brian/worktrees/agent-doc-repeatsamepreset` (base `7b44d8bb28`).
+
+Each `#rebase` or `#review` submitted under the same parent is a new piece of work. The worker owns the spec, the tests, and a push of that branch.
+
+<!-- agent:boundary:2162575b -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -794,7 +801,7 @@ The choice is `#reviewpublish-marker` on the todo list. Implementation of the ma
   - ~~Where does this file live? My Coder agent is asking.~~
 - do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
 - 🚧 [#subagent:runduplicate#1] As I was typing "I'm running into confusion over..." prompt while a turn was running, agent-doc duplicated the prompt as another agent:run item.
 - 🚧 [#subagent:responseid#1] Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
@@ -810,6 +817,8 @@ The choice is `#reviewpublish-marker` on the todo list. Implementation of the ma
   ...
   - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
 ```
+---
+- 🚧 [#subagent:repeatsamepreset#1] do [#repeatsamepreset]
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -843,6 +852,8 @@ The choice is `#reviewpublish-marker` on the todo list. Implementation of the ma
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
+- [ ] [#reviewrebase-repeat] Each copy of a nested review or rebase preset in one prompt tree must run again, including when the same words already ran under another parent. A short claim binds one remaining head, and the closeout that answers one leaf removes the same text under a different parent. On 2026-10-29, /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md commit 46525385 still had an inbox review child under https://github.com/haiven-dev/haiven-api/pull/767. Commit 477a8d7e removed that child while recording the review for https://github.com/haiven-dev/haiven-api/pull/763. Create a plan. Do not implement the fix in that plan.
+- [ ] [#repeatsamepreset] I may prompt `#rebase` or `#review` multiple times under the same parent item in the nested list. This would lead to a duplicate prompt. I want the "duplicate" prompt to be acted on every single time I submit it. I don't want duplicate prompts to be rejected.
 - [ ] [#grok-live-editor] Grok Build should see live agent-doc editor changes. A Grok session reads the CRDT document only when it calls agent_doc_admit, agent_doc_plan, agent_doc_read, or agent_doc_finalize, or when it pulls agent-doc steering. The Read tool sees disk, which trails the editor replica. Queue rows the operator adds during a turn stay invisible until the next pull, so the coordinator dispatches only the rows the last plan listed and the operator sees idle inbox rows. Expected: while a Grok pane owns a session, converged editor ops (new queue rows, strikes, claim projection) are pushed into that session, and the next plan includes the newly runnable rows without waiting for another user message. Observed 2026-10-28 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md: the operator asked why only two subagents were running while more queue rows were visible. The prior plan queue_subagent_dispatch listed only those two.
 <!-- /agent:backlog -->
 

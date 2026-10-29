@@ -739,30 +739,28 @@ Those eighteen plan claims exited 1 because each command used `--item '#rebase'`
 > **Queue prompt:** release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
 
 **Deferred:** Both named commits are on origin/main (`9c09d2aadc` and `1bbc28a6a9`). `feat/release-readiness` is five commits ahead of origin/main, ending at `f058fa029d`. The `0.35.561` version projection is uncommitted. `make check` is running. `v0.35.561` is not tagged, and publication has not run.
+
+### Re: 0.35.561 is published — grok-4.7 · 2026-10-29T11:10-04:00
+
+> **Chat prompt (#chatprompt):** how is the publish coming along?
+
+`v0.35.561` is published. `origin/main` and the tag are `7b44d8bb28`. GitHub Actions run `40891180347` completed with success. The GitHub Release has 24 assets at https://github.com/btakita/agent-doc/releases/tag/v0.35.561. PyPI run `40898500134` completed with success, and `agent_doc-0.35.561-py3-none-any.whl` is public. The installed binary is `agent-doc 0.35.561`. `v0.35.560` remains `bd971e9b87`.
+
+> **Queue prompt:** release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
+
+Both named commits are in this release. `9c09d2aadc` and `1bbc28a6a9` were already on `origin/main`. The tag push, local `install-full`, GitHub Release, and PyPI publication are complete.
+
 <!-- agent:boundary:0a96ac8f -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- 📥 [#vscodecodersmoke]
+- [#vscodecodersmoke]
   - ~~Where does this file live? My Coder agent is asking.~~
-- 📥 do [#grok-live-editor]
+- do [#grok-live-editor]
   - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- ☑️ [#subagent:releaseinclude#2] release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.
-- ~~Why are there many agent:run items with 📥 in api.md? Is the state out of sync or do we need another emoji to represent another state?~~ — auto-struck: answered this cycle (#ftstrike)
-~~~done
-agent:run items should never be refused. From api.md session:
-```
-Yes. The queue claim for a shared #rebase row is refused when several pull requests use that same      9:12 AM   █
-text. Nine live rows match it, on pull requests 717, 758, 763, and 767, so those claims exited 1 and             █
-no worker started. Pull request 767's section has rebase rows and no #review row. The short #review              █
-claim is held by pull request 763. GitHub showed 0 reviews and 0 review comments on https://                     █
-github.com/haiven-dev/haiven-api/pull/767. The head was 958dbf52dfca2a499f47320db72d86a62d77622d on
-agent/studio-integration-redirects-20261026, base sdk-dev. mergeable came back UNKNOWN.
-```
-~~~
-- ~~Does a "refusal" strand the state of a agent:run item? Is this why there are so many run items that are stuck iwth 📥 in api.md?~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Remove Editor Plugin dialog since this is a normal/routine operation: [route] Sent 1 update to the agent already running for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs.md; no second turn was started. steering_delivered=1 sent=explicit ui_outcome_contract=ui-outcome-v1 ui_outcome=steering_delivered_to_owner ui_outcome_class=ok next_action=owner_turn_handles_steering~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~In api.md, a turn shows `All 18 plan claims exited 1, so no worker started. I am recording the three chat prompts and the current PR 767 git state in the closeout.`: I believe this is related to the stranded 📥. Why are the claims exiting 1? Can we discern a reason and use certain reasons to update the state so we don't have stranded items with 📥 only to exit 1 during every turn? Also I added https://github.com/haiven-dev/haiven-api/pull/762 > #rebase, but agent-doc did nothing...presumably because it had an exit 1.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~release + publish: Include #subagent:contractprsstall and #subagent:nestlistlineage.~~ — auto-struck: answered this cycle (#ftstrike)
+- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes ()
+- I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change)
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

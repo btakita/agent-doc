@@ -36,6 +36,34 @@ project config from failing closed before the skill can migrate it. Install
 rewrites only those args to the explicit canonical form, and the skill audit
 (`skill check --harness grok`) rejects the legacy shape.
 
+### Live editor plan refresh (`#grok-live-editor`)
+
+While a Grok pane owns an active agent-doc session, the converged live-editor
+cut is an event source for that session, not data that waits for the next user
+message. The relay's process-scoped queue-region `Source` feeds a
+document-scoped `Computed` projection that joins the authoritative CRDT
+revision, runnable queue/claim projection, owner generation, cycle state, and
+Grok composer state. An `Effect` reacts when that projection changes. This is
+the existing reactive document graph; implementations must not add a polling
+loop, watch stale disk metadata, or create a second document model.
+
+An effective change includes a newly runnable queue row, a strike that changes
+what remains runnable, or a claim transition that changes the dispatch plan.
+When the current owner is Grok, the effect pushes one bounded route-sync
+steering instruction into the owned session. A busy pane uses Grok's empty
+follow-up composer; an idle pane uses the supervisor trigger. An unreadable
+composer or an operator draft is protected and remains fail-closed. The
+instruction tells the connected session to call `agent_doc_plan` again rather
+than embedding a full document copy in terminal input.
+
+Refresh delivery is keyed by owner generation plus authoritative revision and
+plan fingerprint. Repeated observations coalesce, delivery records a receipt,
+and an owner change invalidates the old delivery target. After the refresh,
+`agent_doc_plan` resolves the current live CRDT cut and its
+`queue_subagent_dispatch` includes every newly runnable row even when disk is
+unchanged. Detached documents and non-owning panes do not receive a push;
+their ordinary MCP reads and command-boundary behavior are unchanged.
+
 ## Trait
 
 `fn send(prompt, session_id, fork, model) -> (text, session_id)`

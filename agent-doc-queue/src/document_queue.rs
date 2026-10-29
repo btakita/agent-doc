@@ -9114,9 +9114,7 @@ mod tests {
             .filter_map(|(index, entry)| match entry {
                 QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
                     text: prompt.text.clone(),
-                    marker: if index == 0 {
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                    } else if index == 1 {
+                    marker: if index == 0 || index == 1 {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
                     } else {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported

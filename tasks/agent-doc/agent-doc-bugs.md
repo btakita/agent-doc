@@ -420,6 +420,18 @@ The new run row that begins "If a subagent or agent claims a tree item" is still
 
 No additional backlog follow-up is needed because the entire-tree commit is on main and the three issue rows are already running on their workers.
 
+### Re: installed binary is the unbumped build — grok-4.7 · 2026-10-28T21:00-04:00
+
+> **Chat prompt (#chatprompt):** Are the local changes installed even though the version has not changed?
+
+Yes. `make install` of main `397d559aec` replaced `/home/brian/.cargo/bin/agent-doc` and `libagent_doc.so` with the build from that commit. `agent-doc --version` still prints `agent-doc 0.35.560` because the package version was not bumped.
+
+The installed binary and `target/local-install/release-local/agent-doc` share sha256 `764015d51f786d330c2200c8707bae88e4b7cc4217feb44c7c0511992c4d02d1`. `libagent_doc.so` matches the same build (`c716337289959b24a94408c62711803da0c1c6a2198fdf571f47dd9a40293eb6`). The install log records `[binary-install] target/local-install/release-local/agent-doc -> /home/brian/.cargo/bin/agent-doc`. The worktree is clean at `397d559aec`. The installed file time is `2026-10-28 20:50:41 -0400`, after that commit.
+
+JetBrains `0.2.881` and `0.2.882` were already byte-identical, so those plugin files stayed in place. VS Code `0.2.90` was packaged and installed again. The queue change is in the Rust binary that was replaced.
+
+No additional backlog follow-up is needed because the install check is answered here.
+
 <!-- agent:boundary:32cd12b5 -->
 <!-- /agent:exchange -->
 

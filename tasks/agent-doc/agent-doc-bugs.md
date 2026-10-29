@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 3 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 2 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1038,7 +1038,16 @@ The private-name scan of added lines was clean. The worker reported `make check`
   - **No new affordance**: Keep lifecycle markers, strikethrough, owner annotations, and the until-commit diff gutter.
 
 Branch `fix/recent-run-affordance` is unchanged at `7b44d8bb2890fb636b4579862ff64a5bd15d5e28`. No files changed. No commit. No tests run. No follow-up queue heads.
-<!-- agent:boundary:7860a38c -->
+> **Queue prompt:** If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+### Re: Top three can be numbered — grok-4.7 · 2026-10-29T13:21-04:00
+
+A numeric recency glyph can carry that order. Three stripped metadata tokens, the same class as `⟦effect:N⟧`, mark the newest, second, and third `agent:run` rows a closeout addressed. They are not queue identity.
+
+A timestamp annotation can drive the same three editor highlights. The time stays in the markdown. The plugin ranks those times and paints the newest three. The highlight is editor-only.
+
+That combination is now choice (6) on `#recent-run-affordance`. `subagent:recentrun` generation 1 has exited, so this note is recorded here. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`. Nothing is implemented.
+<!-- agent:boundary:59cd7ea3 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
@@ -1049,25 +1058,12 @@ Branch `fix/recent-run-affordance` is unchanged at `7b44d8bb2890fb636b4579862ff6
 - 🙋☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
   - Annotation, worker-reported
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
-~~~done
-agent-doc needs to surface any errors that occur during a prompt. Prompts should not be unanswered:
-```
-> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/767: #review
-
-**Deferred:** this cycle's plan did not dispatch that pending row. It stays queued.
-```
-```
-- https://github.com/haiven-dev/haiven-api/pull/767
-  ...
-  - ~~#rebase https://github.com/haiven-dev/haiven-api/pull/767~~
-```
-~~~
-- ~~do [#repeatsamepreset]~~
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+  - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->
@@ -1094,7 +1090,7 @@ agent-doc needs to surface any errors that occur during a prompt. Prompts should
 - [x] [#subagent-operator-request-rtsteering-force-lease] Answer the blocking subagent permission request for tracked work grok-live-editor for queue item ‘re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering’ in agent:exchange: permission to run `git push --force-with-lease` on `fix/realtime-steering-parity` only (choices: allow, deny) (source: agent:backlog [#grok-live-editor])
 - [ ] [#reviewpublish-marker] Pick the local-vs-published marker for a #review or code-change row. Worker 01a18839-8b85-7601-9741-6333916b1f50 left branch fix/local-vs-published-marker unchanged at 7b44d8bb28. (1) Annotation, worker-reported: ⟦local⟧ and ⟦published⟧, alone or together, only when queue report-complete records that state. (2) Icons, worker-reported: same rule, and you name both glyphs first. (3) Observe git and GitHub on projection for a pull-request row whose preset is #review, #rebase, #push, #fix-ci, or #address. (4) Other: you specify the tokens, the row rule, and the source of truth.
 - [ ] [#subagent-operator-request-review-publish-marker] Answer the blocking subagent question for queue item ‘I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context…’ in agent:exchange: Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"? (choices: Annotation, worker-reported, Icons, worker-reported, Observe git and GitHub, Other)
-- [ ] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance.
+- [ ] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance. (6) Timestamp annotation plus editor highlights for the newest three, or a numeric recency glyph that carries that order.
 - [ ] [#subagent-operator-request-recent-run-affordance] Answer the blocking subagent question for tracked work reviewrebase-repeat for queue item ‘If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn?…’ in agent:exchange: Which affordance should mark an `agent:run` row addressed by a recent turn? (choices: Editor highlight, clear on caret, Timestamp annotation, Recency glyph, no clock, Status digest only, No new affordance)
 <!-- /agent:todo -->
 

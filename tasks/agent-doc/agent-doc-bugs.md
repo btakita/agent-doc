@@ -2,7 +2,7 @@
 agent_doc_session: 3f069c68-7119-4c7b-84a9-4baeb84be35c
 resume:
   claude: f08cd727-ebd1-4b95-8305-635688e2d56c
-  codex: 01a17616-9ddc-7ee0-86df-a42c74605356
+  codex: 01a18932-dcae-7493-8021-dd8a09572c34
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -1422,32 +1422,116 @@ Keep **Annotation, worker-reported** as the canonical source of truth. I recomme
 Use the timestamp annotation as durable truth and derive numeric editor glyphs `①`, `②`, and `③`, where `①` is the most recently addressed row. Match those ranks with three highlight strengths. Moving the caret onto a row can clear its transient highlight without deleting the timestamp or rank evidence; ranks are recomputed when another turn is addressed. I captured this as recommended backlog item `#recentrunmarkers` and completed the two recency decision TODOs.
 
 Changed paths: task state in `tasks/agent-doc/agent-doc-bugs.md`; the required version gate also refreshed installed agent-doc skill/runbook mirrors. Commands: agent-doc read/plan, the live GitHub issue check, and this granular backlog/TODO closeout. Verification: the repository currently shows three open issues, exclusions #40 and #45 leave only #385, and the live document search found no existing #385 URL. Confidence: high. Escalation: none; these implementation items are queued rather than built in this choice-response cycle.
+
+### Re: Integrated queue fixes and #385 closeout — gpt-5 · 2026-10-29T18:12:44-04:00
+
+> **Chat prompt (#chatprompt:1fc8fae26279):** Is `🙋☑️ [#subagent:leafcontext#1] ...: leaf only` done?
+
+No. The earlier worker completed only live-subprompt answer recognition. The Leaf-only execution model is still open. This cycle did fix the lifecycle defect that wedged the row behind an exited owner, and the recorded Leaf-only answer is now durable; the implementation row itself is not being claimed complete.
+
+> **Chat prompt (#chatprompt:1395cb5673b9):** Is agent-doc blocking work on that prompt steer?
+
+Yes. Generation 1 remained bound to an exited worker, so the steer was routed only to an unreachable owner. Commit `bde1377e72` now preserves the edit and transitions unavailable-owner work through a generation-fenced redispatchable state. Its focused regression and the combined suite passed.
+
+> **Chat prompt (#chatprompt:863cb06fa559):** Fix the bug in a subagent
+
+Done. `#staleownersteer` was implemented in a dedicated worktree, integrated, checked, installed, and pushed.
+
+> **Chat prompt (#chatprompt:b9e1b7183371):** Why is the backlog item [#gh385fencehead] not complete when the queue item has a ☑️?
+
+Because ☑️ means the worker reported completion; it does not mean the coordinator integrated, verified, installed, pushed, and closed the backlog item. Those gates are now complete. `#gh385fencehead` is closed by this response.
+
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
+>   - Annotation, worker-reported
+>   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+Implemented and re-audited. Canonical worker-reported states are `⟦local⟧`, `⟦published⟧`, and `⟦published+local⟧`; VS Code and JetBrains derive `✎`, `⇧`, and `✎⇧` with tooltips. The focused audit passed 53 tests.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+>   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+Implemented and re-audited. Addressed rows receive durable `⟦addressed-at:...Z⟧`; editors derive newest-three ranks `①`/`②`/`③` and graded transient highlights. Caret navigation clears only the transient highlight. Eight focused tests passed.
+
+The decision-id answer is: `**Other**` is a value, not a safe identity. Use the stable tracked request id and encode the answer separately, for example `⟦decision:subagent-operator-request-decision-annotation-syntax=Other⟧`. Option (2), request-answer stamp and requeue, is recommended; choose option (3) only to generalize decisions to every tracked todo id. The decision-annotation implementation remains open pending that operator choice.
+
+> **Queue prompt:** api.md did not pass the prompt lineage to the agent. I switched from Grok to Codex. Is Codex out of date?:
+> ```
+> • The queue is blocked on #push, whose target is unspecified. No push or subagent dispatch occurred; the stale PR 762
+>   review was already completed.
+>
+>   Please specify the repository, source ref/commit, destination remote branch, and whether force-with-lease is
+>   authorized. This request is recorded in tasks/api.md (tasks/api.md).
+> ```
+
+Codex was current. Direct continuation lineage was defective. The selected group parent now submits its full nested authorization/prompt tree.
+
+> **Queue prompt:** In api.md, the subprompt `    - respond to the review in the PR` and `  - Add backlog items into fpe.md.` is not being picked up by an agent. Will this be fixed when we install the next release?
+
+Yes. Reported and lost parents no longer consume nested steering capacity; live claimed/running parents retain one slot. The integrated install contains the fix.
+
+> **Queue prompt:** In sdk-demo.md, `- ⛔ ⟦blocked by bossroom-sbx-provision⟧ do [#bossroom-stg-provision]` should now be unblocked. agent-doc should remove the `⛔ ⟦blocked by bossroom-sbx-provision⟧` once bossroom-sbx-provision was completed. There is also multiple blocks as in `- ⛔ ⟦blocked by bossroom-sbx-provision, sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]`. The blockers were completed, so as each blocker is complete, remove from the blocked by list.
+
+Fixed. Closeout now reprojects blocker-only state immediately: the last completed blocker removes the full blocked marker, and partial completion retains only still-open blocker ids.
+
+> **Queue prompt:** In api.md, I added `  - #review` to `- https://github.com/haiven-dev/haiven-api/pull/762`. agent-doc deleted `  - #review` on the first Run Agent Doc. I readded `  - #review` and Run Agent Doc kept it.
+
+Fixed. Queue sync now replaces only exact canonical top-level `do [#id]` mirror rows and preserves nested presets such as `#review`.
+
+> **Queue prompt:** api.md has stale document bookeeping: `- 🙋 do [#search-suggest-ambiguous-status] [#subagent-operator-request-search-suggest-commit-pr]` and `- 🙋⛔ ⟦blocked by subagent-operator-request-slack-local-token⟧ do [#runlocallynow] [#subagent-operator-request-slack-local-token]` were kept even though a subprompt completed the prompt.
+
+Fixed. Answer discovery now scans every run/loop queue block and treats a live executable free-text leaf beneath a tracked request parent as its answer, while excluding struck/history rows, group labels, and tracked child directives.
+
+Integrated source commits were pushed to `origin/main` at `dae6ff83fe`. The batch includes GH #385, publication markers, recency markers, Grok live-editor refresh, lineage and nested pickup, blocker refresh, nested preset preservation, unavailable-owner recovery, and stale parent bookkeeping.
+
+Verification:
+- Combined `make check`: exit 0; 12,204 passed, 187 skipped.
+- JetBrains classic, 262, and 263 builds: all successful.
+- Package generations: JetBrains `0.2.892`, JetBrains 262 `0.2.894`, JetBrains 263 `0.2.893`, VS Code `0.2.92`.
+- One coordinator `make install`: exit 0.
+- CI run `40964048034` was queued after the push.
+- Confidence: high. The combined branch, conflict resolutions, package fences, and install all passed.
+- Operational note: modular JetBrains 263 plugin files were replaced, but its UI/plugin changes require an IDE restart; the native endpoint remains usable meanwhile.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- [#vscodecodersmoke]
-  - ~~Where does this file live? My Coder agent is asking.~~
-- do [#grok-live-editor]
-  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow
-- ☑️ [#subagent:reviewpublish#1] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
+- ~~do [#grok-live-editor]~~
+  - ~~re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow~~
+- ☑️ [#subagent:reviewpublishverify#2] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
   - Annotation, worker-reported
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
-- ☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+- ☑️ [#subagent:recentrunverify#2] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
-- 🙋☑️ [#subagent:decisionannotate#1] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
-- ~~In game-sessions.md, I see items with `☑️` and a decision id without a `🙋`. I believe the prompt is blocked on the decision. If I add a subprompt to the `☑️` prompt, that should be worked on.~~ — auto-struck: answered this cycle (#ftstrike)
+- 🙋☑️ [#subagent:decisionsurrogate#2] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
+  - The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?
 - ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
-- 🙋☑️ [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]
-- 🚧 [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
-- 🚧 [#subagent:planrange#1] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
-- do [#gh385fencehead]
-- do [#reviewpublishmarkers]
-- do [#recentrunmarkers]
+- ☑️ [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only
+- ⚠️ [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
+- ⚠️ [#subagent:planrange#1] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
+- ~~do [#gh385fencehead]~~
+- ~~do [#reviewpublishmarkers]~~
+- ~~do [#recentrunmarkers]~~
+- ~~do [#subagents-fanout]~~
+- ~~do [#reviewrebase-repeat]~~
+- ~~do [#grok-live-editor]~~
+~~~done
+api.md did not pass the prompt lineage to the agent. I switched from Grok to Codex. Is Codex out of date?:
+```
+• The queue is blocked on #push, whose target is unspecified. No push or subagent dispatch occurred; the stale PR 762
+  review was already completed.
+
+  Please specify the repository, source ref/commit, destination remote branch, and whether force-with-lease is
+  authorized. This request is recorded in tasks/api.md (tasks/api.md).
+```
+~~~
+- ~~In api.md, the subprompt `    - respond to the review in the PR` and `  - Add backlog items into fpe.md.` is not being picked up by an agent. Will this be fixed when we install the next release?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
+- ~~In sdk-demo.md, `- ⛔ ⟦blocked by bossroom-sbx-provision⟧ do [#bossroom-stg-provision]` should now be unblocked. agent-doc should remove the `⛔ ⟦blocked by bossroom-sbx-provision⟧` once bossroom-sbx-provision was completed. There is also multiple blocks as in `- ⛔ ⟦blocked by bossroom-sbx-provision, sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]`. The blockers were completed, so as each blocker is complete, remove from the blocked by list.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
+- ~~In api.md, I added `  - #review` to `- https://github.com/haiven-dev/haiven-api/pull/762`. agent-doc deleted `  - #review` on the first Run Agent Doc. I readded `  - #review` and Run Agent Doc kept it.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
+- ~~api.md has stale document bookeeping: `- 🙋 do [#search-suggest-ambiguous-status] [#subagent-operator-request-search-suggest-commit-pr]` and `- 🙋⛔ ⟦blocked by subagent-operator-request-slack-local-token⟧ do [#runlocallynow] [#subagent-operator-request-slack-local-token]` were kept even though a subprompt completed the prompt.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->
@@ -1470,24 +1554,12 @@ Changed paths: task state in `tasks/agent-doc/agent-doc-bugs.md`; the required v
   - GitLab default: union of open MRs (created_by_me, assigned_to_me, reviews_for_me), open issues (created_by_me, assigned_to_me) and items behind pending `mentioned`/`directly_addressed` to-dos. It misses items you only commented on. OK?
   - Jira default: `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`. Comments count only through auto-watch, and mentions are not matched. OK?
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
-- [x] [#rtsteering-force-lease] Allow or deny git push --force-with-lease on fix/realtime-steering-parity only
-- [x] [#subagent-operator-request-rtsteering-force-lease] Answer the blocking subagent permission request for tracked work grok-live-editor for queue item ‘re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering’ in agent:exchange: permission to run `git push --force-with-lease` on `fix/realtime-steering-parity` only (choices: allow, deny) (source: agent:backlog [#grok-live-editor])
-- [x] [#reviewpublish-marker] Pick the local-vs-published marker for a #review or code-change row. Worker 01a18839-8b85-7601-9741-6333916b1f50 left branch fix/local-vs-published-marker unchanged at 7b44d8bb28. (1) Annotation, worker-reported: ⟦local⟧ and ⟦published⟧, alone or together, only when queue report-complete records that state. (2) Icons, worker-reported: same rule, and you name both glyphs first. (3) Observe git and GitHub on projection for a pull-request row whose preset is #review, #rebase, #push, #fix-ci, or #address. (4) Other: you specify the tokens, the row rule, and the source of truth.
-- [x] [#subagent-operator-request-review-publish-marker] Answer the blocking subagent question for queue item ‘I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context…’ in agent:exchange: Which marker, which rows, and which source of truth should distinguish "changed locally" from "published (pushed or posted to the remote)"? (choices: Annotation, worker-reported, Icons, worker-reported, Observe git and GitHub, Other)
-- [x] [#recent-run-affordance] Pick how an agent:run row shows that a recent turn addressed it. Worker 01a1889d-af6d-7001-b854-63cc83c662b7 left fix/recent-run-affordance unchanged at 7b44d8bb28. (1) Editor highlight, clear on caret. (2) Timestamp annotation. (3) Recency glyph, no clock. (4) Status digest only. (5) No new affordance. (6) Timestamp annotation plus editor highlights for the newest three, or a numeric recency glyph that carries that order.
-- [x] [#subagent-operator-request-recent-run-affordance] Answer the blocking subagent question for tracked work reviewrebase-repeat for queue item ‘If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn?…’ in agent:exchange: Which affordance should mark an `agent:run` row addressed by a recent turn? (choices: Editor highlight, clear on caret, Timestamp annotation, Recency glyph, no clock, Status digest only, No new affordance)
 - [ ] [#subagent-operator-request-decision-annotation-syntax] Pick how a made decision id annotates prompts and whether that restarts them. Worker 01a188dc-ebd3-7711-87c6-67034f7b9536 made no commit. (1) Blocker-close stamp: ⟦decision:<id>⟧ on live do [#id] rows when a stays-open or after= blocker leaves the open set; the last blocker returns the row from ⛔ to 📥. (2) Request-answer stamp and requeue: only [#subagent-operator-request-…] ids, token ⟦decision:<id>=<answer>⟧, every citing row returns to 📥 and its claim is released. (3) Cited-id answer stamp and requeue: any [#id] naming an open todo or operator request, made when that todo is checked or any instance has a nested answer; every unstruck citing row is stamped, loses ☑️ ⛔ 🙋, and returns to 📥. (4) Stamp only: same detection and token as (3), with no lifecycle change and no release. (5) Other.
 - [ ] [#subagent-operator-request-inbox-terminal-reading] Which reading should a closeout adopt when a nested #address or #rebase: #address row would stay at 📥? Worker 01a188df-8bd1-7bf1-938a-d7bb1d907c05 made no commit. Branch fix/inbox-not-terminal stays at 7b44d8bb28. (1) Start a new turn: the nested row stays its own pending head, 📥 means ready to run, and another row's closeout may commit while this row is still 📥. (2) The subprompt is in a bad state: do not commit that 📥; treat the row as a sub-prompt or failed work and remove the pending marker in the same turn. The worker prompt ended before the later sentences about a reliable error emoji, making 📥 unambiguous, and not ending a turn while prompts are 📥.
-- [ ] [#subagent-operator-request-parent-leaf-context] Should a parent that has subprompts stay one executable head (#nestedsubprompts), or become non-executable prefixed context so only the leaves run and a blocker on the parent does not stop those leaves? Worker 01a188e5-ad81-70d0-8926-43381e563159 landed the live-subprompt answer on fix/parent-is-leaf-context at 90cf29ae63668f53168938364d26ad25faf87837. (1) Keep one head: the parent with free-text subprompts stays the executable prompt, and a blocker on that head holds the whole unit. The landed subprompt-answer rule stays. (2) Leaf-only: once a parent has subprompts, the parent is prefixed context and is not executable. Only leaves run. A blocker on the parent does not stop those leaves.
+- [x] [#subagent-operator-request-parent-leaf-context] Should a parent that has subprompts stay one executable head (#nestedsubprompts), or become non-executable prefixed context so only the leaves run and a blocker on the parent does not stop those leaves? Worker 01a188e5-ad81-70d0-8926-43381e563159 landed the live-subprompt answer on fix/parent-is-leaf-context at 90cf29ae63668f53168938364d26ad25faf87837. (1) Keep one head: the parent with free-text subprompts stays the executable prompt, and a blocker on that head holds the whole unit. The landed subprompt-answer rule stays. (2) Leaf-only: once a parent has subprompts, the parent is prefixed context and is not executable. Only leaves run. A blocker on the parent does not stop those leaves.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->
-- [ ] [#gh385fencehead] Fix GH #385 (https://github.com/btakita/agent-doc/issues/385): let a labeled verbatim Queue prompt echo strike a fence-leading free-text head; keep trailing-only and unlabeled blockquotes non-matching; add regression coverage for same-line and next-line label shapes.
-- [ ] [#reviewpublishmarkers] [recommended] Implement worker-reported local/published state as canonical annotations (local, published, published+local) with derived editor glyphs ✎, ⇧, and ✎⇧ plus a legend or tooltip; source decision #reviewpublish-marker.
-- [ ] [#recentrunmarkers] [recommended] Implement addressed-at timestamp annotations with editor-derived ①/②/③ recency ranks and highlights for the newest three rows; caret navigation clears only the transient highlight; source decision #recent-run-affordance.
-- [ ] [#subagents-fanout] A bare subagents attribute on agent:run, with no =N cap, is a fan-out: every eligible head in every such run is dispatched in the same cycle, each to its own subagent. agent-doc plan still returns parallelizable false and a one-item queue_subagent_dispatch, so a coordinator holds the other live heads. Observed 2026-10-29 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md cycle cycle-1793299293224. That document has three runs, id=main, id=api-prs, and id=contracts-prs, each marked subagents with no cap. After the haiven-api pull 767 review was already running, a fresh plan set task_class queue_subagent_dispatch, dispatch_mode manual, parallelizable false, and listed only https://github.com/haiven-dev/haiven-api/pull/762: #review. queue brief at the same time still named other live heads, including the haiven-contracts pull 169 row whose child is Add backlog items into fpe.md. and the haiven-contracts pull 174 address row whose new child is respond to the review in the PR. Create a plan. Do not implement the fix in that plan.
-- [ ] [#reviewrebase-repeat] Each copy of a nested review or rebase preset in one prompt tree must run again, including when the same words already ran under another parent. A short claim binds one remaining head, and the closeout that answers one leaf removes the same text under a different parent. On 2026-10-29, /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md commit 46525385 still had an inbox review child under https://github.com/haiven-dev/haiven-api/pull/767. Commit 477a8d7e removed that child while recording the review for https://github.com/haiven-dev/haiven-api/pull/763. Create a plan. Do not implement the fix in that plan.
-- [ ] [#grok-live-editor] Grok Build should see live agent-doc editor changes. A Grok session reads the CRDT document only when it calls agent_doc_admit, agent_doc_plan, agent_doc_read, or agent_doc_finalize, or when it pulls agent-doc steering. The Read tool sees disk, which trails the editor replica. Queue rows the operator adds during a turn stay invisible until the next pull, so the coordinator dispatches only the rows the last plan listed and the operator sees idle inbox rows. Expected: while a Grok pane owns a session, converged editor ops (new queue rows, strikes, claim projection) are pushed into that session, and the next plan includes the newly runnable rows without waiting for another user message. Observed 2026-10-28 on /home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/api.md: the operator asked why only two subagents were running while more queue rows were visible. The prior plan queue_subagent_dispatch listed only those two.
 <!-- /agent:backlog -->
 
 ## Review <!-- agent:review -->

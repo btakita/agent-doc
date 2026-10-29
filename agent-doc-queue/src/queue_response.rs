@@ -875,33 +875,44 @@ pub fn submitted_continuation_prompt(
     submitted_queue_prompt_skipping(content, head_text, skip)
 }
 
-/// Submitted prompts for `heads`, using the selected queue when it parses.
+/// Submitted prompts for `heads` across every runnable section (`#nestsubmit`).
 ///
-/// Heads are a subsequence in queue order. Each identical leaf takes the next
-/// live row's parent (`#nestsubmit`).
+/// Heads are a subsequence in document order. A plan ranges across every
+/// `agent:run` and every `agent:loop`, including a section defined after
+/// another run, then the other tree markers. Each head binds to the section
+/// that contains it. A cursor inside that section gives identical leaves
+/// different parents. A later section's rows and subprompts stay in that
+/// head's prompt tree when an earlier section already matched a different head.
 pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<String> {
     let bodies = parsed_queue_bodies(content);
-    let matches_head = |entries: &[crate::document_queue::QueueEntry]| {
-        heads.iter().any(|head| {
-            entries.iter().enumerate().any(|(index, entry)| {
-                matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
-                    && !crate::document_queue::entry_is_group_parent(entries, index)
-                    && crate::document_queue::row_matches_head_text(entries, index, head)
-            })
+    if bodies.is_empty() {
+        return heads.to_vec();
+    }
+    let mut cursors = vec![0usize; bodies.len()];
+    heads
+        .iter()
+        .map(|head| {
+            if head.trim().is_empty() || crate::queue_command::slash_command_text(head).is_some() {
+                return head.clone();
+            }
+            for (body_index, entries) in bodies.iter().enumerate() {
+                for (idx, entry) in entries.iter().enumerate().skip(cursors[body_index]) {
+                    let crate::document_queue::QueueEntry::Prompt(_) = entry else {
+                        continue;
+                    };
+                    if crate::document_queue::entry_is_group_parent(entries, idx)
+                        || !crate::document_queue::row_matches_head_text(entries, idx, head)
+                    {
+                        continue;
+                    }
+                    cursors[body_index] = idx + 1;
+                    return crate::document_queue::submitted_prompt_at(entries, idx)
+                        .unwrap_or_else(|| head.clone());
+                }
+            }
+            head.clone()
         })
-    };
-    if let Some(entries) = bodies.iter().find(|entries| matches_head(entries)) {
-        return crate::document_queue::submitted_prompts_in_order(entries, heads, |_| false);
-    }
-    for entries in &bodies {
-        if entries
-            .iter()
-            .any(|entry| matches!(entry, crate::document_queue::QueueEntry::Prompt(_)))
-        {
-            return crate::document_queue::submitted_prompts_in_order(entries, heads, |_| false);
-        }
-    }
-    heads.to_vec()
+        .collect()
 }
 
 /// The live row named by `head_text`, including folded sub-prompts.
@@ -3308,6 +3319,67 @@ queue_active: true
         assert!(
             submitted[0].starts_with(contracts),
             "the contracts lineage binds that queue, not the earlier #rebase: {submitted:?}"
+        );
+    }
+
+    /// A plan ranges across every `agent:run` and `agent:loop`, including a
+    /// section defined after another run. An earlier section matching one head
+    /// must not drop a later section's subprompts from the other heads.
+    #[test]
+    fn submitted_prompts_for_heads_ranges_across_later_run_and_loop() {
+        let api = "https://example.com/api/pull/1: #rebase";
+        let contracts = "https://example.com/contracts/pull/9: #rebase";
+        let nightly = "https://example.com/loop/pull/3: #check";
+        let content = "\
+<!-- agent:run id=\"api-prs\" subagents -->
+- https://example.com/api/pull/1
+  - #rebase
+<!-- /agent:run -->
+
+<!-- agent:run id=\"contracts-prs\" subagents -->
+- https://example.com/contracts/pull/9
+  - #rebase
+  - record the contracts note
+<!-- /agent:run -->
+
+<!-- agent:loop id=\"nightly\" subagents -->
+- https://example.com/loop/pull/3
+  - #check
+    - check the nightly note
+<!-- /agent:loop -->
+";
+        let submitted = submitted_prompts_for_heads(
+            content,
+            &[api.to_string(), contracts.to_string(), nightly.to_string()],
+        );
+        assert_eq!(submitted.len(), 3, "{submitted:?}");
+        assert!(
+            submitted[0].starts_with(api),
+            "the earlier run keeps its own tree: {submitted:?}"
+        );
+        assert!(
+            !submitted[0].contains("record the contracts note"),
+            "the earlier tree stays that section: {submitted:?}"
+        );
+        assert!(
+            submitted[1].starts_with(contracts),
+            "the later run binds its own section: {submitted:?}"
+        );
+        assert!(
+            submitted[1].contains("record the contracts note"),
+            "a subprompt in the later run stays in that head's tree: {submitted:?}"
+        );
+        assert!(
+            submitted[1].contains("Prompt tree (`#nestsubmit`"),
+            "{submitted:?}"
+        );
+        assert!(
+            submitted[2].starts_with(nightly),
+            "the loop section binds after the runs: {submitted:?}"
+        );
+        assert!(
+            submitted[2].contains("check the nightly note"),
+            "a loop subprompt stays in that head's tree: {submitted:?}"
         );
     }
 

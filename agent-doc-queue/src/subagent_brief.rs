@@ -163,6 +163,36 @@ fn tracked_work_item(
         })
 }
 
+/// The plan's origin queue for `item`.
+///
+/// A plan ranges across every `agent:run` and `agent:loop`. The origin is the
+/// section that contains the head, so a later section's subprompts and
+/// follow-ups stay in that section. When the selected queue also contains the
+/// head, the origin stays the selected queue: a mirrored head does not move.
+/// An unmatched item keeps the selected queue.
+fn origin_queue_id(content: &str, components: &[element::Component], item: &str) -> Option<String> {
+    let queues = crate::queue_graph::QueueSet::parse(content, components).ok()?;
+    let contains = |block: &crate::queue_graph::QueueBlock<'_>| block_contains_head(block, item);
+    if let Some(selected) = queues.selected()
+        && contains(selected)
+    {
+        return Some(selected.id.clone());
+    }
+    if let Some(block) = queues.blocks().iter().find(|block| contains(block)) {
+        return Some(block.id.clone());
+    }
+    queues.selected().map(|block| block.id.clone())
+}
+
+fn block_contains_head(block: &crate::queue_graph::QueueBlock<'_>, item: &str) -> bool {
+    let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
+    entries.iter().enumerate().any(|(index, entry)| {
+        matches!(entry, QueueEntry::Prompt(_))
+            && !crate::document_queue::entry_is_group_parent(entries.as_ref(), index)
+            && crate::document_queue::row_matches_head_text(entries.as_ref(), index, item)
+    })
+}
+
 /// Preset names the selected queue declares: every whitespace-separated
 /// reference in its `preset=` attr, then any body-level `preset <name>` lines.
 fn queue_preset_names(
@@ -300,9 +330,7 @@ pub fn subagent_authorization_with_presets(
     } else {
         AuthorizationStatus::Resolved
     };
-    let queue_id = crate::queue_graph::QueueSet::parse(content, components)
-        .ok()
-        .and_then(|queues| queues.selected().map(|queue| queue.id.clone()));
+    let queue_id = origin_queue_id(content, components, item);
     let queue_policy = crate::queue_set::selected_component(content, components)
         .ok()
         .flatten()
@@ -1172,6 +1200,57 @@ agent_doc_format: template
             ),
             "{}",
             auth.subagent_prompt_preamble
+        );
+    }
+
+    /// A head that lives only in a later `agent:run` names that run, not the
+    /// earlier selected run. Its submitted prompt keeps that section's subprompt.
+    #[test]
+    fn authorization_names_the_later_run_that_holds_the_subprompt() {
+        let content = "\
+<!-- agent:run id=\"api-prs\" subagents go -->
+- https://example.com/api/pull/1
+  - #rebase
+<!-- /agent:run -->
+
+<!-- agent:run id=\"contracts-prs\" subagents -->
+- https://example.com/contracts/pull/9
+  - #rebase
+  - record the contracts note
+<!-- /agent:run -->
+
+<!-- agent:loop id=\"nightly\" subagents -->
+- https://example.com/loop/pull/3
+  - #check
+    - check the nightly note
+<!-- /agent:loop -->
+";
+        let contracts = "https://example.com/contracts/pull/9: #rebase";
+        let nightly = "https://example.com/loop/pull/3: #check";
+        let contracts_auth = subagent_authorization("doc.md", content, contracts);
+        assert_eq!(contracts_auth.queue_id.as_deref(), Some("contracts-prs"));
+        assert!(
+            contracts_auth
+                .subagent_prompt_preamble
+                .contains("record the contracts note"),
+            "{}",
+            contracts_auth.subagent_prompt_preamble
+        );
+        assert!(
+            contracts_auth.subagent_prompt_preamble.contains(
+                "agent-doc queue follow-up doc.md --id contracts-prs --after <origin> --item <text>..."
+            ),
+            "{}",
+            contracts_auth.subagent_prompt_preamble
+        );
+        let loop_auth = subagent_authorization("doc.md", content, nightly);
+        assert_eq!(loop_auth.queue_id.as_deref(), Some("nightly"));
+        assert!(
+            loop_auth
+                .subagent_prompt_preamble
+                .contains("check the nightly note"),
+            "{}",
+            loop_auth.subagent_prompt_preamble
         );
     }
 

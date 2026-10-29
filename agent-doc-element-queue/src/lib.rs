@@ -409,38 +409,159 @@ fn strip_projection_token(trimmed: &str) -> Option<&str> {
         })
         .max_by_key(|(len, _)| *len)
         .map(|(_, rest)| rest)
-        .or_else(|| {
-            // `#queueblocked`: the blocker annotation that follows `⛔`
-            // (`⛔ ⟦blocked by a, b⟧`) is projection, never work identity.
-            let after_open = trimmed.strip_prefix("⟦blocked by ")?;
-            let close = after_open.find('⟧')?;
-            (!after_open[..close].contains(['\n', '\r']))
-                .then(|| &after_open[close + '⟧'.len_utf8()..])
+        // `#queueblocked`: the blocker annotation that follows `⛔`
+        // (`⛔ ⟦blocked by a, b⟧`) is projection, never work identity.
+        .or_else(|| strip_blocked_annotation_token(trimmed))
+        .or_else(|| strip_owner_annotation_token(trimmed))
+}
+
+/// A leading `⟦blocked by ...⟧` annotation, the blocker list that follows `⛔`.
+fn strip_blocked_annotation_token(trimmed: &str) -> Option<&str> {
+    let after_open = trimmed.strip_prefix("⟦blocked by ")?;
+    let close = after_open.find('⟧')?;
+    (!after_open[..close].contains(['\n', '\r'])).then(|| &after_open[close + '⟧'.len_utf8()..])
+}
+
+/// A leading exact-attempt owner annotation (`[#<owner>#<generation>]` or the
+/// legacy `⟦…⟧` spellings). A bare `[#id]` is work identity, not an attempt.
+fn strip_owner_annotation_token(trimmed: &str) -> Option<&str> {
+    let (payload, after, legacy_delimiters) = if let Some(rest) = trimmed.strip_prefix("[#") {
+        let (payload, after) = rest.split_once(']')?;
+        (payload, after, false)
+    } else {
+        let rest = trimmed.strip_prefix('⟦')?;
+        let (payload, after) = rest.split_once('⟧')?;
+        (payload, after, true)
+    };
+    let (owner, generation) = if legacy_delimiters {
+        if let Some(legacy) = payload.strip_prefix("owner=") {
+            legacy.rsplit_once(";generation=")?
+        } else {
+            payload.rsplit_once('#')?
+        }
+    } else {
+        payload.rsplit_once('#')?
+    };
+    (!owner.is_empty()
+        && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
+        && generation.parse::<u64>().is_ok())
+    .then_some(after)
+}
+
+fn longest_marker_prefix<'a>(trimmed: &'a str, markers: &[&str]) -> Option<(&'a str, &'a str)> {
+    markers
+        .iter()
+        .filter(|marker| !marker.is_empty())
+        .filter_map(|marker| {
+            trimmed
+                .strip_prefix(marker)
+                .map(|rest| (&trimmed[..marker.len()], rest))
         })
-        .or_else(|| {
-            let (payload, after, legacy_delimiters) = if let Some(rest) = trimmed.strip_prefix("[#")
-            {
-                let (payload, after) = rest.split_once(']')?;
-                (payload, after, false)
-            } else {
-                let rest = trimmed.strip_prefix('⟦')?;
-                let (payload, after) = rest.split_once('⟧')?;
-                (payload, after, true)
-            };
-            let (owner, generation) = if legacy_delimiters {
-                if let Some(legacy) = payload.strip_prefix("owner=") {
-                    legacy.rsplit_once(";generation=")?
-                } else {
-                    payload.rsplit_once('#')?
-                }
-            } else {
-                payload.rsplit_once('#')?
-            };
-            (!owner.is_empty()
-                && !owner.chars().any(|ch| ch == '\n' || ch == '\r')
-                && generation.parse::<u64>().is_ok())
-            .then_some(after)
-        })
+        .max_by_key(|(marker, _)| marker.len())
+}
+
+/// Operator pin spellings. A pin on a sub-prompt child is the operator's, not
+/// a lifecycle projection (`#nestedsubprompts`).
+fn leading_pin(trimmed: &str) -> Option<(&str, &str)> {
+    let icons = agent_doc_queue_icons::queue_icons();
+    let configured = [icons.prioritized.as_str(), icons.agent_prioritized.as_str()];
+    let defaults = [
+        "**prioritized**",
+        "__prioritized__",
+        "**pin**",
+        "__pin__",
+        ":pushpin:",
+        ":pin:",
+        "📌",
+        "*prioritized*",
+        "_prioritized_",
+        "*pin*",
+        "_pin_",
+        ":round_pushpin:",
+        "📍",
+    ];
+    let markers = configured.into_iter().chain(defaults).collect::<Vec<_>>();
+    longest_marker_prefix(trimmed, &markers)
+}
+
+/// One leading lifecycle marker, not a pin and not `🙋`.
+fn strip_lifecycle_token(trimmed: &str) -> Option<&str> {
+    let icons = agent_doc_queue_icons::queue_icons();
+    let configured = [
+        icons.claimed.as_str(),
+        icons.running.as_str(),
+        icons.pending.as_str(),
+        icons.blocked.as_str(),
+        icons.reported.as_str(),
+        icons.lost.as_str(),
+        icons.reconciling.as_str(),
+        icons.unknown.as_str(),
+        icons.skipped.as_str(),
+        icons.awaiting_operator.as_str(),
+    ];
+    let defaults = [
+        "🟡",
+        "🚧",
+        "📥",
+        "⛔",
+        "☑️",
+        "📫",
+        "📤",
+        "⚠️",
+        "🔄",
+        "❔",
+        "⏭\u{fe0f}",
+        "⏳",
+    ];
+    let markers = configured.into_iter().chain(defaults).collect::<Vec<_>>();
+    longest_marker_prefix(trimmed, &markers).map(|(_, rest)| rest)
+}
+
+/// Lifecycle projection on a sub-prompt child, with operator pins kept
+/// (`#nestedsubprompts`).
+///
+/// A child is not its own head, so a lifecycle marker, `🙋`, an owner
+/// annotation, or a blocker annotation on it is binary-owned whether or not
+/// an owner annotation follows the marker. A pin stays, including one written
+/// before or after the marker. `None` when nothing was removed, or when
+/// removal would leave the child empty.
+pub(crate) fn without_child_lifecycle_projection(text: &str) -> Option<String> {
+    let mut rest = text.trim_start();
+    let mut pins: Vec<&str> = Vec::new();
+    let mut dropped = false;
+    loop {
+        if let Some((pin, after)) = leading_pin(rest) {
+            pins.push(pin);
+            rest = after.trim_start();
+            continue;
+        }
+        if let Some(after) = strip_operator_action_glyph(rest)
+            .or_else(|| strip_lifecycle_token(rest))
+            .or_else(|| strip_blocked_annotation_token(rest))
+            .or_else(|| strip_owner_annotation_token(rest))
+        {
+            dropped = true;
+            rest = after.trim_start();
+            continue;
+        }
+        break;
+    }
+    if !dropped || rest.is_empty() {
+        return None;
+    }
+    if pins.is_empty() {
+        return Some(rest.to_string());
+    }
+    let mut out = String::new();
+    for (index, pin) in pins.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        out.push_str(pin);
+    }
+    out.push(' ');
+    out.push_str(rest);
+    Some(out)
 }
 
 /// `text` with every leading binary-owned *attempt projection* token removed:

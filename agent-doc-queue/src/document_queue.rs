@@ -1578,6 +1578,9 @@ pub fn set_prompt_runtime_projections(
 ) -> Option<Vec<QueueEntry>> {
     // `#nestedsubprompts`: children never carry their own projection, so a
     // legacy child marker is neither part of the match key nor kept.
+    // `#queuenest`: a group label is not a head. Pending means ready to run,
+    // so a pending target does not repaint one. A claim, report, or other
+    // ledger marker still does.
     let projection_key = |text: &str| {
         let cleaned = agent_doc_element_queue::subprompts::strip_subprompt_projections(text);
         strip_priority_markers(cleaned.as_deref().unwrap_or(text))
@@ -1592,7 +1595,8 @@ pub fn set_prompt_runtime_projections(
     let mut changed = false;
     let out = entries
         .iter()
-        .map(|entry| match entry {
+        .enumerate()
+        .map(|(index, entry)| match entry {
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 let mut next = prompt.clone();
                 if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
@@ -1606,6 +1610,7 @@ pub fn set_prompt_runtime_projections(
                     changed = true;
                 }
                 let key = projection_key(&next.text);
+                let group_label = entry_is_group_parent(entries, index);
                 let target = targets
                     .iter_mut()
                     .find(|(target_key, target, consumed)| {
@@ -1613,6 +1618,11 @@ pub fn set_prompt_runtime_projections(
                             && !*consumed
                             && (!matches!(entry, QueueEntry::Completed(_))
                                 || target.reopen_completed)
+                            && !(
+                                group_label
+                                    && target.marker
+                                        == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                            )
                     })
                     .map(|(_, target, consumed)| {
                         *consumed = true;
@@ -9052,6 +9062,104 @@ mod tests {
                 "- 🚧 Sync PR and Jira state into this document.\n",
                 "  - So this is the first subtask.\n",
                 "  - This is the second subtask.\n",
+            )
+        );
+    }
+
+    /// A bare `📥` on a sub-prompt child is the same legacy projection as an
+    /// owner-stamped one. The parent keeps the head's marker (`#nestedsubprompts`).
+    #[test]
+    fn a_bare_child_pending_marker_is_retired_with_the_parent() {
+        let body = concat!(
+            "- 📥 https://example.test/pull/164\n",
+            "  - 📥 https://example.test/pull/164 #review\n",
+        );
+        let head = prompts(&parse(body).unwrap())[0].text.clone();
+        let (projected, _) = project_prompt_runtime_projections(
+            body,
+            &[QueueRowProjection {
+                text: head,
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
+                owner: None,
+                blockers: Vec::new(),
+                reopen_completed: false,
+            }],
+        )
+        .unwrap()
+        .expect("the child marker is retired");
+        assert_eq!(
+            projected,
+            concat!(
+                "- 📥 https://example.test/pull/164\n",
+                "  - https://example.test/pull/164 #review\n",
+            )
+        );
+    }
+
+    /// `#queuenest`: a group label is not ready to run, so pending does not
+    /// paint it. A ledger marker on that row still does. Its leaves keep
+    /// their own markers.
+    #[test]
+    fn a_group_label_is_not_painted_pending() {
+        let body = concat!(
+            "- 📥 https://example.test/pull/717\n",
+            "  - 📥 #rebase\n",
+            "  - ☑️ [#subagent:fix#1] #fix-ci\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(entry_is_group_parent(&entries, 0));
+        let targets = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| match entry {
+                QueueEntry::Prompt(prompt) => Some(QueueRowProjection {
+                    text: prompt.text.clone(),
+                    marker: if index == 0 {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    } else if index == 1 {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                    } else {
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    },
+                    owner: (index == 2).then(|| {
+                        agent_doc_document::queue_projection::QueueOwnerProjection {
+                            owner: "subagent:fix".to_string(),
+                            generation: 1,
+                        }
+                    }),
+                    blockers: Vec::new(),
+                    reopen_completed: false,
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let (projected, _) = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the label loses its pending marker");
+        assert_eq!(
+            projected,
+            concat!(
+                "- https://example.test/pull/717\n",
+                "  - 📥 #rebase\n",
+                "  - ☑️ [#subagent:fix#1] #fix-ci\n",
+            )
+        );
+
+        let mut claimed = targets;
+        claimed[0].marker = agent_doc_document::queue_projection::QueueLifecycleMarker::Running;
+        claimed[0].owner = Some(agent_doc_document::queue_projection::QueueOwnerProjection {
+            owner: "subagent:label".to_string(),
+            generation: 1,
+        });
+        let (projected, _) = project_prompt_runtime_projections(body, &claimed)
+            .unwrap()
+            .expect("a real claim on the label still projects");
+        assert_eq!(
+            projected,
+            concat!(
+                "- 🚧 [#subagent:label#1] https://example.test/pull/717\n",
+                "  - 📥 #rebase\n",
+                "  - ☑️ [#subagent:fix#1] #fix-ci\n",
             )
         );
     }

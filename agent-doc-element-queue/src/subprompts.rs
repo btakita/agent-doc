@@ -291,16 +291,16 @@ pub fn unwrap_struck_parent(head: &str) -> &str {
     if inner.is_empty() { trimmed } else { inner }
 }
 
-/// Remove binary-owned attempt projections (lifecycle markers, the
-/// `[#owner#generation]` annotation) that a child row carries.
+/// Remove binary-owned lifecycle projections that a child row carries.
 ///
 /// Children never carry their own projection: the parent row's marker is the
 /// item's progress (`#nestedsubprompts`). Rows written before sub-prompts were
 /// folded into their parent were each projected as an independent head, so a
-/// legacy child can still start with `🟡 [#subagent:x#1]`. The binary owns
-/// those bytes, so the next projection pass removes them. Operator text
-/// (including a struck child) is never touched. Returns `None` when nothing
-/// changed.
+/// legacy child can still start with `🟡 [#subagent:x#1]` or a bare `📥`. The
+/// binary owns those bytes, so the next projection pass removes them, with or
+/// without an owner annotation. An operator pin on a child stays. Operator
+/// text (including a struck child) is never touched. Returns `None` when
+/// nothing changed.
 pub fn strip_subprompt_projections(text: &str) -> Option<String> {
     let (head, block) = split_subprompt_block(text);
     let block = block?;
@@ -313,19 +313,14 @@ pub fn strip_subprompt_projections(text: &str) -> Option<String> {
         let newline = &line[body.len()..];
         if let Some(content) = list_item_content(body)
             && !content.is_empty()
+            && let Some(stripped) = crate::without_child_lifecycle_projection(content)
         {
-            let stripped = strip_attempt_projection_prefix(content);
-            let prefix = &content[..content.len() - stripped.len()];
-            // Only a stamped attempt projection (`<marker> [#owner#gen]`) is
-            // binary-owned; a bare pin on a child is the operator's.
-            if prefix.contains("[#") && !stripped.trim().is_empty() {
-                let prefix_len = body.len() - content.len();
-                out.push_str(&body[..prefix_len]);
-                out.push_str(stripped);
-                out.push_str(newline);
-                changed = true;
-                continue;
-            }
+            let prefix_len = body.len() - content.len();
+            out.push_str(&body[..prefix_len]);
+            out.push_str(&stripped);
+            out.push_str(newline);
+            changed = true;
+            continue;
         }
         out.push_str(line);
     }
@@ -438,6 +433,19 @@ mod tests {
         assert_eq!(
             strip_subprompt_projections(text).as_deref(),
             Some("📥 Parent\n  - first\n  - second\n  - ~~done~~")
+        );
+        // A bare lifecycle marker is the same projection, not operator text.
+        // A pin on a child stays, on either side of the marker.
+        assert_eq!(
+            strip_subprompt_projections(
+                "📥 Parent\n  - 📥 review the pull request\n  - 📌 📥 keep this pin\n  - 📥 📍 and this one\n"
+            )
+            .as_deref(),
+            Some("📥 Parent\n  - review the pull request\n  - 📌 keep this pin\n  - 📍 and this one\n")
+        );
+        assert_eq!(
+            strip_subprompt_projections("Parent\n  - 📌 first\n  - ~~done~~"),
+            None
         );
         assert_eq!(
             strip_subprompt_projections("Parent\n  - first\n  - ~~done~~"),

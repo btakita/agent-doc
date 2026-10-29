@@ -1491,6 +1491,24 @@ Verification:
 - CI run `40964048034` was queued after the push.
 - Confidence: high. The combined branch, conflict resolutions, package fences, and install all passed.
 - Operational note: modular JetBrains 263 plugin files were replaced, but its UI/plugin changes require an IDE restart; the native endpoint remains usable meanwhile.
+
+### Re: Lost subagent work now restarts with its reason — gpt-5 · 2026-10-29T18:37:54-04:00
+
+> **Queue prompt:** `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
+
+Fixed and pushed to `origin/main` at `c3c36232ee`.
+
+The existing unavailable-owner fix handled a new steer after the harness reported an exited worker, but an older retained-Lost per-line subagent row was still filtered out by the “new since seed” rule. Eligible Lost per-line rows are now re-offered. Existing nested `agent:run subagents` recovery remains intact.
+
+Recovery dispatches now carry typed context—reason, prior owner, prior worker id, and prior generation—and distinguish `claim_ttl_expired` from `attempt_abandoned_for_requeue`.
+
+Verification:
+- Worker `make check`: 12,208 passed, 187 skipped; docs, VS Code, package, cross-editor, and JetBrains stages passed.
+- Coordinator affected-crate verification: 299 preflight-I/O and 276 queue-I/O tests passed.
+- `make audit-docs`: no blocking issues.
+- Coordinator `make install`: exit 0.
+- No editor generation bump was needed for this Rust/spec-only delta.
+- Confidence: high.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
@@ -1506,7 +1524,7 @@ Verification:
   - The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?
 - ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
 - ☑️ [#subagent:leafcontext#1] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only
-- ⚠️ [#subagent:lostrestart#1] `  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.
+- ~~`  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T22:39:12.000Z⟧
 - ⚠️ [#subagent:planrange#1] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
 - ~~do [#gh385fencehead]~~
 - ~~do [#reviewpublishmarkers]~~

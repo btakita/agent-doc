@@ -1058,6 +1058,12 @@ That combination is now choice (6) on `#recent-run-affordance`. `subagent:recent
 ### Re: Both marker choices stay open — grok-4.7 · 2026-10-29T13:23-04:00
 
 `subagent:reviewpublish` generation 1 and `subagent:recentrun` generation 1 are operator actions. Both workers have exited. Nothing is implemented.
+
+### Re: Answers-in-plan row is running — grok-4.7 · 2026-10-29T13:28-04:00
+
+`subagent:answersinplan` generation 1 is running as worker `01a188b4-c00c-74b3-9d2a-e32b387dfb6b` on branch `fix/operator-answers-in-plan` in `/home/brian/worktrees/agent-doc-answersinplan` (base `7b44d8bb28`).
+
+The row is that nested answers under the marker prompt and the recency prompt did not enter the plan. The worker owns the spec, the tests, and a push of that branch. It does not implement the marker or the recency highlight. Install stays with the coordinator after the branch integrates.
 <!-- agent:boundary:d8bc4803 -->
 <!-- /agent:exchange -->
 
@@ -1071,11 +1077,11 @@ That combination is now choice (6) on `#recent-run-affordance`. `subagent:recent
   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 - 🙋☑️ [#subagent:recentrun#1] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
-- I made answers to the prompts, but agent-doc did not add them to the plan.
+- 🚧 [#subagent:answersinplan#1] I made answers to the prompts, but agent-doc did not add them to the plan.
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
-- 🚧 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
+- 📥 Watch https://github.com/btakita/agent-doc/issues for new issues. Add new issues into the backlog + queue except issue #40 + #45.
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->

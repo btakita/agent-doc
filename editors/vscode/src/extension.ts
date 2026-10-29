@@ -821,6 +821,15 @@ class SyntaxDecorationController implements vscode.Disposable {
     private readonly italicDecoration = vscode.window.createTextEditorDecorationType({
         fontStyle: 'italic',
     });
+    private readonly queueReportLocalDecoration = vscode.window.createTextEditorDecorationType({
+        after: { contentText: ' ✎', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
+    });
+    private readonly queueReportPublishedDecoration = vscode.window.createTextEditorDecorationType({
+        after: { contentText: ' ⇧', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
+    });
+    private readonly queueReportPublishedLocalDecoration = vscode.window.createTextEditorDecorationType({
+        after: { contentText: ' ✎⇧', color: new vscode.ThemeColor('descriptionForeground'), margin: '0 0 0 0.35em' },
+    });
 
     constructor() {
         this.disposables.push(
@@ -836,6 +845,9 @@ class SyntaxDecorationController implements vscode.Disposable {
             this.labelTagDecoration,
             this.boldDecoration,
             this.italicDecoration,
+            this.queueReportLocalDecoration,
+            this.queueReportPublishedDecoration,
+            this.queueReportPublishedLocalDecoration,
         );
         this.disposables.push(
             vscode.window.onDidChangeVisibleTextEditors((editors) => {
@@ -900,6 +912,9 @@ class SyntaxDecorationController implements vscode.Disposable {
             labelTag: [] as vscode.Range[],
             bold: [] as vscode.Range[],
             italic: [] as vscode.Range[],
+            queueReportLocal: [] as vscode.DecorationOptions[],
+            queueReportPublished: [] as vscode.DecorationOptions[],
+            queueReportPublishedLocal: [] as vscode.DecorationOptions[],
         };
 
         for (const token of tokens) {
@@ -946,6 +961,15 @@ class SyntaxDecorationController implements vscode.Disposable {
                 case 'italic':
                     ranges.italic.push(range);
                     break;
+                case 'queue_report_local':
+                    ranges.queueReportLocal.push({ range, hoverMessage: 'Worker-reported local changes (✎)' });
+                    break;
+                case 'queue_report_published':
+                    ranges.queueReportPublished.push({ range, hoverMessage: 'Worker-reported published state (⇧)' });
+                    break;
+                case 'queue_report_published_local':
+                    ranges.queueReportPublishedLocal.push({ range, hoverMessage: 'Published, then changed locally again (✎⇧)' });
+                    break;
             }
         }
 
@@ -961,6 +985,9 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.labelTagDecoration, ranges.labelTag);
         editor.setDecorations(this.boldDecoration, ranges.bold);
         editor.setDecorations(this.italicDecoration, ranges.italic);
+        editor.setDecorations(this.queueReportLocalDecoration, ranges.queueReportLocal);
+        editor.setDecorations(this.queueReportPublishedDecoration, ranges.queueReportPublished);
+        editor.setDecorations(this.queueReportPublishedLocalDecoration, ranges.queueReportPublishedLocal);
     }
 
     private clearEditor(editor: vscode.TextEditor): void {
@@ -976,6 +1003,9 @@ class SyntaxDecorationController implements vscode.Disposable {
         editor.setDecorations(this.labelTagDecoration, []);
         editor.setDecorations(this.boldDecoration, []);
         editor.setDecorations(this.italicDecoration, []);
+        editor.setDecorations(this.queueReportLocalDecoration, []);
+        editor.setDecorations(this.queueReportPublishedDecoration, []);
+        editor.setDecorations(this.queueReportPublishedLocalDecoration, []);
     }
 
     dispose(): void {

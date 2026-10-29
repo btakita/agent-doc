@@ -4621,6 +4621,9 @@ enum QueueAction {
         /// claims; omitted only for legacy generation-zero rows.
         #[arg(long)]
         generation: Option<u64>,
+        /// Worker-reported local/published state rendered as a canonical queue annotation.
+        #[arg(long = "publication-state", value_name = "local|published|published+local")]
+        publication_state: Option<agent_doc_queue::QueueReportState>,
         /// The background worker's complete response. It is rendered visibly
         /// inside the binary-owned completion cell and retained until closeout.
         #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
@@ -8368,12 +8371,14 @@ fn try_main() -> anyhow::Result<()> {
                 file,
                 item,
                 generation,
+                publication_state,
                 response,
             } => {
                 match queue_completion_feedback::report_complete(
                     &file,
                     &item,
                     generation,
+                    publication_state,
                     &response,
                 )? {
                     Some(outcome) => eprintln!(

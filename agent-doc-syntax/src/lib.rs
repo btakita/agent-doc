@@ -15,6 +15,9 @@ pub enum VisualTokenKind {
     ResponseHeading,
     TrackedId,
     LabelTag,
+    QueueReportLocal,
+    QueueReportPublished,
+    QueueReportPublishedLocal,
     /// Markdown **strong** emphasis span (`**text**` or `__text__`), rendered
     /// bold in the editor (`#editor-bold-markdown-rendering`).
     Bold,
@@ -39,10 +42,48 @@ pub fn collect_visual_tokens(doc: &str) -> Vec<VisualToken> {
     collect_line_tokens(doc, &code_ranges, &mut tokens);
     collect_label_tags(doc, &code_ranges, &mut tokens);
     collect_tracked_ids(doc, &code_ranges, &mut tokens);
+    collect_queue_report_state_tokens(doc, &code_ranges, &mut tokens);
     collect_emphasis_tokens(doc, &code_ranges, &mut tokens);
 
     tokens.sort_by_key(|token| (token.start, token.end));
     tokens
+}
+
+fn collect_queue_report_state_tokens(
+    doc: &str,
+    code_ranges: &[(usize, usize)],
+    out: &mut Vec<VisualToken>,
+) {
+    let mut line_start = 0usize;
+    for line in doc.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\r', '\n']);
+        let trimmed = content.trim_start();
+        let is_live_list_row = trimmed
+            .strip_prefix("- ")
+            .is_some_and(|body| !body.trim_start().starts_with("~~"));
+        if is_live_list_row
+            && let Some((range, state)) =
+                agent_doc_element_queue::queue_report_state_annotation(content)
+        {
+            let start = line_start + range.start;
+            let end = line_start + range.end;
+            if !overlaps_code(start, end, code_ranges) {
+                let kind = match state {
+                    agent_doc_element_queue::QueueReportState::Local => {
+                        VisualTokenKind::QueueReportLocal
+                    }
+                    agent_doc_element_queue::QueueReportState::Published => {
+                        VisualTokenKind::QueueReportPublished
+                    }
+                    agent_doc_element_queue::QueueReportState::PublishedLocal => {
+                        VisualTokenKind::QueueReportPublishedLocal
+                    }
+                };
+                out.push(VisualToken { kind, start, end });
+            }
+        }
+        line_start += line.len();
+    }
 }
 
 /// Collect markdown emphasis spans (`#editor-bold-markdown-rendering`): `**…**`
@@ -666,5 +707,22 @@ scratch note
         let body_text = &doc[body.start..body.end];
         assert!(body_text.contains("scratch note"));
         assert!(body_text.contains("![img_3.png](img_3.png)"));
+    }
+
+    #[test]
+    fn queue_report_annotations_emit_exact_live_row_tokens() {
+        let doc = "- local work ⟦local⟧\n- shipped ⟦published⟧\n- changed ⟦published+local⟧\n- ~~done ⟦local⟧~~\nprose ⟦published⟧\n";
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::QueueReportLocal),
+            vec!["⟦local⟧"]
+        );
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::QueueReportPublished),
+            vec!["⟦published⟧"]
+        );
+        assert_eq!(
+            tokens_of(doc, VisualTokenKind::QueueReportPublishedLocal),
+            vec!["⟦published+local⟧"]
+        );
     }
 }

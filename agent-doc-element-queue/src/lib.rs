@@ -6,6 +6,7 @@ use agent_doc_element::{
 };
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
+use std::{fmt, ops::Range, str::FromStr};
 
 pub mod nested_claim_steer;
 pub mod queue_identity;
@@ -27,6 +28,104 @@ pub const DESCRIPTOR: ElementDescriptor = ElementDescriptor {
 
 pub fn descriptor() -> ElementDescriptor {
     DESCRIPTOR
+}
+
+/// Worker-reported publication state persisted on a queue claim and rendered
+/// as a canonical trailing annotation on the live queue row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum QueueReportState {
+    #[serde(rename = "local")]
+    Local,
+    #[serde(rename = "published")]
+    Published,
+    #[serde(rename = "published+local")]
+    PublishedLocal,
+}
+
+impl QueueReportState {
+    pub const ALL: [Self; 3] = [Self::Local, Self::Published, Self::PublishedLocal];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Published => "published",
+            Self::PublishedLocal => "published+local",
+        }
+    }
+
+    pub const fn annotation(self) -> &'static str {
+        match self {
+            Self::Local => "⟦local⟧",
+            Self::Published => "⟦published⟧",
+            Self::PublishedLocal => "⟦published+local⟧",
+        }
+    }
+
+    pub const fn glyph(self) -> &'static str {
+        match self {
+            Self::Local => "✎",
+            Self::Published => "⇧",
+            Self::PublishedLocal => "✎⇧",
+        }
+    }
+}
+
+impl fmt::Display for QueueReportState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for QueueReportState {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::ALL
+            .into_iter()
+            .find(|state| state.as_str() == value)
+            .ok_or_else(|| format!("unknown publication state {value:?}; expected local, published, or published+local"))
+    }
+}
+
+/// Exact byte range and typed state of a canonical trailing annotation.
+pub fn queue_report_state_annotation(text: &str) -> Option<(Range<usize>, QueueReportState)> {
+    let trimmed = text.trim_end();
+    QueueReportState::ALL.into_iter().find_map(|state| {
+        trimmed
+            .strip_suffix(state.annotation())
+            .filter(|prefix| prefix.ends_with(char::is_whitespace))
+            .map(|prefix| (prefix.len()..trimmed.len(), state))
+    })
+}
+
+/// Remove one canonical trailing report-state annotation without touching a
+/// prose occurrence elsewhere in the work text.
+pub fn strip_queue_report_state_annotation(text: &str) -> &str {
+    queue_report_state_annotation(text)
+        .map(|(range, _)| text[..range.start].trim_end())
+        .unwrap_or(text)
+}
+
+/// Replace any prior report-state suffix with the claim's authoritative state.
+pub fn render_queue_report_state_annotation(text: &str, state: Option<QueueReportState>) -> String {
+    let (head, tail) = text
+        .split_once('\n')
+        .map_or((text, None), |(head, tail)| (head, Some(tail)));
+    let rendered_head = match state {
+        Some(state) => format!(
+            "{} {}",
+            strip_queue_report_state_annotation(head).trim_end(),
+            state.annotation()
+        ),
+        None => match queue_report_state_annotation(head) {
+            Some(_) => strip_queue_report_state_annotation(head).to_string(),
+            None => head.to_string(),
+        },
+    };
+    match tail {
+        Some(tail) => format!("{rendered_head}\n{tail}"),
+        None => rendered_head,
+    }
 }
 
 /// Visible lifecycle state of a single rendered queue item, in ascending lawful
@@ -666,7 +765,13 @@ pub fn strip_priority_markers(text: &str) -> String {
             bare[..start].trim_end()
         };
     }
-    bare.to_string()
+    match bare.split_once('\n') {
+        Some((head, tail)) => format!(
+            "{}\n{tail}",
+            strip_queue_report_state_annotation(head)
+        ),
+        None => strip_queue_report_state_annotation(bare).to_string(),
+    }
 }
 
 /// The **work identity** of a live queue head: the one key queue claims,
@@ -1074,5 +1179,26 @@ mod tests {
         assert_eq!(note, QueueItemIdentity::FreeText("[#todo-a]: note".into()));
         assert_eq!(pinned_note, note);
         assert_eq!(explicit_directive, QueueItemIdentity::Id("todo-a".into()));
+    }
+
+    #[test]
+    fn report_state_annotations_are_typed_and_not_part_of_work_identity() {
+        for state in QueueReportState::ALL {
+            let rendered = render_queue_report_state_annotation("do [#ship]", Some(state));
+            assert_eq!(queue_report_state_annotation(&rendered).unwrap().1, state);
+            assert_eq!(
+                queue_head_identity(&rendered),
+                queue_head_identity("do [#ship]")
+            );
+            assert_eq!(strip_priority_markers(&format!("worker work {}", state.annotation())), "worker work");
+        }
+        assert_eq!(
+            strip_queue_report_state_annotation("explain ⟦local⟧ in prose"),
+            "explain ⟦local⟧ in prose"
+        );
+        assert_eq!(
+            render_queue_report_state_annotation("parent\n  - child", Some(QueueReportState::Local)),
+            "parent ⟦local⟧\n  - child"
+        );
     }
 }

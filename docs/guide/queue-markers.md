@@ -46,6 +46,7 @@ stays.
 | `[#<owner>#<N>]` | Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity. |
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
+| `⟦local⟧ / ⟦published⟧ / ⟦published+local⟧` | Worker-reported publication state: local changes (✎), published (⇧), or published and then changed locally again (✎⇧). Metadata, not work identity. |
 | `📫 / 📤` | Older spellings of the reported marker; normalized on the next projection write. |
 | `⟦<owner>#<N>⟧` | Older spelling of the owner annotation; normalized to `[#<owner>#<N>]`. |
 

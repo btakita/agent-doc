@@ -2744,6 +2744,7 @@ name = "agent-doc-syntax"
 version = "0.35.561"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-element-queue",
  "serde",
 ]
 

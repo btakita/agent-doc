@@ -25,6 +25,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
+import com.github.btakita.agentdoc.shell.ShellQueueReportGutterIconRenderer
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent
@@ -380,6 +381,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
             )
             highlighter.putUserData(HIGHLIGHTER_KEY, true)
             highlighter.putUserData(HIGHLIGHT_IDENTITY_KEY, key.toUserData())
+            queueReportPresentation(key.kind)?.let { (glyph, tooltip) ->
+                highlighter.gutterIconRenderer = ShellQueueReportGutterIconRenderer(glyph, tooltip)
+                highlighter.errorStripeTooltip = tooltip
+            }
             next.add(highlighter)
         }
         editor.putUserData(TRACKED_HIGHLIGHTERS_KEY, next)
@@ -503,6 +508,14 @@ class VisualHighlighterManager private constructor(private val project: Project)
         when (kind) {
             "component_body", "scratch_comment_body" -> HighlighterLayer.ADDITIONAL_SYNTAX - 1
             else -> HighlighterLayer.ADDITIONAL_SYNTAX
+        }
+
+    private fun queueReportPresentation(kind: String): Pair<String, String>? =
+        when (kind) {
+            "queue_report_local" -> "✎" to "Worker-reported local changes"
+            "queue_report_published" -> "⇧" to "Worker-reported published state"
+            "queue_report_published_local" -> "✎⇧" to "Published, then changed locally again"
+            else -> null
         }
 
     private fun mutedBackground(editor: Editor, accent: Color?): Color {

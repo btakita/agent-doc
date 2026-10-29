@@ -358,8 +358,13 @@ pub fn derive_claim_runtime_projection_scoped(
                             })
                         });
                     Some(agent_doc_queue::document_queue::QueueRowProjection {
-                        text: agent_doc_document::queue_projection::strip_in_progress_marker(
-                            &prompt.text,
+                        text: agent_doc_element_queue::render_queue_report_state_annotation(
+                            &agent_doc_document::queue_projection::strip_in_progress_marker(
+                                &prompt.text,
+                            ),
+                            claim
+                                .and_then(|claim| claim.publication_state)
+                                .or_else(|| receipt.and_then(|receipt| receipt.publication_state)),
                         ),
                         blockers: if marker
                             == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked

@@ -73,6 +73,7 @@ pub fn prepare_route_document(
     // residue guard sent the operator after the wrong component.
     let scrubbed = scrub_duplicate_prompt_comments_for_route(&updated_content, &preserve_docs)
         .map_err(|err| {
+            let reason = format!("{err:#}");
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -80,13 +81,16 @@ pub fn prepare_route_document(
                     file.display(),
                     updated_content.len(),
                     agent_doc_hash::content_hash(&updated_content),
-                    format!("{err:#}").replace('\n', " ")
+                    reason.replace('\n', " ")
                 ),
             );
+            let repair_guidance = agent_doc_element::element::component_structure_repair_guidance(
+                &file.display().to_string(),
+                &reason,
+            );
             err.context(format!(
-                "route could not prepare {} for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue — recover the structure (reopen the editor tab to resync the replica, or `agent-doc repair {}`) before dispatching",
+                "route could not prepare {} for dispatch: its component structure did not parse, so duplicate-prompt cleanup could not run. This is document corruption, not duplicate prompt residue. {repair_guidance}",
                 file.display(),
-                file.display()
             ))
         })?;
     if let Some(cleanup) = scrubbed {

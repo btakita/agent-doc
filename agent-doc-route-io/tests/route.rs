@@ -2173,6 +2173,25 @@ mod tests {
             rendered.contains("not duplicate prompt residue"),
             "and must not send the operator after the residue guard: {rendered}"
         );
+        assert!(
+            !rendered.contains("orphaned body with no close marker"),
+            "the diagnostic must not dump operator content: {rendered}"
+        );
+        assert!(
+            rendered.contains("the component has no close `/agent:notes`")
+                && rendered.contains("opening marker at line 10"),
+            "the recovery must name the exact missing marker and line: {rendered}"
+        );
+        assert!(
+            rendered.contains("Fix the markers at the lines named above in the editor")
+                && rendered.contains("git -C")
+                && rendered.contains("show HEAD:./plan.md"),
+            "the recovery must provide the shared editor/HEAD restoration path: {rendered}"
+        );
+        assert!(
+            !rendered.contains("agent-doc repair"),
+            "generic repair cannot reconstruct arbitrary missing component markers: {rendered}"
+        );
 
         let log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();

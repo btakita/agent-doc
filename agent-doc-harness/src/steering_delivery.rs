@@ -76,6 +76,10 @@ pub fn explicit_running_turn_send_is_composer_diff(harness: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunningTurnFollowUpComposer {
     Empty,
+    /// Unsent operator text in the composer. Before injection this protects the
+    /// draft; after route has proved the composer empty and injected its own
+    /// text, this proves Enter did not submit the follow-up.
+    Draft,
     Blocked { reason: String },
     Unreadable,
 }
@@ -85,26 +89,26 @@ pub fn running_turn_follow_up_composer(harness: &str, output: &str) -> RunningTu
     if adapter.harness == "grok" {
         return match crate::grok::follow_up_composer(output) {
             crate::grok::FollowUpComposer::Empty => RunningTurnFollowUpComposer::Empty,
-            crate::grok::FollowUpComposer::Draft { .. } => RunningTurnFollowUpComposer::Blocked {
-                reason: "the composer holds an unsent draft".to_string(),
-            },
+            crate::grok::FollowUpComposer::Draft { .. } => RunningTurnFollowUpComposer::Draft,
             crate::grok::FollowUpComposer::Unreadable => RunningTurnFollowUpComposer::Unreadable,
         };
     }
 
     let config = crate::HarnessConfig::from_agent_name(adapter.harness);
     if let Some(reason) = config.protected_prompt_input_reason(output) {
+        if matches!(
+            reason.as_str(),
+            "queued draft in composer" | "drafted prompt input"
+        ) {
+            return RunningTurnFollowUpComposer::Draft;
+        }
         return RunningTurnFollowUpComposer::Blocked { reason };
     }
     match crate::project_pane_composer(output, &config) {
         crate::PaneComposerProjection::ReadyEmpty { .. } | crate::PaneComposerProjection::Busy => {
             RunningTurnFollowUpComposer::Empty
         }
-        crate::PaneComposerProjection::OperatorDraft { .. } => {
-            RunningTurnFollowUpComposer::Blocked {
-                reason: "the composer holds an unsent draft".to_string(),
-            }
-        }
+        crate::PaneComposerProjection::OperatorDraft { .. } => RunningTurnFollowUpComposer::Draft,
         crate::PaneComposerProjection::AgentAddressed { target } => {
             RunningTurnFollowUpComposer::Blocked {
                 reason: format!("the composer is addressed to subagent {target:?}"),
@@ -253,15 +257,43 @@ mod tests {
             RunningTurnFollowUpComposer::Empty
         );
         let codex_draft = "• Working (1m 34s • esc to interrupt)\n\n›\ntab to queue message\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used";
-        assert!(matches!(
+        assert_eq!(
             running_turn_follow_up_composer("codex", codex_draft),
-            RunningTurnFollowUpComposer::Blocked { reason }
-                if reason.contains("queued draft")
-        ));
+            RunningTurnFollowUpComposer::Draft
+        );
         assert_eq!(
             running_turn_follow_up_composer("codex", "no recognizable composer"),
             RunningTurnFollowUpComposer::Unreadable
         );
+    }
+
+    #[test]
+    fn every_supervised_tui_distinguishes_an_unsubmitted_multiline_draft() {
+        let cases = [
+            (
+                "claude",
+                "✶ Generating… (3s · esc to interrupt)\n────────────────────────\n❯ first page of steering continuing through the second page\n────────────────────────\n  Opus 4.8 ctx:40% ~/work/repo main user@host\n  ⏵⏵ bypass permissions on",
+            ),
+            (
+                "codex",
+                "• Working (1m 34s • esc to interrupt)\n\n› first page of steering\n  second page\ntab to queue message\ngpt-5.4 high · Context 54% used",
+            ),
+            (
+                "opencode",
+                "Working (21s - esc to interrupt)\n┃ first page of steering\n┃ second page\n┃\n┃ Build · GLM-5.1\n╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\ntab agents  ctrl+p commands\n~/work/repo  esc interrupt  26.6K (13%)  ctrl+p commands  OpenCode 1.15.13",
+            ),
+            (
+                "grok-build",
+                "Waiting for response… 1.0s [stop]\n╭────────────────────────╮\n│ ❯ first page of steering │\n│ second page              │\n╰──── Grok 4.7 (high) ────╯\nTab/→:accept suggestion  │  Shift+Tab:mode  │  Ctrl+x:shortcuts",
+            ),
+        ];
+        for (harness, capture) in cases {
+            assert_eq!(
+                running_turn_follow_up_composer(harness, capture),
+                RunningTurnFollowUpComposer::Draft,
+                "{harness}"
+            );
+        }
     }
 
     #[test]

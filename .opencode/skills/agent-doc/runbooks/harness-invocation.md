@@ -51,8 +51,12 @@ running is steering, not a request for another turn (`#routesyncsteer`). Route
 submits the latest diff since the last send into the empty composer as one
 mid-turn follow-up. The harness injects it at its next safe gap or queues it
 for the turn boundary according to its native follow-up behavior. Handle that
-diff as operator steering. Do not start a second turn. An unreadable composer,
-an unsent draft, or Claude's subagent-addressed composer remains protected.
+diff as operator steering. Do not start a second turn. Route records delivery
+only after a later pane capture proves the same turn is busy and the injected
+draft has left the composer. If a large paste remains visible, route retries
+only the bare Enter key within a fixed budget; it never pastes the payload a
+second time. An unreadable composer, an unsent draft after that budget, or
+Claude's subagent-addressed composer remains protected.
 
 Routing reuses the supervisor lifecycle and document-bound resume UUID.
 Readiness requires a complete empty Grok composer with no live cancel/stop

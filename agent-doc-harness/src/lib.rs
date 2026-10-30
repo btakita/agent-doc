@@ -1673,6 +1673,22 @@ pub fn project_pane_composer(content: &str, harness: &HarnessConfig) -> PaneComp
             grok::project(content)
         };
     }
+    // OpenCode renders its composer as a box instead of a standalone prompt
+    // glyph. Inspect that bottom composer before the busy cue collapses the
+    // whole pane to `Busy`, otherwise an injected multi-page draft that failed
+    // to submit is indistinguishable from an empty composer.
+    if harness.binary == "opencode"
+        && let Some(scan) = harness.scan_bottom_idle_chrome(content, 12)
+        && scan.composer_holds_draft
+        && let Some(preview) = scan.recent.iter().find_map(|line| {
+            line.strip_prefix('┃')
+                .map(str::trim)
+                .filter(|draft| !draft.is_empty())
+                .map(ToOwned::to_owned)
+        })
+    {
+        return PaneComposerProjection::OperatorDraft { preview };
+    }
     let latest_prompt_candidate = harness.last_prompt_candidate(content);
     let latest_agent_addressed_target = (harness.binary == "claude")
         .then(|| {

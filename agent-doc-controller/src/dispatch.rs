@@ -2247,6 +2247,11 @@ pub enum StartingPaneBlocker {
     /// operator to "submit or clear that draft" asks them to finish agent-doc's
     /// job by hand.
     StrandedTrigger,
+    /// The composer holds exactly the harness-native context-clear command.
+    /// Run Agent Doc may submit that command once, prove the resulting fresh
+    /// prompt, and only then inject its own trigger. Text around the command
+    /// remains operator-owned.
+    ContextClearDraft,
 }
 
 impl StartingPaneBlocker {
@@ -2279,10 +2284,23 @@ impl StartingPaneBlocker {
     /// `OperatorDraft`: the operator may have typed around it, and submitting
     /// then sends their words too.
     pub fn from_composer_draft_for_trigger(draft: Option<&str>, trigger: Option<&str>) -> Self {
+        Self::from_composer_draft_for_trigger_and_clear(draft, trigger, None)
+    }
+
+    pub fn from_composer_draft_for_trigger_and_clear(
+        draft: Option<&str>,
+        trigger: Option<&str>,
+        clear_command: Option<&str>,
+    ) -> Self {
         match draft {
             Some(draft) => match trigger {
                 Some(trigger) if draft_is_exactly_the_trigger(draft, trigger) => {
                     Self::StrandedTrigger
+                }
+                _ if clear_command
+                    .is_some_and(|clear| draft_is_exactly_the_trigger(draft, clear)) =>
+                {
+                    Self::ContextClearDraft
                 }
                 _ => Self::OperatorDraft,
             },
@@ -2295,6 +2313,7 @@ impl StartingPaneBlocker {
             Self::OperatorDraft => "submit_or_clear_pane_draft",
             Self::AgentAddressed => "clear_pane_agent_addressing",
             Self::StrandedTrigger => "resubmit_stranded_trigger",
+            Self::ContextClearDraft => "submit_context_clear_then_reopen",
             Self::Booting => "wait_for_dispatch_ready_prompt",
         }
     }
@@ -9317,6 +9336,37 @@ mod stranded_trigger_classification_tests {
                 StartingPaneBlocker::from_composer_draft_for_trigger(Some(draft), Some(TRIGGER)),
                 StartingPaneBlocker::OperatorDraft,
                 "{draft}"
+            );
+        }
+    }
+
+    /// Run Agent Doc may finish an exact context-clear command that the
+    /// operator already composed, but must not submit any surrounding text.
+    #[test]
+    fn exact_context_clear_draft_has_its_own_recovery_action() {
+        for draft in ["\u{276f} /clear", "›\u{a0}/clear"] {
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger_and_clear(
+                    Some(draft),
+                    Some(TRIGGER),
+                    Some("/clear"),
+                ),
+                StartingPaneBlocker::ContextClearDraft,
+            );
+        }
+        assert_eq!(
+            StartingPaneBlocker::ContextClearDraft.unblocker(),
+            "submit_context_clear_then_reopen",
+        );
+        for draft in ["\u{276f} /clear after this", "\u{276f} please /clear"] {
+            assert_eq!(
+                StartingPaneBlocker::from_composer_draft_for_trigger_and_clear(
+                    Some(draft),
+                    Some(TRIGGER),
+                    Some("/clear"),
+                ),
+                StartingPaneBlocker::OperatorDraft,
+                "{draft}",
             );
         }
     }

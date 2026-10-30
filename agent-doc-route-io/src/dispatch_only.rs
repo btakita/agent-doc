@@ -85,10 +85,15 @@ fn remaining_ready_wait(deadline: Instant, now: Instant) -> Duration {
 fn dispatch_only_starting_pane_blocker(
     projection: &PaneComposerProjection,
     trigger: &str,
+    clear_command: &str,
 ) -> StartingPaneBlocker {
     match projection {
         PaneComposerProjection::OperatorDraft { preview } => {
-            StartingPaneBlocker::from_composer_draft_for_trigger(Some(preview), Some(trigger))
+            StartingPaneBlocker::from_composer_draft_for_trigger_and_clear(
+                Some(preview),
+                Some(trigger),
+                Some(clear_command),
+            )
         }
         PaneComposerProjection::AgentAddressed { .. } => StartingPaneBlocker::AgentAddressed,
         PaneComposerProjection::ReadyEmpty { .. }
@@ -105,6 +110,111 @@ fn submit_stranded_trigger_then_await_projection(
 ) -> Result<bool> {
     submit()?;
     Ok(await_projection())
+}
+
+/// Run the bounded context-clear recovery in causal order: submit the command
+/// already present in the composer, record that clear against the document,
+/// then prove that the harness returned to a fresh ready prompt.
+fn submit_context_clear_then_await_ready(
+    submit: impl FnOnce() -> Result<()>,
+    record_clear: impl FnOnce() -> Result<()>,
+    await_ready: impl FnOnce() -> bool,
+) -> Result<bool> {
+    submit()?;
+    record_clear()?;
+    Ok(await_ready())
+}
+
+fn submit_stranded_context_clear_dispatch_only(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    pane: &str,
+    harness: &HarnessConfig,
+    timeout: Duration,
+) -> Result<()> {
+    let clear_command = harness.context_clear_command();
+    let submit_key = agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness.binary);
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_context_clear_resubmit file={} pane={} harness={} command={} submit_key={} timeout_millis={} note=exact context-clear command remained unsubmitted; resending bare submit once",
+            file.display(),
+            pane,
+            harness.binary,
+            clear_command,
+            submit_key,
+            timeout.as_millis(),
+        ),
+    );
+    eprintln!(
+        "[route] dispatch-only {} reopen for {} found the exact {} command stranded in pane {}; resending {} once before the document trigger",
+        harness.binary,
+        file.display(),
+        clear_command,
+        pane,
+        submit_key,
+    );
+
+    let ready = submit_context_clear_then_await_ready(
+        || {
+            agent_doc_tmux_io::send_key_logged(
+                tmux,
+                pane,
+                submit_key,
+                agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                    Some(file),
+                    agent_doc_ops_log_io::log_op,
+                ),
+                "route.dispatch_only_context_clear_resubmit",
+            )?;
+            Ok(())
+        },
+        || {
+            if matches!(harness.binary.as_str(), "codex" | "opencode") {
+                agent_doc_codex_hook_io::record_external_prompt_for_file(
+                    file,
+                    session_id,
+                    clear_command,
+                )?;
+            }
+            Ok(())
+        },
+        || wait_for_agent_ready_outcome(tmux, pane, timeout, harness).is_ready(),
+    )?;
+    if !ready {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_only_context_clear_resubmit_missing file={} pane={} harness={} command={} timeout_millis={}",
+                file.display(),
+                pane,
+                harness.binary,
+                clear_command,
+                timeout.as_millis(),
+            ),
+        );
+        anyhow::bail!(
+            "dispatch-only {} reopen submitted the stranded {} command once in pane {} for {}, but the harness did not return to a fresh ready prompt within {}ms",
+            harness.binary,
+            clear_command,
+            pane,
+            file.display(),
+            timeout.as_millis(),
+        );
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_dispatch_only_context_clear_resubmit_ready file={} pane={} harness={} command={} timeout_millis={}",
+            file.display(),
+            pane,
+            harness.binary,
+            clear_command,
+            timeout.as_millis(),
+        ),
+    );
+    Ok(())
 }
 
 fn resubmit_stranded_dispatch_only_trigger(
@@ -568,6 +678,10 @@ pub fn dispatch_only_send_reopen(
             },
         )?,
     );
+    // The native clear command is safe to submit only as a one-shot recovery.
+    // If the same draft survives that submit, fail closed instead of repeatedly
+    // pressing Enter into an ambiguous composer.
+    let mut context_clear_submitted = false;
     if requires_ready_probe {
         let route_start_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
         // `--wait-for-ready` is one request budget, not a fresh allowance for
@@ -591,7 +705,11 @@ pub fn dispatch_only_send_reopen(
             {
                 let projection =
                     pane_composer_projection(tmux, &dispatch_pane, &content, harness);
-                match dispatch_only_starting_pane_blocker(&projection, &route_trigger) {
+                match dispatch_only_starting_pane_blocker(
+                    &projection,
+                    &route_trigger,
+                    harness.context_clear_command(),
+                ) {
                     StartingPaneBlocker::StrandedTrigger => {
                         if dispatch_only_cycle_owns_pane_input(
                             file,
@@ -638,6 +756,37 @@ pub fn dispatch_only_send_reopen(
                                 outcome_fields: &outcome_fields,
                             },
                         ));
+                    }
+                    StartingPaneBlocker::ContextClearDraft => {
+                        if context_clear_submitted {
+                            anyhow::bail!(
+                                "dispatch-only {} reopen submitted the exact {} command once in pane {} for {}, but the command remained stranded",
+                                harness.binary,
+                                harness.context_clear_command(),
+                                dispatch_pane,
+                                file.display(),
+                            );
+                        }
+                        let remaining = remaining_ready_wait(ready_deadline, Instant::now());
+                        if remaining.is_zero() {
+                            anyhow::bail!(
+                                "dispatch-only {} reopen found the exact {} command stranded in pane {} for {}, but its startup-ready budget was already exhausted",
+                                harness.binary,
+                                harness.context_clear_command(),
+                                dispatch_pane,
+                                file.display(),
+                            );
+                        }
+                        context_clear_submitted = true;
+                        submit_stranded_context_clear_dispatch_only(
+                            tmux,
+                            file,
+                            session_id,
+                            &dispatch_pane,
+                            harness,
+                            remaining,
+                        )?;
+                        continue;
                     }
                     StartingPaneBlocker::AgentAddressed => {
                         let PaneComposerProjection::AgentAddressed { target } = &projection else {
@@ -786,7 +935,11 @@ pub fn dispatch_only_send_reopen(
             );
             let file_display = file.display().to_string();
             let blocker = projection.as_ref().map_or(StartingPaneBlocker::Booting, |projection| {
-                dispatch_only_starting_pane_blocker(projection, &route_trigger)
+                dispatch_only_starting_pane_blocker(
+                    projection,
+                    &route_trigger,
+                    harness.context_clear_command(),
+                )
             });
             let outcome_fields =
                 agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
@@ -810,6 +963,15 @@ pub fn dispatch_only_send_reopen(
                         route_start_cycle.as_ref(),
                     )?;
                     return Ok(dispatch_pane);
+                }
+                (StartingPaneBlocker::ContextClearDraft, Some(_)) => {
+                    anyhow::bail!(
+                        "dispatch-only {} reopen found the exact {} command stranded in pane {} for {}, but its startup-ready budget expired before the command could be settled",
+                        harness.binary,
+                        harness.context_clear_command(),
+                        dispatch_pane,
+                        file.display(),
+                    );
                 }
                 (
                     StartingPaneBlocker::OperatorDraft,
@@ -862,9 +1024,36 @@ pub fn dispatch_only_send_reopen(
     // mode, including paths that did not require the startup-ready wait above.
     // An addressed Claude composer would accept the bytes but silently deliver
     // them to the wrong agent, so it must never reach either submit adapter.
-    let pre_submit_content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)?;
-    let pre_submit_projection =
-        pane_composer_projection(tmux, &dispatch_pane, &pre_submit_content, harness);
+    let (pre_submit_content, pre_submit_projection) = loop {
+        let content = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)?;
+        let projection = pane_composer_projection(tmux, &dispatch_pane, &content, harness);
+        if dispatch_only_starting_pane_blocker(
+            &projection,
+            &route_trigger,
+            harness.context_clear_command(),
+        ) != StartingPaneBlocker::ContextClearDraft
+        {
+            break (content, projection);
+        }
+        if context_clear_submitted {
+            anyhow::bail!(
+                "dispatch-only {} reopen submitted the exact {} command once in pane {} for {}, but the command remained stranded at the pre-submit fence",
+                harness.binary,
+                harness.context_clear_command(),
+                dispatch_pane,
+                file.display(),
+            );
+        }
+        context_clear_submitted = true;
+        submit_stranded_context_clear_dispatch_only(
+            tmux,
+            file,
+            session_id,
+            &dispatch_pane,
+            harness,
+            (options.effects.dispatch_only_starting_pane_ready_timeout)(harness),
+        )?;
+    };
     if let PaneComposerProjection::AgentAddressed { target } = &pre_submit_projection {
         let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
             StartingPaneBlocker::AgentAddressed.unblocker(),
@@ -913,8 +1102,11 @@ pub fn dispatch_only_send_reopen(
                 &harness.binary,
                 &reason,
                 options.queue_prompt_text.is_some(),
-                dispatch_only_starting_pane_blocker(&pre_submit_projection, &route_trigger)
-                    == StartingPaneBlocker::StrandedTrigger,
+                dispatch_only_starting_pane_blocker(
+                    &pre_submit_projection,
+                    &route_trigger,
+                    harness.context_clear_command(),
+                ) == StartingPaneBlocker::StrandedTrigger,
                 active_auto_queue_owns_codex_stop,
             ),
         ) {
@@ -2042,6 +2234,7 @@ mod tests {
                     preview: "›\u{a0}agent-doc tasks/sample.md".to_string(),
                 },
                 trigger,
+                "/clear",
             ),
             StartingPaneBlocker::StrandedTrigger,
         );
@@ -2051,8 +2244,30 @@ mod tests {
                     preview: "❯ agent-doc tasks/sample.md please continue".to_string(),
                 },
                 trigger,
+                "/clear",
             ),
             StartingPaneBlocker::OperatorDraft,
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(
+                &PaneComposerProjection::OperatorDraft {
+                    preview: "› /clear".to_string(),
+                },
+                trigger,
+                "/clear",
+            ),
+            StartingPaneBlocker::ContextClearDraft,
+        );
+        assert_eq!(
+            dispatch_only_starting_pane_blocker(
+                &PaneComposerProjection::OperatorDraft {
+                    preview: "› /clear then inspect logs".to_string(),
+                },
+                trigger,
+                "/clear",
+            ),
+            StartingPaneBlocker::OperatorDraft,
+            "surrounding operator text must remain protected",
         );
         assert_eq!(
             dispatch_only_starting_pane_blocker(
@@ -2060,6 +2275,7 @@ mod tests {
                     preview: "❯ agent-doc tasks/other.md".to_string(),
                 },
                 trigger,
+                "/clear",
             ),
             StartingPaneBlocker::OperatorDraft,
         );
@@ -2080,7 +2296,11 @@ mod tests {
             PaneComposerProjection::ReadyEmpty { .. }
         ));
         assert_eq!(
-            dispatch_only_starting_pane_blocker(&projection, "agent-doc /abs/tasks/sdk/sdk-pr.md"),
+            dispatch_only_starting_pane_blocker(
+                &projection,
+                "agent-doc /abs/tasks/sdk/sdk-pr.md",
+                harness.context_clear_command(),
+            ),
             StartingPaneBlocker::Booting,
             "visual ghost text must continue through readiness instead of asking the operator to submit or clear it"
         );
@@ -2092,7 +2312,11 @@ mod tests {
             PaneComposerProjection::OperatorDraft { .. }
         ));
         assert_eq!(
-            dispatch_only_starting_pane_blocker(&projection, "agent-doc /abs/tasks/sdk/sdk-pr.md"),
+            dispatch_only_starting_pane_blocker(
+                &projection,
+                "agent-doc /abs/tasks/sdk/sdk-pr.md",
+                harness.context_clear_command(),
+            ),
             StartingPaneBlocker::OperatorDraft,
             "real typed input must retain the exact submit-or-clear safety blocker"
         );
@@ -2106,6 +2330,7 @@ mod tests {
                     target: "@general-purpose".to_string(),
                 },
                 "agent-doc tasks/sample.md",
+                "/clear",
             ),
             StartingPaneBlocker::AgentAddressed,
         );
@@ -2134,6 +2359,38 @@ mod tests {
 
         assert!(projected);
         assert_eq!(events.into_inner(), ["submit", "await_projection"]);
+    }
+
+    #[test]
+    fn context_clear_effect_submits_records_and_only_then_awaits_ready() {
+        let events = std::cell::RefCell::new(Vec::new());
+
+        let ready = submit_context_clear_then_await_ready(
+            || {
+                events.borrow_mut().push("submit_clear");
+                Ok(())
+            },
+            || {
+                assert_eq!(events.borrow().as_slice(), ["submit_clear"]);
+                events.borrow_mut().push("record_clear");
+                Ok(())
+            },
+            || {
+                assert_eq!(
+                    events.borrow().as_slice(),
+                    ["submit_clear", "record_clear"]
+                );
+                events.borrow_mut().push("await_ready");
+                true
+            },
+        )
+        .unwrap();
+
+        assert!(ready);
+        assert_eq!(
+            events.into_inner(),
+            ["submit_clear", "record_clear", "await_ready"]
+        );
     }
 
     #[test]

@@ -4345,8 +4345,12 @@ mod tests {
             "a visible draft or agent-addressed composer is terminal and must fail before the bounded ready wait"
         );
 
-        let final_capture = source
-            .find("let pre_submit_content = agent_doc_tmux_io::capture_pane_with_ansi")
+        let final_fence = source
+            .find("let (pre_submit_content, pre_submit_projection) = loop")
+            .expect("fail-closed pre-submit composer fence");
+        let final_capture = source[final_fence..]
+            .find("let content = agent_doc_tmux_io::capture_pane_with_ansi")
+            .map(|offset| final_fence + offset)
             .expect("fail-closed pre-submit composer capture");
         let addressing_fence = source[final_capture..]
             .find("PaneComposerProjection::AgentAddressed")

@@ -2031,9 +2031,17 @@ mod tests {
             claim.generation,
         )
         .unwrap();
-        crate::queue_claim::report_attempt(&doc, "release + publish", Some(claim.generation))
-            .unwrap();
-        let reported_row = format!("- ☑️ [#{owner}#{}] release + publish", claim.generation);
+        crate::queue_claim::report_attempt_with_publication_state(
+            &doc,
+            "release + publish",
+            Some(claim.generation),
+            Some(agent_doc_element_queue::QueueReportState::Published),
+        )
+        .unwrap();
+        let reported_row = format!(
+            "- ☑️ [#{owner}#{}] release + publish ⟦published⟧",
+            claim.generation
+        );
         let projection =
             derive_claim_runtime_projection(&doc, &std::fs::read_to_string(&doc).unwrap(), None)
                 .unwrap();
@@ -2047,7 +2055,9 @@ mod tests {
         std::fs::write(&doc, &projection.target_content).unwrap();
 
         // The operator restores an identical row directly above the claimed
-        // one, and preflight annotates both copies in the same queue cut.
+        // one, and preflight annotates both copies in the same queue cut. The
+        // historical projection placed effect identity after publication
+        // state, which must be repaired rather than duplicated.
         let restored = projection.target_content.replace(
             &format!("{reported_row}\n"),
             &format!("- release + publish ⟦effect:1⟧\n{reported_row} ⟦effect:2⟧\n"),
@@ -2056,10 +2066,17 @@ mod tests {
 
         let projection = derive_claim_runtime_projection(&doc, &restored, None).unwrap();
         assert!(
-            projection
-                .target_content
-                .contains(&format!("{reported_row} ⟦effect:2⟧\n")),
+            projection.target_content.contains(&format!(
+                "- ☑️ [#{owner}#{}] release + publish ⟦effect:2⟧ ⟦published⟧\n",
+                claim.generation
+            )),
             "{}",
+            projection.target_content
+        );
+        assert_eq!(
+            projection.target_content.matches("⟦published⟧").count(),
+            1,
+            "report state remains canonical instead of becoming state/effect/state: {}",
             projection.target_content
         );
         assert!(
@@ -2071,7 +2088,17 @@ mod tests {
         );
         let reports = crate::queue_claim::claim_reports_for_content(&doc, &restored).unwrap();
         assert_eq!(reports.len(), 1, "{reports:#?}");
-        assert_eq!(reports[0].claim.item_text, "release + publish ⟦effect:2⟧");
+        assert_eq!(
+            reports[0].claim.item_text,
+            "release + publish ⟦published⟧ ⟦effect:2⟧"
+        );
+        assert_eq!(
+            reports[0].claim.identity,
+            agent_doc_queue::queue_claim::claim_identity(
+                "release + publish ⟦effect:2⟧ ⟦published⟧"
+            ),
+            "legacy annotation order cannot mint a second claim identity"
+        );
         assert_eq!(
             reports[0].claim.state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported

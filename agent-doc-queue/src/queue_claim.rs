@@ -2239,7 +2239,13 @@ impl QueueClaimLedger {
 /// whose remainder is the work (`#subagents: #gh-fix <url>`) stays on
 /// [`queue_head_identity`].
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
-    let trimmed = item.trim();
+    // Publication state is binary-owned attempt metadata. Normalize both the
+    // canonical `effect state` form and the historical `state effect state`
+    // form before keying the row, while retaining `⟦effect:N⟧` as the distinct
+    // occurrence identity.
+    let normalized =
+        crate::document_queue::render_queue_effect_report_state_annotation(item.trim(), None);
+    let trimmed = normalized.trim();
     if let Some(identity) = nest_vector_claim_identity(trimmed) {
         return identity;
     }

@@ -1649,7 +1649,7 @@ pub fn set_prompt_runtime_projections(
     let projection_key = |text: &str| {
         let cleaned = agent_doc_element_queue::subprompts::strip_subprompt_projections(text);
         let without_prefix = strip_priority_markers(cleaned.as_deref().unwrap_or(text));
-        agent_doc_element_queue::strip_queue_report_state_annotation(&without_prefix).to_string()
+        render_queue_effect_report_state_annotation(&without_prefix, None)
     };
     let mut targets = targets
         .iter()
@@ -1713,11 +1713,10 @@ pub fn set_prompt_runtime_projections(
                                 &marked,
                                 target.owner.as_ref(),
                             );
-                        let marked_text =
-                            agent_doc_element_queue::render_queue_report_state_annotation(
-                                &marked_with_owner,
-                                publication_state,
-                            );
+                        let marked_text = render_queue_effect_report_state_annotation(
+                            &marked_with_owner,
+                            publication_state,
+                        );
                         if marked_text != next.text {
                             next.text = marked_text;
                             changed = true;
@@ -4635,21 +4634,77 @@ fn head_shape(prompt: &QueuePrompt) -> HeadShape {
 /// into newly-authored work.
 pub const QUEUE_EFFECT_ANNOTATION_PREFIX: &str = "⟦effect:";
 
-fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
+fn split_queue_effect_projection(
+    text: &str,
+) -> (
+    String,
+    Option<usize>,
+    Option<agent_doc_element_queue::QueueReportState>,
+) {
     let trimmed = text.trim_end();
-    let Some(before_close) = trimmed.strip_suffix('⟧') else {
-        return (text.to_string(), None);
+    let (before_state, trailing_state) =
+        match agent_doc_element_queue::queue_report_state_annotation(trimmed) {
+            Some((range, state)) => (trimmed[..range.start].trim_end(), Some(state)),
+            None => (trimmed, None),
+        };
+    let without_trailing_state = || {
+        trailing_state.map_or_else(
+            || text.to_string(),
+            |_| agent_doc_element_queue::strip_queue_report_state_annotation(trimmed).to_string(),
+        )
+    };
+    let Some(before_close) = before_state.strip_suffix('⟧') else {
+        return (without_trailing_state(), None, trailing_state);
     };
     let Some((base, raw)) = before_close.rsplit_once(" ⟦effect:") else {
-        return (text.to_string(), None);
+        return (without_trailing_state(), None, trailing_state);
     };
     let Ok(effect) = raw.parse::<usize>() else {
-        return (text.to_string(), None);
+        return (without_trailing_state(), None, trailing_state);
     };
+    let base = base.trim_end();
     if base.trim().is_empty() {
-        return (text.to_string(), None);
+        return (text.to_string(), None, trailing_state);
     }
-    (base.to_string(), Some(effect))
+    // Preflight used to append `⟦effect:N⟧` after an already-rendered report
+    // state. Runtime projection then appended the state again because it was no
+    // longer trailing, yielding `⟦published⟧ ⟦effect:N⟧ ⟦published⟧`. That
+    // binary-owned middle token changed the claim identity, so preflight saw no
+    // reported claim and repainted the row as running. Recover that legacy form
+    // while keeping the report state canonical and trailing.
+    let embedded_state = agent_doc_element_queue::queue_report_state_annotation(base)
+        .map(|(range, state)| (base[..range.start].trim_end(), state));
+    let (base, state) = match (embedded_state, trailing_state) {
+        (Some((base, _)), Some(state)) => (base, Some(state)),
+        (Some((base, state)), None) => (base, Some(state)),
+        (None, state) => (base, state),
+    };
+    (base.to_string(), Some(effect), state)
+}
+
+fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
+    let (base, effect, _) = split_queue_effect_projection(text);
+    (base, effect)
+}
+
+/// Render the effect id before the canonical trailing report-state annotation.
+///
+/// This also repairs the historical `state effect state` form in one pass.
+pub fn render_queue_effect_report_state_annotation(
+    text: &str,
+    state: Option<agent_doc_element_queue::QueueReportState>,
+) -> String {
+    let (base, effect, _) = split_queue_effect_projection(text);
+    let with_effect = effect.map_or_else(
+        || base.clone(),
+        |effect| {
+            format!(
+                "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+                base.trim_end()
+            )
+        },
+    );
+    agent_doc_element_queue::render_queue_report_state_annotation(&with_effect, state)
 }
 
 /// The operator-authored work text of `text` with a trailing binary-owned
@@ -4746,11 +4801,14 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
             let QueueEntry::Prompt(prompt) = &entries[index] else {
                 unreachable!("live effect-family index must name a live prompt");
             };
-            let (base, _) = split_queue_effect_annotation(&prompt.text);
+            let (base, _, publication_state) = split_queue_effect_projection(&prompt.text);
             let effect = effect.expect("every duplicate effect receives an id");
-            let text = format!(
-                "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
-                base.trim_end()
+            let text = render_queue_effect_report_state_annotation(
+                &format!(
+                    "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+                    base.trim_end()
+                ),
+                publication_state,
             );
             if text != prompt.text {
                 changed = true;
@@ -10160,6 +10218,48 @@ mod tests {
                 p("release + publish ⟦effect:1⟧"),
                 p("release + publish ⟦effect:3⟧"),
             ]
+        );
+    }
+
+    /// A report-state annotation is binary-owned metadata, not authored work.
+    /// Duplicate-effect projection must keep it after `⟦effect:N⟧`; otherwise
+    /// runtime projection appends a second state token and the middle token
+    /// changes the claim identity, making preflight repaint `☑️` as `🚧`.
+    #[test]
+    fn effect_annotation_keeps_report_state_trailing_and_repairs_legacy_duplicates() {
+        assert_eq!(
+            render_queue_effect_report_state_annotation("I'm seeing ", None),
+            "I'm seeing ",
+            "rows without binary metadata keep authored trailing whitespace"
+        );
+        let owner = "[#subagent:api-pr797-review#2]";
+        let entries = vec![
+            nested(c("#review")),
+            nested(p(&format!("☑️ {owner} #review ⟦published⟧"))),
+        ];
+        let canonical = annotate_duplicate_queue_effects(&entries).unwrap();
+        assert_eq!(
+            canonical,
+            vec![
+                nested(c("#review")),
+                nested(p(&format!("☑️ {owner} #review ⟦effect:2⟧ ⟦published⟧"))),
+            ]
+        );
+
+        let legacy = vec![
+            nested(c("#review")),
+            nested(p(&format!(
+                "☑️ {owner} #review ⟦published⟧ ⟦effect:2⟧ ⟦published⟧"
+            ))),
+        ];
+        assert_eq!(
+            annotate_duplicate_queue_effects(&legacy).unwrap(),
+            canonical,
+            "preflight repairs the live duplicated annotation instead of preserving a new identity"
+        );
+        assert!(
+            annotate_duplicate_queue_effects(&canonical).is_none(),
+            "canonical projection is a fixpoint"
         );
     }
 

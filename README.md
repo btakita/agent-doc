@@ -165,7 +165,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | `⛔` | blocked: its tracked item waits on open work, named after the marker (`⛔ ⟦blocked by a, b⟧`); it is not drained or dispatched until that work closes |
 | `🟡` | claimed for a worker that has not started yet |
 | `🚧` | a worker is running it |
-| `☑️` | the worker reported back; the coordinator still has to integrate and close it |
+| `☑️` | keep the row: the worker reported back, but the coordinator still has to integrate and close it |
 | `⚠️` | lost: the claim expired; it can be reclaimed |
 | `🔄` | needs reconcile: there is finished-work evidence but no current claim; it is not dispatched again |
 | `❔` | unknown: the state is unreadable or contradicts the row |
@@ -173,6 +173,7 @@ agent-doc prefixes each row in an `agent:run` section with its state:
 | `⏳` | waiting on an operator verdict |
 | `🙋` | an operator request is open for the row |
 | `📌` / `📍` | operator / agent priority pin |
+| `~~row~~` | integrated and terminal; a prompt tree is safe to delete only when every row is struck |
 
 A session document with an `agent:run` section keeps this legend on one line
 at the end of its `agent:status` section (hide it with `queue-legend=off` on

@@ -211,6 +211,36 @@ impl CloseoutWaitRouteOutcome {
     }
 }
 
+/// Strengthen an `OpenEmptyPreflight` block when the exact authoritative pane
+/// visibly proves that its harness turn is still running.
+///
+/// Session-check's typed `LiveOwnerTurn` verdict remains authoritative when it
+/// is available. The pane cue is a one-way fallback for the admission race in
+/// which the cycle is already open and the harness is visibly busy, but the
+/// turn-active lease has not reached session-check yet. It may protect a live
+/// turn; it never authorizes cancellation or recovery.
+fn blocked_closeout_live_owner_verdict(
+    context: RouteCloseoutBlockContext,
+    reason: &str,
+    pane: &str,
+    harness: &str,
+    generation: u64,
+    active_turn_busy_cue: Option<&str>,
+) -> Option<String> {
+    if matches!(context, RouteCloseoutBlockContext::LiveOwnerTurn) {
+        return Some(agent_doc_secret_redact::redact(reason));
+    }
+    if !matches!(context, RouteCloseoutBlockContext::OpenEmptyPreflight) {
+        return None;
+    }
+    active_turn_busy_cue.map(|cue| {
+        format!(
+            "[route] ACTIVE OWNER: authoritative actor generation {generation} on pane {pane} visibly proves an active {harness} turn ({})",
+            agent_doc_secret_redact::redact(cue)
+        )
+    })
+}
+
 /// GH #228 (`#routeliveturnverdict`): pure outcome for a route that met an open
 /// closeout session-check classified as a live owner-scoped turn (IN
 /// PROGRESS). It reuses that verdict verbatim, never a re-derived
@@ -644,11 +674,61 @@ pub fn route_via_authoritative_actor(
         }
         RouteCloseoutDrainOutcome::Blocked { reason, context } => {
             // GH #228 (`#routeliveturnverdict`): session-check's live-turn
-            // verdict is the one classification source. Keep it verbatim; the
-            // recovery decision below is consulted only for queue-prompt and
-            // head facts and never re-labels a live turn as a recovery.
-            let live_owner_verdict = matches!(context, RouteCloseoutBlockContext::LiveOwnerTurn)
-                .then(|| agent_doc_secret_redact::redact(&reason));
+            // verdict is the primary classification source. Keep it verbatim;
+            // the recovery decision below is consulted only for queue-prompt
+            // and head facts and never re-labels a live turn as a recovery.
+            // A freshly admitted turn can open its preflight before its
+            // turn-active lease becomes visible to session-check. The exact
+            // authoritative pane's harness-specific busy cue closes that race:
+            // protect the running turn and deliver explicit steering to it,
+            // never surface `session cancel-turn` for the same live work.
+            let active_owner_busy_cue = if matches!(
+                context,
+                RouteCloseoutBlockContext::OpenEmptyPreflight
+            ) {
+                match tmux.capture_pane(&dispatch_pane, Some(80)) {
+                    Ok(content) => closeout_harness.busy_proof_line(&content),
+                    Err(error) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_closeout_busy_owner_probe_failed file={} pane={} harness={} generation={} error={}",
+                                file.display(),
+                                dispatch_pane,
+                                closeout_harness.binary,
+                                actor.record.generation,
+                                agent_doc_secret_redact::redact(&error.to_string()),
+                            ),
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            let live_owner_verdict = blocked_closeout_live_owner_verdict(
+                context,
+                &reason,
+                &dispatch_pane,
+                &closeout_harness.binary,
+                actor.record.generation,
+                active_owner_busy_cue.as_deref(),
+            );
+            if active_owner_busy_cue.is_some()
+                && !matches!(context, RouteCloseoutBlockContext::LiveOwnerTurn)
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_drain_closeout_busy_owner_strengthened file={} pane={} harness={} generation={} original_context={} action=protect_live_turn",
+                        file.display(),
+                        dispatch_pane,
+                        closeout_harness.binary,
+                        actor.record.generation,
+                        crate::closeout_drain::route_closeout_block_context_label(context),
+                    ),
+                );
+            }
             let (decision, dispatch_decision) = classify_route_closeout_block(
                 file,
                 reason,
@@ -671,13 +751,15 @@ pub fn route_via_authoritative_actor(
                         .flatten()
                 })
             };
-            // `#ctrlcrerun`: a live-owner verdict rests on the turn lease. If
-            // the owning pane sits at an empty ready composer across two
-            // captures, liveness is ambiguous: route says so instead of
-            // claiming a running turn received the request. A busy frame the
-            // drain already saw is reused; an idle one is re-proven now,
-            // because the drain's projection wait (up to 30s) sits between
-            // that capture and this verdict.
+            // `#ctrlcrerun`: a session-check live-owner verdict rests on the
+            // turn lease. If the owning pane sits at an empty ready composer
+            // across two captures, liveness is ambiguous: route says so
+            // instead of claiming a running turn received the request. A busy
+            // frame the drain already saw is reused; an idle one is re-proven
+            // now, because the drain's projection wait (up to 30s) sits
+            // between that capture and this verdict. The admission-race
+            // fallback already holds a positive busy frame, so this proof
+            // cannot downgrade it to idle.
             let observe_owner_pane_idle = || {
                 stable_dispatch_ready_observed.get() != Some(false)
                     && agent_doc_tmux_io::with_current_pane_id_override(&dispatch_pane, || {
@@ -2277,6 +2359,55 @@ mod tests {
         assert!(
             !message.contains("No second trigger was injected"),
             "{message}"
+        );
+    }
+
+    /// A route can observe the empty preflight before the admission hook's
+    /// turn-active lease reaches session-check. The authoritative pane's
+    /// harness-specific busy cue is positive liveness proof and must protect
+    /// that turn from the generic `open_empty_preflight` cancellation remedy.
+    #[test]
+    fn busy_authoritative_pane_strengthens_open_empty_preflight_to_live_owner() {
+        let blocker = "closeout recovery replay_safe [open_empty_preflight]: agent-doc session cancel-turn /tmp/sample-session.md";
+        let verdict = blocked_closeout_live_owner_verdict(
+            RouteCloseoutBlockContext::OpenEmptyPreflight,
+            blocker,
+            "%2",
+            "codex",
+            200,
+            Some("esc to interrupt"),
+        )
+        .expect("an exact busy owner pane proves the turn is live");
+
+        assert!(verdict.contains("ACTIVE OWNER"), "{verdict}");
+        assert!(verdict.contains("generation 200"), "{verdict}");
+        assert!(verdict.contains("pane %2"), "{verdict}");
+        assert!(verdict.contains("active codex turn"), "{verdict}");
+        assert!(!verdict.contains("cancel-turn"), "{verdict}");
+        assert!(!verdict.contains("open_empty_preflight"), "{verdict}");
+
+        let outcome =
+            live_owner_turn_route_outcome(Path::new("/tmp/sample-session.md"), None, &verdict, 0);
+        let CloseoutWaitRouteOutcome::OwnerTurnBusy(message) = outcome else {
+            panic!("busy owner proof must be a benign live-turn yield");
+        };
+        assert!(message.contains("a turn is already running"), "{message}");
+        assert!(message.contains("nothing needs recovery"), "{message}");
+        assert!(message.contains("owner_turn=live"), "{message}");
+        assert!(!message.contains("cancel-turn"), "{message}");
+        assert!(!message.contains("open_empty_preflight"), "{message}");
+
+        assert!(
+            blocked_closeout_live_owner_verdict(
+                RouteCloseoutBlockContext::OpenEmptyPreflight,
+                blocker,
+                "%2",
+                "codex",
+                200,
+                None,
+            )
+            .is_none(),
+            "an empty-preflight shape alone is not owner liveness proof"
         );
     }
 

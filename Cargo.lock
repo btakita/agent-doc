@@ -868,6 +868,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-log-time",
+ "agent-doc-markdown-ast",
  "anyhow",
  "serde",
  "sha2",
@@ -1764,6 +1765,7 @@ name = "agent-doc-prompt-lines"
 version = "0.35.561"
 dependencies = [
  "agent-doc-element-backlog",
+ "agent-doc-markdown-ast",
 ]
 
 [[package]]

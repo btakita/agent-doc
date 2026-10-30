@@ -60,6 +60,11 @@ pub fn line_looks_like_slash_command(line: &str) -> bool {
 
 fn line_looks_like_prompt_target(line: &str) -> bool {
     let trimmed = line.trim();
+    if markdown_list_item_payload(trimmed)
+        .is_some_and(agent_doc_markdown_ast::overlay::is_ignored_list_comment)
+    {
+        return false;
+    }
     let normalized_imperative = normalize_imperative_candidate(trimmed)
         .is_some_and(|normalized| looks_like_imperative_directive(&normalized));
     let slash_command = line_looks_like_slash_command(trimmed);
@@ -421,7 +426,7 @@ fn starts_with_imperative_verb(line: &str) -> bool {
     matches!((first, words.next()), ("clean", Some("up")))
 }
 
-pub fn parse_markdown_list_item(line: &str) -> Option<&str> {
+fn markdown_list_item_payload(line: &str) -> Option<&str> {
     let trimmed = strip_prompt_prefix(line.trim_start());
     for prefix in ["- ", "* ", "+ "] {
         if let Some(rest) = trimmed.strip_prefix(prefix) {
@@ -440,6 +445,11 @@ pub fn parse_markdown_list_item(line: &str) -> Option<&str> {
     }
 
     None
+}
+
+pub fn parse_markdown_list_item(line: &str) -> Option<&str> {
+    markdown_list_item_payload(line)
+        .filter(|payload| !agent_doc_markdown_ast::overlay::is_ignored_list_comment(payload))
 }
 
 pub fn line_looks_like_markdown_list_item(line: &str) -> bool {
@@ -566,6 +576,14 @@ mod tests {
         assert!(!is_chat_prompt_record_line(
             "> **Chat prompt (#chatpromptish):** nope"
         ));
+    }
+
+    #[test]
+    fn list_comments_are_not_prompt_targets_or_list_work() {
+        for line in ["- [//]: # (markdown note)", "  - %%should this run?%%"] {
+            assert_eq!(parse_markdown_list_item(line), None, "line: {line}");
+            assert!(!text_line_looks_like_prompt_target(line), "line: {line}");
+        }
     }
 
     /// `#politeimperative`: a polite instruction is still an instruction. The

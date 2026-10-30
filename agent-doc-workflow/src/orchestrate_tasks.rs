@@ -330,6 +330,9 @@ pub fn parse_list_item(line: &str) -> Option<String> {
         .strip_prefix("- ")
         .or_else(|| trimmed.strip_prefix("* "))
     {
+        if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+            return None;
+        }
         let task = normalize_task(rest);
         return (!task.is_empty()).then_some(task);
     }
@@ -345,6 +348,9 @@ pub fn parse_list_item(line: &str) -> Option<String> {
         .or_else(|| rest.strip_prefix(") "))
         .or_else(|| rest.strip_prefix(".\t"))
         .or_else(|| rest.strip_prefix(")\t"))?;
+    if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+        return None;
+    }
     let task = normalize_task(rest);
     (!task.is_empty()).then_some(task)
 }
@@ -620,6 +626,12 @@ mod tests {
     fn parse_list_item_strips_prompt_prefix_with_star() {
         let result = parse_list_item("❯ * do #task2");
         assert_eq!(result, Some("do #task2".to_string()));
+    }
+
+    #[test]
+    fn parse_list_item_ignores_list_comments() {
+        assert_eq!(parse_list_item("- [//]: # (markdown note)"), None);
+        assert_eq!(parse_list_item("  1. %%obsidian note%%"), None);
     }
 
     #[test]

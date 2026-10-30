@@ -999,6 +999,10 @@ fn parse_item_line(line: &str) -> Option<PendingItem> {
     let (marker, rest) = parse_parent_list_marker(line)?;
     let rest = rest.trim_start();
 
+    if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+        return None;
+    }
+
     // Checkbox? Supports typed gates: [/release], [/deploy], etc.
     let (state, gate_type, after_box) = if let Some(r) = rest.strip_prefix("[ ]") {
         (PendingState::Open, None, r.trim_start())
@@ -6178,6 +6182,23 @@ mod tests {
             "expected second child id prefixed by parent id, got: {}",
             lines[2]
         );
+    }
+
+    #[test]
+    fn backfill_preserves_nested_list_comments_without_tracking_them() {
+        let body = concat!(
+            "- parent task\n",
+            "  - [//]: # (markdown note)\n",
+            "  - %%obsidian note%%\n",
+            "  - child task\n"
+        );
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+
+        assert!(changed);
+        assert!(new_body.contains("  - [//]: # (markdown note)\n"));
+        assert!(new_body.contains("  - %%obsidian note%%\n"));
+        assert_eq!(new_body.matches("[#").count(), 2, "got: {new_body}");
+        assert!(new_body.contains("  - [ ] [#"), "got: {new_body}");
     }
 
     #[test]

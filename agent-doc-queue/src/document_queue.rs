@@ -1197,6 +1197,26 @@ pub fn sync_backlog_into_queue(
     backlog_ids: &[String],
     mode: BacklogQueueSyncMode,
 ) -> Option<Vec<QueueEntry>> {
+    sync_backlog_into_queue_with_external_ids(
+        entries,
+        backlog_ids,
+        mode,
+        &std::collections::HashSet::new(),
+    )
+}
+
+/// [`sync_backlog_into_queue`] while treating tracked ids already represented in
+/// sibling `agent:run` blocks as present.
+///
+/// A tracked nested leaf owns its queue ancestry. Backlog mirroring into another
+/// run block must not manufacture a second top-level `do [#id]` row merely
+/// because the target block cannot see the sibling's entries (`#crossrunmirror`).
+pub fn sync_backlog_into_queue_with_external_ids(
+    entries: &[QueueEntry],
+    backlog_ids: &[String],
+    mode: BacklogQueueSyncMode,
+    external_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
     // Normalize backlog ids: lowercase, drop empties, dedupe (first-seen order).
     let mut seen = std::collections::HashSet::new();
     let ordered_ids: Vec<String> = backlog_ids
@@ -1208,8 +1228,14 @@ pub fn sync_backlog_into_queue(
     // Multi-id aware (#provauth2): a manually-authored `[#a] [#b] [#c]` line
     // marks a, b AND c as present so the mirror never re-adds the trailing ids
     // as duplicate `do [#id]` lines.
-    let existing_ids: std::collections::HashSet<String> =
+    let normalized_external_ids: std::collections::HashSet<String> = external_ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .filter(|id| !id.is_empty())
+        .collect();
+    let mut existing_ids: std::collections::HashSet<String> =
         entries.iter().flat_map(queue_entry_reference_ids).collect();
+    existing_ids.extend(normalized_external_ids.iter().cloned());
 
     let new_entries: Vec<QueueEntry> = match mode {
         BacklogQueueSyncMode::Sync => {
@@ -1224,11 +1250,12 @@ pub fn sync_backlog_into_queue(
             // Once an operator nests or annotates one, it is no longer safe for
             // sync to replace it. Preserve those rows and count their referenced
             // ids as already represented so the mirror does not add a duplicate.
-            let preserved_reference_ids: std::collections::HashSet<String> = entries
+            let mut preserved_reference_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter(|entry| !is_canonical_top_level_backlog_mirror(entry))
                 .flat_map(queue_entry_reference_ids)
                 .collect();
+            preserved_reference_ids.extend(normalized_external_ids.iter().cloned());
             let mirror = ordered_ids
                 .iter()
                 .filter(|id| !preserved_reference_ids.contains(*id))
@@ -5826,6 +5853,20 @@ mod tests {
         )
         .expect("queue should change");
         assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n- do [#c]\n");
+    }
+
+    #[test]
+    fn append_mode_does_not_duplicate_id_from_sibling_run() {
+        let entries = parse("- do [#a]\n").unwrap();
+        let sibling_ids = ["closed".to_string()].into_iter().collect();
+        let synced = sync_backlog_into_queue_with_external_ids(
+            &entries,
+            &ids(&["a", "closed", "b"]),
+            BacklogQueueSyncMode::Append,
+            &sibling_ids,
+        )
+        .expect("only the genuinely absent id should be appended");
+        assert_eq!(render(&synced), "- do [#a]\n- do [#b]\n");
     }
 
     #[test]

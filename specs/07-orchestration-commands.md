@@ -546,6 +546,11 @@ Semantics:
   before priority and preserving every existing queue byte. Equal-priority items
   retain backlog document order, which is also the caller's top-down order for a
   repeated `--backlog-add` batch; generated ids are never scheduling tie-breakers.
+  Tracked identity is document-wide across non-repeating `agent:run` blocks: an
+  id already represented by a nested leaf in a sibling run is already queued,
+  so reconciliation never manufactures a top-level mirror in the primary run
+  or moves the leaf away from its original parent (`#crossrunmirror`). Explicit
+  one-shot sync and preflight population apply the same sibling-run fence.
   It never sweeps all open backlog ids at closeout, because doing so would
   resurrect unrelated operator-deleted queue entries.
 - **Operator-delete tombstones read row ids through the projection

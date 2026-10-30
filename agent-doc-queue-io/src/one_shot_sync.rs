@@ -40,8 +40,7 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     let components = element::parse(content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
 
-    let queue_comp = components.iter().find(|c| c.name == "queue");
-    let Some(qc) = queue_comp else {
+    let Some(qc) = backlog_sync::mirror_queue_component(&components) else {
         bail!(
             "{}: no agent:queue component found. Add `<!-- agent:queue -->..<!-- /agent:queue -->` to the document.",
             file.display()
@@ -71,8 +70,17 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     let entries = document_queue::parse(body)
         .with_context(|| format!("failed to parse queue body in {}", file.display()))?;
 
-    let Some(synced) = document_queue::sync_backlog_into_queue(&entries, &ids, effective_mode)
-    else {
+    let sibling_ids = backlog_sync::sibling_run_queue_reference_ids(
+        &components,
+        content,
+        qc.open_start,
+    )?;
+    let Some(synced) = document_queue::sync_backlog_into_queue_with_external_ids(
+        &entries,
+        &ids,
+        effective_mode,
+        &sibling_ids,
+    ) else {
         return Ok(OneShotQueueSyncResult::AlreadyInSync {
             requested_count: ids.len(),
             mode: effective_mode,
@@ -194,6 +202,41 @@ mod tests {
             OneShotQueueSyncResult::AlreadyInSync {
                 requested_count: 1,
                 mode: BacklogQueueSyncMode::Append
+            }
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn sync_recognizes_nested_id_in_sibling_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("api.md");
+        let content = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=\"contracts-prs\" -->\n",
+            "- https://github.com/haiven-dev/haiven-contracts/pull/170\n",
+            "  - do [#closed]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#closed] Why was this PR closed?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let result = sync_one_shot_backlog_queue_with_snapshot(
+            &doc,
+            content,
+            |_path, _current, _target| panic!("sibling-owned id must not be duplicated"),
+            |_path, _content| panic!("already-in-sync should not save snapshot"),
+        )
+        .expect("the sibling nested leaf satisfies the mirror");
+
+        assert_eq!(
+            result,
+            OneShotQueueSyncResult::AlreadyInSync {
+                requested_count: 1,
+                mode: BacklogQueueSyncMode::Append,
             }
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);

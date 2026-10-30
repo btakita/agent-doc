@@ -5577,9 +5577,24 @@ pub fn run_queue_maintenance_with_coin_gate(
                 }
             }
         }
-        if let Some(synced) =
-            agent_doc_queue::document_queue::sync_backlog_into_queue(&entries, &backlog_ids, mode)
-        {
+        let sync_components = agent_doc_element::element::parse(&current_content)?;
+        let sync_target = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &sync_components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: selected queue vanished before backlog sync")?;
+        let sibling_ids = agent_doc_queue::backlog_sync::sibling_run_queue_reference_ids(
+            &sync_components,
+            &current_content,
+            sync_target.open_start,
+        )?;
+        if let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue_with_external_ids(
+            &entries,
+            &backlog_ids,
+            mode,
+            &sibling_ids,
+        ) {
             let pre_sync_ids = entries
                 .iter()
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
@@ -10755,6 +10770,69 @@ mod tests {
                 .any(|w| w.code == "backlog_queue_sync_pending"),
             "empty-queue-before-sync must emit backlog_queue_sync_pending warning, got {:?}",
             state.warnings
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_preserves_nested_leaf_in_sibling_run() {
+        // `#crossrunmirror`: api.md's selected `main` run had other work while
+        // `#closed` already existed beneath PR 170 in `contracts-prs`. The
+        // append mirror inspected only `main` and manufactured a duplicate.
+        let dir = setup_project();
+        let doc = dir.path().join("api.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"main\" go -->\n",
+            "- do [#other]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=\"contracts-prs\" -->\n",
+            "- https://github.com/haiven-dev/haiven-contracts/pull/170\n",
+            "  - do [#closed]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#other] other work\n",
+            "- [ ] [#closed] Why was this PR closed?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = state.authoritative_content.as_deref().unwrap_or(content);
+        let components = agent_doc_element::element::parse(updated).unwrap();
+        let queues = agent_doc_queue::queue_set::QueueSet::parse(updated, &components).unwrap();
+        let main = queues.block("main").unwrap();
+        let contracts = queues.block("contracts-prs").unwrap();
+
+        assert!(
+            main.entries.iter().all(|entry| {
+                !agent_doc_queue::document_queue::queue_entry_reference_ids(entry)
+                    .iter()
+                    .any(|id| id == "closed")
+            }),
+            "main received a duplicate #closed mirror:\n{updated}"
+        );
+        assert_eq!(
+            contracts
+                .entries
+                .iter()
+                .flat_map(agent_doc_queue::document_queue::queue_entry_reference_ids)
+                .filter(|id| id == "closed")
+                .count(),
+            1,
+            "contracts-prs must retain the original nested leaf:\n{updated}"
         );
     }
 

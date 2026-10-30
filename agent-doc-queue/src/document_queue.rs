@@ -9619,6 +9619,29 @@ mod tests {
         assert_eq!(render(&entries), body);
     }
 
+    #[test]
+    fn parent_with_only_comment_children_remains_runnable() {
+        for body in [
+            "- parent task\n  - %%one note%%\n",
+            concat!(
+                "- parent task\n",
+                "  - %%one note%%\n",
+                "  - [//]: # (another note)\n"
+            ),
+        ] {
+            let entries = parse(body).unwrap();
+            assert_eq!(
+                prompts(&entries)
+                    .iter()
+                    .map(|prompt| prompt.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["parent task"],
+                "comment-only children must not turn their runnable parent into an inert group"
+            );
+            assert_eq!(render(&entries), body);
+        }
+    }
+
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`
     /// is the precedent — a round-trip once silently dropped an operator's list
     /// marker.

@@ -1138,6 +1138,34 @@ mod tests {
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
     }
 
+    #[test]
+    fn queue_attr_dispatches_parent_with_only_comment_children() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## API PRs\n\n",
+            "<!-- agent:run id=api-prs subagents presets=\"#push: #auth\" priority go -->\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+            "  - %%waiting for review%%\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/758\n",
+            "  - %%one note%%\n",
+            "  - [//]: # (another note)\n",
+            "<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![
+                "https://github.com/haiven-dev/haiven-api/pull/717".to_string(),
+                "https://github.com/haiven-dev/haiven-api/pull/758".to_string(),
+            ],
+            "comment children are inert annotations, not descendants that make the parent a group label"
+        );
+    }
+
     fn two_runs(main_attr: &str, main_body: &str, prs_attr: &str, prs_body: &str) -> String {
         format!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n\

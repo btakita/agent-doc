@@ -1096,7 +1096,8 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Turn context for an exact same-turn repeat of an admitted Codex trigger.
+/// Turn context for a same-turn repeat of an admitted Codex trigger targeting
+/// the same canonical document.
 ///
 /// Both shapes keep the turn's original admission authoritative and leave the
 /// exact-thread binding untouched (no refusal receipt), so the Codex Stop hook
@@ -1109,22 +1110,52 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
 /// operator's pending prompt was dropped. Coalesced, the closeout finishes and
 /// the Stop hook re-dispatches the pending prompt (auto-queue continuation or
 /// active-session-prompt writeback) once the cycle commits.
+struct SameTurnRepeatContext {
+    context: String,
+    delivered: Option<agent_doc_session_check_io::midturn_steering::RouteSyncSteering>,
+}
+
 fn same_turn_repeat_context(
     existing: &agent_doc_codex_hook_io::SameTurnAdmittedInvocation,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<SameTurnRepeatContext> {
     use agent_doc_codex_hook_io::SameTurnRepeatKind;
     match existing.kind {
         SameTurnRepeatKind::OpenPreflight => {
+            // The repeated trigger is an explicit send. Reuse route's
+            // cycle-scoped diff owner: a changed document delivers exactly
+            // what changed since the last submit, while an unchanged document
+            // is a true no-op. The caller records delivery only after stdout
+            // accepts the hook response.
+            let delivered =
+                agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(
+                    &existing.doc_path,
+                )?;
+            let (kind, required_action) = if delivered.is_some() {
+                (
+                    "same_turn_steering",
+                    "Apply the operator steering below in the current turn; the original cycle contract remains authoritative. Do not start a second response cycle.",
+                )
+            } else {
+                (
+                    "same_turn_repeat_no_changes",
+                    "The document has no new steering since this cycle was admitted. This repeated agent-doc invocation is a no-op: do not start a second response cycle or emit a separate acknowledgement. Continue only the work already admitted in the current turn.",
+                )
+            };
             let reuse = serde_json::to_string_pretty(&serde_json::json!({
                 "reused_admission": true,
-                "kind": existing.kind.as_str(),
+                "kind": kind,
                 "document": existing.doc_path,
                 "cycle_id": existing.cycle_id,
-                "required_action": "Continue the unresolved work in the current turn; the original cycle contract remains authoritative.",
+                "required_action": required_action,
             }))?;
-            Ok(format!(
-                "{reuse}\n{CONTRACT_MARKER}\n{CODEX_IN_PANE_ADMISSION_DIRECTIVE}"
-            ))
+            let context = format!(
+                "{reuse}{}",
+                delivered
+                    .as_ref()
+                    .map(|delivery| format!("\n{}", delivery.instructions))
+                    .unwrap_or_default(),
+            );
+            Ok(SameTurnRepeatContext { context, delivered })
         }
         SameTurnRepeatKind::CloseoutInFlight { phase } => {
             agent_doc_ops_log_io::log_op(
@@ -1144,9 +1175,12 @@ fn same_turn_repeat_context(
                 "cycle_phase": phase.as_str(),
                 "required_action": "This turn already owns the document and its closeout for this cycle is still in flight. Let that closeout finish; do not start a second response, rerun finalize/write, recapture, or report a refusal. End the turn normally once the closeout returns: the Stop hook re-dispatches any pending operator prompt as a continuation of this turn.",
             }))?;
-            Ok(format!(
-                "{reuse}\n{CONTRACT_MARKER}\n{CODEX_CLOSEOUT_IN_FLIGHT_DIRECTIVE}"
-            ))
+            Ok(SameTurnRepeatContext {
+                context: format!(
+                    "{reuse}\n{CONTRACT_MARKER}\n{CODEX_CLOSEOUT_IN_FLIGHT_DIRECTIVE}"
+                ),
+                delivered: None,
+            })
         }
     }
 }
@@ -1180,13 +1214,21 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    // Codex may deliver a second identical trigger as real-time steering into
+    // Codex may deliver a second trigger for the same canonical document as
     // the turn whose hook already admitted this document. Preserve that
     // admission before `apply_user_prompt_submit` replaces its receipt with a
-    // fresh pending one. Exact turn/prompt/document identity keeps unrelated
-    // and genuinely new prompts on the normal fail-closed path.
+    // fresh pending one. Exact turn/document identity keeps unrelated and
+    // genuinely new prompts on the normal fail-closed path.
     if let Some(existing) = agent_doc_codex_hook_io::same_turn_admitted_invocation(&input)? {
-        emit_user_prompt_submit_context(&same_turn_repeat_context(&existing)?);
+        let repeated = same_turn_repeat_context(&existing)?;
+        emit_user_prompt_submit_context(&repeated.context);
+        if let Some(delivered) = repeated.delivered {
+            agent_doc_session_check_io::midturn_steering::record_route_sync_steering_delivered_explicit(
+                &existing.doc_path,
+                &delivered.cycle_id,
+                &delivered.content,
+            )?;
+        }
         return Ok(());
     }
 

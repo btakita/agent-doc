@@ -239,7 +239,8 @@ pub struct UserPromptSubmitInput {
     pub prompt: String,
 }
 
-/// An exact repeated Codex trigger that may keep using its already-admitted cycle.
+/// A repeated Codex trigger for the same canonical document that may keep using
+/// its already-admitted cycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SameTurnAdmittedInvocation {
     pub doc_path: PathBuf,
@@ -298,15 +299,18 @@ pub fn classify_same_turn_repeat(
     }
 }
 
-/// Return the existing admission only when Codex repeats the exact trigger in
-/// the exact turn that already owns the document's still-open cycle — either
-/// still uncaptured, or with its own closeout in flight.
+/// Return the existing admission only when Codex repeats an `agent-doc` trigger
+/// for the same canonical document in the exact turn that already owns the
+/// document's still-open cycle — either still uncaptured, or with its own
+/// closeout in flight.
 ///
 /// Codex can steer another user message into an active turn. Re-running
 /// preflight for that message makes the cycle look like a competing fresh turn
 /// and fails closed against its own open state. The durable admission receipt
-/// plus exact session/turn/prompt/document identity is the continuation edge:
-/// anything less specific remains on normal admission.
+/// plus exact session/turn/document identity is the continuation edge. Prompt
+/// spelling is deliberately not identity: relative, absolute, and pane-resolved
+/// forms of the same document are equivalent. Anything less specific remains on
+/// normal admission.
 ///
 /// `#fixrunturn` (infra.md, 2026-10-12): Run Agent Doc typed the trigger into a
 /// busy Codex pane; Codex steered it into the turn while that turn's own
@@ -332,7 +336,6 @@ pub fn same_turn_admitted_invocation(
     let stored_doc = stored_doc.canonicalize().unwrap_or(stored_doc);
     if !state.has_harness_identity()
         || state.last_turn_id != input.turn_id
-        || state.last_prompt != input.prompt
         || state.preflight_admitted != Some(true)
         || stored_doc != doc_path
     {
@@ -1886,14 +1889,14 @@ mod tests {
     }
 
     #[test]
-    fn exact_same_turn_trigger_reuses_admitted_open_preflight() {
+    fn same_document_trigger_reuses_admitted_open_preflight_across_path_spellings() {
         let dir = setup_project();
         let doc = write_doc(&dir);
         let input = UserPromptSubmitInput {
             session_id: "codex-session".to_string(),
             turn_id: "turn-1".to_string(),
             cwd: dir.path().display().to_string(),
-            prompt: format!("agent-doc {}", doc.display()),
+            prompt: "agent-doc task.md".to_string(),
         };
 
         apply_user_prompt_submit(&input).unwrap();
@@ -1903,7 +1906,11 @@ mod tests {
         record_preflight_admission(&input, true).unwrap();
 
         assert_eq!(
-            same_turn_admitted_invocation(&input).unwrap(),
+            same_turn_admitted_invocation(&UserPromptSubmitInput {
+                prompt: format!("agent-doc {}", doc.display()),
+                ..input
+            })
+            .unwrap(),
             Some(SameTurnAdmittedInvocation {
                 doc_path: doc,
                 cycle_id: cycle.cycle_id,
@@ -2020,7 +2027,7 @@ mod tests {
     }
 
     #[test]
-    fn same_turn_reuse_rejects_changed_prompt_turn_or_refused_admission() {
+    fn same_turn_reuse_rejects_changed_document_turn_or_refused_admission() {
         let dir = setup_project();
         let doc = write_doc(&dir);
         let input = UserPromptSubmitInput {
@@ -2036,8 +2043,10 @@ mod tests {
         let mut changed = input.clone();
         changed.turn_id = "turn-2".to_string();
         assert!(same_turn_admitted_invocation(&changed).unwrap().is_none());
+        let other = dir.path().join("other.md");
+        fs::write(&other, "# Other\n").unwrap();
         changed = input.clone();
-        changed.prompt.push_str(" again");
+        changed.prompt = format!("agent-doc {}", other.display());
         assert!(same_turn_admitted_invocation(&changed).unwrap().is_none());
 
         record_preflight_admission(&input, false).unwrap();

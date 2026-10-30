@@ -543,20 +543,28 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 }
 
 #[test]
-fn codex_hook_cli_reuses_exact_same_turn_admission() {
+fn codex_hook_cli_treats_same_document_repeat_without_diff_as_no_op() {
     let (tmp, doc) = setup_template_doc();
     init_git_repo(tmp.path(), &doc);
     let submit_payload = json!({
         "session_id": "same-turn-session",
         "turn_id": "same-turn-id",
         "cwd": tmp.path().display().to_string(),
-        "prompt": format!("agent-doc {}", doc.display()),
+        "prompt": "agent-doc session.md",
     });
 
     agent_doc()
         .current_dir(tmp.path())
         .args(["hook", "codex-user-prompt-submit"])
-        .write_stdin(submit_payload.to_string())
+        .write_stdin(
+            json!({
+                "session_id": "same-turn-session",
+                "turn_id": "same-turn-id",
+                "cwd": tmp.path().display().to_string(),
+                "prompt": format!("agent-doc {}", doc.display()),
+            })
+            .to_string(),
+        )
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -576,8 +584,10 @@ fn codex_hook_cli_reuses_exact_same_turn_admission() {
         .as_str()
         .expect("same-turn reuse must carry additionalContext");
     assert!(context.contains("\"reused_admission\": true"));
-    assert!(context.contains("\"kind\": \"same_turn_repeat\""));
-    assert!(context.contains("cycle contract (preflight already ran"));
+    assert!(context.contains("\"kind\": \"same_turn_repeat_no_changes\""));
+    assert!(context.contains("This repeated agent-doc invocation is a no-op"));
+    assert!(!context.contains("operator steering arrived mid-turn"));
+    assert!(!context.contains("cycle contract (preflight already ran"));
     assert!(!context.contains("cycle contract UNAVAILABLE"));
 
     let after = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -587,6 +597,100 @@ fn codex_hook_cli_reuses_exact_same_turn_admission() {
         .unwrap()
         .unwrap();
     assert_eq!(state.preflight_admitted, Some(true));
+}
+
+#[test]
+fn codex_hook_cli_delivers_same_turn_document_diff_as_steering() {
+    let (tmp, doc) = setup_template_doc();
+    init_git_repo(tmp.path(), &doc);
+    let submit_payload = json!({
+        "session_id": "same-turn-steering-session",
+        "turn_id": "same-turn-steering-id",
+        "cwd": tmp.path().display().to_string(),
+        "prompt": "agent-doc session.md",
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(submit_payload.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "cycle contract (preflight already ran",
+        ));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    fs::write(
+        &doc,
+        content.replace(
+            "<!-- agent:pending -->\n<!-- /agent:pending -->",
+            "<!-- agent:pending -->\n❯ Please also verify the steering path.\n<!-- /agent:pending -->",
+        ),
+    )
+    .unwrap();
+
+    let repeated = agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-user-prompt-submit"])
+        .write_stdin(
+            json!({
+                "session_id": "same-turn-steering-session",
+                "turn_id": "same-turn-steering-id",
+                "cwd": tmp.path().display().to_string(),
+                "prompt": format!("agent-doc {}", doc.display()),
+            })
+            .to_string(),
+        )
+        .assert()
+        .success();
+    let hook_output: serde_json::Value = serde_json::from_slice(&repeated.get_output().stdout)
+        .expect("same-turn steering stdout must be exactly one valid JSON document");
+    let context = hook_output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .expect("same-turn steering must carry additionalContext");
+    assert!(
+        context.contains("\"kind\": \"same_turn_steering\""),
+        "{context}"
+    );
+    assert!(
+        context.contains("[agent-doc] operator steering:"),
+        "{context}"
+    );
+    let token = context
+        .split("--token '")
+        .nth(1)
+        .and_then(|tail| tail.split('\'').next())
+        .expect("same-turn steering must carry a retrievable compact token");
+    let steering =
+        agent_doc_session_check_io::midturn_steering::take_steering_surrogate(&doc, token).unwrap();
+    assert!(
+        steering.contains("operator steering arrived mid-turn"),
+        "{steering}"
+    );
+    assert!(
+        steering.contains("Please also verify the steering path."),
+        "{steering}"
+    );
+    assert!(
+        !context.contains("cycle contract (preflight already ran"),
+        "{context}"
+    );
+    assert!(!context.contains("cycle contract UNAVAILABLE"), "{context}");
+
+    let post_tool_use = json!({
+        "session_id": "same-turn-steering-session",
+        "cwd": tmp.path().display().to_string(),
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Bash",
+    })
+    .to_string();
+    assert_eq!(
+        agent_doc_session_check_io::midturn_steering::post_tool_use_response(&post_tool_use)
+            .unwrap(),
+        None,
+        "the explicit repeat acknowledgement must prevent duplicate delivery"
+    );
 }
 
 /// `#fixrunturn` (infra.md, 2026-10-12): Run Agent Doc typed the trigger into a

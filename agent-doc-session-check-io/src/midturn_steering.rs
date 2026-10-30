@@ -990,7 +990,7 @@ fn prepare(
     consumer: &str,
     policy: ClosedCyclePolicy,
 ) -> Result<Option<PreparedObservation>> {
-    prepare_with_gate(file, consumer, policy, true, None)
+    prepare_with_gate(file, consumer, policy, true, None, false)
 }
 
 /// [`prepare`] with the unchanged-document gate optional. The gate is a pure
@@ -1002,6 +1002,7 @@ fn prepare_with_gate(
     policy: ClosedCyclePolicy,
     unchanged_gate: bool,
     carried: Option<&WakeSettleCarry>,
+    explicit_send_override: bool,
 ) -> Result<Option<PreparedObservation>> {
     let Some(root) = project_root(file) else {
         return Ok(None);
@@ -1120,8 +1121,9 @@ fn prepare_with_gate(
     }
 
     let disk_changed_ms = mtime_ms(&meta);
-    let explicit_send = load_explicit_send(&conn, file)
-        .is_some_and(|send| send.covers(disk_changed_ms, &content_hash, editor_attached));
+    let explicit_send = explicit_send_override
+        || load_explicit_send(&conn, file)
+            .is_some_and(|send| send.covers(disk_changed_ms, &content_hash, editor_attached));
     // The turn boundary is the last chance before the loop re-enters: an
     // item that is complete surfaces now rather than waiting out the window.
     let debounce_ms = if policy == ClosedCyclePolicy::ForceBoundary || explicit_send {
@@ -1321,6 +1323,34 @@ pub fn observe(file: &Path, consumer: &str, advance: bool) -> Result<Option<Stee
     Ok(prepared.report)
 }
 
+/// Observe one explicit operator send without persisting a save-grace marker.
+///
+/// Route records an explicit-send marker because delivery happens later through
+/// a PostToolUse hook. A Codex `UserPromptSubmit` hook can deliver in the same
+/// process, so it bypasses the typing gate directly and advances the consumer
+/// atomically. This keeps a no-diff repeat from affecting a later edit.
+pub fn observe_explicit(
+    file: &Path,
+    consumer: &str,
+    advance: bool,
+) -> Result<Option<SteeringReport>> {
+    let Some(prepared) = prepare_with_gate(
+        file,
+        consumer,
+        ClosedCyclePolicy::Boundary,
+        false,
+        None,
+        true,
+    )?
+    else {
+        return Ok(None);
+    };
+    if advance {
+        prepared.acknowledge(file)?;
+    }
+    Ok(prepared.report)
+}
+
 /// The turn-boundary observation for the in-turn agent channel: unsurfaced
 /// steering relative to the hook consumer's watermark (so nothing the hook
 /// already delivered repeats), in boundary mode, with no debounce. The caller
@@ -1492,6 +1522,7 @@ pub fn observe_for_wake_with(file: &Path, carry: &mut WakeSettleCarry) -> Result
         ClosedCyclePolicy::Boundary,
         false,
         Some(carry),
+        false,
     )?;
     carry.remember(hook.as_ref().and_then(|prepared| prepared.next.as_ref()));
     let Some(hook_report) = hook.as_ref().and_then(|prepared| prepared.report.clone()) else {
@@ -1567,6 +1598,7 @@ pub fn explicit_send_pending_items(file: &Path) -> Result<Vec<SteeringItem>> {
         ClosedCyclePolicy::Boundary,
         false,
         None,
+        false,
     )?
     .and_then(|prepared| prepared.report)
     .map(|report| report.items)
@@ -1684,6 +1716,29 @@ pub fn record_route_sync_steering_delivered(
     cycle_id: &str,
     content: &str,
 ) -> Result<()> {
+    record_route_sync_steering_delivery(file, cycle_id, content, false)
+}
+
+/// Record a route-sync payload delivered directly by an explicit-send hook.
+///
+/// Unlike route's asynchronous pane delivery, the hook needs no durable
+/// save-grace marker: it already owns the submitted document bytes. Consumers
+/// are advanced with a one-shot typing-gate override so a later PostToolUse
+/// hook cannot repeat the delivered edit.
+pub fn record_route_sync_steering_delivered_explicit(
+    file: &Path,
+    cycle_id: &str,
+    content: &str,
+) -> Result<()> {
+    record_route_sync_steering_delivery(file, cycle_id, content, true)
+}
+
+fn record_route_sync_steering_delivery(
+    file: &Path,
+    cycle_id: &str,
+    content: &str,
+    explicit: bool,
+) -> Result<()> {
     let Some(root) = project_root(file) else {
         return Ok(());
     };
@@ -1699,7 +1754,12 @@ pub fn record_route_sync_steering_delivered(
         now_ms(),
     )?;
     for consumer in [CONSUMER_HOOK, CONSUMER_CLI, CONSUMER_FOLLOW] {
-        if let Err(err) = observe(file, consumer, true) {
+        let observed = if explicit {
+            observe_explicit(file, consumer, true)
+        } else {
+            observe(file, consumer, true)
+        };
+        if let Err(err) = observed {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(

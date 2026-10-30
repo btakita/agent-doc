@@ -58,6 +58,13 @@ only the bare Enter key within a fixed budget; it never pastes the payload a
 second time. An unreadable composer, an unsent draft after that budget, or
 Claude's subagent-addressed composer remains protected.
 
+Codex applies the same rule when the plain `agent-doc <FILE>` trigger itself is
+steered into the already-admitted turn. Trigger spelling is not identity:
+relative, absolute, and pane-resolved paths for the same canonical document
+reuse that turn. The hook sends the document diff since the prior submit through
+the route-sync steering envelope; when no diff exists, the repeat is an explicit
+no-op and must not run a second preflight or produce a separate acknowledgement.
+
 Routing reuses the supervisor lifecycle and document-bound resume UUID.
 Readiness requires a complete empty Grok composer with no live cancel/stop
 indicator; unknown screens and drafts remain protected. Fullscreen UI was

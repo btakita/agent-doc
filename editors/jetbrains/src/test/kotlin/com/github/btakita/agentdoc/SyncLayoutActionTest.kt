@@ -115,7 +115,8 @@ class SyncLayoutActionTest {
             sync.indexOf("FileEditorManagerEx.getInstanceEx(project).currentWindow?.selectedFile") <
                 sync.indexOf("manager.selectedTextEditor?.virtualFile"),
         )
-        assertTrue(action.contains("syncLayout(project, terminalPrepared = true)"))
+        assertTrue(action.contains("syncLayout(project)"))
+        assertTrue(sync.contains("IdeTerminalCoordinator.startAndAttach("))
     }
 
     @Test

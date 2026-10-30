@@ -24,7 +24,6 @@ class AgentDocPopupAction : ImplAction {
     companion object {
         internal val PRIMARY_ACTION_IDS = listOf(
             "AgentDoc.Submit",
-            "AgentDoc.StartAgentDoc",
             "AgentDoc.InitSession",
             "AgentDoc.FixDocument",
             "AgentDoc.Claim",
@@ -46,6 +45,7 @@ class AgentDocPopupAction : ImplAction {
         )
 
         internal val OVERFLOW_ACTION_IDS = listOf(
+            "AgentDoc.StartAgentDoc",
             // One-time setup for Marketplace users who installed the plugin first.
             "AgentDoc.InstallCli",
             // IdeaVim-style opt-in to the GitHub-hosted early update channel.

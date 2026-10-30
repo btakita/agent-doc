@@ -9335,6 +9335,43 @@ mod tests {
         assert_eq!(render(&entries), body);
     }
 
+    /// `#nestsubmit`: the api.md `#fix-ci` release leaf stays nested under its
+    /// pull request in the document while its submitted prompt carries that
+    /// parent lineage. Runtime projection may annotate the leaf, never hoist it.
+    #[test]
+    fn fix_ci_release_leaf_keeps_its_pull_request_parent() {
+        const PARENT: &str = "https://github.com/haiven-dev/haiven-api/pull/717";
+        const LEAF: &str = "#fix-ci https://github.com/haiven-dev/haiven-api/pull/717 at head 381f3f911185844d9dc06bf7385b7045d961bd9f: Release";
+        let body = format!("- {PARENT}\n  - {LEAF}\n");
+        let entries = parse(&body).unwrap();
+
+        assert!(entry_is_group_parent(&entries, 0));
+        assert_eq!(render(&entries), body);
+        let submitted = submitted_prompt_at(&entries, 1).expect("nested leaf is executable");
+        assert!(
+            submitted.starts_with(&format!("{PARENT}: {LEAF}\n")),
+            "{submitted}"
+        );
+        assert!(
+            submitted.contains(&format!("> - {PARENT}\n>   - {LEAF} (this leaf)")),
+            "{submitted}"
+        );
+
+        let (projected, _) = project_prompt_runtime_projections(
+            &body,
+            &[QueueRowProjection {
+                text: LEAF.to_string(),
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+                owner: None,
+                blockers: Vec::new(),
+                reopen_completed: false,
+            }],
+        )
+        .unwrap()
+        .expect("the running leaf receives a marker");
+        assert_eq!(projected, format!("- {PARENT}\n  - 🚧 {LEAF}\n"));
+    }
+
     /// Lifecycle markers project onto executable leaves only; a stale marker on
     /// the context parent and an unrelated sibling marker are retired.
     #[test]

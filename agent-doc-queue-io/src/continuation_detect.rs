@@ -115,6 +115,27 @@ mod tests {
         assert_eq!(continuation.head_prompt, "do [#a]");
     }
 
+    /// `#nestedinboxcloseout`: file-backed closeout detection must preserve the
+    /// pure queue invariant that a nested `📥` leaf is drainable work.
+    #[test]
+    fn detects_nested_pending_leaf_as_required_continuation() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("task.md");
+        let content = continuation_doc("parent context\n  - 📥 address reviewer feedback");
+        std::fs::write(&doc, &content).unwrap();
+
+        let continuation =
+            detect_required_continuation_with(&doc, |_| Ok(Some(content.clone())), |_| false)
+                .unwrap()
+                .expect("a nested pending leaf must prevent terminal closeout");
+
+        assert_eq!(continuation.head_id, None);
+        assert_eq!(
+            continuation.head_prompt,
+            "📥 address reviewer feedback"
+        );
+    }
+
     #[test]
     fn queue_subagent_head_is_dispatch_work_not_inline_continuation() {
         let dir = tempfile::tempdir().unwrap();

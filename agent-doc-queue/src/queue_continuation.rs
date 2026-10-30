@@ -2820,6 +2820,40 @@ mod tests {
         assert!(continuation.reason.contains("agent:queue go"));
     }
 
+    /// `#nestedinboxcloseout`: a pending nested leaf is executable work, so a
+    /// closeout cannot report `no_drainable_work` while that leaf is still
+    /// ready. Completing the leaf removes the continuation requirement.
+    #[test]
+    fn required_continuation_keeps_nested_pending_leaf_out_of_terminal_closeout() {
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "## Queue\n\n<!-- agent:queue go -->\n",
+            "- parent context\n",
+            "  - 📥 address reviewer feedback\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let continuation = required_continuation(content, Some(content))
+            .unwrap()
+            .expect("a ready nested leaf must force a non-terminal continuation");
+        assert_eq!(
+            continuation.head_prompt,
+            "📥 address reviewer feedback"
+        );
+        assert!(continuation.reason.contains("agent:queue go"));
+
+        let completed = content.replace(
+            "  - 📥 address reviewer feedback",
+            "  - ~~address reviewer feedback~~",
+        );
+        assert!(
+            required_continuation(&completed, Some(&completed))
+                .unwrap()
+                .is_none(),
+            "a completed nested leaf permits terminal closeout"
+        );
+    }
+
     #[test]
     fn required_continuation_none_for_persisted_active_head_without_go() {
         let content = doc_with_backlog(&["do [#persisted]"], &["- [ ] [#persisted] first"])

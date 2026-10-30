@@ -1,5 +1,13 @@
 # agent-doc Functional Specification
 
+- Queue identity and lifecycle maintenance is structurally in-place
+  (`#queue-tree-structure-invariant`). Replacing free text with a backlog id,
+  normalizing a pin variant, projecting completion or runtime state, restoring
+  a live editor addition, and route supersession must retain the row's exact
+  parent, sibling order, indentation, and ordered-list marker. Those maintenance
+  paths may change only payload or lifecycle state; only an explicit operator
+  add/remove or documented priority/dependency reorder may change prompt-tree
+  structure.
 - Removing a claimed `agent:run` row is authoritative cancellation
   (`#queue-removal-cancels`), not a best-effort request. Steering identifies the
   exact owner, bound harness worker, and claim generation. The binary first

@@ -1351,6 +1351,7 @@ pub fn mark_first_matching_prompts_completed_by_texts(
     entries: &[QueueEntry],
     target_texts: &[String],
 ) -> Option<Vec<QueueEntry>> {
+    let before_shape = document_queue::queue_tree_shape(entries);
     let mut remaining_targets = target_texts.to_vec();
     let mut marked = Vec::with_capacity(target_texts.len());
     let mut result = Vec::with_capacity(entries.len());
@@ -1369,6 +1370,11 @@ pub fn mark_first_matching_prompts_completed_by_texts(
         result.push(entry.clone());
     }
     if marked.len() == target_texts.len() {
+        debug_assert_eq!(
+            document_queue::queue_tree_shape(&result),
+            before_shape,
+            "targeted queue strike changed prompt parent/sibling placement"
+        );
         Some(result)
     } else {
         None

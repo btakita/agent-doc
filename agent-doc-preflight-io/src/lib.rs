@@ -11020,9 +11020,13 @@ mod tests {
             !queue.contains("--- start"),
             "an already-active queue must not receive a redundant start fence:\n{updated}"
         );
+        assert!(
+            queue.find("do [#existing]").unwrap() < queue.find(&format!("do [#{id}]")).unwrap(),
+            "promotion must keep the new row in its authored sibling slot:\n{updated}"
+        );
         assert_eq!(
-            state.selected_queue_prompts.first(),
-            Some(&format!("do [#{id}]"))
+            state.selected_queue_prompts.first().map(String::as_str),
+            Some("do [#existing]")
         );
     }
 

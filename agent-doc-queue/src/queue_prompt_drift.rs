@@ -178,9 +178,9 @@ pub fn merge_visible_queue_additions_into_content_ours(
     let mut content_ours_counts =
         queue_prompt_counts(&queue_prompt_texts_including_consumed(&content_ours_queue));
     let mut candidate_seen = HashMap::new();
-    let mut appended = Vec::new();
+    let mut additions = Vec::new();
 
-    for entry in candidate_entries {
+    for (candidate_index, entry) in candidate_entries.iter().enumerate() {
         let QueueEntry::Prompt(prompt) = entry else {
             continue;
         };
@@ -203,26 +203,56 @@ pub fn merge_visible_queue_additions_into_content_ours(
         let content_ours_added_count =
             queue_prompt_count(&content_ours_counts, &text).saturating_sub(baseline_count);
         if candidate_added_index > content_ours_added_count {
-            appended.push(QueueEntry::Prompt(document_queue::QueuePrompt {
-                text: text.clone(),
-                multiline: false,
-                indent: 0,
-                ordered_marker: None,
-            }));
+            additions.push((candidate_index, entry.clone()));
             *content_ours_counts.entry(text).or_insert(0) += 1;
         }
     }
 
-    if appended.len() != dropped_queue.len() {
+    if additions.len() != dropped_queue.len() {
         return None;
     }
-    merged_entries.extend(appended);
+    for (candidate_index, addition) in additions {
+        let next_anchor = candidate_entries[candidate_index + 1..]
+            .iter()
+            .find_map(prompt_anchor_text)
+            .and_then(|anchor| {
+                merged_entries
+                    .iter()
+                    .position(|entry| prompt_anchor_text(entry).as_deref() == Some(anchor.as_str()))
+            });
+        let previous_anchor = candidate_entries[..candidate_index]
+            .iter()
+            .rev()
+            .find_map(prompt_anchor_text)
+            .and_then(|anchor| {
+                merged_entries
+                    .iter()
+                    .rposition(|entry| {
+                        prompt_anchor_text(entry).as_deref() == Some(anchor.as_str())
+                    })
+                    .map(|index| index + 1)
+            });
+        let insert_at = next_anchor
+            .or(previous_anchor)
+            .unwrap_or(merged_entries.len());
+        merged_entries.insert(insert_at, addition);
+    }
     let merged_queue = document_queue::render(&merged_entries);
     let components = agent_doc_element::element::parse(content_ours).ok()?;
     let queue_component = components
         .iter()
         .find(|component| component.name == "queue")?;
     Some(queue_component.replace_content(content_ours, &merged_queue))
+}
+
+fn prompt_anchor_text(entry: &QueueEntry) -> Option<String> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) if !prompt.multiline => {
+            let text = prompt.text.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -384,5 +414,31 @@ mod tests {
             "unproven live queue deletion must not be folded into content_ours:\n{reconciled}"
         );
         assert_eq!(ignored, vec!["do [#deleted]".to_string()]);
+    }
+
+    #[test]
+    fn forward_merge_keeps_added_nested_row_in_its_exact_tree_slot() {
+        let baseline = concat!(
+            "<!-- agent:queue -->\n",
+            "- release train\n",
+            "  1. do [#before]\n",
+            "  3. do [#after]\n",
+            "- unrelated sibling\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let candidate = baseline.replace(
+            "  3. do [#after]\n",
+            "  2. inspect published artifacts\n  3. do [#after]\n",
+        );
+        let dropped = dropped_queue_prompt_lines_after_content_ours(baseline, &candidate, baseline);
+        let merged = merge_visible_queue_additions_into_content_ours(
+            baseline, &candidate, baseline, &dropped,
+        )
+        .unwrap();
+
+        assert_eq!(
+            queue_component_text(&merged),
+            queue_component_text(&candidate)
+        );
     }
 }

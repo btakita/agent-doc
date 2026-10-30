@@ -304,7 +304,7 @@ fn adjacent_snapshot_extension_claims(
     entries: &[crate::document_queue::QueueEntry],
     existing_items: &[agent_doc_element_backlog::backlog::PendingItem],
     actionable_keys: &HashSet<String>,
-) -> Vec<(String, String, String)> {
+) -> Vec<(String, String, String, usize)> {
     let mut provisional = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
@@ -316,20 +316,20 @@ fn adjacent_snapshot_extension_claims(
             continue;
         }
 
-        let mut adjacent_ids = HashSet::new();
-        for neighbor in [index.checked_sub(1), index.checked_add(1)]
+        let adjacent_ids = [index.checked_sub(1), index.checked_add(1)]
             .into_iter()
             .flatten()
-            .filter_map(|neighbor| entries.get(neighbor))
-        {
-            if let Some(id) = crate::queue_projection::queue_entry_do_id(neighbor) {
-                adjacent_ids.insert(id);
-            }
-        }
+            .filter_map(|neighbor_index| {
+                entries.get(neighbor_index).and_then(|neighbor| {
+                    crate::queue_projection::queue_entry_do_id(neighbor)
+                        .map(|id| (id, neighbor_index))
+                })
+            })
+            .collect::<HashMap<_, _>>();
         let mut candidates = existing_items
             .iter()
             .filter(|item| item.state != agent_doc_element_backlog::backlog::PendingState::Done)
-            .filter(|item| adjacent_ids.contains(&item.id.trim().to_ascii_lowercase()))
+            .filter(|item| adjacent_ids.contains_key(&item.id.trim().to_ascii_lowercase()))
             .filter_map(|item| {
                 let old_key = crate::queue_response::normalize_for_answer_match(&item.text);
                 // `#halftypedcoin`: a stub coined from a half-typed line
@@ -347,17 +347,23 @@ fn adjacent_snapshot_extension_claims(
         candidates.sort();
         candidates.dedup();
         if let [candidate] = candidates.as_slice() {
-            provisional.push((new_key, candidate.0.clone(), candidate.1.clone()));
+            let superseded_index = adjacent_ids[&candidate.0];
+            provisional.push((
+                new_key,
+                candidate.0.clone(),
+                candidate.1.clone(),
+                superseded_index,
+            ));
         }
     }
 
     let mut claims_per_id = HashMap::<String, usize>::new();
-    for (_, id, _) in &provisional {
+    for (_, id, _, _) in &provisional {
         *claims_per_id.entry(id.clone()).or_default() += 1;
     }
     provisional
         .into_iter()
-        .filter(|(_, id, _)| claims_per_id.get(id) == Some(&1))
+        .filter(|(_, id, _, _)| claims_per_id.get(id) == Some(&1))
         .collect()
 }
 
@@ -591,18 +597,19 @@ pub struct FreeTextAdmission {
 
 /// Exact lineage receipt of one promoted free-text queue head
 /// (`#freetextqueue`): admission minted backlog `id` from `source_text`.
-/// A top-level head is removed and re-added as `do [#id]`. A nested
-/// `#queuenest` leaf stays in its tree slot (`nest_in_place`). Claims follow
-/// this receipt to the `do [#id]` head; no text-similarity guess is involved.
+/// `entry_index` is the authored tree slot that becomes `do [#id]`; both
+/// top-level and nested rows are replaced in place. Claims follow this receipt
+/// to the `do [#id]` head; no text-similarity guess is involved.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FreeTextPromotion {
     /// The queue line's prompt text as it stood before promotion.
     pub source_text: String,
     /// The lowercase backlog id minted (or matched) for it.
     pub id: String,
-    /// Replace this nested leaf in place. A top-level head is dropped so the
-    /// backlog mirror can prepend `do [#id]`.
-    pub nest_in_place: bool,
+    /// Exact entry slot in the parsed queue supplied to admission.
+    pub entry_index: usize,
+    /// Older adjacent mirror row retired when this is a continued draft.
+    pub superseded_entry_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -633,10 +640,9 @@ impl PreparedFreeTextAdmission {
         let mut queue_entries = self.queue_entries;
         let queued_ids = match execution {
             FreeTextAdmissionExecution::Goal => {
-                // Nested leaves stay in `queue_entries` so Queue mode can
-                // replace them in place. Goal still removes the free text and
-                // inserts `/goal`, matching a top-level admission.
-                drop_nested_promoted_free_text(&mut queue_entries, &self.promotions);
+                // Queue mode replaces promoted rows in place. Goal removes
+                // those exact rows and inserts `/goal` instead.
+                drop_promoted_free_text(&mut queue_entries, &self.promotions);
                 let command = goal_command_for_ids(&self.unique_ids);
                 if !goal_command_already_queued(&queue_entries, &self.unique_ids) {
                     queue_entries.insert(
@@ -659,12 +665,13 @@ impl PreparedFreeTextAdmission {
             }
             FreeTextAdmissionExecution::Queue => {
                 // Snapshot before the in-place `do [#id]` exists, or the new
-                // nested id is omitted from `queued_ids` (`#qrepeatid`).
+                // id is omitted from `queued_ids` (`#qrepeatid`).
                 let before_ids: HashSet<String> = queue_entries
                     .iter()
                     .filter_map(crate::queue_projection::queue_entry_do_id)
                     .collect();
-                replace_nested_free_text_in_place(&mut queue_entries, &self.promotions);
+                replace_promoted_free_text_in_place(&mut queue_entries, &self.promotions);
+                retire_superseded_promotion_rows(&mut queue_entries, &self.promotions);
                 let synced = crate::document_queue::sync_backlog_into_queue(
                     &queue_entries,
                     &self.unique_ids,
@@ -858,7 +865,7 @@ fn prepare_free_text_admission_for_queue(
     if !extension_claims.is_empty() {
         let edits = extension_claims
             .iter()
-            .map(|(_, id, text)| (id.clone(), text.clone()))
+            .map(|(_, id, text, _)| (id.clone(), text.clone()))
             .collect::<Vec<_>>();
         backlog_body = agent_doc_element_backlog::backlog::op_edit_many(&backlog_body, &edits)
             .context("free-text admission: update continued queue draft in backlog")?;
@@ -872,7 +879,11 @@ fn prepare_free_text_admission_for_queue(
             }
         }
     }
-    for (key, id, _) in extension_claims {
+    let superseded_by_key = extension_claims
+        .iter()
+        .map(|(key, _, _, entry_index)| (key.clone(), *entry_index))
+        .collect::<HashMap<_, _>>();
+    for (key, id, _, _) in extension_claims {
         id_by_text.insert(key, id);
     }
 
@@ -939,18 +950,19 @@ fn prepare_free_text_admission_for_queue(
         .cloned()
         .collect::<HashSet<_>>();
     let mut promotions = Vec::new();
-    let mut placed_nested_ids = HashSet::new();
     let queue_entries = entries
         .iter()
-        .filter_map(|entry| {
+        .enumerate()
+        .map(|entry| {
+            let (entry_index, entry) = entry;
             let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
-                return Some((*entry).clone());
+                return entry.clone();
             };
             let key = crate::queue_response::normalize_for_answer_match(
                 &normalize_admitted_free_text(&prompt.text),
             );
             if key.is_empty() || !admitted_keys.contains(&key) {
-                return Some(entry.clone());
+                return entry.clone();
             }
             let nested = prompt.indent > 0;
             let in_scope = queue_scope.allows_prompt(&prompt.text);
@@ -958,29 +970,22 @@ fn prepare_free_text_admission_for_queue(
             // leaf is the tree slot the id replaces, including when only the
             // exchange prompt was in scope (`#queuenest`, `#freetextqueue`).
             if !in_scope && !nested {
-                return Some(entry.clone());
+                return entry.clone();
             }
             let Some(id) = id_by_text.get(&key) else {
-                return Some(entry.clone());
+                return entry.clone();
             };
             let id = id.trim().to_ascii_lowercase();
             if id.is_empty() {
-                return Some(entry.clone());
+                return entry.clone();
             }
             promotions.push(FreeTextPromotion {
                 source_text: prompt.text.clone(),
                 id: id.clone(),
-                nest_in_place: nested,
+                entry_index,
+                superseded_entry_index: superseded_by_key.get(&key).copied(),
             });
-            if !nested {
-                return None;
-            }
-            // One id, one nested row. A later copy of the same text would be a
-            // second head for the same backlog item.
-            if !placed_nested_ids.insert(id) {
-                return None;
-            }
-            Some(entry.clone())
+            entry.clone()
         })
         .collect();
 
@@ -1009,50 +1014,71 @@ pub fn append_empty_agent_component(content: &str, name: &str) -> String {
     out
 }
 
-/// Replace each nested free-text leaf with `do [#id]` at the same indent.
+/// Replace each promoted free-text row with `do [#id]` at the exact same tree
+/// slot.
 ///
-/// The backlog mirror then sees the id and does not prepend a second
-/// top-level row (`#queuenest`, `#freetextqueue`).
-fn replace_nested_free_text_in_place(
-    entries: &mut Vec<crate::document_queue::QueueEntry>,
+/// The backlog mirror then sees the id and does not prepend a second row
+/// (`#queuenest`, `#freetextqueue`, `#queue-tree-structure-invariant`).
+fn replace_promoted_free_text_in_place(
+    entries: &mut [crate::document_queue::QueueEntry],
     promotions: &[FreeTextPromotion],
 ) {
-    let mut placed = HashSet::new();
-    let mut index = 0;
-    while index < entries.len() {
-        let replacement_id = match &entries[index] {
-            crate::document_queue::QueueEntry::Prompt(prompt) if prompt.indent > 0 => promotions
-                .iter()
-                .find(|promotion| promotion.nest_in_place && promotion.source_text == prompt.text)
-                .map(|promotion| promotion.id.clone()),
-            _ => None,
-        };
-        let Some(id) = replacement_id else {
-            index += 1;
-            continue;
-        };
-        if !placed.insert(id.clone()) {
-            entries.remove(index);
-            continue;
+    for promotion in promotions {
+        let matches_source = matches!(
+            entries.get(promotion.entry_index),
+            Some(crate::document_queue::QueueEntry::Prompt(prompt))
+                if prompt.text == promotion.source_text
+        );
+        if matches_source {
+            crate::document_queue::replace_prompt_text_in_place(
+                entries,
+                promotion.entry_index,
+                format!("do [#{}]", promotion.id),
+                false,
+            );
         }
-        if let crate::document_queue::QueueEntry::Prompt(prompt) = &mut entries[index] {
-            prompt.text = format!("do [#{id}]");
-            prompt.multiline = false;
-        }
-        index += 1;
     }
 }
 
-/// Goal execution removes nested free text instead of leaving it beside `/goal`.
-fn drop_nested_promoted_free_text(
+/// A continued-draft promotion supersedes its adjacent, older mirror row. The
+/// authored continued row remains the survivor; retiring the redundant mirror
+/// must never be implemented by moving the survivor into the mirror's slot.
+fn retire_superseded_promotion_rows(
     entries: &mut Vec<crate::document_queue::QueueEntry>,
     promotions: &[FreeTextPromotion],
 ) {
-    entries.retain(|entry| match entry {
-        crate::document_queue::QueueEntry::Prompt(prompt) if prompt.indent > 0 => !promotions
-            .iter()
-            .any(|promotion| promotion.nest_in_place && promotion.source_text == prompt.text),
-        _ => true,
+    let promoted_indices = promotions
+        .iter()
+        .map(|promotion| promotion.entry_index)
+        .collect::<HashSet<_>>();
+    let superseded_indices = promotions
+        .iter()
+        .filter_map(|promotion| promotion.superseded_entry_index)
+        .filter(|entry_index| !promoted_indices.contains(entry_index))
+        .collect::<HashSet<_>>();
+    let mut index = 0;
+    entries.retain(|_| {
+        let keep = !superseded_indices.contains(&index);
+        index += 1;
+        keep
+    });
+}
+
+/// Goal execution removes the exact promoted rows instead of leaving them
+/// beside `/goal`.
+fn drop_promoted_free_text(
+    entries: &mut Vec<crate::document_queue::QueueEntry>,
+    promotions: &[FreeTextPromotion],
+) {
+    let drop_indices = promotions
+        .iter()
+        .map(|promotion| promotion.entry_index)
+        .collect::<HashSet<_>>();
+    let mut index = 0;
+    entries.retain(|_| {
+        let keep = !drop_indices.contains(&index);
+        index += 1;
+        keep
     });
 }
 
@@ -1533,6 +1559,80 @@ mod tests {
         )));
     }
 
+    #[test]
+    fn top_level_promotion_replaces_the_authored_sibling_slot_in_place() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#before]\n",
+            "- Implement checkout setup\n",
+            "- do [#after]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let before_shape = crate::document_queue::queue_tree_shape(&entries);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+
+        assert_eq!(
+            crate::document_queue::queue_tree_shape(&queue_entries),
+            before_shape,
+            "minting a backlog id must not alter parent/sibling placement"
+        );
+        assert_eq!(
+            crate::document_queue::render(&queue_entries),
+            format!("- do [#before]\n- do [#{id}]\n- do [#after]\n")
+        );
+    }
+
+    #[test]
+    fn ordered_nested_promotion_preserves_parent_and_exact_list_marker() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- release train\n",
+            "  1. do [#before]\n",
+            "  2. Implement checkout setup\n",
+            "  3. do [#after]\n",
+            "- unrelated sibling\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let entries = queue_entries_from_content(content);
+        let before_shape = crate::document_queue::queue_tree_shape(&entries);
+
+        let prepared = prepare_free_text_admission(
+            content,
+            &entries,
+            None,
+            &FreeTextAdmissionScope::All,
+            false,
+            "doc-id",
+        )
+        .unwrap()
+        .unwrap();
+        let id = prepared.unique_ids[0].clone();
+        let admission = prepared.finish(FreeTextAdmissionExecution::Queue).unwrap();
+        let queue_entries = queue_entries_from_content(&admission.content);
+
+        assert_eq!(
+            crate::document_queue::queue_tree_shape(&queue_entries),
+            before_shape
+        );
+        assert!(
+            crate::document_queue::render(&queue_entries).contains(&format!("  2. do [#{id}]\n"))
+        );
+    }
+
     /// A nested free-text leaf under a tracked `do [#id]` parent stays in that
     /// tree slot when admission mints a backlog id (`#freetextqueue`,
     /// `#queuenest`). Lifting it to a top-level `do [#id]` leaves the original
@@ -1967,8 +2067,10 @@ mod tests {
             "- [ ] [#existing] Implement release and publish\n",
             "<!-- /agent:backlog -->\n\n",
             "<!-- agent:queue go -->\n",
+            "- do [#before]\n",
             "- 🚧 do [#existing]\n",
             "- Implement release and publish and install\n",
+            "- do [#after]\n",
             "<!-- /agent:queue -->\n",
         );
         let entries = queue_entries_from_content(content);
@@ -1998,6 +2100,14 @@ mod tests {
         assert_eq!(items[0].text, "Implement release and publish and install");
 
         let queue_entries = queue_entries_from_content(&admission.content);
+        assert_eq!(
+            queue_entries
+                .iter()
+                .filter_map(crate::queue_projection::queue_entry_do_id)
+                .collect::<Vec<_>>(),
+            vec!["before", "existing", "after"],
+            "the continued draft must survive in its authored sibling slot"
+        );
         assert_eq!(
             queue_entries
                 .iter()

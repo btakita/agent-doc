@@ -110,6 +110,57 @@ impl QueuePrompt {
     }
 }
 
+/// One authored prompt-tree slot.
+///
+/// Parentage and sibling placement are fully determined by the list row's
+/// encounter index, indentation, and exact ordered marker. Text/lifecycle
+/// changes may mutate a row, but replacement-style maintenance must preserve
+/// this shape (`#queue-tree-structure-invariant`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueTreeSlot {
+    pub entry_index: usize,
+    pub indent: usize,
+    pub ordered_marker: Option<String>,
+}
+
+/// Structural projection of the operator-authored prompt tree.
+pub fn queue_tree_shape(entries: &[QueueEntry]) -> Vec<QueueTreeSlot> {
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(entry_index, entry)| match entry {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(QueueTreeSlot {
+                entry_index,
+                indent: prompt.indent,
+                ordered_marker: prompt.ordered_marker.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Replace one live prompt's payload without moving it out of its authored
+/// parent/sibling slot.
+pub fn replace_prompt_text_in_place(
+    entries: &mut [QueueEntry],
+    entry_index: usize,
+    text: String,
+    multiline: bool,
+) -> bool {
+    let before = queue_tree_shape(entries);
+    let Some(QueueEntry::Prompt(prompt)) = entries.get_mut(entry_index) else {
+        return false;
+    };
+    prompt.text = text;
+    prompt.multiline = multiline;
+    debug_assert_eq!(
+        before,
+        queue_tree_shape(entries),
+        "in-place queue replacement changed prompt-tree structure"
+    );
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub struct QueueComponent {
@@ -1739,6 +1790,10 @@ fn validate_in_progress_marker_projection(
         tracked_prompt_ids_by_entry(before) == tracked_prompt_ids_by_entry(after),
         "queue in-progress marker projection moved or buried a tracked [#id] row"
     );
+    anyhow::ensure!(
+        queue_tree_shape(before) == queue_tree_shape(after),
+        "queue projection changed prompt parent/sibling placement"
+    );
     Ok(())
 }
 
@@ -1934,11 +1989,9 @@ pub fn project_all_prompt_operator_actions(
     let mut replacements = Vec::new();
     for queue in queues.blocks() {
         let component = queue.component;
-        if let Some((projected, _)) = project_prompt_operator_actions(
-            component.content(content),
-            actions,
-            open_todo_ids,
-        )? {
+        if let Some((projected, _)) =
+            project_prompt_operator_actions(component.content(content), actions, open_todo_ids)?
+        {
             replacements.push((component.open_end, component.close_start, projected));
         }
     }
@@ -4060,14 +4113,12 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
         .iter()
         .enumerate()
         .filter(|(i, _)| !drop.contains(i))
-        .map(|(i, entry)| match keep_text.get(&i) {
-            Some(text) if matches!(entry, QueueEntry::Prompt(_)) => {
-                QueueEntry::Prompt(QueuePrompt {
-                    text: text.clone(),
-                    multiline: false,
-                    indent: 0,
-                    ordered_marker: None,
-                })
+        .map(|(i, entry)| match (keep_text.get(&i), entry) {
+            (Some(text), QueueEntry::Prompt(prompt)) => {
+                let mut survivor = prompt.clone();
+                survivor.text = text.clone();
+                survivor.multiline = false;
+                QueueEntry::Prompt(survivor)
             }
             _ => entry.clone(),
         })
@@ -5298,12 +5349,10 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
                 if *text != p.text {
                     changed = true;
                 }
-                converged.push(QueueEntry::Prompt(QueuePrompt {
-                    text: text.clone(),
-                    multiline: false,
-                    indent: 0,
-                    ordered_marker: None,
-                }));
+                let mut survivor = p.clone();
+                survivor.text = text.clone();
+                survivor.multiline = false;
+                converged.push(QueueEntry::Prompt(survivor));
             }
             _ => converged.push(entry.clone()),
         }
@@ -5346,6 +5395,7 @@ pub fn mark_first_prompt_completed(entries: &[QueueEntry]) -> Vec<QueueEntry> {
 }
 
 pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> Vec<QueueEntry> {
+    let before_shape = queue_tree_shape(entries);
     let mut result = Vec::with_capacity(entries.len());
     let mut marked = 0usize;
     for (index, entry) in entries.iter().enumerate() {
@@ -5361,6 +5411,11 @@ pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> V
         }
         result.push(entry.clone());
     }
+    debug_assert_eq!(
+        queue_tree_shape(&result),
+        before_shape,
+        "queue strike changed prompt parent/sibling placement"
+    );
     result
 }
 
@@ -7275,6 +7330,25 @@ mod tests {
             ),
             "pin+bare twin collapses to one strongest-pin head at the earliest slot: {deduped:?}"
         );
+    }
+
+    #[test]
+    fn dedup_pin_variant_survivor_keeps_its_nested_ordered_slot() {
+        let entries = parse(concat!(
+            "- release train\n",
+            "  2. do [#ship]\n",
+            "- :pushpin: do [#ship]\n",
+        ))
+        .unwrap();
+        let deduped = dedup_pin_variant_do_heads(&entries).unwrap();
+
+        assert_eq!(
+            render(&deduped),
+            "- release train\n  2. :pushpin: do [#ship]\n"
+        );
+        let survivor = prompts(&deduped)[0];
+        assert_eq!(survivor.indent, 2);
+        assert_eq!(survivor.ordered_marker.as_deref(), Some("2."));
     }
 
     #[test]
@@ -9962,6 +10036,21 @@ mod tests {
         let out = converge(&entries, &[]);
         assert_eq!(out.len(), 1, "{out:?}");
         assert_eq!(out, vec![p(":pushpin: do [#6b5hwire]")]);
+    }
+
+    #[test]
+    fn converge_pin_variant_survivor_keeps_nested_tree_slot() {
+        let mut nested_bare = QueuePrompt::new("do [#ship]");
+        nested_bare.indent = 2;
+        nested_bare.ordered_marker = Some("2.".to_string());
+        let entries = vec![
+            p("release train"),
+            QueueEntry::Prompt(nested_bare),
+            p(":pushpin: do [#ship]"),
+        ];
+        let out = converge(&entries, &[]);
+
+        assert_eq!(render(&out), "- release train\n  2. :pushpin: do [#ship]\n");
     }
 
     /// `#qdedup-directive-twin`: textually-identical `do [#id]` directive twins

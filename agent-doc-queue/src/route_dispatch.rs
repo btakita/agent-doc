@@ -187,13 +187,16 @@ pub fn prepare_route_dispatch_queue_update(
                         && has_auto_attr(&queue_component.attrs)
                         && active_prompt_count == 1;
                     if replace_single_auto_prompt {
-                        for entry in &mut entries {
-                            if let QueueEntry::Prompt(prompt) = entry {
-                                prompt.multiline = prompt_text.contains('\n');
-                                prompt.text = prompt_text.clone();
-                                superseded = true;
-                                break;
-                            }
+                        if let Some(index) = entries
+                            .iter()
+                            .position(|entry| matches!(entry, QueueEntry::Prompt(_)))
+                        {
+                            superseded = document_queue::replace_prompt_text_in_place(
+                                &mut entries,
+                                index,
+                                prompt_text.clone(),
+                                prompt_text.contains('\n'),
+                            );
                         }
                     } else {
                         let new_prompt = QueueEntry::Prompt(QueuePrompt {

@@ -3552,6 +3552,27 @@ fn run_command_inner_within_pass(
             }
         }
 
+        if commit_mode != CommitMode::None {
+            let backlink = queue_consume::annotate_newly_completed_queue_prompts_with_response_id(
+                file,
+                current_content_for_queue.as_ref(),
+                &response_body,
+                options.force_disk,
+                queue_consume_writeback_effects(options.force_disk),
+            );
+            match (commit_mode, backlink) {
+                (_, Ok(0)) => {}
+                (_, Ok(count)) => {
+                    eprintln!("[queue] linked {count} completed prompt(s) to the response cell")
+                }
+                (CommitMode::BestEffort, Err(error)) => {
+                    eprintln!("[queue] warning: response backlink projection failed: {error}")
+                }
+                (CommitMode::Required, Err(error)) => return Err(error),
+                (CommitMode::None, Err(_)) => unreachable!(),
+            }
+        }
+
         // `#ftstrike-reactive`: publish authoritative markdown as a Source.
         // Captured response is already a durable controller Source; their
         // Computed projection derives the exact answered-free-text target and

@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -1580,26 +1580,43 @@ An install will not run it; `agent-doc 0.35.561` already matches main. Choose op
 The batch is pushed to `origin/main` at `07d8a46ddb`. Combined verification passed: controller 882, queue 1,047, state-backbone 149, and plan-range interaction 12,213 tests with 187 skipped. Every full `make check` passed; `make audit-docs` had no blockers.
 
 The inbox-terminal row remains open intentionally: choose whether leftover nested `📥` means “start a new turn” or “bad state.” No new follow-up backlog item is needed because both outstanding choices are already tracked in Todo.
+
+### Re: Context parents remain; audit leaves closed — gpt-5 · 2026-10-29
+
+> **Queue prompt:** Should these run items be struck? If yes, fix agent-doc causes.: `⚠️ [#subagent:recentrunverify#2]`
+
+No. The stale `⚠️` has already disappeared from the live projection. The recency row is now an unmarked, non-executable context parent with its answered child struck. Preserve it as lineage context; close only this audit leaf. Three focused tests passed.
+
+> **Queue prompt:** Should these run items be struck? If yes, fix agent-doc causes.: `- 🙋⚠️ [#subagent:decisionsurrogate#2]`
+
+Not yet. Its clarification leaf is struck, but the linked decision Todo is still open. Preserve the context parent and its `🙋` operator gate. After the operator chooses option (2) or (3) and completes the Todo, projection clears `🙋` and normal close/requeue resumes. The stale `⚠️` is already absent. Three focused tests passed.
+
+> **Queue prompt:** Should these run items be struck? If yes, fix agent-doc causes.: `- Sync Issues on sdk-demo.md`
+
+No. `Sync Issues on sdk-demo.md` is a non-executable context parent; both executable children are correctly struck. Preserve the parent and struck children as history. Three focused tests passed.
+
+> **Queue prompt:** Should these run items be struck? If yes, fix agent-doc causes.: `- If I have a long list of agent:run items, ...`
+
+No. This abbreviated reference points to the same full recency context parent. Parents with descendants are lineage context, while claims, lifecycle, and strikes target leaves. Preserve the parent and its struck child. Two focused tests passed.
+
+No code or specification changes were needed, and no worker produced follow-up work.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-  - ~~Annotation, worker-reported~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-  - ~~If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ⚠️ [#subagent:recentrunverify#2] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+- If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - ~~If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- 🙋⚠️ [#subagent:decisionsurrogate#2] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
+- 🙋 If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
   - ~~The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
 - ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
-- ~~In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ~~agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ⚠️ [#subagent:tmuxsyncfix#1] Sync Issues on sdk-demo.md
+- Sync Issues on sdk-demo.md
   - ~~Sync Tmux Pane: Sync failed: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
   - ~~Run Agent Doc: editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ~~local install~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ~~sdk-demo.md: agent-doc corrupts my frontmatter resume even after I correct it: `  codex: 01a16  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
-- ~~How can we run `- 🙋⚠️ [#subagent:decisionsurrogate#2]`? Would an install make it run?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- Should these run items be struck? If yes, fix agent-doc causes.
+  - ~~`⚠️ [#subagent:recentrunverify#2]`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
+  - ~~`- 🙋⚠️ [#subagent:decisionsurrogate#2]`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
+  - ~~`- Sync Issues on sdk-demo.md`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
+  - ~~`- If I have a long list of agent:run items, ...`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

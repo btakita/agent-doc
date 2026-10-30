@@ -1462,10 +1462,11 @@ fn merge_nonexchange_inner(
         out.push_str(&text[cursor..start]);
         let span = &text[start..end];
         for (_, line) in slots.iter().filter(|(slot, _)| *slot == Some(index)) {
+            let line = render_item_in_operator_slot(line, &theirs_items[index], span);
             if span.ends_with('\n') {
-                push_line(&mut out, line);
+                push_line(&mut out, &line);
             } else {
-                out.push_str(line);
+                out.push_str(&line);
             }
         }
         if position + 1 == spans.len() {
@@ -1488,6 +1489,29 @@ fn merge_nonexchange_inner(
         }
     }
     out
+}
+
+/// Render a merged list item with the operator skeleton's original list prefix.
+///
+/// The semantic overlay stores an item's payload but intentionally normalizes
+/// away its leading indentation and bullet. [`item_line`] therefore emits a
+/// canonical top-level `- ` row. That is appropriate for a genuinely new item,
+/// but not for an edit replacing an existing operator slot: using the canonical
+/// prefix there hoists nested choices and their prompt children to queue roots.
+/// Recover the exact prefix (`  - `, `    * `, `1. `, …) from the operator span
+/// and combine it with the merged payload. Multiline prompt items are not list
+/// backed and remain verbatim.
+fn render_item_in_operator_slot(line: &str, operator_item: &Item, span: &str) -> String {
+    if operator_item.surface != ItemSurface::ListItem {
+        return line.to_string();
+    }
+    let Some(payload) = line.strip_prefix("- ") else {
+        return line.to_string();
+    };
+    let Some(payload_start) = span.find(&operator_item.raw) else {
+        return line.to_string();
+    };
+    format!("{}{payload}", &span[..payload_start])
 }
 
 /// Rebuild the operator body, replacing each component's inner items with the
@@ -2176,6 +2200,41 @@ mod tests {
             m.conflict_advisories.is_empty(),
             "{:?}",
             m.conflict_advisories
+        );
+    }
+
+    /// A lifecycle projection replaces a nested queue row in its existing
+    /// Markdown list slot. Rebuilding every item as a column-zero `- ` row
+    /// hoisted the projected choice out of its parent, while the editor/CRDT
+    /// could retain the nested copy and expose a duplicate choice.
+    #[test]
+    fn nested_lifecycle_projection_keeps_the_operator_list_slot() {
+        let parent = "~~do [#rungamesessions] [#subagent-operator-request-rungamesessions-reopen]~~";
+        let choice = "[#subagent:rungamesessions_reconcile_choice#1] **Reconcile and reopen (Recommended)**";
+        let marked = format!("🙋⚠️ {choice}");
+        let nested_prompt = "🚧 [#subagent:rungamesessions_reconcile_gui#1] Reconcile the live session";
+        let base = q(&format!(
+            "- {parent}\n  - {choice}\n    - {nested_prompt}\n"
+        ));
+        let ours = q(&format!(
+            "- {parent}\n  - {marked}\n    - {nested_prompt}\n"
+        ));
+
+        let m = document_cell_merge(&base, &ours, &base);
+
+        assert_eq!(
+            m.merged_doc,
+            q(&format!(
+                "- {parent}\n  - {marked}\n    - {nested_prompt}\n"
+            )),
+            "nested lifecycle projection must replace its row in place:\n{}",
+            m.merged_doc
+        );
+        assert_eq!(m.merged_doc.matches(&marked).count(), 1, "{}", m.merged_doc);
+        assert!(
+            !m.merged_doc.contains(&format!("\n- {marked}\n")),
+            "projected choice was hoisted to a top-level queue row:\n{}",
+            m.merged_doc
         );
     }
 

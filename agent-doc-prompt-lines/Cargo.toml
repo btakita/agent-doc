@@ -12,3 +12,4 @@ name = "agent_doc_prompt_lines"
 
 [dependencies]
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.495" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.495" }

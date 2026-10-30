@@ -414,6 +414,11 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
                 QueueEntry::Freeform(line.to_string())
+            } else if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+                // Dedicated Markdown/Obsidian list comments are document
+                // annotations, not runnable queue prompts. Freeform retains
+                // every authored byte through parse/render.
+                QueueEntry::Freeform(line.to_string())
             } else if let Some(completed) = parse_completed_inline(rest) {
                 QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
@@ -7051,6 +7056,27 @@ mod tests {
                 ("another top level", 0),
             ]
         );
+    }
+
+    #[test]
+    fn nested_list_comments_are_preserved_but_not_runnable() {
+        let body = concat!(
+            "- parent epic\n",
+            "  - [//]: # (markdown note)\n",
+            "  - %%should this run?%%\n",
+            "  - child task\n"
+        );
+        let entries = parse(body).unwrap();
+        let prompts: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(prompts, vec!["parent epic", "child task"]);
+        assert_eq!(render(&entries), body);
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`

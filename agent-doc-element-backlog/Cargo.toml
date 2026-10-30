@@ -14,6 +14,7 @@ name = "agent_doc_element_backlog"
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.495" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.495" }
 agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.495" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.495" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"

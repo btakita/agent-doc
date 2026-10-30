@@ -205,6 +205,27 @@ pub(crate) fn strip_bullet(line: &str) -> Option<&str> {
     None
 }
 
+/// Whether a list item's complete payload is an operator-authored comment.
+///
+/// Both forms are deliberately line-local. They remain in the source document,
+/// but list-backed agent components must not project them as typed work.
+pub fn is_ignored_list_comment(item_content: &str) -> bool {
+    let trimmed = item_content.trim();
+
+    if trimmed.len() >= 4 && trimmed.starts_with("%%") && trimmed.ends_with("%%") {
+        return true;
+    }
+
+    let Some(rest) = trimmed.strip_prefix("[//]:") else {
+        return false;
+    };
+    let Some(title) = rest.trim_start().strip_prefix('#') else {
+        return false;
+    };
+    let title = title.trim_start();
+    title.starts_with('(') && title.ends_with(')')
+}
+
 /// True when `line` may continue the queue list item directly above it
 /// (`#queuecruft`).
 ///
@@ -817,6 +838,9 @@ pub fn components(source: &str) -> Vec<Component> {
         if let Some(comp) = open.as_mut()
             && let Some(item_content) = strip_bullet(content)
         {
+            if is_ignored_list_comment(item_content) {
+                continue;
+            }
             comp.items
                 .push(parse_item(item_content, line_start, offset));
             if comp.name == "queue" && queue_item_accepts_continuation(item_content) {
@@ -850,6 +874,25 @@ mod tests {
 2. [x] [#beta] done task
 <!-- /agent:backlog -->
 ";
+
+    #[test]
+    fn list_comment_items_are_preserved_but_not_typed() {
+        for name in ["run", "loop", "queue", "backlog", "review", "icebox"] {
+            let source = format!(
+                "<!-- agent:{name} -->\n- parent\n  - [//]: # (markdown note)\n  - %%obsidian note%%\n  - child\n<!-- /agent:{name} -->\n"
+            );
+            let parsed = components(&source);
+            assert_eq!(parsed.len(), 1, "component {name}");
+            let texts: Vec<&str> = parsed[0]
+                .items
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect();
+            assert_eq!(texts, vec!["parent", "child"], "component {name}");
+            assert!(source.contains("- [//]: # (markdown note)"));
+            assert!(source.contains("- %%obsidian note%%"));
+        }
+    }
 
     fn queue() -> Component {
         components(DOC)

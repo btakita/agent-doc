@@ -158,11 +158,14 @@ object AgentDocComponentOutline {
                         HEADING.matchEntire(line)?.let { m ->
                             headings += ComponentItem(ItemKind.HEADING, label(m.groupValues[2].ifBlank { m.groupValues[1] }), lineStart)
                         } ?: LIST_ITEM.matchEntire(line)?.let { m ->
-                            listItems += ComponentItem(
-                                ItemKind.LIST_ITEM,
-                                label(m.groupValues[1].replaceFirst(CHECKBOX, "")),
-                                lineStart,
-                            )
+                            val payload = m.groupValues[1]
+                            if (!isIgnoredListComment(payload)) {
+                                listItems += ComponentItem(
+                                    ItemKind.LIST_ITEM,
+                                    label(payload.replaceFirst(CHECKBOX, "")),
+                                    lineStart,
+                                )
+                            }
                         }
                     }
                 }
@@ -177,6 +180,20 @@ object AgentDocComponentOutline {
         if (ch != '`' && ch != '~') return null
         val run = trimmed.takeWhile { it == ch }
         return if (run.length >= 3) run else null
+    }
+
+    /** Keep the editor outline aligned with the shared list-component parser. */
+    private fun isIgnoredListComment(payload: String): Boolean {
+        val trimmed = payload.trim()
+        if (trimmed.length >= 4 && trimmed.startsWith("%%") && trimmed.endsWith("%%")) {
+            return true
+        }
+
+        if (!trimmed.startsWith("[//]:")) return false
+        val rest = trimmed.removePrefix("[//]:").trimStart()
+        if (!rest.startsWith("#")) return false
+        val title = rest.removePrefix("#").trimStart()
+        return title.startsWith("(") && title.endsWith(")")
     }
 
     private fun label(raw: String): String {

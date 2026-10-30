@@ -2082,7 +2082,9 @@ GH #19 (plugin UX phases 5-7); shared contract in `editors/SPEC.md` § 12.
   `AllIcons.Nodes.Template` icon on the leaf holding each open marker; the tooltip names the
   component, its item count and inline attributes; clicking toggles that component's fold.
   Structure view: `agent:NAME` nodes with the item count as location, nested components and
-  items as children, each navigating to its line.
+  items as children, each navigating to its line. The outline applies the shared list-component
+  comment rule: a row whose complete payload is `[//]: # (...)` or `%%...%%` is preserved in the
+  document but omitted from structure nodes, item counts, and fold-summary counts.
 - Native visual tokens derive the newest three addressed queue rows across all queue components
   from their durable `⟦addressed-at:YYYY-MM-DDTHH:MM:SS.mmmZ⟧` annotations. The plugin renders
   persistent gutter ranks `①`, `②`, and `③` and strongest-to-weakest whole-row background

@@ -229,7 +229,7 @@ reread repair, or secondary full-content delivery channel.
 
 - **Scope:** agent-doc session documents only (the content classification in § 6c); any other Markdown file shows no folds, markers, or nodes. Plugin UX phases 5-7 (GH #19).
 - **Boundaries:** sourced from the shared native parser (`agent_doc_parse_components`), never re-parsed in the editor. Its offsets are UTF-8 bytes; adapters convert them to their editor's offset unit. The parse runs off the editor event thread on the debounced visual refresh; folding/marker/outline callbacks read a cached outline that tracks edits and never call native code. An unavailable library or a mid-edit unparseable document keeps the last outline.
-- **Items:** a component body's ATX headings when it has any, otherwise its unindented list items (checkbox prefix stripped); lines in fenced code and in nested components do not count.
+- **Items:** a component body's ATX headings when it has any, otherwise its unindented list items (checkbox prefix stripped); lines in fenced code and in nested components do not count. Line-local list comments whose complete payload is `[//]: # (...)` or `%%...%%` remain authored annotations and do not become outline items, item counts, or fold-summary counts.
 - **Folding:** every multi-line component folds open marker through close marker to `<!-- agent:NAME · N items -->` (`1 item`, `empty`). Nothing is collapsed by default.
 - **Gutter marker:** one icon per component open marker; tooltip = name, item count, inline attributes; click toggles the component's fold.
 - **Structure view:** components (item count as secondary text) with nested components and items as children, each navigable; the editor's own Markdown outline is extended, not replaced.

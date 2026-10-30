@@ -3212,13 +3212,13 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
         return false;
     };
     for later in entries.iter().skip(idx + 1) {
-        match entry_indent(later) {
+        match tree_entry_indent(later) {
             // Deeper than us before we returned to our own depth: we are a parent.
             Some(indent) if indent > own_indent => return true,
             // Back to our depth or shallower: our subtree ended without a child.
             Some(_) => return false,
-            // Non-item entries (fences, presets, freeform) neither open nor close
-            // a subtree; keep scanning past them.
+            // Non-item entries (fences, presets, unrelated freeform) neither
+            // open nor close a subtree; keep scanning past them.
             None => continue,
         }
     }
@@ -3857,6 +3857,25 @@ fn entry_indent(entry: &QueueEntry) -> Option<usize> {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
         _ => None,
     }
+}
+
+/// Indentation of an entry that participates in the authored list tree.
+///
+/// Inert list comments remain [`QueueEntry::Freeform`] so they are never
+/// runnable and render byte-for-byte. They still carry structural parenthood:
+/// filtering the only nested comment row out of this scan makes its parent look
+/// like an executable leaf and lets queue dispatch stamp a worker marker on it.
+/// Recognize only the closed whole-payload comment forms here; arbitrary
+/// freeform lines keep the historical non-structural behavior.
+fn tree_entry_indent(entry: &QueueEntry) -> Option<usize> {
+    entry_indent(entry).or_else(|| match entry {
+        QueueEntry::Freeform(line) => split_list_item(line)
+            .filter(|(_, _, payload)| {
+                agent_doc_markdown_ast::overlay::is_ignored_list_comment(payload)
+            })
+            .map(|(indent, _, _)| indent),
+        _ => None,
+    })
 }
 
 /// Collapse duplicate live `Prompt` entries that target the same queue identity,
@@ -9617,6 +9636,62 @@ mod tests {
             ]
         );
         assert_eq!(render(&entries), body);
+    }
+
+    /// A non-comment row with only comment descendants is context for those
+    /// annotations, not a newly exposed executable leaf. This is the exact
+    /// PR-717 shape that previously acquired a worker marker after comment
+    /// leaves were filtered out of the runnable entry set.
+    #[test]
+    fn comment_only_descendants_keep_the_parent_inert_and_byte_exact() {
+        for body in [
+            concat!(
+                "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+                "  - %% Waiting for guidance re: an agent api key to run on this. %%\n",
+            ),
+            concat!(
+                "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+                "  - %% Waiting for guidance re: an agent api key to run on this. %%\n",
+                "\t\t- %% grandchild comment %%\n",
+                "  - %% another child comment %%\n",
+            ),
+        ] {
+            let entries = parse(body).unwrap();
+            assert!(
+                prompts(&entries).is_empty(),
+                "comment-only prompt tree must not expose its parent: {entries:?}"
+            );
+            assert_eq!(render(&entries), body);
+        }
+
+        let wrongly_marked = concat!(
+            "- 🚧 [#subagent:#6] https://github.com/haiven-dev/haiven-api/pull/717\n",
+            "  - %% Waiting for guidance re: an agent api key to run on this. %%\n",
+        );
+        let expected = concat!(
+            "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+            "  - %% Waiting for guidance re: an agent api key to run on this. %%\n",
+        );
+        let (projected, entries) = project_prompt_runtime_projections(wrongly_marked, &[])
+            .unwrap()
+            .expect("the stale worker projection is retired");
+        assert_eq!(projected, expected);
+        assert!(prompts(&entries).is_empty());
+
+        let with_work = concat!(
+            "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+            "  - %% annotation only %%\n",
+            "  - investigate the failing workflow\n",
+        );
+        let entries = parse(with_work).unwrap();
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["investigate the failing workflow"]
+        );
+        assert_eq!(render(&entries), with_work);
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`

@@ -1009,6 +1009,37 @@ mod tests {
         )
     }
 
+    /// A runnable-list parent with only comment descendants is an inert prompt
+    /// tree. The queue attribute must not dispatch (and therefore must not
+    /// project a worker lifecycle marker onto) the parent URL.
+    #[test]
+    fn queue_attr_does_not_dispatch_comment_only_prompt_trees() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## API PRs\n\n",
+            "<!-- agent:run subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/717\n",
+            "  - %% Waiting for guidance re: an agent api key to run on this. %%\n",
+            "\t\t- %% grandchild comment %%\n",
+            "  - %% another child comment %%\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        assert!(
+            pending_subagent_dispatch_for_content(&file, content)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::drainable_head_count(content),
+            0
+        );
+    }
+
     /// `#planattributeauto` phase 2: under the queue attribute, dispatch is
     /// state-based (a head already in the seed is still offered), capped by
     /// `subagents=N` minus live claims, and every held head is out of the

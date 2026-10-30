@@ -287,14 +287,16 @@ impl ClaimReleaseReceiptLedger {
 }
 
 /// How a persisted answer closes queue line `item_text` (`#reportedrelease`):
-/// a free-text line strikes only on the verbatim `> **Queue prompt:**` echo,
-/// an id head only on `--done <id>`. A heading-only answer leaves the line
-/// queued, so it is served (and dispatched) again.
+/// a free-text line strikes only on the verbatim `> **Queue prompt:**` echo.
+/// An id head closes with `--done <id>` when its tracked work is complete, or
+/// with `queue consume --ack-id <id>` when the worker handoff is integrated but
+/// the tracked item intentionally stays open. A heading-only answer leaves the
+/// line queued, so it is served (and dispatched) again.
 pub fn queue_line_closeout(document: &str, item_text: &str) -> String {
     let item = item_text.trim();
     match claim_identity(item) {
         QueueItemIdentity::Id(id) => format!(
-            "pass `--done {id}` to `agent-doc finalize {document}` (or `--pending-gate {id}` when it is gated)"
+            "when the tracked work is complete, pass `--done {id}` to `agent-doc finalize {document}` (or `--pending-gate {id}` when it is gated); when this worker handoff is integrated but the backlog/Todo item must stay open, strike the reported row immediately with `agent-doc queue consume {document} --ack-id {id}`"
         ),
         QueueItemIdentity::FreeText(_) => format!(
             "open the response with the verbatim echo `> **Queue prompt:** {item}` and persist it with `agent-doc finalize {document}`; a `### Re:` heading alone leaves the line queued"
@@ -482,6 +484,11 @@ mod tests {
         assert!(free.contains("Do NOT dispatch a new subagent"), "{free}");
         let id = persist_reported_instruction("tasks/docs.md", "do [#gh275]", "subagent:y");
         assert!(id.contains("--done gh275"), "{id}");
+        assert!(
+            id.contains("agent-doc queue consume tasks/docs.md --ack-id gh275"),
+            "{id}"
+        );
+        assert!(id.contains("must stay open"), "{id}");
         assert!(!id.contains("Queue prompt"), "{id}");
     }
 

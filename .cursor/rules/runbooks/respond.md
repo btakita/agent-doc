@@ -337,8 +337,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode.
      The exact generation fence prevents a late result from mutating a reclaimed
-     item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration; keep the live row until the coordinator strikes it). The binary appends
-     immediate, deduplicated completion feedback to `agent:exchange` through
+     item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration; keep the live row until the coordinator strikes it).
+     `☑️` is not an end-of-turn timer: as soon as the coordinator integrates
+     the result and verifies the queue item's authorized delivery boundary
+     (for example PR delivery versus target-branch delivery), strike it in the
+     current turn. A publication annotation alone is not that proof. For an
+     id-backed row whose tracked item must remain open, run
+     `agent-doc queue consume <FILE> --ack-id <id>` immediately.
+     The binary appends immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The
      feedback is a structurally complete, N−1-inert response cell whose

@@ -24,6 +24,13 @@ pub const QUEUE_MARKER_LEGEND_URL: &str =
 /// markers is never mistaken for it.
 pub const QUEUE_MARKER_LEGEND_LINE_PREFIX: &str = "Queue markers:";
 
+/// Terminal presentation shown after every live row in a prompt tree has
+/// closed. Unlike lifecycle markers, strikethrough is operator-deletable
+/// history rather than live queue work.
+pub const QUEUE_TERMINAL_LEGEND_ENTRY: &str = "~~done~~ safe to delete";
+pub const QUEUE_TERMINAL_TOKEN: &str = "~~row~~";
+pub const QUEUE_TERMINAL_MEANING: &str = "Integrated, terminal queue history. A prompt tree is safe to delete only when every row in it is struck; any live row, especially `☑️`, must remain.";
+
 /// Every visible prefix the binary paints on (or accepts from) a queue row.
 ///
 /// Lifecycle markers are mutually exclusive: a row shows exactly one.
@@ -94,7 +101,7 @@ impl QueueMarker {
                 QueueLifecycleMarker::Blocked => "blocked",
                 QueueLifecycleMarker::Claimed => "claimed",
                 QueueLifecycleMarker::Running => "running",
-                QueueLifecycleMarker::Reported => "reported",
+                QueueLifecycleMarker::Reported => "keep: worker done",
                 QueueLifecycleMarker::Lost => "lost",
                 QueueLifecycleMarker::Reconciling => "needs reconcile",
                 QueueLifecycleMarker::Unknown => "unknown",
@@ -124,7 +131,7 @@ impl QueueMarker {
                     "A spawned worker is bound to this exact claim by `queue start`."
                 }
                 QueueLifecycleMarker::Reported => {
-                    "The worker reported back (`queue report-complete`); the coordinator still has to integrate, verify, and close the row."
+                    "Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet."
                 }
                 QueueLifecycleMarker::Lost => {
                     "The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it."
@@ -164,7 +171,11 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 7] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 8] = [
+    QueueMarkerAnnotation {
+        token: QUEUE_TERMINAL_TOKEN,
+        meaning: QUEUE_TERMINAL_MEANING,
+    },
     QueueMarkerAnnotation {
         token: "[#<owner>#<N>]",
         meaning: "Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity.",
@@ -198,11 +209,12 @@ pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 7] = [
 /// The compact single-line legend for `icons`, as the binary writes it into a
 /// document's `agent:status` component.
 pub fn queue_marker_legend_line_for(icons: &QueueIconSet) -> String {
-    let entries = ALL_QUEUE_MARKERS
+    let mut entries = ALL_QUEUE_MARKERS
         .iter()
         .map(|marker| format!("{} {}", marker.prefix_in(icons), marker.label()))
-        .collect::<Vec<_>>()
-        .join(" · ");
+        .collect::<Vec<_>>();
+    entries.push(QUEUE_TERMINAL_LEGEND_ENTRY.to_string());
+    let entries = entries.join(" · ");
     format!("{QUEUE_MARKER_LEGEND_LINE_PREFIX} {entries} ([legend]({QUEUE_MARKER_LEGEND_URL}))")
 }
 
@@ -412,6 +424,11 @@ mod tests {
         assert!(help.contains("🔄  needs reconcile"));
         assert!(help.contains("⛔  blocked"));
         assert!(line.contains("⛔ blocked"));
+        assert!(help.contains("☑️  keep: worker done"));
+        assert!(line.contains("☑️ keep: worker done"));
+        assert!(line.contains(QUEUE_TERMINAL_LEGEND_ENTRY));
+        assert!(table.contains(QUEUE_TERMINAL_TOKEN));
+        assert!(table.contains(QUEUE_TERMINAL_MEANING));
     }
 
     #[test]

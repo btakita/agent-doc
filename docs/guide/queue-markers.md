@@ -31,7 +31,7 @@ stays.
 | ⛔ | `blocked` | blocked | Its tracked item still waits on open work: a `(stays open: blocked behind #a, #b)` clause or an `after=#id` edge names an item still open in backlog, todo or review. `⟦blocked by a, b⟧` lists those ids. The row is held out of drain and subagent dispatch and returns to pending once every blocker closes. |
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
-| ☑️ | `reported` | reported | The worker reported back (`queue report-complete`); the coordinator still has to integrate, verify, and close the row. |
+| ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
 | ⚠️ | `lost` | lost | The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it. |
 | 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |
@@ -43,6 +43,7 @@ stays.
 
 | Annotation | Meaning |
 | --- | --- |
+| `~~row~~` | Integrated, terminal queue history. A prompt tree is safe to delete only when every row in it is struck; any live row, especially `☑️`, must remain. |
 | `[#<owner>#<N>]` | Owner and claim generation of the current attempt or report receipt, for example `[#subagent:fix#2]`. Metadata, not work identity. |
 | `⟦blocked by <id>, <id>⟧` | Follows the blocked marker and names the open items the row waits on (ids without `#`). Metadata, not work identity. |
 | `⟦effect:N⟧` | Numbers live rows that have identical text, so each one is its own claimable effect. |
@@ -65,7 +66,7 @@ surfaces render it:
   keeps one compact legend line as the last paragraph of `agent:status`:
 
   ```text
-  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](…/queue-markers.md#queue-markers))
+  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
   ```
 
   New documents from the Claim for Tmux Pane template start with it. An
@@ -126,12 +127,17 @@ clause in the tracked item. The exact rule is in
 
 ## When a `☑️` row closes
 
-`☑️` (reported) means a worker finished and reported back, but nobody has
+`☑️` (reported) means **keep this row**: a worker finished and reported back, but nobody has
 integrated its result yet. The state comes from one of two records: a
 `Reported` claim attempt (`queue report-complete`), or a release receipt
 (`queue release` without `--requeue`). agent-doc never strikes a `☑️` row by
 itself, and time never clears it. The coordinator closes it in a closeout, and
 which close works depends on the row's shape:
+
+Do not delete a live `☑️` row: it is the coordinator's integration/writeback
+debt. A struck row (`~~row~~`) is integrated terminal history and may be
+deleted. For a nested prompt tree, wait until every parent and leaf is struck;
+if even one row remains live, the tree must remain in `agent:run`.
 
 | Row | What strikes it |
 | --- | --- |

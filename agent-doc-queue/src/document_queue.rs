@@ -10930,6 +10930,32 @@ mod tests {
     }
 
     #[test]
+    fn prompt_tree_is_deletable_only_after_every_row_is_struck() {
+        let reported = parse(concat!(
+            "- Release train\n",
+            "  - ☑️ [#subagent:publish#1] Publish the release.\n",
+        ))
+        .unwrap();
+        assert!(
+            settle_inert_group_parents(&reported, &std::collections::HashSet::new()).is_none(),
+            "a reported live leaf keeps the prompt tree open"
+        );
+
+        let closed = parse(concat!(
+            "- Release train\n",
+            "  - ~~Publish the release.~~\n",
+        ))
+        .unwrap();
+        let settled = settle_inert_group_parents(&closed, &std::collections::HashSet::new())
+            .expect("the context parent closes after its last live leaf");
+        assert_eq!(
+            render(&settled),
+            concat!("- ~~Release train~~\n", "  - ~~Publish the release.~~\n",)
+        );
+        assert!(prompts(&settled).is_empty());
+    }
+
+    #[test]
     fn inert_blocked_group_moves_the_blocker_to_an_actionable_child() {
         let entries = parse(concat!(
             "- ⛔ ⟦blocked by editor-api⟧ Parent still needs editor verification.\n",

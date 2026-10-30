@@ -88,6 +88,8 @@ The queue coordinator protocol is three-boundary and worker-fenced
    worker-bound/running.
 3. When that exact worker reports, run `queue report-complete` with the same
    generation and the complete worker response in `--response`; `☑️` means
+   keep the live row because coordinator integration is still pending, while a
+   wholly struck prompt tree is terminal and safe to delete. The marker is the
    worker-complete handoff/outbox. Integrate and persist the result in the same
    turn so closeout strikes the queue line and ends the claim.
 

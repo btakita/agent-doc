@@ -1477,7 +1477,7 @@ mod tests {
             "<!-- agent:status sync=\"##sync-release\" -->\n",
             "Main is at `b6b9af6e15` (older prose).\n\n",
             "<!-- status:sync -->\nLatest release: v0.35.558\n<!-- /status:sync -->\n\n",
-            "Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ reported · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))\n",
+            "Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ~~done~~ safe to delete ([legend](https://github.com/btakita/agent-doc/blob/main/docs/guide/queue-markers.md#queue-markers))\n",
             "📤 Queue handoff: 1 reported item awaiting coordinator integration.\n",
             "<!-- /agent:status -->\n",
         );

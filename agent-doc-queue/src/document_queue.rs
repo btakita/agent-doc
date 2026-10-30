@@ -2073,9 +2073,14 @@ pub fn settle_inert_group_parents(
             .into_iter()
             .filter(|id| open_todo_ids.contains(id))
             .collect::<Vec<_>>();
-        let mut parent_text = strip_in_progress_marker_for_display(&parent.text)
-            .unwrap_or_else(|| parent.text.clone());
-        parent_text = apply_owner_projection(&parent_text, None);
+        // Terminal context history keeps the work and any resolved request id,
+        // never the runtime projection that used to gate it. In particular,
+        // `strip_in_progress_marker_for_display` does not remove the orthogonal
+        // `🙋` glyph, so using it here left a resolved decision visibly blocked
+        // after every descendant had already completed. The shared strike
+        // normalizer removes lifecycle, owner, and operator-action prefixes
+        // while preserving a trailing resolved `[#request-id]` as provenance.
+        let mut parent_text = struck_work_text(&parent.text).to_string();
         parent_text = remove_operator_action_ids(&parent_text, &action_ids);
 
         if marker.is_none() && action_ids.is_empty() {
@@ -10871,6 +10876,40 @@ mod tests {
             )
         );
         assert_eq!(prompts(&settled).len(), 1);
+    }
+
+    #[test]
+    fn resolved_operator_gated_group_clears_action_and_strikes_the_whole_tree() {
+        let entries = parse(concat!(
+            "- 🙋 Decide the stable decision annotation [#subagent-operator-request-choice]\n",
+            "  - ~~Compare value and surrogate decision ids.~~\n",
+            "  - ~~choice: Reserved request IDs only~~\n",
+            "  - ~~Verify every decision-id occurrence is annotated.~~\n",
+        ))
+        .unwrap();
+        let settled = settle_inert_group_parents(&entries, &std::collections::HashSet::new())
+            .expect("a resolved request closes its completed prompt tree");
+
+        let rendered = render(&settled);
+        assert_eq!(
+            rendered,
+            concat!(
+                "- ~~Decide the stable decision annotation [#subagent-operator-request-choice]~~\n",
+                "  - ~~Compare value and surrogate decision ids.~~\n",
+                "  - ~~choice: Reserved request IDs only~~\n",
+                "  - ~~Verify every decision-id occurrence is annotated.~~\n",
+            )
+        );
+        assert!(prompts(&settled).is_empty());
+        assert!(
+            rendered.contains("[#subagent-operator-request-choice]"),
+            "the resolved decision id remains attached as provenance"
+        );
+        assert!(
+            !rendered.contains('🙋'),
+            "a resolved decision cannot retain the operator-action gate"
+        );
+        assert!(settle_inert_group_parents(&settled, &std::collections::HashSet::new()).is_none());
     }
 
     /// A request packet may retain the whole prompt tree as origin context.

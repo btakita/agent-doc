@@ -438,7 +438,13 @@ the vector. The prompt submitted for that leaf is that vector plus the entire pr
 tree (`#nestsubmit`): a synthetic queue diff, a plan queue prompt, a direct
 run's active-queue diff, and a subagent's submitted prompt. The tree is
 context from the parsed queue AST, including a sibling branch that is not on
-the lineage path. An example lineage is
+the lineage path. Walk that context as a requirements checklist, but complete
+only the selected executable leaf: validate that the leaf's requested outcome
+and verification requirements are actually met before reporting it done. If
+they are not, state the concrete deferral and leave the leaf live. Once every
+leaf has independently passed that check and been struck, the binary strikes
+the context parents too; a resolved decision keeps its `[#request-id]` as
+provenance while losing the stale `🙋` gate. An example lineage is
 `https://github.com/haiven-dev/haiven-api/pull/758: #rebase`. Claims and `--item` use that vector when the leaf is not a tracked directive,
 so the same bare `#tag` under another parent is different work
 (`#nestlistlineage`). The dispatch list shows the leaf when its text is unique,

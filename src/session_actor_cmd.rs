@@ -770,7 +770,7 @@ fn prepare_restart_live_busy_pane(ctx: &SessionContext, tmux: &Tmux, force: bool
 }
 
 pub fn clear(file: &Path) -> Result<()> {
-    let ctx = build_context(file)?;
+    let ctx = build_clear_context(file)?;
     let authorization = agent_doc_controller_io::project_controller::authorize_operator_command(
         &ctx.base_dir,
         &ctx.canonical_file,
@@ -958,6 +958,74 @@ pub fn clear(file: &Path) -> Result<()> {
         )
     );
     Ok(())
+}
+
+/// Resolve the session-clear context, taking the one recovery rung that the
+/// attached-editor refusal explicitly authorizes.
+///
+/// This is an actorless, bounded operator-command boundary: context resolution
+/// failed before the document actor can be joined, and `admin reload-lib` is a
+/// synchronous typed fan-out whose receipt proves whether the editor
+/// re-registered. Retrying exactly once after that receipt is therefore the
+/// narrow one-shot exception to reactive coordination, not a caller-owned poll
+/// loop. Every other recovery decision, a refused reload, and a second context
+/// refusal fail closed with their original typed guidance.
+fn build_clear_context(file: &Path) -> Result<SessionContext> {
+    retry_after_editor_replica_reload_once(
+        || build_context(file),
+        || {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_clear_context_recovery file={} action=reload_lib_then_retry",
+                    file.display(),
+                ),
+            );
+            let report = crate::lib_install::reload_lib()
+                .context("session clear could not request the editor native-library reload")?;
+            crate::lib_install::reload_lib_verdict(&report)
+                .context("session clear editor native-library reload was refused")?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_clear_context_recovery file={} action=reload_lib_acknowledged",
+                    file.display(),
+                ),
+            );
+            Ok(())
+        },
+    )
+}
+
+/// Run one operation, reload the editor native library only for the typed
+/// `ReloadEditor` refusal, then retry the exact operation once.
+fn retry_after_editor_replica_reload_once<T>(
+    mut operation: impl FnMut() -> Result<T>,
+    mut reload_editor: impl FnMut() -> Result<()>,
+) -> Result<T> {
+    match operation() {
+        Ok(value) => Ok(value),
+        Err(first_error) => {
+            let reload_authorized =
+                agent_doc_document_realtime_io::attached_editor_disk_read_refusal(&first_error)
+                    .is_some_and(|refusal| {
+                        refusal.recovery
+                            == agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor
+                    });
+            if !reload_authorized {
+                return Err(first_error);
+            }
+
+            reload_editor().with_context(|| {
+                format!(
+                    "automatic editor-replica recovery failed before the exact session-clear retry; initial refusal: {first_error:#}"
+                )
+            })?;
+            operation().context(
+                "session clear exact retry failed after the editor acknowledged reload-lib; the one automatic reload recovery has already been used",
+            )
+        }
+    }
 }
 
 /// Whether the document's agent-doc cycle is still open. Fails CLOSED (open)
@@ -5336,6 +5404,120 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::sync::Arc;
+
+    fn attached_editor_refusal(
+        recovery: agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision,
+    ) -> anyhow::Error {
+        agent_doc_document_realtime_io::AttachedEditorDiskReadRefused {
+            file: PathBuf::from("/repo/tasks/sample-session.md"),
+            reason: "sync_pending".to_string(),
+            remedy: agent_doc_turn::write_ownership::editor_replica_recovery().to_string(),
+            recovery,
+        }
+        .into()
+    }
+
+    #[test]
+    fn clear_context_reloads_then_retries_the_exact_resolution_once() {
+        let mut resolution_calls = 0usize;
+        let mut reload_calls = 0usize;
+
+        let value = retry_after_editor_replica_reload_once(
+            || {
+                resolution_calls += 1;
+                if resolution_calls == 1 {
+                    return Err(attached_editor_refusal(
+                        agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
+                    ));
+                }
+                Ok("resolved current document")
+            },
+            || {
+                reload_calls += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(value, "resolved current document");
+        assert_eq!(resolution_calls, 2, "the same resolution runs once more");
+        assert_eq!(reload_calls, 1, "reload-lib is a single recovery rung");
+    }
+
+    #[test]
+    fn clear_context_does_not_reload_for_another_typed_recovery() {
+        let mut resolution_calls = 0usize;
+        let mut reload_calls = 0usize;
+
+        let err = retry_after_editor_replica_reload_once::<()>(
+            || {
+                resolution_calls += 1;
+                Err(attached_editor_refusal(
+                    agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::RestartEditor,
+                ))
+            },
+            || {
+                reload_calls += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(resolution_calls, 1);
+        assert_eq!(reload_calls, 0);
+        assert!(format!("{err:#}").contains("sync_pending recovery exhausted"));
+    }
+
+    #[test]
+    fn clear_context_second_refusal_stops_after_the_exact_retry() {
+        let mut resolution_calls = 0usize;
+        let mut reload_calls = 0usize;
+
+        let err = retry_after_editor_replica_reload_once::<()>(
+            || {
+                resolution_calls += 1;
+                Err(attached_editor_refusal(
+                    agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
+                ))
+            },
+            || {
+                reload_calls += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(resolution_calls, 2);
+        assert_eq!(reload_calls, 1);
+        assert!(
+            format!("{err:#}").contains("the one automatic reload recovery has already been used"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn clear_context_does_not_retry_when_reload_lib_is_refused() {
+        let mut resolution_calls = 0usize;
+        let mut reload_calls = 0usize;
+
+        let err = retry_after_editor_replica_reload_once::<()>(
+            || {
+                resolution_calls += 1;
+                Err(attached_editor_refusal(
+                    agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
+                ))
+            },
+            || {
+                reload_calls += 1;
+                anyhow::bail!("reload-lib endpoint unavailable")
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(resolution_calls, 1);
+        assert_eq!(reload_calls, 1);
+        assert!(format!("{err:#}").contains("reload-lib endpoint unavailable"));
+    }
 
     #[test]
     fn background_replacement_acceptance_is_not_reported_as_completion_proof() {

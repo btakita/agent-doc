@@ -337,7 +337,7 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode.
      The exact generation fence prevents a late result from mutating a reclaimed
-     item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration). The binary appends
+     item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration; keep the live row until the coordinator strikes it). The binary appends
      immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The

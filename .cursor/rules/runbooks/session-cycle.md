@@ -86,7 +86,9 @@ only the compact routing table that survives context compaction.
 - Subagent claims are attempt- and worker-fenced (`#queueclaimstate`,
   `#queueclaimworker`). Save the claim generation. `📥` is pending/unclaimed,
   `🟡` is reserved/dispatching, `🚧` is worker-bound/running,
-  `☑️` is worker-complete handoff/outbox, `⚠️` is lost, `❔` is unknown or
+  `☑️` is worker-complete handoff/outbox: keep that live row until the
+  coordinator integrates and strikes it. A prompt tree is safe to delete only
+  when every row is struck. `⚠️` is lost, `❔` is unknown or
   contradictory state (diagnose, never redispatch), and `🔄` is finished-work
   evidence with no current claim (close or reconcile, never redispatch).
   `agent-doc queue legend` prints every marker (`#queuemarkerlegend`).

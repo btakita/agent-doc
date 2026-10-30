@@ -898,14 +898,22 @@ The current packet protocol also carries `<origin-queue-item>` verbatim,
 nested beneath `- *queue_item:*` (historically on the key line). Its derived todo owns
 `[#<packet-id>]`; an explicit todo suppresses
 derivation only when it owns that same id. While the todo is open, the matching
-live queue row carries identity-neutral `🙋` immediately beside any worker
+live queue rows in every `agent:run` / `agent:loop` block carry identity-neutral
+`🙋` immediately beside any worker
 lifecycle marker (`🙋🚧` while running), while `[#<packet-id>]` is appended to
-the row beside the secondary request instead of preceding the primary work.
-The row is not drainable while `🙋` is present. The operator may answer locally
+each row beside the secondary request instead of preceding the primary work.
+The rows are not drainable while `🙋` is present. This automatic decision
+annotation is limited to the reserved `subagent-operator-request-` id namespace;
+an ordinary tracked-work id is never inferred to be a decision merely because
+it recurs. The operator may answer locally
 by extending the suffix to `[#<packet-id>]: <answer>`; the next closeout checks
-off the same-id todo and removes `🙋` in the same transaction while preserving
-the local request/answer evidence. Explicit todo completion has the same
-unblocking projection. This request-linked rule supersedes the older
+off the same-id todo and removes `🙋` from every occurrence in the same
+transaction while preserving the request id as decision provenance. Explicit
+todo completion, including an operator check made directly in Markdown and
+observed by preflight, has the same all-block unblocking projection. Each
+released row resumes its ordinary lifecycle independently: pending work becomes
+drainable again, while an existing worker lifecycle remains visible. This
+request-linked rule supersedes the older
 tracked-id/surrogate layering described above for newly emitted packets.
 
 **Turn-end consolidated report (`#consolidatedreport`).** A turn that prints a subagent report still prints the consolidated report when the turn ends. Both belong in `agent:exchange`, and the subagent report stays. A subagent report is a blocking `[#subagent-operator-request-<unique-id>]` packet or a binary-attested subagent completion cell (`#subagentcompletionfeedback`). The consolidated report is coordinator prose before the first of those reports, a real `### Re:` heading other than the synthetic `### Re: Response` heading and other than a completion heading, or a `queue_worker_binding:` line. Detail that only follows a report opening the response is the worker handback, not the consolidated report. Closeout refuses that response before capture ([§7](07-closeout-commands.md)). A response that contains both is written in full. A response with no subagent report is unchanged.

@@ -5977,30 +5977,25 @@ pub fn run_queue_maintenance_with_coin_gate(
         );
     }
 
-    // `#queueoperatoraction`: the annotation is a projection of the same-id
-    // operator todo, never durable authority by itself. An operator may check
-    // the Markdown todo directly, so preflight also removes stale annotations
-    // instead of relying only on the closeout command path.
+    // `#queueoperatoraction` / `#reserveddecisionallruns`: the annotation is a
+    // projection of the same-id operator todo, never durable authority by
+    // itself. An operator may check the Markdown todo directly, so preflight
+    // removes stale annotations from EVERY queue block instead of relying only
+    // on the closeout command path or updating only the selected run.
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current_content);
-    if let Some(projected_entries) = agent_doc_queue::document_queue::set_prompt_operator_actions(
-        &activation.entries_after,
-        &[],
-        &open_todo_ids,
-    ) {
-        let new_body = agent_doc_queue::document_queue::render(&projected_entries);
-        current_content = {
-            let comps = agent_doc_element::element::parse(&current_content)?;
-            let q = agent_doc_queue::queue_set::component_for_id(
-                &current_content,
-                &comps,
-                &selected_queue_id,
-            )?
-            .context("queue maintenance: selected queue vanished during operator-action sync")?;
-            q.replace_content(&current_content, &new_body)
-        };
-        activation.entries_after = projected_entries;
+    if let Some(projected) =
+        agent_doc_queue::document_queue::project_all_prompt_operator_actions(
+            &current_content,
+            &[],
+            &open_todo_ids,
+        )?
+    {
+        current_content = projected;
+        activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
         mutated = true;
-        eprintln!("[preflight] queue: cleared resolved operator-action indicators");
+        eprintln!(
+            "[preflight] queue: cleared resolved operator-action indicators across all run blocks"
+        );
     }
 
     // Consume start fence if needed
@@ -19601,6 +19596,66 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             completed.is_empty(),
             "historical answer evidence must not strike an unanswered operator request: {completed:?}"
+        );
+    }
+
+    /// `#reserveddecisionallruns`: checking the reserved request todo is the
+    /// operator's decision for every row that carries that request id, not only
+    /// for the run block selected by the scheduler. Every occurrence must lose
+    /// its operator hold while keeping the id as decision provenance.
+    #[test]
+    fn run_queue_maintenance_restarts_every_run_block_after_reserved_decision() {
+        let dir = setup_project();
+        let doc = dir.path().join("game-sessions.md");
+        let request_id = "subagent-operator-request-session-store";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=\"local\" -->\n",
+                "- 🙋📥 Persist the local game session [#{request_id}]\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=\"remote\" -->\n",
+                "- 🙋📥 Persist the remote game session [#{request_id}]\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [x] [#{request_id}] Choose the session-store contract.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            request_id = request_id,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(
+            updated.matches(&format!("[#{request_id}]")).count(),
+            3,
+            "both queue rows and the completed todo retain one stable decision id:\n{updated}"
+        );
+        assert_eq!(
+            updated.matches("🙋").count(),
+            0,
+            "the made decision must release every run-block occurrence:\n{updated}"
+        );
+        assert!(
+            state.queue_supervisor_drainable
+                && state.queue_supervisor_continuation_head.is_some()
+                && updated.contains("- 📥 Persist the remote game session"),
+            "released work must immediately resume or become pending again: {state:?}\n{updated}"
         );
     }
 

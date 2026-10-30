@@ -366,13 +366,20 @@ The default `sync-mode` is `additive` (and `sync-mode="additive"` is accepted ex
 **Node-keyed mutations:** The markdown AST crate exposes component mutations keyed by semantic item identity plus occurrence, not absolute byte offsets: consume marks a node struck, dedup removes duplicate id-backed nodes while preserving free-text duplicates, reorder moves items by node key, and enqueue inserts relative to an existing node key. These APIs are the phase-4/5 bridge away from text-line heuristics; callers should treat pin markers and strike markers as node attributes, not identity text.
 
 **Duplicate queue-effect annotation (`#queueeffectidentity`):** When lifecycle
-convergence proves that two or more live, single-line free-text queue rows are
-lawful operator-authored occurrences of the same normalized text, the binary
-appends a visible `⟦effect:N⟧` suffix to each occurrence. The positive integer is
-an occurrence identity, not operator prose. It remains part of exact claim,
-worker, completion, and receipt identity; lifecycle/priority markers remain
-cosmetic. Existing positive ids are stable, missing ids receive the lowest unused
-integer in queue order, and a lone survivor is never renumbered. Id-backed and
+convergence proves that two or more live single-line free-text queue rows, or a
+live nested command leaf plus an earlier completed occurrence, are lawful
+operator-authored occurrences of the same normalized text, the binary appends a
+visible `⟦effect:N⟧` suffix to each live occurrence that needs a distinct
+identity. A nested bare `#preset` is contextual work under its parent, not a
+durable top-level `#id` reference, so repeating `#review` beneath the same PR
+receives a new effect id.
+The positive integer is an occurrence identity, not operator prose. It remains
+part of exact claim, worker, completion, and receipt identity;
+lifecycle/priority markers remain cosmetic. Completed nested-command rows
+reserve their queue-order id without being rewritten, so repeating `#review`
+runs it again instead of inheriting the prior completion. Existing positive ids
+are stable, missing live ids receive the lowest unused integer in queue order,
+and a lone annotated survivor is never renumbered. Top-level id-backed and
 multiline heads are outside this projection.
 Annotating a claimed row never moves its claim to a text-identical sibling
 (`#claimrowmigrate`): the claim follows its own row's annotated successor,

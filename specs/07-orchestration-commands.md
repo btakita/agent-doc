@@ -647,33 +647,36 @@ Before emitting queue state, preflight may:
 
 #### Duplicate queue-effect identity (`#queueeffectidentity`)
 
-Invariant: every lawful repeated live free-text occurrence is a separately
-addressable effect. Two rows may have the same operator-authored work text, but
-they MUST NOT inherit one shared claim, lifecycle marker, report receipt, or
-closeout merely because that text normalizes equally. Conversely, an annotation
-MUST NOT increase the snapshot-authored multiplicity and thereby turn a replay
-artifact into new work.
+Invariant: every lawful repeated live free-text occurrence and every repeated
+nested command leaf is a separately addressable effect. Two rows may have the
+same operator-authored work text, but they MUST NOT inherit one shared claim,
+lifecycle marker, report receipt, or closeout merely because that text
+normalizes equally. Conversely, an annotation MUST NOT increase the snapshot-
+authored multiplicity and thereby turn a replay artifact into new work.
 
 The pure policy owner is
 `document_queue::annotate_duplicate_queue_effects`, invoked by the existing
 `converge_queue_via_lifecycle` preflight projection. Its transition table is:
 
-| Observed live single-line free-text family | Successor |
+| Observed single-line free-text/nested-command family | Successor |
 | --- | --- |
 | One bare row | Unchanged |
 | Two or more lawful bare rows | Append `⟦effect:1⟧`, `⟦effect:2⟧`, ... in queue order |
+| Completed nested-command occurrence followed by a live bare recurrence | Leave the completed row unchanged; reserve its queue-order id and append the next id to the live row |
 | Existing unique positive effect ids plus bare rows | Preserve existing ids; assign each bare row the lowest unused positive id in queue order |
 | A repeated or zero effect id | Preserve the first valid occurrence; deterministically reassign later/missing occurrences |
 | One annotated survivor | Preserve its id; never compact or renumber |
-| Id-backed or multiline row | Unchanged |
+| Top-level id-backed or multiline row | Unchanged |
 
 Lifecycle convergence strips only the effect suffix when computing the
-free-text multiplicity family, then annotates the lawful survivors. Claim and
-receipt identity retain the suffix. Therefore convergence remains replay-safe,
-while `release + publish ⟦effect:1⟧` and `release + publish ⟦effect:2⟧` are
-exactly different targets. A bare target against several annotated descendants
-is an ambiguity error listing the exact rows; claim resolution never chooses
-the first annotated effect.
+free-text multiplicity family, then annotates the lawful live survivors. For a
+nested command family it also reserves occurrence ids for completed rows, but
+never rewrites those rows. Claim and receipt identity retain the suffix.
+Therefore convergence remains replay-safe, while `release + publish
+⟦effect:1⟧` and `release + publish ⟦effect:2⟧` are exactly different targets.
+A bare target against several annotated descendants is an ambiguity error
+listing the exact rows; claim resolution never chooses the first annotated
+effect.
 
 **A claim is bound to the row it was issued for, never to a text-identical
 sibling (`#claimrowmigrate`).** Annotation is an edit of the claimed row, so

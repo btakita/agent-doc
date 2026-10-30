@@ -4607,12 +4607,16 @@ fn queue_effect_family_identity(
     agent_doc_element_queue::QueueItemIdentity::from_prompt(&base)
 }
 
-/// Give every lawful repeated live free-text queue effect a stable visible id.
+/// Give every lawful repeated free-text or nested command effect a stable
+/// visible id.
 ///
-/// Existing positive ids are retained. Missing ids (including a repeated or
-/// zero id) receive the lowest unused positive integer in queue order. A lone
-/// annotated survivor keeps its id, so consuming `effect:1` never silently
-/// renames `effect:2`. Id-backed heads and multiline heads are untouched.
+/// Existing positive ids are retained. Completed nested-command occurrences
+/// reserve an id but are never rewritten; this makes a later text-identical live
+/// command distinct from the work that already completed. Missing live ids
+/// (including a repeated or zero id) receive the lowest unused positive integer
+/// in queue order. A lone annotated survivor keeps its id, so consuming
+/// `effect:1` never silently renames `effect:2`. Top-level id-backed heads and
+/// multiline heads are untouched.
 ///
 /// This is a one-shot pure projection over one immutable queue cut; it owns no
 /// source or reactive lifetime. The preflight convergence effect persists its
@@ -4620,28 +4624,41 @@ fn queue_effect_family_identity(
 pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
     use agent_doc_element_queue::QueueItemIdentity;
 
-    let mut families = std::collections::HashMap::<QueueItemIdentity, Vec<usize>>::new();
+    let mut families = std::collections::HashMap::<QueueItemIdentity, Vec<(usize, bool)>>::new();
     for (index, entry) in entries.iter().enumerate() {
-        let QueueEntry::Prompt(prompt) = entry else {
-            continue;
+        let (prompt, live) = match entry {
+            QueueEntry::Prompt(prompt) => (prompt, true),
+            QueueEntry::Completed(prompt) => (prompt, false),
+            _ => continue,
         };
         if prompt.multiline {
             continue;
         }
+        if !live && !prompt.is_nested() {
+            continue;
+        }
         let identity = queue_effect_family_identity(prompt);
-        if matches!(identity, QueueItemIdentity::FreeText(_)) {
-            families.entry(identity).or_default().push(index);
+        // A nested bare `#preset` is contextual work under its parent, not the
+        // durable top-level `#id` reference that `from_prompt` sees in
+        // isolation. It therefore needs the same occurrence identity as prose
+        // when the operator runs it again under that parent.
+        if matches!(identity, QueueItemIdentity::FreeText(_)) || prompt.is_nested() {
+            families.entry(identity).or_default().push((index, live));
         }
     }
 
     let mut annotated = entries.to_vec();
     let mut changed = false;
-    for indexes in families.values().filter(|indexes| indexes.len() > 1) {
+    for occurrences in families
+        .values()
+        .filter(|occurrences| occurrences.len() > 1 && occurrences.iter().any(|(_, live)| *live))
+    {
         let mut used = std::collections::HashSet::<usize>::new();
-        let mut assignments = Vec::with_capacity(indexes.len());
-        for &index in indexes {
-            let QueueEntry::Prompt(prompt) = &entries[index] else {
-                unreachable!("effect-family index must name a live prompt");
+        let mut assignments = Vec::with_capacity(occurrences.len());
+        for &(index, _) in occurrences {
+            let prompt = match &entries[index] {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
+                _ => unreachable!("effect-family index must name a prompt"),
             };
             let (_, existing) = split_queue_effect_annotation(&prompt.text);
             assignments.push(existing.filter(|effect| *effect > 0 && used.insert(*effect)));
@@ -4658,9 +4675,12 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
             used.insert(next);
         }
 
-        for (&index, effect) in indexes.iter().zip(assignments) {
+        for (&(index, live), effect) in occurrences.iter().zip(assignments) {
+            if !live {
+                continue;
+            }
             let QueueEntry::Prompt(prompt) = &entries[index] else {
-                unreachable!("effect-family index must name a live prompt");
+                unreachable!("live effect-family index must name a live prompt");
             };
             let (base, _) = split_queue_effect_annotation(&prompt.text);
             let effect = effect.expect("every duplicate effect receives an id");
@@ -9688,6 +9708,19 @@ mod tests {
             ordered_marker: None,
         })
     }
+    fn nested(entry: QueueEntry) -> QueueEntry {
+        match entry {
+            QueueEntry::Prompt(mut prompt) => {
+                prompt.indent = 2;
+                QueueEntry::Prompt(prompt)
+            }
+            QueueEntry::Completed(mut prompt) => {
+                prompt.indent = 2;
+                QueueEntry::Completed(prompt)
+            }
+            other => other,
+        }
+    }
 
     /// Apply convergence, returning the converged entries (or the input unchanged
     /// when the queue is already at its lawful fixpoint).
@@ -9719,6 +9752,36 @@ mod tests {
             converge(&survivor, &once),
             survivor,
             "removing effect 1 never renumbers effect 2"
+        );
+    }
+
+    /// A completed occurrence is historical evidence, not permission to answer
+    /// a newly authored identical prompt with the old result. Reserve its effect
+    /// slot so the new live row receives a distinct claim/receipt identity.
+    #[test]
+    fn converge_disambiguates_a_repeated_prompt_after_completion() {
+        let entries = vec![
+            p("https://example.test/pull/795"),
+            nested(c("#review")),
+            nested(p("#review")),
+        ];
+        assert_eq!(
+            converge(&entries, &entries),
+            vec![
+                p("https://example.test/pull/795"),
+                nested(c("#review")),
+                nested(p("#review ⟦effect:2⟧")),
+            ]
+        );
+
+        let converged = vec![
+            p("https://example.test/pull/795"),
+            nested(c("#review")),
+            nested(p("#review ⟦effect:2⟧")),
+        ];
+        assert!(
+            converge_queue_via_lifecycle(&converged, &entries, &Default::default()).is_none(),
+            "the surrogate effect id is stable on later maintenance passes"
         );
     }
 

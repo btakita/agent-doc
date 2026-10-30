@@ -134,6 +134,15 @@ integrated its result yet. The state comes from one of two records: a
 itself, and time never clears it. The coordinator closes it in a closeout, and
 which close works depends on the row's shape:
 
+Closure is not tied to the end of a harness turn. As soon as the coordinator
+has integrated and verified the delivery boundary authorized by the queue item
+(for example, a PR exists when PR delivery is the requested outcome, or the
+change is in the target branch when branch delivery is required), it should
+close the row immediately. For an id-backed row whose tracked item must remain
+open, `queue consume --ack-id` makes that strike visible mid-turn. A worker
+merely reporting or publishing a branch does not prove a stronger delivery
+boundary than the queue item authorized, so `report-complete` never auto-strikes.
+
 Do not delete a live `☑️` row: it is the coordinator's integration/writeback
 debt. A struck row (`~~row~~`) is integrated terminal history and may be
 deleted. For a nested prompt tree, wait until every parent and leaf is struck;

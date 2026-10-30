@@ -758,22 +758,26 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
     preflight_json(dir.path(), &doc);
     assert_single("preflight while running", Some("🚧"));
     for id in ids {
-        assert_ok(
-            &run_agent_doc(
-                dir.path(),
-                &[
-                    "queue",
-                    "report-complete",
-                    path,
-                    "--item",
-                    &format!("do [#{id}]"),
-                    "--generation",
-                    "1",
-                    "--response",
-                    &format!("Implemented and tested the {id} fix; branch fix/{id} is pushed."),
-                ],
-            ),
-            "queue report-complete",
+        let report = run_agent_doc(
+            dir.path(),
+            &[
+                "queue",
+                "report-complete",
+                path,
+                "--item",
+                &format!("do [#{id}]"),
+                "--generation",
+                "1",
+                "--response",
+                &format!("Implemented and tested the {id} fix; branch fix/{id} is pushed."),
+            ],
+        );
+        assert_ok(&report, "queue report-complete");
+        let stderr = String::from_utf8_lossy(&report.stderr);
+        assert!(stderr.contains("awaiting integration. Next:"), "{stderr}");
+        assert!(
+            stderr.contains(&format!("agent-doc queue consume {path} --ack-id {id}")),
+            "an id-backed report must say how to strike its row while keeping tracked work open: {stderr}"
         );
     }
     assert_single("reported", Some("☑️"));

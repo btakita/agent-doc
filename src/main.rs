@@ -8411,7 +8411,7 @@ fn try_main() -> anyhow::Result<()> {
                     &response,
                 )? {
                     Some(outcome) => eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration{}",
+                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. Next: {}{}",
                         if outcome.appended {
                             "accepted"
                         } else {
@@ -8420,6 +8420,10 @@ fn try_main() -> anyhow::Result<()> {
                         outcome.claim.item_text,
                         outcome.claim.owner,
                         outcome.claim.generation,
+                        agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                            &file.display().to_string(),
+                            &outcome.claim.item_text,
+                        ),
                         if outcome.projection_pending {
                             format!(
                                 "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",

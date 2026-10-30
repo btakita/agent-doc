@@ -46,6 +46,7 @@ abstract class ShellActionForwarder(val actionId: String) : AnAction(), DumbAwar
 
 class PopupForwarder : ShellActionForwarder("AgentDoc.Popup")
 class SubmitForwarder : ShellActionForwarder("AgentDoc.Submit")
+class StartAgentDocForwarder : ShellActionForwarder("AgentDoc.StartAgentDoc")
 class InitSessionForwarder : ShellActionForwarder("AgentDoc.InitSession")
 class FixDocumentForwarder : ShellActionForwarder("AgentDoc.FixDocument")
 class LintDocumentForwarder : ShellActionForwarder("AgentDoc.LintDocument")

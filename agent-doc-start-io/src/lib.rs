@@ -425,10 +425,38 @@ pub fn bootstrap_start_inside_tmux_for_client(
         return Ok(None);
     }
 
+    start_in_tmux_pane_for_client(
+        file,
+        force,
+        route_owned,
+        route_owned_reap_policy,
+        route_owned_start_purpose,
+        resume,
+        harness_override,
+        client_id,
+    )
+    .map(Some)
+}
+
+/// Dispatch `agent-doc start` into the document's resolved tmux pane and
+/// return immediately. Unlike [`bootstrap_start_inside_tmux_for_client`], this
+/// remains nonblocking when the caller inherited `$TMUX`, as editor extension
+/// hosts sometimes do.
+#[allow(clippy::too_many_arguments)]
+pub fn start_in_tmux_pane_for_client(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: agent_doc_supervisor::route_owned::RouteOwnedReapPolicy,
+    route_owned_start_purpose: RouteOwnedStartPurpose,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+    harness_override: Option<&str>,
+    client_id: Option<&str>,
+) -> Result<TmuxEnsureOutcome> {
     prepare_start_document_for_tmux_bootstrap(file)?;
     let tmux = tmux_for_environment();
     let target = match start_bootstrap_target(&tmux, file, force, client_id)? {
-        StartBootstrap::Reuse(outcome) => return Ok(Some(outcome)),
+        StartBootstrap::Reuse(outcome) => return Ok(outcome),
         StartBootstrap::Start(target) => target,
     };
     let command = start_reexec_command(
@@ -445,7 +473,7 @@ pub fn bootstrap_start_inside_tmux_for_client(
         "[start] dispatched into tmux session '{}' pane {}; attach with: {}",
         target.outcome.session_name, target.pane_id, target.outcome.attach_command,
     );
-    Ok(Some(target.outcome))
+    Ok(target.outcome)
 }
 
 /// Run the re-exec'd start in its freshly provisioned pane.

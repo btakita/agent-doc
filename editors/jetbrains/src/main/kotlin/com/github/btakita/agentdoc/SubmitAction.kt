@@ -75,14 +75,26 @@ class SubmitAction : ImplAction {
                     return@invokeLater
                 }
                 if (!attempt.isCurrent()) return@invokeLater
-                LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
-                TerminalUtil.sendToTerminal(
-                    project,
-                    file,
-                    attempt = attempt,
-                    resolved = resolved,
+                attempt.recordIfCurrent("route_start_agent_doc")
+                IdeTerminalCoordinator.startInPane(
+                    project = project,
+                    cwd = cwd,
+                    relativePath = relativePath,
+                    onReady = {
+                        LOG.warn("[run] invoking sendToTerminal after agent-doc start: ${file.name}")
+                        TerminalUtil.sendToTerminal(
+                            project,
+                            file,
+                            attempt = attempt,
+                            resolved = resolved,
+                        )
+                        TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
+                    },
+                    onFailure = { detail ->
+                        attempt.finishIfCurrent("route_start_agent_doc_failed", error = detail)
+                        TerminalUtil.notifyError(project, "Failed to start Agent Doc: $detail")
+                    },
                 )
-                TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
             }
         }
     }

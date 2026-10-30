@@ -60,7 +60,8 @@ internal object IdeTerminalCoordinator {
     private const val TERMINAL_PLUGIN_ID = "org.jetbrains.plugins.terminal"
     private const val ENSURE_TIMEOUT_MS = 10_000L
 
-    fun ensureAndAttach(
+    /** Start in tmux without creating, selecting, or revealing an IDE terminal. */
+    fun startInPane(
         project: Project,
         cwd: String,
         relativePath: String,
@@ -70,6 +71,87 @@ internal object IdeTerminalCoordinator {
         GenerationWork.executeOnPooledThread {
             val result = try {
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
+                SyncLayoutAction.runCommandWithTimeout(
+                    startAgentDocCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
+                    cwd,
+                    ENSURE_TIMEOUT_MS,
+                    captureStderrSeparately = true,
+                )
+            } catch (failure: Throwable) {
+                dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
+                return@executeOnPooledThread
+            }
+            if (result.exitCode != 0) {
+                val detail = result.errorOutput.ifBlank {
+                    result.output.ifBlank { "agent-doc tmux start failed (exit ${result.exitCode})" }
+                }
+                dispatchFailure(project, onFailure, detail)
+                return@executeOnPooledThread
+            }
+            GenerationWork.invokeLater {
+                if (!project.isDisposed) onReady()
+            }
+        }
+    }
+
+    /**
+     * Start the focused document's agent-doc supervisor in its tmux pane, then
+     * attach the IDE terminal to that pane. `agent-doc tmux start` is the policy
+     * owner for the idempotent already-running decision; editor actions never
+     * infer supervisor liveness from the presence of a pane.
+     */
+    fun startAndAttach(
+        project: Project,
+        cwd: String,
+        relativePath: String,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) = prepareAndAttach(project, cwd, relativePath, startFirst = true, onReady, onFailure)
+
+    fun ensureAndAttach(
+        project: Project,
+        cwd: String,
+        relativePath: String,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) = prepareAndAttach(project, cwd, relativePath, startFirst = false, onReady, onFailure)
+
+    private fun prepareAndAttach(
+        project: Project,
+        cwd: String,
+        relativePath: String,
+        startFirst: Boolean,
+        onReady: () -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
+        GenerationWork.executeOnPooledThread {
+            val agentDoc = try {
+                TerminalUtil.resolveAgentDoc(cwd)
+            } catch (failure: Throwable) {
+                dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
+                return@executeOnPooledThread
+            }
+            if (startFirst) {
+                val startResult = try {
+                    SyncLayoutAction.runCommandWithTimeout(
+                        startAgentDocCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
+                        cwd,
+                        ENSURE_TIMEOUT_MS,
+                        captureStderrSeparately = true,
+                    )
+                } catch (failure: Throwable) {
+                    dispatchFailure(project, onFailure, failure.message ?: failure.javaClass.simpleName)
+                    return@executeOnPooledThread
+                }
+                if (startResult.exitCode != 0) {
+                    val detail = startResult.errorOutput.ifBlank {
+                        startResult.output.ifBlank { "agent-doc tmux start failed (exit ${startResult.exitCode})" }
+                    }
+                    dispatchFailure(project, onFailure, detail)
+                    return@executeOnPooledThread
+                }
+            }
+            val result = try {
                 SyncLayoutAction.runCommandWithTimeout(
                     ideTerminalEnsureCommand(agentDoc, relativePath, CpRouteClient.navigationClientId),
                     cwd,
@@ -125,6 +207,13 @@ internal object IdeTerminalCoordinator {
             }
         }
     }
+
+    internal fun startAgentDocCommand(
+        agentDoc: String,
+        relativePath: String,
+        clientId: String,
+    ): List<String> =
+        listOf(agentDoc, "tmux", "start", relativePath, "--client-id", clientId)
 
     /**
      * `#ideriderindependentnav` P3: the ensure names this IDE's surface client, so with

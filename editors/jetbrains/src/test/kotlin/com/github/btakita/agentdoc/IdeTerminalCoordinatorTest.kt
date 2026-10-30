@@ -90,4 +90,23 @@ class IdeTerminalCoordinatorTest {
             ),
         )
     }
+
+    @Test
+    fun `start command names the document and this IDE's navigation client`() {
+        assertEquals(
+            listOf(
+                "agent-doc",
+                "tmux",
+                "start",
+                "tasks/plan.md",
+                "--client-id",
+                "jetbrains@IU.0a1b2c3d-pid:41",
+            ),
+            IdeTerminalCoordinator.startAgentDocCommand(
+                "agent-doc",
+                "tasks/plan.md",
+                "jetbrains@IU.0a1b2c3d-pid:41",
+            ),
+        )
+    }
 }

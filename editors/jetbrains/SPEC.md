@@ -1831,7 +1831,7 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   reconciliation generation even when the documents match the last automatic
   surface. Repeated resyncs preserve editor pane cardinality; they never derive
   visible panes by enumerating the session registry.
-- Manual `Sync Tmux Layout` submits `agent-doc.sync_tmux_layout.v1` to the Project Controller command plane
+- Manual `Sync Tmux Layout` first awaits the nonblocking, idempotent `agent-doc tmux start <FILE> --client-id <IDE>` pane dispatch, then submits `agent-doc.sync_tmux_layout.v1` to the Project Controller command plane
   with `no_autostart=false` and waits for the terminal command receipt. The controller runs the full sync
   path and repairs window order before reconciliation: `0:agent-doc`, `1:stash`, then adjacent
   overflow `N:stash` windows. When the requested document has no pane, that terminal boundary includes

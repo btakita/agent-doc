@@ -4,6 +4,27 @@ use agent_doc_config::terminal_host::ResolvedTerminalHost;
 use anyhow::Result;
 use std::path::Path;
 
+/// Nonblocking editor-facing start. The supervisor becomes the tmux pane
+/// process; this CLI process always returns after dispatch.
+pub fn start(file: &Path, client_id: Option<&str>) -> Result<()> {
+    let resume = agent_doc_harness::ResumeRequest::Latest;
+    let outcome = agent_doc_start_io::start_in_tmux_pane_for_client(
+        file,
+        false,
+        false,
+        agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
+        agent_doc_supervisor::route_owned::RouteOwnedStartPurpose::Dispatch,
+        Some(&resume),
+        None,
+        client_id,
+    )?;
+    println!(
+        "started agent-doc for {} in tmux session '{}' pane {}",
+        file.display(), outcome.session_name, outcome.pane_id,
+    );
+    Ok(())
+}
+
 pub fn ensure(
     file: &Path,
     session: Option<&str>,

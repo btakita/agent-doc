@@ -1,5 +1,6 @@
 export type PopupMenuActionId =
     | 'submit'
+    | 'startAgentDoc'
     | 'initSession'
     | 'claim'
     | 'fixDocument'
@@ -50,6 +51,7 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
 
 export function buildOverflowPopupMenuItems(): PopupMenuItem[] {
     return [
+        { label: '$(terminal) Start Agent Doc', id: 'startAgentDoc' },
         { label: '$(hubot) Run with Junie', id: 'runWithJunie' },
         { label: '$(warning) Force Claim for Tmux Pane', id: 'forceClaim' },
         { label: '$(debug-stop) Stop Agent', id: 'stopAgent' },

@@ -107,6 +107,7 @@ class AgentDocImplGeneration : ImplGeneration {
         internal val ACTION_HANDLERS: Map<String, () -> ImplAction> = linkedMapOf(
             "AgentDoc.Popup" to ::AgentDocPopupAction,
             "AgentDoc.Submit" to ::SubmitAction,
+            "AgentDoc.StartAgentDoc" to ::StartAgentDocAction,
             "AgentDoc.InitSession" to ::InitSessionAction,
             "AgentDoc.FixDocument" to ::FixDocumentAction,
             "AgentDoc.LintDocument" to ::LintDocumentAction,

@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -42,10 +42,58 @@ Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · �
 Compacted content:
 - Archived 89 response topic(s): agent:rules dispatch; release waits on agent:rules; agent:rules on main; 86 more
 - Prior summary/context: prior compacted content: Archived 68 response topic(s): do [#clearqueuedciflake], do [#startcwdfallback], [#krwr] dec...
+
+### Re: Actionable context, cross-run dedupe, and Todo sync — gpt-5 · 2026-10-29
+
+> **Queue prompt:** Should these run items be struck? If yes, fix agent-doc causes.: What is actionable about those items? Can agent-doc express what needs to be done? agent-doc should add a child agent:run item to make closing it actionable. It's ok if the actionable item is blocked. The main thing is we should have a goal of completing the agent:run items and never leave a agent:run item blocked.
+
+Fixed. Queue settlement is now deepest-first: a plain context parent closes after all executable descendants finish; if unresolved lifecycle, owner, or operator evidence remains, agent-doc removes inert parent lifecycle state and projects one concrete executable child carrying the remaining action. The child may be blocked, but the prompt tree no longer ends as an inert blocked/lost parent.
+
+The contamination guard now compares against real pre-write provenance, so a pre-existing operator context row quoted in `### Re:` is not misclassified as copied assistant prose.
+
+Implemented in `20d9d7c984`; full worker `make check` passed 12,217 Rust tests plus editor/plugin suites.
+
+> **Queue prompt:** agent-doc issues in api.md:: `- 🚧 [#subagent:api-contracts-pr170-closed#1] do [#closed]` was duplicated in the `agent:run id="main"` from where it was originally defined in `agent:run id="contracts-prs"` under `https://github.com/haiven-dev/haiven-contracts/pull/170`.
+
+Fixed. Same-closeout, preflight, and one-shot backlog mirroring now check tracked identity across all non-repeating sibling run sections. An existing nested `do [#closed]` in `contracts-prs` prevents a duplicate top-level mirror in `main`, preserving its original ancestry.
+
+Implemented in `9ebb0b2e5b`; four focused regressions and the worker’s full `make check` passed.
+
+> **Queue prompt:** sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.: [#gh379-remotedev-proof]: done
+
+Done. The operator’s explicit assertion is sufficient to close the local Todo; `#gh379-remotedev-proof` is checked off by this closeout.
+
+> **Queue prompt:** sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.: [#coder-remote-install-02805]: done? It seems like the Coder instance doesn't have `If DELIVERY_FAILED No such file or directory persists` anymore. Will file another gh issue if it comes up again.
+
+Done. This is an operator-accepted symptom closure rather than a fresh replay of every original positive proof. `#coder-remote-install-02805` is checked off; a recurrence can become a new GitHub issue as requested.
+
+> **Queue prompt:** sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.: [#ahfe]: done
+
+Done. The explicit operator assertion supersedes the older watch-state note. `#ahfe` is checked off; this changes only the local Todo and does not mutate GH #267.
+
+> **Queue prompt:** sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.: [#subagent-operator-request-decision-annotation-syntax]: already decided?
+
+Not yet. `Other` was resolved as the answer value and the reserved request id as the identity, but scope remains open:
+
+- Option (2): only reserved `[#subagent-operator-request-…]` IDs are decisions.
+- Option (3): any cited open Todo/operator-request ID can be a decision.
+
+Choose (2) or (3); the Todo remains open.
+
+> **Queue prompt:** sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.: [#subagent-operator-request-inbox-terminal-reading]: already decided?
+
+Not yet. The worker-complete `☑️` was not an operator choice. Choose:
+
+- **Start a new turn:** `📥` is a valid ready leaf that can remain for a later turn.
+- **The subprompt is in a bad state:** closeout must not commit that `📥`; it removes or reclassifies it in the same turn.
+
+The Todo remains open.
+
+Merged verification across both fixes passed for queue, preflight, queue-I/O, workflow, and session-check crates. One `make install` completed successfully; no editor package bytes changed, and no JetBrains restart is required. The integrated source is pushed to `origin/main` at `9ebb0b2e5b`.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
-## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
+## Run <!-- agent:run subagents preset=#spec-test-build-install-commit-push go -->
 - If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
   - ~~If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
 - 🙋 If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
@@ -59,6 +107,15 @@ Compacted content:
   - ~~`- 🙋⚠️ [#subagent:decisionsurrogate#2]`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
   - ~~`- Sync Issues on sdk-demo.md`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
   - ~~`- If I have a long list of agent:run items, ...`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:33:09.000Z⟧
+  - ~~What is actionable about those items? Can agent-doc express what needs to be done? agent-doc should add a child agent:run item to make closing it actionable. It's ok if the actionable item is blocked. The main thing is we should have a goal of completing the agent:run items and never leave a agent:run item blocked.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:53:25.000Z⟧
+- agent-doc issues in api.md:
+  - ~~`- 🚧 [#subagent:api-contracts-pr170-closed#1] do [#closed]` was duplicated in the `agent:run id="main"` from where it was originally defined in `agent:run id="contracts-prs"` under `https://github.com/haiven-dev/haiven-contracts/pull/170`.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:53:25.000Z⟧
+- sync agent:todo with current decision state. Mark any agent:todo items done that were already answered.
+  - ~~[#gh379-remotedev-proof]: done~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:53:25.000Z⟧
+  - ~~[#coder-remote-install-02805]: done? It seems like the Coder instance doesn't have `If DELIVERY_FAILED No such file or directory persists` anymore. Will file another gh issue if it comes up again.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:53:25.000Z⟧
+  - ~~[#ahfe]: done~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:53:25.000Z⟧
+  - 🙋☑️ [#subagent:decisiontodosync#1] [#subagent-operator-request-decision-annotation-syntax]: already decided?
+  - 🙋☑️ [#subagent:inboxtodosync#1] [#subagent-operator-request-inbox-terminal-reading]: already decided?
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->
@@ -66,10 +123,10 @@ Compacted content:
 <!-- /agent:loop -->
 
 ## Todo <!-- agent:todo priority -->
-- [ ] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
+- [x] [#ahfe] Live-check GH #267 on the 263 IDE: after `agent-doc upgrade` WITHOUT restart, once idea.log shows `[native] hot-reloaded libagent_doc`, Run Agent Doc should complete (ops.log `editor_route_superseded_editor_admitted`, route output ends with the advisory line). 2026-10-15 operator: did not work (believed); watch for bug reports before reopening GH #267.
 - [ ] [#ctg7] Under heavy load, switch the editor 2 panes -> 1 -> 2 and confirm tmux follows and stays at 2 (stale-controller fix).
-- [ ] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
-- [ ] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
+- [x] [#coder-remote-install-02805] Repair Coder Remote Dev sync after the two-sided install: open /home/brian/work/btakita/agent-loop as the backend IDE project root; ensure Client/Gateway and backend both load JetBrains 263 plugin 0.2.824; restart both; on the backend run agent-doc env --json, agent-doc tmux ensure tasks/agent-doc/agent-doc-bugs.md --ide-terminal --json, and agent-doc session status tasks/agent-doc/agent-doc-bugs.md; require client idea.log to show snapshot schema negotiated with geometry=measured, backend idea.log to show accepted ingress with no DELIVERY_FAILED, and .agent-doc/logs/ops.log to show controller_editor_surface_observed client=jetbrains-rd@... surface=remote-client:... followed by pane_layout_desired_published with column_order=editor. If DELIVERY_FAILED No such file or directory persists, fix ControllerSurfaceSnapshotPublisher to resolve the controller from each session document root instead of an unrelated IDE project basePath, expose connected-without-accepted-publication as blocked while preserving the no-guessing fence, and add a regression test.
+- [x] [#gh379-remotedev-proof] Close GH #379 (https://github.com/btakita/agent-doc/issues/379) after proof from its Remote Dev setup (Windows JetBrains Client): on that backend, `agent-doc --version` is 0.35.555 or newer and the IntelliJ IDEA 2026.3 plugin is 0.2.835 or newer; Run Agent Doc then ends exit 0 and ops.log shows `controller_editor_route_measured_layout_resolved` with no `editor route requires the exact visible layout before dispatch`.
 - [ ] [#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13.
 - [ ] [#yeja] Choose how to handle ~/.agent-doc (see the #ddj8 answer in agent:exchange): (a) never treat $HOME as a project root, mirroring the tsift fix (icebox #homerootguard), (b) keep agent-doc activity in a child git repo such as ~/notes, (a)+(b) (recommended), or (c) status quo. Separately, ~/.agent-doc holds 1.8G (1.7G in the retired live-buffer/) that you can archive or delete. (source: agent:icebox [#homerootguard])
 - [ ] [#automationapiquestions] Answer the automation-API design questions (specs/proposals/automation-api.md on branch design/automationapi)
@@ -87,7 +144,6 @@ Compacted content:
   - Should we rely on GitHub advanced search ORing PR queries (observed, not documented), with the two-query fallback?
 - [ ] [#subagent-operator-request-decision-annotation-syntax] Pick how a made decision id annotates prompts and whether that restarts them. Worker 01a188dc-ebd3-7711-87c6-67034f7b9536 made no commit. (1) Blocker-close stamp: ⟦decision:<id>⟧ on live do [#id] rows when a stays-open or after= blocker leaves the open set; the last blocker returns the row from ⛔ to 📥. (2) Request-answer stamp and requeue: only [#subagent-operator-request-…] ids, token ⟦decision:<id>=<answer>⟧, every citing row returns to 📥 and its claim is released. (3) Cited-id answer stamp and requeue: any [#id] naming an open todo or operator request, made when that todo is checked or any instance has a nested answer; every unstruck citing row is stamped, loses ☑️ ⛔ 🙋, and returns to 📥. (4) Stamp only: same detection and token as (3), with no lifecycle change and no release. (5) Other.
 - [ ] [#subagent-operator-request-inbox-terminal-reading] Which reading should a closeout adopt when a nested #address or #rebase: #address row would stay at 📥? Worker 01a188df-8bd1-7bf1-938a-d7bb1d907c05 made no commit. Branch fix/inbox-not-terminal stays at 7b44d8bb28. (1) Start a new turn: the nested row stays its own pending head, 📥 means ready to run, and another row's closeout may commit while this row is still 📥. (2) The subprompt is in a bad state: do not commit that 📥; treat the row as a sub-prompt or failed work and remove the pending marker in the same turn. The worker prompt ended before the later sentences about a reliable error emoji, making 📥 unambiguous, and not ending a turn while prompts are 📥.
-- [x] [#subagent-operator-request-parent-leaf-context] Should a parent that has subprompts stay one executable head (#nestedsubprompts), or become non-executable prefixed context so only the leaves run and a blocker on the parent does not stop those leaves? Worker 01a188e5-ad81-70d0-8926-43381e563159 landed the live-subprompt answer on fix/parent-is-leaf-context at 90cf29ae63668f53168938364d26ad25faf87837. (1) Keep one head: the parent with free-text subprompts stays the executable prompt, and a blocker on that head holds the whole unit. The landed subprompt-answer rule stays. (2) Leaf-only: once a parent has subprompts, the parent is prefixed context and is not executable. Only leaves run. A blocker on the parent does not stop those leaves.
 <!-- /agent:todo -->
 
 ## Backlog <!-- agent:backlog priority queue -->

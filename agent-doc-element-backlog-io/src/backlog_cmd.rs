@@ -162,30 +162,15 @@ pub fn queue_operator_answer_row_ids(content: &str) -> Result<Vec<String>> {
 pub fn sync_queue_operator_actions(file: &Path, actions: &[(String, String)]) -> Result<bool> {
     let full = read_command_document(file, "sync queue operator actions")?;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(&full);
-    let components = element::parse(&full).context("failed to parse components")?;
-    let queues = agent_doc_queue::queue_set::QueueSet::parse(&full, &components)?;
-    let mut replacements = Vec::new();
-    for queue in queues.blocks() {
-        let component = queue.component;
-        let body = component.content(&full);
-        if let Some((projected, _)) =
-            agent_doc_queue::document_queue::project_prompt_operator_actions(
-                body,
-                actions,
-                &open_todo_ids,
-            )?
-        {
-            replacements.push((component.open_end, component.close_start, projected));
-        }
-    }
-    if replacements.is_empty() {
+    let Some(target) =
+        agent_doc_queue::document_queue::project_all_prompt_operator_actions(
+            &full,
+            actions,
+            &open_todo_ids,
+        )?
+    else {
         return Ok(false);
-    }
-    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
-    let mut target = full.clone();
-    for (start, end, projected) in replacements {
-        target.replace_range(start..end, &projected);
-    }
+    };
     persist_pending_write(file, &full, &target)?;
     emit_pending_receipt("[queue] synchronized operator-action indicators".to_string());
     Ok(true)

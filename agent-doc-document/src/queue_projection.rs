@@ -375,7 +375,11 @@ fn trailing_operator_action_annotation(text: &str) -> Option<(&str, &str, usize)
     None
 }
 
-fn is_reserved_operator_action_id(id: &str) -> bool {
+/// Whether `id` belongs to the reserved namespace used to carry a blocking
+/// subagent request and its eventual operator decision through queue rows.
+/// Ordinary tracked-work ids are deliberately excluded: completing one does
+/// not make every textual occurrence of that id a decision annotation.
+pub fn is_reserved_operator_action_id(id: &str) -> bool {
     id.to_ascii_lowercase()
         .starts_with("subagent-operator-request-")
 }

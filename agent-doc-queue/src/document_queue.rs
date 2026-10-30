@@ -1913,6 +1913,41 @@ pub fn project_prompt_operator_actions(
     Ok(Some((projected, reparsed)))
 }
 
+/// Project request-linked operator actions in every queue block in `content`.
+///
+/// Queue selection governs execution order, not decision visibility. A single
+/// reserved request id may annotate several prompts (and several `agent:run`
+/// blocks), so opening or resolving it must update all of those occurrences in
+/// one document successor.
+pub fn project_all_prompt_operator_actions(
+    content: &str,
+    actions: &[(String, String)],
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> Result<Option<String>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let queues = crate::queue_set::QueueSet::parse(content, &components)?;
+    let mut replacements = Vec::new();
+    for queue in queues.blocks() {
+        let component = queue.component;
+        if let Some((projected, _)) = project_prompt_operator_actions(
+            component.content(content),
+            actions,
+            open_todo_ids,
+        )? {
+            replacements.push((component.open_end, component.close_start, projected));
+        }
+    }
+    if replacements.is_empty() {
+        return Ok(None);
+    }
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    let mut projected = content.to_string();
+    for (start, end, body) in replacements {
+        projected.replace_range(start..end, &body);
+    }
+    Ok(Some(projected))
+}
+
 pub fn set_prompt_operator_actions(
     entries: &[QueueEntry],
     actions: &[(String, String)],
@@ -1949,6 +1984,11 @@ pub fn set_prompt_operator_actions(
         if live {
             for (queue_item, request_id) in actions {
                 let request_id = request_id.to_ascii_lowercase();
+                if !agent_doc_document::queue_projection::is_reserved_operator_action_id(
+                    &request_id,
+                ) {
+                    continue;
+                }
                 let direct_match =
                     agent_doc_document::queue_projection::operator_request_item_matches_row(
                         &prompt.text,
@@ -10747,6 +10787,23 @@ mod tests {
         assert_eq!(
             cleared,
             "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+        );
+    }
+
+    #[test]
+    fn operator_action_projection_reserves_automatic_annotations_for_request_ids() {
+        let body = "- Decide the ordinary tracked item\n";
+        let entries = parse(body).unwrap();
+        let ordinary_id = "ordinary-work-id".to_string();
+        let actions = vec![(
+            "Decide the ordinary tracked item".to_string(),
+            ordinary_id.clone(),
+        )];
+        let open = std::collections::HashSet::from([ordinary_id]);
+
+        assert!(
+            set_prompt_operator_actions(&entries, &actions, &open).is_none(),
+            "ordinary tracked ids must not become decision annotations"
         );
     }
 

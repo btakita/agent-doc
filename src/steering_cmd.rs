@@ -45,8 +45,18 @@ fn print_report(report: Option<SteeringReport>, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run(file: &Path, json: bool, peek: bool, follow: bool) -> Result<()> {
+pub fn run(
+    file: &Path,
+    json: bool,
+    peek: bool,
+    follow: bool,
+    token: Option<&str>,
+) -> Result<()> {
     anyhow::ensure!(file.is_file(), "document not found: {}", file.display());
+    if let Some(token) = token {
+        println!("{}", steering::take_steering_surrogate(file, token)?);
+        return Ok(());
+    }
     if !follow {
         let report = steering::observe(file, CONSUMER_CLI, !peek)?;
         return print_report(report, json);

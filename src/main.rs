@@ -2792,6 +2792,10 @@ enum Commands {
         /// FILE narrows "latest" to that document
         #[arg(long, conflicts_with_all = ["peek", "follow"])]
         explain: bool,
+        /// Resolve a one-shot compact steering reference emitted by a hook or
+        /// running-turn send. The token is document-, cycle-, and TTL-bound.
+        #[arg(long, conflicts_with_all = ["json", "peek", "follow", "explain"])]
+        token: Option<String>,
     },
     /// Print the session document the current tmux pane claims:
     /// the FILE that the no-argument `/agent-doc` /
@@ -6206,12 +6210,13 @@ fn try_main() -> anyhow::Result<()> {
             json,
             peek,
             follow,
+            token,
             ..
         } => {
             let file = file.context(
                 "agent-doc steering needs a session document: agent-doc steering <FILE>",
             )?;
-            steering_cmd::run(&file, json, peek, follow)
+            steering_cmd::run(&file, json, peek, follow, token.as_deref())
         }
         Commands::Outline { file, json } => outline_cmd::run_outline(&file, json),
         Commands::Document { pane, json } => {

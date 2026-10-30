@@ -2283,6 +2283,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tmux-router",
+ "uuid",
 ]
 
 [[package]]

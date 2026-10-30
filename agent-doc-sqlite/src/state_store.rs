@@ -2273,6 +2273,21 @@ pub fn clear_project_runtime_state_in_db(conn: &Connection, state_key: &str) -> 
     Ok(())
 }
 
+/// Delete a runtime record only when it still contains the payload the caller
+/// validated. This compare-and-delete is the single-statement claim used by
+/// one-shot references: concurrent readers cannot both consume the same
+/// record after racing on an earlier read.
+pub fn clear_project_runtime_state_if_payload_in_db(
+    conn: &Connection,
+    state_key: &str,
+    payload: &str,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM project_runtime_state WHERE state_key = ?1 AND payload = ?2",
+        params![state_key, payload],
+    )? > 0)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentRuntimeStateRecord {
     pub document_hash: String,

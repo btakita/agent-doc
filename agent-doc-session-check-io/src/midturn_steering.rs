@@ -45,6 +45,21 @@ pub const CONSUMER_FOLLOW: &str = "follow";
 /// operator-authored mid-turn steering.
 pub const STATUS_SYNC_CHECKPOINT_MARKER: &str = "[agent-doc] status-sync checkpoint";
 
+/// A compact steering reference is intentionally short-lived. The active
+/// cycle check normally expires it first; this wall-clock ceiling also bounds
+/// abandoned records when a composer paste never reaches the agent.
+pub const STEERING_SURROGATE_TTL_MS: u64 = 5 * 60 * 1_000;
+
+const STEERING_SURROGATE_KEY_PREFIX: &str = "steering-surrogate:";
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+struct SteeringSurrogate {
+    document: String,
+    cycle_id: String,
+    payload: String,
+    expires_at_ms: u64,
+}
+
 /// What one observation produced for a consumer.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SteeringReport {
@@ -70,6 +85,117 @@ impl SteeringReport {
             core::render_steering_context(&self.document, &self.items, self.pending)
         }
     }
+}
+
+fn shell_single_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+fn steering_surrogate_key(token: &str) -> String {
+    format!("{STEERING_SURROGATE_KEY_PREFIX}{token}")
+}
+
+fn canonical_document(file: &Path) -> Result<String> {
+    Ok(file
+        .canonicalize()
+        .with_context(|| format!("canonicalize steering document {}", file.display()))?
+        .display()
+        .to_string())
+}
+
+fn gc_expired_steering_surrogates(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    observed_at_ms: u64,
+) -> Result<()> {
+    for (key, raw, _) in agent_doc_sqlite::state_store::list_project_runtime_state_from_db(
+        conn,
+        STEERING_SURROGATE_KEY_PREFIX,
+    )? {
+        let expired = serde_json::from_str::<SteeringSurrogate>(&raw)
+            .map(|record| record.expires_at_ms <= observed_at_ms)
+            .unwrap_or(true);
+        if expired {
+            agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(conn, &key)?;
+        }
+    }
+    Ok(())
+}
+
+fn issue_steering_surrogate_at(
+    file: &Path,
+    cycle_id: &str,
+    payload: &str,
+    issued_at_ms: u64,
+) -> Result<String> {
+    anyhow::ensure!(
+        !cycle_id.trim().is_empty(),
+        "cannot issue compact steering without an active cycle"
+    );
+    let root = project_root(file).context("steering document is outside a project")?;
+    let document = canonical_document(file)?;
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let record = SteeringSurrogate {
+        document: document.clone(),
+        cycle_id: cycle_id.to_string(),
+        payload: payload.to_string(),
+        expires_at_ms: issued_at_ms.saturating_add(STEERING_SURROGATE_TTL_MS),
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    gc_expired_steering_surrogates(&conn, issued_at_ms)?;
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &steering_surrogate_key(&token),
+        &serde_json::to_string(&record)?,
+        issued_at_ms,
+    )?;
+    Ok(format!(
+        "[agent-doc] operator steering: run `agent-doc steering {} --token {}` or call MCP tool `agent_doc_steering` with the same file/token within 5m (one use)",
+        shell_single_quote(&document),
+        shell_single_quote(&token),
+    ))
+}
+
+fn take_steering_surrogate_at(file: &Path, token: &str, observed_at_ms: u64) -> Result<String> {
+    anyhow::ensure!(
+        !token.is_empty()
+            && token.len() <= 64
+            && token.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
+        "invalid steering token"
+    );
+    let root = project_root(file).context("steering document is outside a project")?;
+    let document = canonical_document(file)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let key = steering_surrogate_key(token);
+    let raw = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &key)?
+        .context("steering token is unknown, expired, or already consumed")?;
+    let record: SteeringSurrogate = serde_json::from_str(&raw).context("invalid steering token")?;
+    if record.expires_at_ms <= observed_at_ms {
+        agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(&conn, &key)?;
+        anyhow::bail!("steering token expired");
+    }
+    anyhow::ensure!(
+        record.document == document,
+        "steering token belongs to a different document"
+    );
+    let current_cycle = load_watermark(&conn, &state_key("base", file))?
+        .map(|watermark| watermark.cycle_id);
+    anyhow::ensure!(
+        current_cycle.as_deref() == Some(record.cycle_id.as_str()),
+        "steering token belongs to a stale session cycle"
+    );
+    anyhow::ensure!(
+        agent_doc_sqlite::state_store::clear_project_runtime_state_if_payload_in_db(
+            &conn, &key, &raw,
+        )?,
+        "steering token was already consumed"
+    );
+    Ok(record.payload)
+}
+
+/// Resolve and consume a compact steering reference. Tokens are one-shot,
+/// document-bound, cycle-bound, and wall-clock bounded.
+pub fn take_steering_surrogate(file: &Path, token: &str) -> Result<String> {
+    take_steering_surrogate_at(file, token, now_ms())
 }
 
 fn state_key(kind: &str, file: &Path) -> String {
@@ -1527,11 +1653,12 @@ pub fn prepare_route_sync_steering(file: &Path) -> Result<Option<RouteSyncSteeri
     let diff = previous
         .as_deref()
         .and_then(|previous| agent_doc_diff::unified_diff_from_contents(previous, &content));
-    let instructions =
+    let full_instructions =
         core::render_route_sync_steering(&file.display().to_string(), diff.as_deref(), &items);
-    let Some(instructions) = instructions else {
+    let Some(full_instructions) = full_instructions else {
         return Ok(None);
     };
+    let instructions = issue_steering_surrogate_at(file, &cycle_id, &full_instructions, now_ms())?;
     Ok(Some(RouteSyncSteering {
         instructions,
         pending_items: items.len(),
@@ -2021,8 +2148,8 @@ fn post_tool_use_response_at_with_checkpoint(
     let Some(file) = session_document(&input)? else {
         return Ok(None);
     };
-    let report = match observe(&file, CONSUMER_HOOK, true) {
-        Ok(report) => report,
+    let prepared = match prepare(&file, CONSUMER_HOOK, ClosedCyclePolicy::Hook) {
+        Ok(prepared) => prepared,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
                 &file,
@@ -2035,8 +2162,27 @@ fn post_tool_use_response_at_with_checkpoint(
         }
     };
     let mut contexts = Vec::new();
-    if let Some(context) = report.and_then(|report| report.render()) {
-        contexts.push(context);
+    if let Some(prepared) = prepared {
+        let context = prepared
+            .report
+            .as_ref()
+            .and_then(SteeringReport::render)
+            .map(|payload| {
+                let cycle_id = prepared
+                    .report
+                    .as_ref()
+                    .map(|report| report.cycle_id.as_str())
+                    .unwrap_or_default();
+                issue_steering_surrogate_at(&file, cycle_id, &payload, observed_at_ms)
+            })
+            .transpose()?;
+        // Persist only after the full payload is durably retrievable. A failed
+        // issue leaves the hook watermark untouched, so the next tool event
+        // can retry without losing operator intent.
+        prepared.acknowledge(&file)?;
+        if let Some(context) = context {
+            contexts.push(context);
+        }
     }
     match checkpoint(&file, observed_at_ms) {
         Ok(Some(context)) => contexts.push(context),
@@ -2094,6 +2240,14 @@ pub fn handle_post_tool_use() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compact_token(context: &str) -> &str {
+        context
+            .split("--token '")
+            .nth(1)
+            .and_then(|tail| tail.split('\'').next())
+            .expect("compact steering command carries a quoted token")
+    }
 
     struct LiveEditorFixture {
         file: PathBuf,
@@ -2239,22 +2393,22 @@ mod tests {
         let first = prepare_route_sync_steering(&file)
             .unwrap()
             .expect("first send has a diff");
+        assert_eq!(first.instructions.lines().count(), 1, "{}", first.instructions);
+        assert!(first.instructions.contains("agent-doc steering"));
+        let first_payload = take_steering_surrogate(&file, compact_token(&first.instructions))
+            .expect("compact route steering resolves once");
         assert!(
-            first.instructions.contains("+ship the diff")
-                || first.instructions.contains("ship the diff"),
+            first_payload.contains("+ship the diff") || first_payload.contains("ship the diff"),
             "{}",
-            first.instructions
+            first_payload
         );
         assert!(
-            first.instructions.contains("diff since the last send")
-                || first.instructions.contains(core::STEERING_MARKER),
+            first_payload.contains("diff since the last send")
+                || first_payload.contains(core::STEERING_MARKER),
             "{}",
-            first.instructions
+            first_payload
         );
-        assert!(
-            !first.instructions.contains("agent-doc plan.md\n"),
-            "{first:?}"
-        );
+        assert!(take_steering_surrogate(&file, compact_token(&first.instructions)).is_err());
         record_route_sync_steering_delivered(&file, &first.cycle_id, &first.content).unwrap();
         assert!(
             prepare_route_sync_steering(&file).unwrap().is_none(),
@@ -2270,18 +2424,67 @@ mod tests {
         let second = prepare_route_sync_steering(&file)
             .unwrap()
             .expect("second send is only the newer diff");
+        let second_payload = take_steering_surrogate(&file, compact_token(&second.instructions))
+            .expect("second compact route steering resolves");
         assert!(
-            second.instructions.contains("and the follow-up"),
+            second_payload.contains("and the follow-up"),
             "{}",
-            second.instructions
+            second_payload
         );
         assert!(
-            !second
-                .instructions
+            !second_payload
                 .lines()
                 .any(|line| line.starts_with('+') && line.contains("ship the diff")),
             "the previous send is the baseline, not the cycle admission text: {}",
-            second.instructions
+            second_payload
+        );
+    }
+
+    #[test]
+    fn compact_steering_tokens_fail_closed_for_wrong_document_ttl_and_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let other = dir.path().join("other.md");
+        let baseline = "# S\n\n<!-- agent:queue -->\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        std::fs::write(&other, baseline).unwrap();
+        seed_for_cycle(&file, "cycle-1", baseline, None, Vec::new()).unwrap();
+
+        let reference = issue_steering_surrogate_at(&file, "cycle-1", "secret payload", 100)
+            .expect("issue document-bound token");
+        let token = compact_token(&reference);
+        assert!(
+            take_steering_surrogate_at(&other, token, 101)
+                .unwrap_err()
+                .to_string()
+                .contains("different document")
+        );
+        assert_eq!(
+            take_steering_surrogate_at(&file, token, 101).unwrap(),
+            "secret payload",
+            "a wrong-document probe must not consume the token"
+        );
+
+        let expired = issue_steering_surrogate_at(&file, "cycle-1", "too late", 200).unwrap();
+        assert!(
+            take_steering_surrogate_at(
+                &file,
+                compact_token(&expired),
+                200 + STEERING_SURROGATE_TTL_MS,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("expired")
+        );
+
+        let stale = issue_steering_surrogate_at(&file, "cycle-1", "old cycle", 300).unwrap();
+        seed_for_cycle(&file, "cycle-2", baseline, None, Vec::new()).unwrap();
+        assert!(
+            take_steering_surrogate_at(&file, compact_token(&stale), 301)
+                .unwrap_err()
+                .to_string()
+                .contains("stale session cycle")
         );
     }
 
@@ -2943,9 +3146,14 @@ mod tests {
         let context = output["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        assert!(context.starts_with(core::STEERING_MARKER), "{context}");
-        assert!(context.contains("dispatch=subagent"), "{context}");
-        assert!(context.contains("#subagents fix issue 111"), "{context}");
+        assert_eq!(context.lines().count(), 1, "{context}");
+        assert!(context.contains("agent-doc steering"), "{context}");
+        assert!(!context.contains("#subagents fix issue 111"), "{context}");
+        let expanded = take_steering_surrogate(&file, compact_token(context)).unwrap();
+        assert!(expanded.starts_with(core::STEERING_MARKER), "{expanded}");
+        assert!(expanded.contains("dispatch=subagent"), "{expanded}");
+        assert!(expanded.contains("#subagents fix issue 111"), "{expanded}");
+        assert!(take_steering_surrogate(&file, compact_token(context)).is_err());
         // Exactly once.
         assert_eq!(post_tool_use_response(&payload).unwrap(), None);
     }
@@ -3431,8 +3639,12 @@ mod tests {
         let combined_context = combined["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        assert!(combined_context.contains(core::STEERING_MARKER));
-        assert!(combined_context.contains("inspect issue 42"));
+        assert!(combined_context.contains("agent-doc steering"));
+        assert!(!combined_context.contains("inspect issue 42"));
+        let expanded =
+            take_steering_surrogate(&file, compact_token(combined_context)).unwrap();
+        assert!(expanded.contains(core::STEERING_MARKER));
+        assert!(expanded.contains("inspect issue 42"));
         assert!(combined_context.contains(STATUS_SYNC_CHECKPOINT_MARKER));
 
         // Removing the opt-in interval leaves sync active for the next
@@ -3509,7 +3721,9 @@ mod tests {
         let context = delivered["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap();
-        assert!(context.contains("issues/127"), "{context}");
+        assert!(!context.contains("issues/127"), "{context}");
+        let expanded = take_steering_surrogate(&file, compact_token(context)).unwrap();
+        assert!(expanded.contains("issues/127"), "{expanded}");
         assert_eq!(
             post_tool_use_response(&hook_payload(root, None)).unwrap(),
             None

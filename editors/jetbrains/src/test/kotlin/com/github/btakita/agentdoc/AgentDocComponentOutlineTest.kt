@@ -110,6 +110,30 @@ class AgentDocComponentOutlineTest {
     }
 
     @Test
+    fun `list comments remain annotations instead of component outline items`() {
+        val text = """
+            |<!-- agent:backlog -->
+            |- task
+            |- [//]: # (markdown note)
+            |- %%obsidian note%%
+            |1. %%ordered obsidian note%%
+            |- %%unterminated note
+            |- [//]: # not-a-comment-title
+            |<!-- /agent:backlog -->
+            |""".trimMargin()
+        val spans = spans(text, "backlog")
+
+        assertEquals(
+            listOf("task", "%%unterminated note", "[//]: # not-a-comment-title"),
+            AgentDocComponentOutline.items(text, spans.single(), spans).map { it.label },
+        )
+        assertEquals(
+            "<!-- agent:backlog · 3 items -->",
+            AgentDocComponentOutline.foldSpecs(text, spans).single().placeholder,
+        )
+    }
+
+    @Test
     fun `fold regions cover each multi-line component with a name and item count placeholder`() {
         val folds = AgentDocComponentOutline.foldSpecs(doc, all)
         assertEquals(listOf("exchange", "backlog", "inner"), folds.map { it.name })

@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 6 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->

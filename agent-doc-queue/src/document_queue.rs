@@ -3252,6 +3252,29 @@ pub fn row_matches_head_text(entries: &[QueueEntry], index: usize, head_text: &s
     lineage_claim_text(entries, index).is_some_and(|lineage| same_prompt(&lineage, head_text))
 }
 
+/// Match a submitted head against either an executable leaf or a group parent used as context.
+///
+/// Group parents remain ineligible for execution, but their nested lineage can still identify the
+/// queue block and render the prompt tree that accompanies a submitted leaf-only head.
+pub fn row_matches_submitted_head_text(
+    entries: &[QueueEntry],
+    index: usize,
+    head_text: &str,
+) -> bool {
+    if row_matches_head_text(entries, index, head_text) {
+        return true;
+    }
+    if !entry_is_group_parent(entries, index) {
+        return false;
+    }
+    let Some(prompt) = entries.get(index).and_then(prompt_of) else {
+        return false;
+    };
+    let identity = strip_in_progress_marker(prompt.text.trim());
+    nest_vector_at(entries, index, &identity)
+        .is_some_and(|lineage| same_prompt(&lineage, head_text))
+}
+
 /// `true` when `ancestor_idx` is on the nest chain above `leaf_idx`.
 pub fn entry_is_ancestor_of(entries: &[QueueEntry], ancestor_idx: usize, leaf_idx: usize) -> bool {
     if ancestor_idx >= leaf_idx {
@@ -3325,7 +3348,8 @@ pub fn submitted_group_prompt_at(entries: &[QueueEntry], index: usize) -> Option
     if identity.trim().is_empty() {
         return None;
     }
-    Some(with_prompt_tree(entries, index, &identity))
+    let lineage = nest_vector_at(entries, index, &identity).unwrap_or(identity);
+    Some(with_prompt_tree(entries, index, &lineage))
 }
 
 const PROMPT_TREE_HEADER: &str =

@@ -778,10 +778,29 @@ fn first_submitted_in_document(
     skip: &impl Fn(&str) -> bool,
 ) -> Option<String> {
     for entries in parsed_queue_bodies(content) {
-        if let Some(found) =
-            crate::document_queue::locate_submitted_prompt(&entries, head_text, 0, skip)
-        {
-            return Some(found);
+        for (index, entry) in entries.iter().enumerate() {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if skip(prompt.text.as_str()) {
+                continue;
+            }
+            if crate::document_queue::entry_is_group_parent(&entries, index) {
+                // A directly named group remains context-only and preserves the historical
+                // raw-head result. A nested lineage head may still identify that group so its
+                // prompt tree can accompany authorization and later-section dispatch.
+                if !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                    && crate::document_queue::row_matches_submitted_head_text(
+                        &entries, index, head_text,
+                    )
+                {
+                    return crate::document_queue::submitted_group_prompt_at(&entries, index);
+                }
+                continue;
+            }
+            if crate::document_queue::row_matches_head_text(&entries, index, head_text) {
+                return crate::document_queue::submitted_prompt_at(&entries, index);
+            }
         }
     }
     None
@@ -900,14 +919,19 @@ pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<Strin
                     let crate::document_queue::QueueEntry::Prompt(_) = entry else {
                         continue;
                     };
-                    if crate::document_queue::entry_is_group_parent(entries, idx)
-                        || !crate::document_queue::row_matches_head_text(entries, idx, head)
-                    {
+                    if !crate::document_queue::row_matches_submitted_head_text(entries, idx, head) {
                         continue;
                     }
+                    let submitted = if crate::document_queue::entry_is_group_parent(entries, idx) {
+                        crate::document_queue::submitted_group_prompt_at(entries, idx)
+                    } else {
+                        crate::document_queue::submitted_prompt_at(entries, idx)
+                    };
+                    let Some(submitted) = submitted else {
+                        continue;
+                    };
                     cursors[body_index] = idx + 1;
-                    return crate::document_queue::submitted_prompt_at(entries, idx)
-                        .unwrap_or_else(|| head.clone());
+                    return submitted;
                 }
             }
             head.clone()

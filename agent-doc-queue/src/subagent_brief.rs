@@ -188,8 +188,7 @@ fn block_contains_head(block: &crate::queue_graph::QueueBlock<'_>, item: &str) -
     let entries = crate::nested_claim_steer::expand_slice_if_installed(&block.entries);
     entries.iter().enumerate().any(|(index, entry)| {
         matches!(entry, QueueEntry::Prompt(_))
-            && !crate::document_queue::entry_is_group_parent(entries.as_ref(), index)
-            && crate::document_queue::row_matches_head_text(entries.as_ref(), index, item)
+            && crate::document_queue::row_matches_submitted_head_text(entries.as_ref(), index, item)
     })
 }
 

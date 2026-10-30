@@ -1190,7 +1190,13 @@ without structural provenance retain the operator-owned protection.
   not only a passive layout observation. The editor must first submit the
   binary-owned, nonblocking tmux start command for that document and await its
   start receipt; only afterward may it publish the file-open surface. This
-  automatic start does not create, select, or reveal an IDE terminal; the
+  ordering must not make tmux start depend on that not-yet-published editor
+  surface: when the on-disk document is already a valid agent-doc document with
+  complete session metadata, start must accept that metadata without resolving,
+  repairing, or writing through live editor authority. Documents that still
+  require metadata repair or session injection retain the authoritative
+  document-resolution path. The automatic start does not create, select, or
+  reveal an IDE terminal; the
   surface effect still owns layout and focus.
   This ordering prevents the automatic layout effect from winning the race by
   creating an idle `layout-provision` pane that looks like an existing owner to

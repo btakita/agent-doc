@@ -587,6 +587,15 @@ fn prepare_start_document_for_tmux_bootstrap(file: &Path) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
+    // The editor deliberately awaits this path before publishing its file-open
+    // surface. When session metadata is already complete, consulting live
+    // editor authority here would create a startup cycle: the editor waits for
+    // tmux start while tmux start waits for the editor replica. This read-only
+    // disk proof is sufficient because no document mutation is required.
+    if agent_doc_frontmatter_io::session::session_metadata_ready_on_disk(file) {
+        return Ok(());
+    }
+
     let _ = agent_doc_run_io::repair_document_frontmatter_on_disk(file);
     let start_document = resolve_start_admission_document(file, StartRuntimeAdmission::NewSession)
         .with_context(|| format!("failed to read {}", file.display()))?;
@@ -3258,6 +3267,18 @@ mod tests {
             StartAdmissionReadAuthority::DiskMetadataBootstrapEditorModelUnavailable
         );
         assert!(document.authority.needs_post_start_document_model_ensure());
+    }
+
+    #[test]
+    fn tmux_start_uses_complete_disk_metadata_without_editor_authority() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let disk = "---\nagent_doc_session: tmux-start-ready\n---\n\n# Session\n";
+        std::fs::write(&file, disk).unwrap();
+
+        prepare_start_document_for_tmux_bootstrap(&file).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
     }
 
     #[test]

@@ -245,6 +245,21 @@ pub fn ensure_session_for_file(content: &str, file: &Path) -> Result<(String, St
     ensure_session_with_ssh_resolver(content, &ctx)
 }
 
+/// Return whether the disk replica is already a valid agent-doc document with
+/// complete session metadata. This is a read-only bootstrap proof for callers
+/// that must not wait for live editor authority when no metadata write is needed.
+pub fn session_metadata_ready_on_disk(file: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return false;
+    };
+    if require_agent_doc_document(&content, file).is_err() {
+        return false;
+    }
+    ensure_session_for_file(&content, file)
+        .map(|(updated_content, _)| updated_content == content)
+        .unwrap_or(false)
+}
+
 /// Ensure a document has a session id using a cached SSH/project context.
 pub fn ensure_session_for_file_with_context(
     content: &str,
@@ -825,6 +840,26 @@ mod tests {
 
         assert!(result.0.contains("agent_doc_session:"));
         assert!(result.0.contains("agent: opencode"));
+    }
+
+    #[test]
+    fn disk_session_metadata_readiness_requires_an_initialized_agent_doc() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        let ready = dir.path().join("ready.md");
+        std::fs::write(
+            &ready,
+            "---\nagent_doc_session: tmux-start-ready\n---\nbody\n",
+        )
+        .unwrap();
+        let missing = dir.path().join("missing.md");
+        std::fs::write(&missing, "---\nagent: codex\n---\nbody\n").unwrap();
+        let plain = dir.path().join("plain.md");
+        std::fs::write(&plain, "# Plain notes\n").unwrap();
+
+        assert!(session_metadata_ready_on_disk(&ready));
+        assert!(!session_metadata_ready_on_disk(&missing));
+        assert!(!session_metadata_ready_on_disk(&plain));
     }
 
     #[test]

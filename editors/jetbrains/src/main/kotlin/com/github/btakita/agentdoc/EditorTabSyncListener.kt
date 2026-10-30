@@ -2062,15 +2062,63 @@ requiredFocusGeneration = requestedFocusGeneration,
             log("fileOpened: non-session file=${file.name}; spanning projection queued")
             return
         }
-        log("fileOpened: file=${file.name}")
-        requestObservation(
-            PendingSurfaceObservation(
-                project = source.project,
-                preferredFile = file,
-                forceReconcile = false,
-                authority = ObservationAuthority.FileOpened,
-            ),
-        )
+        log("fileOpened: file=${file.name}; start-before-surface queued")
+        startOpenedSessionBeforeObservation(source.project, file)
+    }
+
+    /**
+     * Opening a session document is a liveness edge as well as a layout edge. Start the document's
+     * tmux owner before publishing its surface: publishing first lets the automatic layout effect
+     * provision an idle `layout-provision` pane, after which an idempotent start sees an existing
+     * owner and the reopened document never receives a real agent-doc start.
+     *
+     * Project-root resolution stays off the EDT. [IdeTerminalCoordinator] owns binary start
+     * idempotence; this listener only preserves the causal order between that receipt and the
+     * ordinary reactive surface publication. The automatic edge does not reveal or select a
+     * terminal — the surface effect still owns layout and focus.
+     */
+    private fun startOpenedSessionBeforeObservation(project: Project, file: VirtualFile) {
+        GenerationWork.executeOnPooledThread {
+            if (project.isDisposed || !file.isValid) return@executeOnPooledThread
+            val (cwd, relativePath) =
+                try {
+                    TerminalUtil.resolveProject(project, file)
+                } catch (failure: Throwable) {
+                    LOG.warn(
+                        "[layout-sync] fileOpened start resolution failed for ${file.path}",
+                        failure,
+                    )
+                    return@executeOnPooledThread
+                }
+            IdeTerminalCoordinator.startInPane(
+                project = project,
+                cwd = cwd,
+                relativePath = relativePath,
+                onReady = {
+                    if (
+                        project.isDisposed ||
+                            !file.isValid ||
+                            !FileEditorManager.getInstance(project).isFileOpen(file)
+                    ) {
+                        return@startInPane
+                    }
+                    requestObservation(
+                        PendingSurfaceObservation(
+                            project = project,
+                            preferredFile = file,
+                            forceReconcile = false,
+                            authority = ObservationAuthority.FileOpened,
+                        ),
+                    )
+                    log("fileOpened: file=${file.name}; start ready, surface queued")
+                },
+                onFailure = { message ->
+                    LOG.warn(
+                        "[layout-sync] fileOpened start failed for ${file.path}: $message",
+                    )
+                },
+            )
+        }
     }
 
     /**

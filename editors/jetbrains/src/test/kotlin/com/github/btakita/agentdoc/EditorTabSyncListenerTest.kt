@@ -1436,7 +1436,7 @@ previousSelectionPath = "/repo/tasks/tsift.md",
     }
 
     @Test
-    fun `markdown file open republishes the editor surface after the startup seed`() {
+    fun `session file reopen starts its owner before publishing the editor surface`() {
         val source =
             Files.readString(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/EditorTabSyncListener.kt")
@@ -1452,12 +1452,30 @@ previousSelectionPath = "/repo/tasks/tsift.md",
         val fileOpened =
             source
                 .substringAfter(fileOpenedMarker)
-                .substringBefore("override fun fileClosed")
+                .substringBefore("private fun startOpenedSessionBeforeObservation(")
         assertTrue(fileOpened.contains("if (!AgentDocSessionFiles.isSessionDocument(file))"))
         assertTrue(fileOpened.contains("authority = ObservationAuthority.Layout"))
-        assertTrue(fileOpened.contains("preferredFile = file"))
-        assertTrue(fileOpened.contains("authority = ObservationAuthority.FileOpened"))
+        assertTrue(fileOpened.contains("startOpenedSessionBeforeObservation(source.project, file)"))
+        assertFalse(fileOpened.contains("authority = ObservationAuthority.FileOpened"))
         assertFalse(fileOpened.contains("onEditorLayoutChanged(source.project)"))
+
+        val startBeforeObservation =
+            source
+                .substringAfter("private fun startOpenedSessionBeforeObservation(")
+                .substringBefore("override fun fileClosed")
+        val startCall = startBeforeObservation.indexOf("IdeTerminalCoordinator.startInPane(")
+        val surfacePublish = startBeforeObservation.indexOf("requestObservation(")
+        assertTrue(startCall >= 0)
+        assertTrue(surfacePublish > startCall)
+        assertTrue(startBeforeObservation.contains("onReady ="))
+        assertTrue(startBeforeObservation.contains("isFileOpen(file)"))
+        assertTrue(startBeforeObservation.contains("preferredFile = file"))
+        assertTrue(startBeforeObservation.contains("authority = ObservationAuthority.FileOpened"))
+        assertFalse(
+            startBeforeObservation
+                .substringBefore("onReady =")
+                .contains("requestObservation("),
+        )
     }
 
     @Test

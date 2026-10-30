@@ -1186,16 +1186,19 @@ without structural provenance retain the operator-owned protection.
 - Passive `sync --no-autostart` keeps layout repair explicit and does not run
   `repair_layout`; automatic editor sync should not rename/move stash windows
   while it is only trying to follow a selection event.
-- Because opening/selecting a document fires only the passive `sync
-  --no-autostart` path, a freshly-opened document whose tmux pane is not already
-  up is **not** autoloaded (by design — the passive path avoids attach-first
-  pane growth). The editor exposes an explicit on-demand loader, `Load Tmux
-  Window` (JB action `AgentDoc.LoadTmuxWindow`), which runs the autostart
-  layout-sync path (`sync` with autostart, i.e. without `--no-autostart`) for
-  the focused document so the pane is created and the harness started via the
-  normal `route` auto-start. The action must not invoke `agent-doc start`
-  directly (that runs the harness as a blocking restart-loop child unsuitable
-  for a plugin thread).
+- Opening or reopening an agent-doc session document is an explicit start edge,
+  not only a passive layout observation. The editor must first submit the
+  binary-owned, nonblocking tmux start command for that document and await its
+  start receipt; only afterward may it publish the file-open surface. This
+  automatic start does not create, select, or reveal an IDE terminal; the
+  surface effect still owns layout and focus.
+  This ordering prevents the automatic layout effect from winning the race by
+  creating an idle `layout-provision` pane that looks like an existing owner to
+  the later start. The binary resolves the pane and serializes duplicate starts,
+  so a reopen of an already-running document is idempotent. The editor must not
+  invoke blocking `agent-doc start` as a plugin subprocess or infer liveness
+  from pane contents. Selection, focus, activation, and structural layout
+  publications that are not file-open edges remain passive.
 - If an editor supplies `--window W`, `W` must already be an `agent-doc` window for the target tmux session. When the named session has no visible `agent-doc` window, normal sync must fail closed and preserve layout instead of reconciling remembered docs onto an arbitrary non-`agent-doc` window.
 - A validated explicit `--window W` is the layout target; sync must not replace
   it by re-resolving the session's named window or report that the named

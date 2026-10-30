@@ -7064,7 +7064,8 @@ mod tests {
             "- parent epic\n",
             "  - [//]: # (markdown note)\n",
             "  - %%should this run?%%\n",
-            "  - child task\n"
+            "  - child task with %%inline note%%\n",
+            "  - [//]: # (note) plus runnable work\n"
         );
         let entries = parse(body).unwrap();
         let prompts: Vec<&str> = entries
@@ -7075,7 +7076,14 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(prompts, vec!["parent epic", "child task"]);
+        assert_eq!(
+            prompts,
+            vec![
+                "parent epic",
+                "child task with %%inline note%%",
+                "[//]: # (note) plus runnable work"
+            ]
+        );
         assert_eq!(render(&entries), body);
     }
 

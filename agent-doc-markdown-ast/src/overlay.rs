@@ -879,7 +879,7 @@ mod tests {
     fn list_comment_items_are_preserved_but_not_typed() {
         for name in ["run", "loop", "queue", "backlog", "review", "icebox"] {
             let source = format!(
-                "<!-- agent:{name} -->\n- parent\n  - [//]: # (markdown note)\n  - %%obsidian note%%\n  - child\n<!-- /agent:{name} -->\n"
+                "<!-- agent:{name} -->\n- parent\n  - [//]: # (markdown note)\n  - %%obsidian note%%\n  - child with %%inline note%%\n  - [//]: # (note) plus work\n<!-- /agent:{name} -->\n"
             );
             let parsed = components(&source);
             assert_eq!(parsed.len(), 1, "component {name}");
@@ -888,9 +888,32 @@ mod tests {
                 .iter()
                 .map(|item| item.text.as_str())
                 .collect();
-            assert_eq!(texts, vec!["parent", "child"], "component {name}");
+            assert_eq!(
+                texts,
+                vec![
+                    "parent",
+                    "child with %%inline note%%",
+                    "[//]: # (note) plus work"
+                ],
+                "component {name}"
+            );
             assert!(source.contains("- [//]: # (markdown note)"));
             assert!(source.contains("- %%obsidian note%%"));
+        }
+    }
+
+    #[test]
+    fn list_comment_recognition_requires_the_whole_leaf_payload() {
+        for payload in ["[//]: # (markdown note)", "%%obsidian note%%"] {
+            assert!(is_ignored_list_comment(payload), "payload: {payload}");
+        }
+        for payload in [
+            "work then %%obsidian note%%",
+            "%%obsidian note%% then work",
+            "[//]: # (markdown note) then work",
+            "work then [//]: # (markdown note)",
+        ] {
+            assert!(!is_ignored_list_comment(payload), "payload: {payload}");
         }
     }
 

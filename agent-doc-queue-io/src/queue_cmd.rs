@@ -187,6 +187,11 @@ pub enum ClaimProjectionScope<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeProjectionRows {
     All,
+    /// A claim-ledger transition must not take ownership of a newly typed,
+    /// unrelated bare row merely to add the cosmetic pending marker. The
+    /// transition still repaints rows with durable/runtime evidence and rows
+    /// that already carry a lifecycle marker.
+    LifecycleEvidence,
     BlockedOrPreviouslyBlocked,
 }
 
@@ -391,22 +396,36 @@ fn derive_runtime_projection_scoped(
                     let receipt = (cleared_identity.as_ref() != Some(&identity) && claim.is_none())
                         .then(|| receipts.get(&identity))
                         .flatten();
+                    let has_completion_evidence = completion_evidence.iter().any(|item| {
+                        agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                            item,
+                            &prompt.text,
+                        )
+                    });
+                    let is_selected = selected.claims_at(block.entries, index);
+                    let is_blocked = blockers.blocks_row(&prompt.text);
+                    if rows == RuntimeProjectionRows::LifecycleEvidence
+                        && observed.is_none()
+                        && !state_degraded
+                        && claim.is_none()
+                        && receipt.is_none()
+                        && !has_completion_evidence
+                        && !is_selected
+                        && !is_blocked
+                    {
+                        return None;
+                    }
                     let marker = if state_degraded || durable_on_struck {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
                         claim.state.projection_marker()
                     } else if receipt.is_some() {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                    } else if completion_evidence.iter().any(|item| {
-                        agent_doc_queue::queue_claim::completion_evidence_matches_row(
-                            item,
-                            &prompt.text,
-                        )
-                    }) {
+                    } else if has_completion_evidence {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
-                    } else if selected.claims_at(block.entries, index) {
+                    } else if is_selected {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Running
-                    } else if blockers.blocks_row(&prompt.text) {
+                    } else if is_blocked {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
                     } else if matches!(
                         observed,
@@ -563,7 +582,7 @@ pub fn project_claim_runtime_state_with_effects(
         effects,
         file,
         cleared_item,
-        RuntimeProjectionRows::All,
+        RuntimeProjectionRows::LifecycleEvidence,
     )
 }
 
@@ -602,8 +621,14 @@ fn project_runtime_state_with_effects(
             crate::queue_claim::reconcile_completion_evidence(file, &current)?;
         }
         let projection = match rows {
-            RuntimeProjectionRows::All => {
-                derive_claim_runtime_projection(file, &current, cleared_item)?
+            RuntimeProjectionRows::All | RuntimeProjectionRows::LifecycleEvidence => {
+                derive_runtime_projection_scoped(
+                    file,
+                    &current,
+                    cleared_item,
+                    ClaimProjectionScope::Document,
+                    rows,
+                )?
             }
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &current)?
@@ -625,8 +650,14 @@ fn project_runtime_state_with_effects(
         let authoritative =
             effects.current_document_content(file, "queue_claim_runtime_projection_verify")?;
         let settled = match rows {
-            RuntimeProjectionRows::All => {
-                derive_claim_runtime_projection(file, &authoritative, cleared_item)?
+            RuntimeProjectionRows::All | RuntimeProjectionRows::LifecycleEvidence => {
+                derive_runtime_projection_scoped(
+                    file,
+                    &authoritative,
+                    cleared_item,
+                    ClaimProjectionScope::Document,
+                    rows,
+                )?
             }
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &authoritative)?
@@ -1828,6 +1859,31 @@ mod tests {
         assert_eq!(released.item_text, "dispatched worker work");
     }
 
+    /// `#claimprojectiontypingresidue` (api.md, 2026-10-29): repeated claim
+    /// refreshes raced an operator typing `- Is this done?`. A refresh painted
+    /// the unrelated intermediate row `- IS this ` as pending, and the later
+    /// completed row landed beside that captured fragment. Claim transitions
+    /// project their own evidence without taking ownership of a bare row that
+    /// may still be under construction.
+    #[test]
+    fn claim_transition_does_not_mark_an_unrelated_partially_typed_row_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), "- dispatched worker work\n- IS this \n");
+        crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
+
+        let effects = FakeEffects::default();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let projected = std::fs::read_to_string(&doc).unwrap();
+
+        assert!(
+            projected.contains("- 🟡 [#subagent:worker#1] dispatched worker work\n"),
+            "{projected}"
+        );
+        assert!(projected.contains("- IS this \n"), "{projected}");
+        assert!(!projected.contains("- 📥 IS this \n"), "{projected}");
+        assert_eq!(projected.matches("IS this").count(), 1, "{projected}");
+    }
+
     #[test]
     fn cancelled_generation_never_projects_stale_report_or_completion_onto_readded_row() {
         let dir = tempfile::tempdir().unwrap();
@@ -2358,10 +2414,8 @@ mod tests {
 
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let projected = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            projected.contains("- 📥 operator unsaved sibling"),
-            "{projected}"
-        );
+        assert!(projected.contains("- operator unsaved sibling"), "{projected}");
+        assert!(!projected.contains("📥 operator unsaved sibling"), "{projected}");
         assert!(
             projected.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{projected}"

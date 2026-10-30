@@ -119,6 +119,7 @@ fn message_calls_mutating_tool(line: &str) -> bool {
                 | "agent_doc_preflight"
                 | "agent_doc_finalize"
                 | "agent_doc_session_check"
+                | "agent_doc_steering"
         )
     )
 }
@@ -192,7 +193,7 @@ fn initialize_result(params: Option<&Value>) -> Value {
             "title": "agent-doc MCP Server",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly. Never emit a terminal final answer before agent_doc_finalize succeeds: keep progress pre-closeout, because Codex Stop must otherwise continue the same turn to preserve the response. A successful finalize result is the terminal closeout report and includes any queue continuation, so do not follow it with agent_doc_session_check. That tool remains available for explicit diagnostics."
+        "instructions": "Use agent_doc_admit before answering a live session prompt, then agent_doc_finalize for binary-owned closeout; do not patch session documents directly. When a compact operator-steering reference names agent_doc_steering, call it with the supplied absolute file and token instead of asking for the multi-page payload in chat. Never emit a terminal final answer before agent_doc_finalize succeeds: keep progress pre-closeout, because Codex Stop must otherwise continue the same turn to preserve the response. A successful finalize result is the terminal closeout report and includes any queue continuation, so do not follow it with agent_doc_session_check. That tool remains available for explicit diagnostics."
     })
 }
 
@@ -426,6 +427,19 @@ fn tools_list_result() -> Value {
                 }
             },
             {
+                "name": "agent_doc_steering",
+                "title": "Resolve compact agent-doc steering",
+                "description": "Resolve and consume a one-shot compact steering reference. The token must match its canonical document and active cycle and must be used within five minutes.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file": { "type": "string", "description": "Absolute path from the compact steering reference." },
+                        "token": { "type": "string", "description": "One-shot token from the compact steering reference." }
+                    },
+                    "required": ["file", "token"]
+                }
+            },
+            {
                 "name": "agent_doc_finalize",
                 "title": "Finalize agent-doc response",
                 "description": "Write an assistant response through the strict agent-doc finalize path, require a committed closeout, and return any next queue continuation without a follow-up session-check.",
@@ -459,6 +473,7 @@ fn handle_tools_call(params: Option<&Value>) -> std::result::Result<Value, McpPr
         "agent_doc_preflight" => tool_preflight(&args),
         "agent_doc_plan" => tool_plan(&args),
         "agent_doc_session_check" => tool_session_check(&args),
+        "agent_doc_steering" => tool_steering(&args),
         "agent_doc_finalize" => tool_finalize(&args),
         _ => {
             return Err(McpProtocolError::invalid_params(format!(
@@ -664,6 +679,20 @@ fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
         serde_json::to_string_pretty(&structured)?,
         structured,
     ))
+}
+
+fn tool_steering(args: &Map<String, Value>) -> Result<Value> {
+    ensure_mcp_binary_fresh_for_mutation()?;
+    let file = required_path_arg(args, "file")?;
+    let token = required_string_arg(args, "token")?;
+    let payload =
+        agent_doc_session_check_io::midturn_steering::take_steering_surrogate(&file, &token)?;
+    let structured = json!({
+        "ok": true,
+        "file": file.display().to_string(),
+        "steering": payload,
+    });
+    Ok(tool_success_result(payload, structured))
 }
 
 fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
@@ -972,7 +1001,7 @@ fn stale_mcp_binary_message() -> &'static str {
     "stale agent-doc MCP server: the running MCP process maps an agent-doc binary \
      superseded by `make install` or `cargo install`. Automatic exec handoff could \
      not replay this request; retry it, or restart/recycle the MCP server. Refusing \
-     to run stale admit/preflight/finalize/session-check logic against a live document."
+     to run stale admit/preflight/finalize/session-check/steering logic against a live document."
 }
 
 #[cfg(test)]
@@ -1217,6 +1246,7 @@ mod tests {
         assert!(names.contains(&"agent_doc_preflight"));
         assert!(names.contains(&"agent_doc_plan"));
         assert!(names.contains(&"agent_doc_session_check"));
+        assert!(names.contains(&"agent_doc_steering"));
         assert!(names.contains(&"agent_doc_finalize"));
 
         let tools = response["result"]["tools"].as_array().unwrap();
@@ -1444,6 +1474,71 @@ mod tests {
     }
 
     #[test]
+    fn steering_tool_resolves_the_same_one_shot_reference_as_the_cli() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let file = root.join("session.md");
+        let baseline = "# Session\n\n<!-- agent:queue -->\n- current task\n<!-- /agent:queue -->\n";
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_session_check_io::midturn_steering::seed_for_cycle(
+            &file,
+            "mcp-cycle",
+            baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        agent_doc_session_check_io::midturn_steering::record_explicit_send(&file).unwrap();
+        std::fs::write(
+            &file,
+            baseline.replace("- current task\n", "- current task\n- retrieve over mcp\n"),
+        )
+        .unwrap();
+        let reference =
+            agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(&file)
+                .unwrap()
+                .expect("edited document produces compact steering")
+                .instructions;
+        let token = reference
+            .split("--token '")
+            .nth(1)
+            .and_then(|tail| tail.split('\'').next())
+            .expect("reference carries token");
+
+        let call = || {
+            response_for(json!({
+                "jsonrpc": "2.0",
+                "id": 31,
+                "method": "tools/call",
+                "params": {
+                    "name": "agent_doc_steering",
+                    "arguments": {
+                        "file": file.display().to_string(),
+                        "token": token,
+                    }
+                }
+            }))
+        };
+        let response = call();
+        assert_eq!(response["result"]["isError"], false, "{response}");
+        assert!(
+            response["result"]["structuredContent"]["steering"]
+                .as_str()
+                .unwrap()
+                .contains("retrieve over mcp")
+        );
+        let replay = call();
+        assert_eq!(replay["result"]["isError"], true, "{replay}");
+        assert!(
+            replay["result"]["structuredContent"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("already consumed")
+        );
+    }
+
+    #[test]
     fn admit_tool_opens_lightweight_cycle() {
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -1622,6 +1717,7 @@ Done.
             "agent_doc_preflight",
             "agent_doc_finalize",
             "agent_doc_session_check",
+            "agent_doc_steering",
         ] {
             let line = json!({
                 "jsonrpc": "2.0",

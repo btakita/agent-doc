@@ -147,6 +147,35 @@ fn normalize_id(id: &str) -> String {
     id.trim().to_ascii_lowercase()
 }
 
+/// Tracked ids represented in non-repeating sibling `agent:run` blocks.
+///
+/// Backlog mirroring owns a single target block, but tracked queue identity is
+/// document-wide. A nested leaf in another run block therefore suppresses a
+/// generated top-level mirror in the target block, preserving the leaf's
+/// original parent and section (`#crossrunmirror`). Repeating `agent:loop`
+/// blocks are excluded because their rows are standing programs, not one-shot
+/// backlog mirrors.
+pub fn sibling_run_queue_reference_ids(
+    components: &[element::Component],
+    content: &str,
+    target_open_start: usize,
+) -> anyhow::Result<HashSet<String>> {
+    let mut ids = HashSet::new();
+    for component in components.iter().filter(|component| {
+        component.name == "queue"
+            && !crate::queue_graph::is_loop_queue(component)
+            && component.open_start != target_open_start
+    }) {
+        let entries = document_queue::parse(component.content(content))?;
+        ids.extend(
+            entries
+                .iter()
+                .flat_map(document_queue::queue_entry_reference_ids),
+        );
+    }
+    Ok(ids)
+}
+
 /// Collect queue sync source ids from tracked-work components.
 ///
 /// `backlog` and the legacy `pending` alias can opt into component-level sync
@@ -582,10 +611,15 @@ pub fn enqueue_actionable_ids_reporting(
     // text is authoritative, and this is an insert-only operation, so splice the
     // new lines in textually and leave every existing byte untouched.
     let entries = document_queue::parse(body)?;
-    let existing: HashSet<String> = entries
+    let mut existing: HashSet<String> = entries
         .iter()
         .flat_map(document_queue::queue_entry_reference_ids)
         .collect();
+    existing.extend(sibling_run_queue_reference_ids(
+        &components,
+        content,
+        queue_comp.open_start,
+    )?);
 
     let mut seen = HashSet::new();
     let mut fresh: Vec<String> = queueable
@@ -1754,6 +1788,42 @@ mod tests {
                 assert!(mirrored.contains("- do [#b]\n"), "{mirrored}");
             }
         }
+    }
+
+    /// `#crossrunmirror`: api.md already carried `do [#closed]` as a nested
+    /// leaf under its contracts PR in `contracts-prs`. Same-cycle backlog
+    /// mirroring nevertheless inserted a second top-level row into `main`
+    /// because it inspected only the target block.
+    #[test]
+    fn actionable_mirror_preserves_nested_leaf_in_sibling_run() {
+        let content = concat!(
+            "<!-- agent:run id=\"main\" go -->\n",
+            "- do [#other]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=\"contracts-prs\" -->\n",
+            "- https://github.com/haiven-dev/haiven-contracts/pull/170\n",
+            "  - https://github.com/haiven-dev/haiven-contracts/pull/170 #review\n",
+            "  - do [#closed]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#closed] Why was this PR closed?\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let outcome = enqueue_actionable_ids_reporting(
+            content,
+            &["closed".to_string()],
+            FollowUpQueuePlacement::Prepend,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            MirrorOutcome::Refused(MirrorRefusal::AlreadyQueued),
+            "the nested leaf owns #closed; main must not receive a mirror"
+        );
+        assert_eq!(content.matches("do [#closed]").count(), 1);
     }
 
     /// `#loopnoinsert`: with an `agent:loop` above the `agent:run`, the backlog

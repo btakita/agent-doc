@@ -17294,6 +17294,51 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
     }
     #[test]
+    fn preflight_gives_a_repeated_nested_command_a_fresh_effect_identity() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior review — gpt-5\n\n",
+            "Reviewed once.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- https://example.test/pull/795\n",
+            "  - ~~#review~~\n",
+            "  - #review\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(state.queue_prompts, vec!["#review ⟦effect:2⟧"]);
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains("  - ~~#review~~\n") && updated.contains("#review ⟦effect:2⟧\n"),
+            "the completed review stays historical while the rerun gets a distinct identity:\n{updated}"
+        );
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            updated,
+            "the rerun surrogate id must be stable across preflight"
+        );
+    }
+    #[test]
     fn preflight_does_not_reflag_stable_inactive_queue_as_residue() {
         // #adoc-queue-ipc-drift root cause #1: after an `item_modified` halt the
         // queue goes inactive (queue_active: false, no `auto`) with a retained

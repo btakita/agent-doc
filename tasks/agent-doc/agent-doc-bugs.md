@@ -23,7 +23,7 @@ queue: go
 
 ## Status <!-- agent:status patch=replace sync="##sync-release" -->
 
-📤 Queue handoff: 5 reported items awaiting coordinator integration, verification, and closeout.
+📤 Queue handoff: 8 reported items awaiting coordinator integration, verification, and closeout.
 
 
 <!-- status:sync -->
@@ -909,7 +909,7 @@ I checked the commit against `7b44d8bb28`. The private-name scan of added lines 
 > **3549 passed, 0 failed, 1 ignored.** No follow-up queue heads.
 <!-- agent-doc-subagent-completion key=d2f56ea54d14349537f97e112ee22bfcd9289e7340c76793972e566f841b0ca8 -->
 > **Queue prompt:** Each response should have a surrogate id so I can quickly locate it using find in the Editor. The surrogate response id should be appended to the prompt, such as an `agent:run` item or the prompt in the agent:exchange.
-> **Queue prompt:** If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 ### Re: Icon pair is pencil and up-arrow — grok-4.7 · 2026-10-29T12:26-04:00
 
@@ -1096,8 +1096,8 @@ The private-name scan of added lines was clean. The worker reported four `cargo 
 
 JetBrains packages were already current: IDE 263 `0.2.891` at IntelliJ IDEA 2026.3 and IDE 262 `0.2.890` at Rider 2026.2. No JetBrains restart. VS Code sync was skipped because vsce is not installed, so that package stays on its previous generation.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both. Worker `01a18839-8b85-7601-9741-6333916b1f50` has exited. Branch `fix/local-vs-published-marker` stays at `7b44d8bb28`.
 
@@ -1119,8 +1119,8 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 
 **Deferred:** Striking this row would remove the timestamp and numeric-glyph note. Choice (6) on `#recent-run-affordance` already records it. Say when to build it. Worker `01a1889d-af6d-7001-b854-63cc83c662b7` has exited. Branch `fix/recent-run-affordance` stays at `7b44d8bb28`.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again.
 
@@ -1187,8 +1187,8 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 
 **Deferred:** `subagent:lostrestart` generation 1 is running as worker `01a188e5-ad81-70d0-8926-43443988ca39` on `fix/lost-claim-restarts` in `/home/brian/worktrees/agent-doc-lostrestart`. The expired `subagent:rtsteeringparity` generation 2 claim is not revived.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` / `⬆`. Say when to build it.
 
@@ -1211,8 +1211,8 @@ The local install of `ce407521928f18b22bd127b063eb45bb0f3c0f67` is already recor
 
 `subagent:reviewpublish`, `subagent:recentrun`, and `subagent:decisionannotate` stay on their operator choices. Their workers have exited. No new worker is dispatched for them.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` / `⬆`. Say when to build it.
 
@@ -1228,8 +1228,8 @@ The two notes in this plan stay open. Annotation, worker-reported remains the re
 
 The worker prompt ended at "or Does this mean the subprompt is in a bad state?" The live row continues with a reliable error emoji, making `📥` unambiguous, and keeping a turn from ending while prompts are `📥`. Those later sentences were outside the worker prompt, so the two choices below leave them for the implementation turn after you pick.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
 
@@ -1270,8 +1270,8 @@ The two notes in this plan stay open. Annotation, worker-reported remains the re
 
 `subagent:leafcontext` generation 1 reported back. A live subprompt now counts as the answer on a `🙋☑️` parent, and that part is committed. Whether the parent becomes non-executable context is still a choice. Worker `01a188e5-ad81-70d0-8926-43381e563159` pushed `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. `make check` logged `EXIT:0` (12183 passed, 187 skipped). `make install` was not run. `main` was not pushed.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
 
@@ -1333,8 +1333,8 @@ Five reported rows stay open. Each one is blocked on an operator pick. Striking 
 
 **Deferred:** `subagent:leafcontext` generation 1 stays on **Keep one head** or **Leaf-only**. The live-subprompt answer is already on `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. Worker `01a188e5-ad81-70d0-8926-43381e563159` has exited.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
 
@@ -1356,8 +1356,8 @@ A reported row that shows `☑️` (legacy `📫` / `📤` included), a trailing
 
 Local install stays the answers-in-plan build. This commit does not contain `ce407521`, so it was not installed over that binary. `make install` was not run.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
 
@@ -1393,8 +1393,8 @@ Five reported rows stay open. Each one is blocked on an operator pick. Striking 
 
 **Deferred:** `subagent:leafcontext` generation 1 stays on **Keep one head** or **Leaf-only**. The live-subprompt answer is already on `fix/parent-is-leaf-context` at `90cf29ae63668f53168938364d26ad25faf87837`. Worker `01a188e5-ad81-70d0-8926-43381e563159` has exited.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 **Deferred:** Annotation, worker-reported stays the recorded choice. The icon suggestion stays `✎` for a local edit, `⬆` for published, and `✎⬆` when a published row is edited again. Say when to build the annotation, the icons, or both.
 
@@ -1412,8 +1412,8 @@ Changed paths: none. Commands: this closeout is `finalize` only. Verification: n
 
 The open list has three issues. After excluding #40 and #45, the only new untracked issue is [#385, fence-leading free-text queue heads are not struck by a labeled verbatim echo](https://github.com/btakita/agent-doc/issues/385). I added it to both backlog and queue as `#gh385fencehead`, with the issue's required same-line/next-line label coverage and its negative cases.
 
-> **Queue prompt:** Annotation, worker-reported
-> If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 Keep **Annotation, worker-reported** as the canonical source of truth. I recommend `⟦local⟧`, `⟦published⟧`, and `⟦published+local⟧`; the last state means the row was published and then changed locally again. The editor can derive compact glyphs from those annotations: `✎` for local, `⇧` for published, and `✎⇧` for published plus a newer local delta. `⇧` reads more like push/upload than a plain up-arrow, while the annotation, legend, and tooltip remove ambiguity. I captured that implementation as recommended backlog item `#reviewpublishmarkers` and completed the two decision TODOs.
 
@@ -1442,8 +1442,8 @@ Done. `#staleownersteer` was implemented in a dedicated worktree, integrated, ch
 Because ☑️ means the worker reported completion; it does not mean the coordinator integrated, verified, installed, pushed, and closed the backlog item. Those gates are now complete. `#gh385fencehead` is closed by this response.
 
 > **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
->   - Annotation, worker-reported
->   - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+> I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
 
 Implemented and re-audited. Canonical worker-reported states are `⟦local⟧`, `⟦published⟧`, and `⟦published+local⟧`; VS Code and JetBrains derive `✎`, `⇧`, and `✎⇧` with tooltips. The focused audit passed 53 tests.
 
@@ -1509,43 +1509,97 @@ Verification:
 - Coordinator `make install`: exit 0.
 - No editor generation bump was needed for this Rust/spec-only delta.
 - Confidence: high.
+
+### Re: Integrated fixes installed; sdk-demo frontmatter repaired — gpt-5 · 2026-10-29
+
+> **Chat prompt (#chatprompt:2fbab9a7db20):** How do I fix the sdk-demo.md frontmatter corruption for now?
+
+The first workaround was incomplete: `reset` preserved malformed YAML, so `resume-id` could not parse it. I recycled the haiven-dev controller with the corrected binary, split the merged line into distinct YAML keys, verified the resume IDs, and committed the converged document:
+
+```yaml
+resume:
+  claude: 86ca3000-73b9-4466-a01b-718dc0a83a3e
+  codex: 01a18945-80a0-7c50-913f-f29e3130a292
+  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f
+```
+
+The newer Codex value is the active session ID, not merged-line corruption.
+
+> **Chat prompt (#chatprompt:1ef0bc549d47):** didn't work.
+
+Confirmed. Reset-plus-resume-id did not work against malformed YAML; the patched-controller repair above did.
+
+> **Chat prompt (#chatprompt:14b10b462ffc):** cont
+
+Continued through integration, combined verification, installation, push, leaf audits, and closeout.
+
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): Annotation, worker-reported
+
+Audited complete: `⟦local⟧`, `⟦published⟧`, and `⟦published+local⟧`.
+
+> **Queue prompt:** I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change): If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
+
+Audited complete: editor glyphs are `✎`, `⇧`, and `⇧✎`, with explicit tooltips.
+
+> **Queue prompt:** If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight?: If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+
+Audited complete. `⟦addressed-at:...Z⟧` drives `①`/`②`/`③` and graded highlights; caret navigation clears only the highlight. Eight focused tests passed.
+
+> **Queue prompt:** If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision.: The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?
+
+`Other` is the value, not the identity. Use `subagent-operator-request-decision-annotation-syntax` and `⟦decision:subagent-operator-request-decision-annotation-syntax=Other⟧`. The parent remains open for option (2) versus option (3).
+
+> **Queue prompt:** In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only
+
+Implemented and audited: parents are context-only and only leaves execute.
+
+> **Queue prompt:** agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
+
+Implemented and audited. Plans now scan every run/loop section.
+
+> **Queue prompt:** Sync Issues on sdk-demo.md: Sync Tmux Pane: Sync failed: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns
+
+Audited complete. Commit `9e9d534556`, its focused regression, and the installed controller contain the fix.
+
+> **Queue prompt:** Sync Issues on sdk-demo.md: Run Agent Doc: editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns
+
+Audited complete. Both nested-owner route regressions passed; the installed CLI/native library contain the fix.
+
+> **Queue prompt:** local install
+
+Complete. `make install` exited 0 and installed VS Code 0.2.93 plus current CLI/native and JetBrains packages. IntelliJ 2026.3 needs a restart for its new plugin generation.
+
+> **Queue prompt:** sdk-demo.md: agent-doc corrupts my frontmatter resume even after I correct it: `  codex: 01a16  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f`
+
+Fixed. A durable editor-op successor now supersedes the stale reconnect target; the repaired document was verified and committed.
+
+> **Queue prompt:** How can we run `- 🙋⚠️ [#subagent:decisionsurrogate#2]`? Would an install make it run?
+
+An install will not run it; `agent-doc 0.35.561` already matches main. Choose option (2) or (3), record it on `#subagent-operator-request-decision-annotation-syntax`, mark that Todo complete, and run agent-doc again. Projection removes `🙋`; then lost generation 2 can be reclaimed as generation 3. Do not manually remove `⚠️`.
+
+The batch is pushed to `origin/main` at `07d8a46ddb`. Combined verification passed: controller 882, queue 1,047, state-backbone 149, and plan-range interaction 12,213 tests with 187 skipped. Every full `make check` passed; `make audit-docs` had no blockers.
+
+The inbox-terminal row remains open intentionally: choose whether leftover nested `📥` means “start a new turn” or “bad state.” No new follow-up backlog item is needed because both outstanding choices are already tracked in Todo.
 <!-- agent:boundary:7bbc0262 -->
 <!-- /agent:exchange -->
 
 ## Run <!-- agent:run subagents preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#grok-live-editor]~~
-  - ~~re: [#grok-live-editor]: Also validate we have parity across all agents (Claude + Codex + Grok + Opencode) for the real-time steering [#subagent-operator-request-rtsteering-force-lease]: allow~~
-- 🚧 [#subagent:reviewiconverify#3] I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]
-  - Annotation, worker-reported
-  - If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.
-- ☑️ [#subagent:recentrunverify#2] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
-  - If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.
+- ~~I'm running into confusion over whether a `#review` is posted. Can we have separate icons or an annotation to distinguish between changed locally vs published (pushed to remote)? This is context dependent...as only certain tasks would have local changes and published changes (like a review or a code change) [#subagent-operator-request-review-publish-marker]~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+  - ~~Annotation, worker-reported~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+  - ~~If we were to do icons, what icons would you suggest? So far, I like annotations because it's clear and since these flags don't apply all task items, I think clarity is important. But I still want to see the icons because brevity would be useful as well...as long as the icons are clear.~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ⚠️ [#subagent:recentrunverify#2] If I have a long list of agent:run items, it is difficult to see what was worked on recently. What are some UI affordances that we can have to quickly distinguish what was recently address in a turn? Should we annotate with a timestamp? Does the Editor provide a way to temporarily highlight recently worked on items, where navigating the cursor to the row would remove the highlight? [#subagent-operator-request-recent-run-affordance]
+  - ~~If we use Timestamp annotation, the plugin can have highlights for the most recent, the 2nd most recent, the 3rd most recent. If there's a way to make the Recency glyph numeric, the recency order can be provided.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
 - 🙋⚠️ [#subagent:decisionsurrogate#2] If a decision with an id was made, annotate the prompt with the decision id. In game-sessions.md, there are multiple usages of a single decision id. Make sure that all instances of the decision id are annotated with the decision. Update the state of the prompt item appropriately. Restart work on the prompt if the prompt was blocked by the made decision across all instances of the blocking decision. [#subagent-operator-request-decision-annotation-syntax]
-  - The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?
+  - ~~The decision id is often a short phrase such as `**Other**`, correct? Or do you need a surrogate key for the decision id?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
 - ☑️ [#subagent:inboxterminal#1] In api.md, there are leftover `  - 📥 #address` and `  - 📥 #rebase: #address` subprompts. The `📥` state of a turn since it is ambiguous. Does this mean the operator needs to start a new turn? or Does this mean the subprompt is in a bad state? If the subprompt is in a bad state, should we have a reliable error emoji? I mainly want `📥` to be unambiguous. Ideally, the turn won't terminate with prompts being in the `📥` state.
-- 🚧 [#subagent:leafcontextfix#2] In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only
-- ~~`  - ⚠️ [#subagent:rtsteeringparity#2] re: [#grok-live-editor]:` has no indication why it was lost and has not restarted work after I Run Agent Doc. It should restart work in a new subagent if [#subagent:rtsteeringparity#2] is not available.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T22:39:12.000Z⟧
-- 🚧 [#subagent:planrangefix#2] agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.
-- ~~do [#gh385fencehead]~~
-- ~~do [#reviewpublishmarkers]~~
-- ~~do [#recentrunmarkers]~~
-- ~~do [#subagents-fanout]~~
-- ~~do [#reviewrebase-repeat]~~
-- ~~do [#grok-live-editor]~~
-~~~done
-api.md did not pass the prompt lineage to the agent. I switched from Grok to Codex. Is Codex out of date?:
-```
-• The queue is blocked on #push, whose target is unspecified. No push or subagent dispatch occurred; the stale PR 762
-  review was already completed.
-
-  Please specify the repository, source ref/commit, destination remote branch, and whether force-with-lease is
-  authorized. This request is recorded in tasks/api.md (tasks/api.md).
-```
-~~~
-- ~~In api.md, the subprompt `    - respond to the review in the PR` and `  - Add backlog items into fpe.md.` is not being picked up by an agent. Will this be fixed when we install the next release?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
-- ~~In sdk-demo.md, `- ⛔ ⟦blocked by bossroom-sbx-provision⟧ do [#bossroom-stg-provision]` should now be unblocked. agent-doc should remove the `⛔ ⟦blocked by bossroom-sbx-provision⟧` once bossroom-sbx-provision was completed. There is also multiple blocks as in `- ⛔ ⟦blocked by bossroom-sbx-provision, sbx-handoff-infra-prep⟧ do [#bossroom-sbx-gh-build]`. The blockers were completed, so as each blocker is complete, remove from the blocked by list.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
-- ~~In api.md, I added `  - #review` to `- https://github.com/haiven-dev/haiven-api/pull/762`. agent-doc deleted `  - #review` on the first Run Agent Doc. I readded `  - #review` and Run Agent Doc kept it.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
-- ~~api.md has stale document bookeeping: `- 🙋 do [#search-suggest-ambiguous-status] [#subagent-operator-request-search-suggest-commit-pr]` and `- 🙋⛔ ⟦blocked by subagent-operator-request-slack-local-token⟧ do [#runlocallynow] [#subagent-operator-request-slack-local-token]` were kept even though a subprompt completed the prompt.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-29T20:11:32.000Z⟧
+- ~~In agent-doc-bugs.md, there are subprompt items with no emoji marker where the parent has a `🙋☑️` marker. If the `🙋` was answered in the subprompt, is the parent prompt wedged if agent-doc currently expects the answer to be appended to the parent prompt? agent-doc should allow answers in subprompts. A blocker in a parent prompt should not stop work in subprompts. In fact, once a parent prompt has subprompts, it should cease to be an actual prompt. It should be the prefixed context to leaf prompts. Only leaf prompts should be executable. [#subagent-operator-request-parent-leaf-context]: Leaf-only~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ~~agent-doc plans should range across all `agent:run` and `agent:loop` elements. Run Agent Doc on api.md leaves some subprompts unaddressed in `agent:run id="contracts-prs"` which is defined after `agent:run id="api-prs"`.~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ⚠️ [#subagent:tmuxsyncfix#1] Sync Issues on sdk-demo.md
+  - ~~Sync Tmux Pane: Sync failed: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+  - ~~Run Agent Doc: editor route layout refused by the main-window owner /home/brian/work/btakita/agent-loop: sync_tmux_layout refused before layout publication: focused document `/home/brian/work/btakita/agent-loop/src/haiven-dev/tasks/sdk/sdk-demo.md` is absent from the desired columns~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ~~local install~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ~~sdk-demo.md: agent-doc corrupts my frontmatter resume even after I correct it: `  codex: 01a16  grok: 01a169f3-a3f9-7c22-9530-41234f13c69f`~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
+- ~~How can we run `- 🙋⚠️ [#subagent:decisionsurrogate#2]`? Would an install make it run?~~ — auto-struck: answered this cycle (#ftstrike) ⟦addressed-at:2026-10-30T00:07:43.000Z⟧
 <!-- /agent:run -->
 
 ## Loop <!-- agent:loop interval="1h" priority -->

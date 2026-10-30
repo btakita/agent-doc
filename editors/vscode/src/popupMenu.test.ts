@@ -39,6 +39,7 @@ describe('popupMenu', () => {
         assert.deepStrictEqual(
             buildOverflowPopupMenuItems().map(item => item.id),
             [
+                'startAgentDoc',
                 'runWithJunie',
                 'forceClaim',
                 'stopAgent',

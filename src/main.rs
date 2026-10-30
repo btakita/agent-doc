@@ -3710,6 +3710,14 @@ enum RunbookAction {
 
 #[derive(Subcommand)]
 enum TmuxAction {
+    /// Start agent-doc in the document's tmux pane and return immediately
+    Start {
+        /// Path to the session document
+        file: PathBuf,
+        /// Editor surface client id used to select a navigation lane
+        #[arg(long)]
+        client_id: Option<String>,
+    },
     /// Create or reuse the project's tmux session without attaching a client
     Ensure {
         /// Path to the session document
@@ -5608,6 +5616,9 @@ fn try_main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Env { json } => env_cmd::run(json),
         Commands::Tmux { action } => match action {
+            TmuxAction::Start { file, client_id } => {
+                tmux_cmd::start(&file, client_id.as_deref())
+            }
             TmuxAction::Ensure {
                 file,
                 session,
@@ -9036,6 +9047,26 @@ mod recycle_force_tests {
             .expect("spawn parse thread")
             .join()
             .expect("parse thread")
+    }
+
+    #[test]
+    fn tmux_start_parses_as_a_nonblocking_pane_dispatch() {
+        match parse(&[
+            "agent-doc",
+            "tmux",
+            "start",
+            "tasks/plan.md",
+            "--client-id",
+            "vscode-pid:41",
+        ]) {
+            Commands::Tmux {
+                action: TmuxAction::Start { file, client_id },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/plan.md"));
+                assert_eq!(client_id.as_deref(), Some("vscode-pid:41"));
+            }
+            _ => panic!("expected tmux start"),
+        }
     }
 
     /// `#queuemarkerlegend`: `queue --help` and every lifecycle subcommand's

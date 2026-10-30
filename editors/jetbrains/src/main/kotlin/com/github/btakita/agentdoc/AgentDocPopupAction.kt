@@ -24,6 +24,7 @@ class AgentDocPopupAction : ImplAction {
     companion object {
         internal val PRIMARY_ACTION_IDS = listOf(
             "AgentDoc.Submit",
+            "AgentDoc.StartAgentDoc",
             "AgentDoc.InitSession",
             "AgentDoc.FixDocument",
             "AgentDoc.Claim",

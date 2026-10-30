@@ -78,6 +78,14 @@
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.StartAgentDoc"
+                class="com.github.btakita.agentdoc.shell.StartAgentDocForwarder"
+                text="Start Agent Doc"
+                description="Start agent-doc in the tmux pane for the focused document">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
         <action id="AgentDoc.InitSession"
                 class="com.github.btakita.agentdoc.shell.InitSessionForwarder"
                 text="Initialize Session"

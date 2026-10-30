@@ -101,6 +101,7 @@ decideIdeTerminalAttach,
 IdeTerminalAttachDecision,
 parseTmuxEnsureReceipt,
 } from './ideTerminal.js';
+import { buildIdeTerminalEnsureArgs, buildStartAgentDocArgs } from './startAgentDoc.js';
 import { DebounceCore } from '@lazily-hub/lazily-js/rateshape';
 
 // ---------------------------------------------------------------------------
@@ -388,9 +389,14 @@ env: {
 });
 }
 
-async function prepareIdeTerminal(cwd: string, relativePath: string): Promise<void> {
+async function startAgentDocInIdeTerminal(cwd: string, relativePath: string): Promise<void> {
+    await runCli(
+        buildStartAgentDocArgs(relativePath, EDITOR_SURFACE_CLIENT_ID),
+        cwd,
+        { timeoutMs: 10_000 },
+    );
     const output = await runCli(
-        ['tmux', 'ensure', relativePath, '--json', '--ide-terminal'],
+        buildIdeTerminalEnsureArgs(relativePath, EDITOR_SURFACE_CLIENT_ID),
         cwd,
         { timeoutMs: 10_000 },
     );
@@ -1354,6 +1360,24 @@ async function submitAction(): Promise<void> {
     await startRunForDocument(cwd, rel, editor.document.uri.fsPath);
 }
 
+async function startAgentDocAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+    const { cwd, relativePath } = resolveProject(root, editor.document.uri.fsPath);
+    try {
+        if (!(await ensureDocumentCleanForCommand(editor.document.uri.fsPath, 'Start Agent Doc'))) return;
+        await startAgentDocInIdeTerminal(cwd, relativePath);
+        showHint(`Agent Doc started for ${relativePath}`);
+    } catch (err: any) {
+        showError(`start failed: ${err.message}`);
+    }
+}
+
 function buildEditorCommandRouteKey(cwd: string, relativePath: string): string {
     return `${cwd}\0${relativePath}`;
 }
@@ -1405,7 +1429,7 @@ async function executeRunForDocument(
     });
 try {
 if (!(await ensureDocumentCleanForCommand(filePath, 'Run'))) return;
-await prepareIdeTerminal(cwd, rel);
+await startAgentDocInIdeTerminal(cwd, rel);
 routeGeneration = native.recordRouteDispatchStarted(filePath, routeKey, cwd);
         const output = await runEditorRouteViaProjectController(cwd, rel, filePath, routeKey, abortController.signal);
         native.recordRouteDispatchProven(filePath, routeGeneration, `vscode:${routeKey}`, cwd);
@@ -2215,7 +2239,7 @@ async function syncLayoutAction(): Promise<void> {
 
     try {
         const { cwd } = resolveProject(root, editor.document.uri.fsPath);
-        await syncLayoutInternal(cwd, true, false, true);
+        await syncLayoutInternal(cwd, true, false);
     } finally {
         commandRunning = false;
     }
@@ -2253,7 +2277,7 @@ throw new Error('native reload did not complete before tmux layout sync timed ou
 }
 const effectiveFocusFile = focusFile ?? flattenVisibleColumns(visibleColumns)[0];
 if (!terminalPrepared && !noAutostart) {
-await prepareIdeTerminal(root, effectiveFocusFile);
+await startAgentDocInIdeTerminal(root, effectiveFocusFile);
 }
 const receipt = native.syncTmuxLayoutJson({
             projectRoot: root,
@@ -2494,6 +2518,9 @@ async function popupMenuAction(): Promise<void> {
         case 'submit':
             await submitAction();
             break;
+        case 'startAgentDoc':
+            await startAgentDocAction();
+            break;
         case 'initSession':
             await initSessionAction();
             break;
@@ -2542,6 +2569,9 @@ async function popupMenuAction(): Promise<void> {
             switch (overflow.id) {
                 case 'runWithJunie':
                     await runWithJunieAction();
+                    break;
+                case 'startAgentDoc':
+                    await startAgentDocAction();
                     break;
                 case 'forceClaim':
                     await forceClaimAction();
@@ -3795,6 +3825,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Feature 1: Run (Submit)
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.submit', submitAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.startAgentDoc', startAgentDocAction)
     );
 
     // Feature 2: Claim

@@ -515,7 +515,7 @@ class SyncLayoutAction : ImplAction {
         val relativeFocusedFile = java.io.File(projectRoot).toPath()
             .relativize(java.io.File(request.focusedFile).toPath())
             .toString()
-        IdeTerminalCoordinator.ensureAndAttach(
+        IdeTerminalCoordinator.startAndAttach(
             project = request.project,
             cwd = projectRoot,
             relativePath = relativeFocusedFile,
@@ -759,9 +759,7 @@ class SyncLayoutAction : ImplAction {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        // The controller submission already owns manual autostart. Submit immediately instead of
-        // making the user action depend on a terminal-tool-window attachment callback.
-        syncLayout(project, terminalPrepared = true)
+        syncLayout(project)
     }
 
     override fun update(e: AnActionEvent) {

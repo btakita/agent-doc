@@ -53,7 +53,7 @@ describe('typed reload_library intent', () => {
         const manualStart = extension.indexOf('async function syncLayoutAction()');
         const manualEnd = extension.indexOf('async function syncLayoutInternal(', manualStart);
         const manual = extension.slice(manualStart, manualEnd);
-        assert.ok(manual.includes('syncLayoutInternal(cwd, true, false, true)'));
+        assert.ok(manual.includes('syncLayoutInternal(cwd, true, false)'));
     });
 
     it('JetBrains reloads and refreshes replicas only from the typed intent', () => {

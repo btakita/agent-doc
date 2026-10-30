@@ -14142,6 +14142,7 @@ fn test_agent_doc_workflow_owns_session_check_response_messages() {
         "pub fn dropped_queue_prompt_guard_result(",
         "pub fn queue_response_contamination_guard_result(",
         "pub fn queue_response_contamination_candidates(",
+        "pub fn queue_response_contamination_candidates_since_baseline(",
         "pub fn dropped_exchange_prompt_guard_result(",
         "pub fn completed_pending_reap_guard_message(",
         "pub fn snapshot_committed_guard_message(",

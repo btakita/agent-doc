@@ -7523,6 +7523,32 @@ pub fn run_queue_maintenance_with_coin_gate(
         mutated = true;
         in_progress_markers_changed = true;
     }
+    // `#queueactionablecontext`: leaf-only execution makes nested parents
+    // context. Once every existing leaf is terminal, close a plain context row
+    // or move unresolved lifecycle/operator evidence to one executable child.
+    // Never leave a blocked/lost/operator-gated parent as an inert queue end.
+    if let Some(settled_entries) = agent_doc_queue::document_queue::settle_inert_group_parents(
+        &activation.entries_after,
+        &open_todo_ids,
+    ) {
+        let new_body = agent_doc_queue::document_queue::render(&settled_entries);
+        current_content = {
+            let comps = agent_doc_element::element::parse(&current_content)?;
+            let q = agent_doc_queue::queue_set::component_for_id(
+                &current_content,
+                &comps,
+                &selected_queue_id,
+            )?
+            .context("queue maintenance: queue component vanished during context settlement")?;
+            q.replace_content(&current_content, &new_body)
+        };
+        activation.entries_after = settled_entries;
+        mutated = true;
+        in_progress_markers_changed = true;
+        eprintln!(
+            "[preflight] queue: settled inert context parents into terminal history or actionable leaves (#queueactionablecontext)"
+        );
+    }
     // `#queuemirrormarkers`: claims, report receipts, and completion cells are
     // keyed by work identity, not queue id, so every queue that displays an
     // identity must show its durable attempt state. The passes above project

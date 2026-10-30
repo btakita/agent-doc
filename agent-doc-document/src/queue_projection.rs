@@ -947,6 +947,33 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
     )
 }
 
+/// Remove selected trailing operator-request annotations as part of moving an
+/// open action to another queue row. Local answers (`[#id]: answer`) remain
+/// provenance and are never removed by this projection helper.
+pub fn remove_operator_action_ids(text: &str, ids: &[String]) -> String {
+    if let (head, Some(block)) = agent_doc_element_queue::subprompts::split_subprompt_block(text) {
+        return format!("{}\n{block}", remove_operator_action_ids(head, ids));
+    }
+    let ids = ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .collect::<std::collections::HashSet<_>>();
+    let mut projected = apply_operator_action_ids(text, &[]);
+    loop {
+        let trimmed_len = projected.trim_end().len();
+        let trailing = projected[trimmed_len..].to_string();
+        let content = &projected[..trimmed_len];
+        let Some((id, after, start)) = trailing_operator_action_annotation(content) else {
+            break;
+        };
+        if !after.is_empty() || !ids.contains(&id.to_ascii_lowercase()) {
+            break;
+        }
+        projected = format!("{}{trailing}", content[..start].trim_end());
+    }
+    projected
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueuePromptRow {
     pub text: String,

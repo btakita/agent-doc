@@ -4,6 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.562
 
+- **Collapsing duplicate queue-parent variants no longer duplicates their inert child notes.** Direct `%% ... %%` and Markdown-comment children merge by relative shape and maximum per-variant multiplicity, so one `%% hold %%` under each duplicate `do [#id]` projection becomes one beneath the survivor while distinct notes and deliberate repeats remain intact.
 - **Route no longer prescribes an incapable repair for broken component markers.** A missing `agent:run` close now produces the shared line-specific editor/HEAD restoration guidance instead of claiming generic `agent-doc repair` can reconstruct an arbitrary deleted boundary.
 - **Large steering payloads now travel through compact, one-use CLI/MCP references.** The full payload is persisted before the hook watermark advances, while the composer receives one document- and cycle-bound token with a five-minute TTL. Wrong-document, stale-cycle, expired, replayed, and unknown tokens fail closed without disclosing the payload. Claude Code, Codex, OpenCode, and Grok Build share the same transport policy.
 - **Running-turn steering is acknowledged only after the harness proves the composer consumed it.** A still-visible draft receives a bounded bare-Enter retry; protected, unreadable, idle, and exhausted states fail closed instead of silently baselining an unsubmitted prompt. Cross-harness projection and scripted tmux coverage pin the behavior.

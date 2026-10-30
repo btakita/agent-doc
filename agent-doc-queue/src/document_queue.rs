@@ -4811,6 +4811,111 @@ fn queue_item_identity(entry: &QueueEntry) -> Option<agent_doc_element_queue::Qu
     ))
 }
 
+type IgnoredCommentShape = (usize, Option<String>, String);
+
+/// Direct inert list-comment children of `parent_idx`, keyed relative to the
+/// parent so equivalent duplicate parent variants can merge their annotations.
+///
+/// Comment rows parse as [`QueueEntry::Freeform`] by design, so the ordinary
+/// lifecycle machine cannot associate them with a parent that it collapses.
+/// Track only direct children here: comments beneath a runnable nested row
+/// belong to that row's subtree and must not be conflated with parent notes.
+fn direct_ignored_comment_children(
+    entries: &[QueueEntry],
+    parent_idx: usize,
+) -> Vec<(usize, IgnoredCommentShape)> {
+    let Some(parent_indent) = entries.get(parent_idx).and_then(entry_indent) else {
+        return Vec::new();
+    };
+    let mut ancestor_indents = vec![parent_indent];
+    let mut comments = Vec::new();
+
+    for (idx, entry) in entries.iter().enumerate().skip(parent_idx + 1) {
+        let (indent, ignored_comment, shape) = match entry {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                (prompt.indent, false, None)
+            }
+            QueueEntry::Freeform(line) => {
+                let Some((indent, ordered_marker, rest)) = split_list_item(line) else {
+                    continue;
+                };
+                let ignored = agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest);
+                let shape = ignored.then(|| {
+                    (
+                        indent.saturating_sub(parent_indent),
+                        ordered_marker,
+                        rest.to_string(),
+                    )
+                });
+                (indent, ignored, shape)
+            }
+            _ => continue,
+        };
+
+        if indent <= parent_indent {
+            break;
+        }
+        while ancestor_indents
+            .last()
+            .is_some_and(|ancestor| *ancestor >= indent)
+        {
+            ancestor_indents.pop();
+        }
+        if ignored_comment {
+            if ancestor_indents.last() == Some(&parent_indent) {
+                comments.push((
+                    idx,
+                    shape.expect("an ignored comment always has a structural shape"),
+                ));
+            }
+        } else {
+            ancestor_indents.push(indent);
+        }
+    }
+
+    comments
+}
+
+/// Comment rows to drop when pin-/text-variant id-backed parents collapse.
+///
+/// Each duplicate parent is another projection of one logical queue head, so
+/// its direct inert annotations merge by maximum authored multiplicity instead
+/// of concatenation. This keeps distinct notes and deliberate repeats within a
+/// single variant while preventing one identical `%% hold %%` per duplicate
+/// parent from becoming two children beneath the survivor.
+fn collapsed_parent_comment_residue(
+    entries: &[QueueEntry],
+    id_groups: &std::collections::HashMap<String, Vec<usize>>,
+    collapsing_ids: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<usize> {
+    let mut dropped = std::collections::HashSet::new();
+
+    for (id, parent_indices) in id_groups {
+        if !collapsing_ids.contains(id) || parent_indices.len() < 2 {
+            continue;
+        }
+        let mut merged_multiplicity =
+            std::collections::HashMap::<IgnoredCommentShape, usize>::new();
+
+        for (variant, &parent_idx) in parent_indices.iter().enumerate() {
+            let mut local_multiplicity =
+                std::collections::HashMap::<IgnoredCommentShape, usize>::new();
+            for (comment_idx, shape) in direct_ignored_comment_children(entries, parent_idx) {
+                let occurrence = local_multiplicity.entry(shape.clone()).or_insert(0);
+                *occurrence += 1;
+                let merged = merged_multiplicity.entry(shape).or_insert(0);
+                if variant > 0 && *occurrence <= *merged {
+                    dropped.insert(comment_idx);
+                } else {
+                    *merged = (*merged).max(*occurrence);
+                }
+            }
+        }
+    }
+
+    dropped
+}
+
 fn snapshot_struck_representatives(
     snapshot_entries: &[QueueEntry],
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, QueueEntry> {
@@ -5172,6 +5277,8 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
         survivor_text.insert(idxs[0], strongest_pin_text(&texts).to_string());
         pin_collapse_ids.insert(id.clone());
     }
+    let collapsed_comment_residue =
+        collapsed_parent_comment_residue(&entries, &id_groups, &pin_collapse_ids);
 
     // Cross-shape subsumption (`#brtc` / `#queuestatemachine3`): an actionable
     // live `do [#id]` **directive** head subsumes a pure bare `[#id]` / `#id`
@@ -5206,6 +5313,13 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     let mut changed = lifecycle_changed;
 
     for (idx, entry) in entries.iter().enumerate() {
+        if collapsed_comment_residue.contains(&idx) {
+            // This inert annotation belonged to a duplicate parent variant and
+            // is already represented beneath the earliest survivor. Unlike
+            // prompts, comments have no convergence identity of their own.
+            changed = true;
+            continue;
+        }
         let Some(key) = convergence_identity(entry) else {
             // Non-prompt entry (fence / preset / dispatch / freeform): position-
             // and content-stable, never a convergence target.
@@ -10051,6 +10165,75 @@ mod tests {
         let out = converge(&entries, &[]);
 
         assert_eq!(render(&out), "- release train\n  2. :pushpin: do [#ship]\n");
+    }
+
+    /// A duplicate id-backed parent can arrive with the same inert annotation
+    /// under each variant. Collapsing the parent must collapse that duplicated
+    /// subtree residue too; otherwise both comment rows are reparented beneath
+    /// the survivor and the operator sees agent-doc duplicate `%% hold %%`.
+    #[test]
+    fn converge_collapses_identical_comments_from_collapsed_parent_variants() {
+        let body = concat!(
+            "- do [#ship] [#request-one]\n",
+            "  - %% hold %%\n",
+            "- do [#ship] [#request-one] [#request-two]\n",
+            "  - %% hold %%\n",
+        );
+        let entries = parse(body).unwrap();
+
+        let out = converge(&entries, &entries);
+
+        assert_eq!(
+            render(&out),
+            "- do [#ship] [#request-one]\n  - %% hold %%\n"
+        );
+        assert!(
+            converge_queue_via_lifecycle(&out, &entries, &Default::default()).is_none(),
+            "the merged parent subtree reaches a fixpoint"
+        );
+    }
+
+    #[test]
+    fn converge_unions_distinct_comments_from_collapsed_parent_variants() {
+        let body = concat!(
+            "- do [#ship] [#request-one]\n",
+            "  - %% hold %%\n",
+            "- :pushpin: do [#ship] [#request-two]\n",
+            "  - %% waiting for review %%\n",
+        );
+        let entries = parse(body).unwrap();
+
+        assert_eq!(
+            render(&converge(&entries, &entries)),
+            concat!(
+                "- :pushpin: do [#ship] [#request-two]\n",
+                "  - %% hold %%\n",
+                "  - %% waiting for review %%\n",
+            ),
+            "different annotations from duplicate parent variants are retained"
+        );
+    }
+
+    #[test]
+    fn converge_preserves_authored_comment_multiplicity_within_one_parent_variant() {
+        let body = concat!(
+            "- do [#ship] [#request-one]\n",
+            "  - %% hold %%\n",
+            "  - %% hold %%\n",
+            "- :pushpin: do [#ship] [#request-two]\n",
+            "  - %% hold %%\n",
+        );
+        let entries = parse(body).unwrap();
+
+        assert_eq!(
+            render(&converge(&entries, &entries)),
+            concat!(
+                "- :pushpin: do [#ship] [#request-two]\n",
+                "  - %% hold %%\n",
+                "  - %% hold %%\n",
+            ),
+            "merging variants uses maximum per-variant multiplicity, not a set"
+        );
     }
 
     /// `#qdedup-directive-twin`: textually-identical `do [#id]` directive twins

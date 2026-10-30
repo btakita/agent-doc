@@ -59,11 +59,59 @@ pub struct SteeringDeliveryAdapter {
 /// Every harness agent-doc supports, by canonical binary name.
 pub const SUPPORTED_HARNESSES: [&str; 5] = ["claude", "codex", "opencode", "grok", "cursor"];
 
-/// `#routesyncsteer`: Grok Build cannot inject hook context into a running
-/// turn, so an explicit Run Agent Doc submits the latest document diff into
-/// the composer. Every other harness keeps its hook or poll delivery.
+/// `#routesyncsteer`: every route-owned TUI accepts an explicit Run Agent Doc
+/// as a follow-up for the turn already running. Passive hook/poll delivery is
+/// still the fallback for edits that the operator did not explicitly send.
 pub fn explicit_running_turn_send_is_composer_diff(harness: &str) -> bool {
-    steering_delivery_adapter(harness).harness == "grok"
+    matches!(
+        steering_delivery_adapter(harness).idle,
+        IdleDelivery::SupervisorTrigger
+    )
+}
+
+/// Whether the busy harness composer can safely accept one explicit steering
+/// follow-up. Route calls this only after positive busy-turn evidence; `Busy`
+/// therefore means the composer is empty, while an absent/unreadable composer
+/// remains fail-closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunningTurnFollowUpComposer {
+    Empty,
+    Blocked { reason: String },
+    Unreadable,
+}
+
+pub fn running_turn_follow_up_composer(harness: &str, output: &str) -> RunningTurnFollowUpComposer {
+    let adapter = steering_delivery_adapter(harness);
+    if adapter.harness == "grok" {
+        return match crate::grok::follow_up_composer(output) {
+            crate::grok::FollowUpComposer::Empty => RunningTurnFollowUpComposer::Empty,
+            crate::grok::FollowUpComposer::Draft { .. } => RunningTurnFollowUpComposer::Blocked {
+                reason: "the composer holds an unsent draft".to_string(),
+            },
+            crate::grok::FollowUpComposer::Unreadable => RunningTurnFollowUpComposer::Unreadable,
+        };
+    }
+
+    let config = crate::HarnessConfig::from_agent_name(adapter.harness);
+    if let Some(reason) = config.protected_prompt_input_reason(output) {
+        return RunningTurnFollowUpComposer::Blocked { reason };
+    }
+    match crate::project_pane_composer(output, &config) {
+        crate::PaneComposerProjection::ReadyEmpty { .. } | crate::PaneComposerProjection::Busy => {
+            RunningTurnFollowUpComposer::Empty
+        }
+        crate::PaneComposerProjection::OperatorDraft { .. } => {
+            RunningTurnFollowUpComposer::Blocked {
+                reason: "the composer holds an unsent draft".to_string(),
+            }
+        }
+        crate::PaneComposerProjection::AgentAddressed { target } => {
+            RunningTurnFollowUpComposer::Blocked {
+                reason: format!("the composer is addressed to subagent {target:?}"),
+            }
+        }
+        crate::PaneComposerProjection::Absent => RunningTurnFollowUpComposer::Unreadable,
+    }
 }
 
 /// The delivery adapter for `harness` (any spelling `normalize_harness_name`
@@ -112,9 +160,9 @@ pub fn steering_delivery_adapter(harness: &str) -> SteeringDeliveryAdapter {
         "grok" | "grok-build" => SteeringDeliveryAdapter {
             harness: "grok",
             // Grok Build lifecycle hooks are notifications: stdout cannot
-            // inject context into the running turn. An explicit Run Agent Doc
-            // while that turn is busy therefore types the latest diff into
-            // the composer (`#routesyncsteer`); passive delivery stays a poll.
+            // inject context into the running turn. Explicit Run Agent Doc
+            // uses the shared composer follow-up (`#routesyncsteer`); passive
+            // delivery stays a poll.
             busy: BusyDelivery::PollAndCommandBoundary,
             idle: IdleDelivery::SupervisorTrigger,
             // `grok -p <PROMPT>` is its single-turn headless mode.
@@ -171,15 +219,49 @@ mod tests {
     }
 
     #[test]
-    fn only_grok_types_an_explicit_send_into_the_running_composer() {
-        assert!(explicit_running_turn_send_is_composer_diff("grok"));
-        assert!(explicit_running_turn_send_is_composer_diff("grok-build"));
-        for harness in ["claude", "codex", "opencode", "cursor"] {
+    fn every_supervised_tui_types_an_explicit_send_into_the_running_composer() {
+        for harness in ["claude", "codex", "opencode", "grok", "grok-build"] {
             assert!(
-                !explicit_running_turn_send_is_composer_diff(harness),
+                explicit_running_turn_send_is_composer_diff(harness),
                 "{harness}"
             );
         }
+        assert!(!explicit_running_turn_send_is_composer_diff("cursor"));
+    }
+
+    #[test]
+    fn busy_follow_up_composer_is_harness_neutral_and_draft_safe() {
+        assert_eq!(
+            running_turn_follow_up_composer(
+                "claude",
+                "✶ Generating… (3s · esc to interrupt)\n❯\n  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host\n  ⏵⏵ bypass permissions on · 1 shell",
+            ),
+            RunningTurnFollowUpComposer::Empty
+        );
+        assert_eq!(
+            running_turn_follow_up_composer(
+                "codex",
+                "• Waiting for background terminal (18m 36s • esc to interrupt)\n\n›\n29% context left",
+            ),
+            RunningTurnFollowUpComposer::Empty
+        );
+        assert_eq!(
+            running_turn_follow_up_composer(
+                "opencode",
+                "Working (21s - esc to interrupt)\nctrl+p commands\n50% context",
+            ),
+            RunningTurnFollowUpComposer::Empty
+        );
+        let codex_draft = "• Working (1m 34s • esc to interrupt)\n\n›\ntab to queue message\ngpt-5.4 high · ~/work/btakita/agent-loop · Context 54% used";
+        assert!(matches!(
+            running_turn_follow_up_composer("codex", codex_draft),
+            RunningTurnFollowUpComposer::Blocked { reason }
+                if reason.contains("queued draft")
+        ));
+        assert_eq!(
+            running_turn_follow_up_composer("codex", "no recognizable composer"),
+            RunningTurnFollowUpComposer::Unreadable
+        );
     }
 
     #[test]

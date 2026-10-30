@@ -1327,9 +1327,10 @@ pub fn content_hash(text: &str) -> String {
 /// Header line every rendered steering payload starts with.
 pub const STEERING_MARKER: &str = "[agent-doc] operator steering arrived mid-turn";
 
-/// Steering instructions for an explicit Run Agent Doc on a running turn
-/// (`#routesyncsteer`): the unified diff since the last send, plus any
-/// classified items the hook would have injected. `None` when both are empty.
+/// Harness-neutral steering instructions for an explicit Run Agent Doc on a
+/// running turn (`#routesyncsteer`): the unified diff since the last send,
+/// plus any classified items passive delivery would have injected. `None`
+/// when both are empty.
 pub fn render_route_sync_steering(
     document: &str,
     diff: Option<&str>,

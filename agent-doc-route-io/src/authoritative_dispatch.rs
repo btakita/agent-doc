@@ -357,9 +357,9 @@ pub fn closeout_wait_route_outcome(
     }
 }
 
-/// `#routesyncsteer`: an explicit send into a running Grok turn is not
-/// delivered until this pane accepts the diff. Hook harnesses keep the
-/// pending-item count; their next hook injects the flush.
+/// `#routesyncsteer`: an explicit send into any running route-owned TUI turn is
+/// not delivered until that pane accepts the diff. Passive hook/poll delivery
+/// remains available for document edits that were not explicitly sent.
 enum RunningTurnSteeringClaim {
     Count(usize),
     NotDelivered(String),
@@ -391,7 +391,7 @@ fn pending_explicit_send_count(file: &Path) -> usize {
         .unwrap_or(0)
 }
 
-/// Count, and for a busy Grok composer submit, the explicit send.
+/// Count, and for a busy route-owned composer submit, the explicit send.
 ///
 /// `submit` is false when the caller has already proved the pane idle: typing
 /// there would start a turn instead of steering the one that is running.
@@ -422,20 +422,19 @@ fn running_turn_steering_claim(
     if !harness_cfg.has_busy_cue(&capture) {
         return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
     }
-    match agent_doc_harness::grok_follow_up_composer(&capture) {
-        agent_doc_harness::GrokFollowUpComposer::Draft { .. } => {
+    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, &capture) {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
             return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                file,
-                "the composer holds an unsent draft",
+                file, &reason,
             ));
         }
-        agent_doc_harness::GrokFollowUpComposer::Unreadable => {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
             return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
                 file,
                 "the composer could not be read",
             ));
         }
-        agent_doc_harness::GrokFollowUpComposer::Empty => {}
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {}
     }
     let prepared =
         match agent_doc_session_check_io::midturn_steering::prepare_route_sync_steering(file) {

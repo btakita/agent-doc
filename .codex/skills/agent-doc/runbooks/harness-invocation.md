@@ -41,15 +41,18 @@ finalize.
 Grok lifecycle hooks are notifications, so a passive edit is not pushed into
 the turn (`#midturn-steering`): poll `agent-doc steering <FILE>` between long
 steps (inspect without consuming with `agent-doc steering --peek <FILE>`), and
-read the steering block in the connected finalize's terminal report. An
-explicit `Run Agent Doc` while this turn is running is different
-(`#routesyncsteer`): route submits the latest diff since the last send into
-the composer as one mid-turn follow-up. With `ui.follow_up_behavior = "steer"`
-that follow-up is injected into this turn at the next safe gap; with `"queue"`
-it waits until the turn ends. Handle that diff as operator steering. Do not
-start a second turn. When the turn ends, the supervisor wakes the idle Grok
-pane for settled, unsurfaced, unclaimed steering (`#steeringwake`) through the
-same guarded idle dispatch.
+read the steering block in the connected finalize's terminal report. When the
+turn ends, the supervisor wakes the idle Grok pane for settled, unsurfaced,
+unclaimed steering (`#steeringwake`) through the same guarded idle dispatch.
+
+For every route-owned TUI harness (Claude Code, Codex, OpenCode, and Grok
+Build), an explicit `Run Agent Doc` while the document's turn is already
+running is steering, not a request for another turn (`#routesyncsteer`). Route
+submits the latest diff since the last send into the empty composer as one
+mid-turn follow-up. The harness injects it at its next safe gap or queues it
+for the turn boundary according to its native follow-up behavior. Handle that
+diff as operator steering. Do not start a second turn. An unreadable composer,
+an unsent draft, or Claude's subagent-addressed composer remains protected.
 
 Routing reuses the supervisor lifecycle and document-bound resume UUID.
 Readiness requires a complete empty Grok composer with no live cancel/stop

@@ -1485,7 +1485,7 @@ fn load_route_sync_baseline(
 }
 
 /// The latest diff since the last successful explicit send, rendered as
-/// steering instructions (`#routesyncsteer`).
+/// harness-neutral steering instructions (`#routesyncsteer`).
 ///
 /// The previous text is the document recorded after the last delivery in this
 /// cycle, or the cycle's steering baseline when this is the first send. `None`

@@ -1,4 +1,5 @@
-//! Pure queue schedule policy (`interval=`, `time=`, `loop`).
+//! Pure queue schedule and completed-row retention policy (`interval=`,
+//! `time=`, `loop`, `keep`).
 //!
 //! `<!-- agent:loop interval=30m time=09:00,17:30 -->` declares a repeating
 //! scheduled run. Legacy `agent:queue loop` / `loop=N` markers remain accepted.
@@ -21,6 +22,8 @@
 //!   without limit; `loop=N` runs N passes and then holds the items. A `loop`
 //!   without `interval`/`time` starts the next pass
 //!   [`MIN_SCHEDULE_INTERVAL_SECS`] after the previous one completed.
+//! - `keep` — completed rows remain struck in the queue as history; unlike
+//!   `loop`, this does not schedule or restore them.
 //!
 //! # Anti-thrash contract
 //!
@@ -55,6 +58,8 @@ pub const QUEUE_INTERVAL_ATTR: &str = "interval";
 pub const QUEUE_TIME_ATTR: &str = "time";
 /// Queue-marker attribute: keep items and re-run them every pass.
 pub const QUEUE_LOOP_ATTR: &str = "loop";
+/// Queue-marker attribute: retain completed items in the runnable list.
+pub const QUEUE_KEEP_ATTR: &str = "keep";
 
 /// The shortest cadence a schedule may run at. A smaller `interval=` is
 /// clamped up to this floor (with a preflight warning), and a cadence-less
@@ -313,20 +318,24 @@ pub fn queue_schedule_spec_for_attrs(
     }
 }
 
-/// GH #327: whether a drain must keep this queue's struck (`~~item~~`) rows
-/// instead of erasing the body when its last live head is consumed.
+/// Whether a drain must keep this queue's struck (`~~item~~`) rows instead of
+/// erasing the body when its last live head is consumed.
 ///
-/// A `loop` queue's struck rows are the pass's completion evidence: the
+/// Bare `keep` retains completed rows as queue history without making them
+/// live again. A `loop` queue implies the same retention because its struck
+/// rows are the pass's completion evidence: the
 /// scheduler's roster reconciliation ([`observe_with_completed`]) keeps a
 /// roster item only while it is live, was seen claimed, or is struck-complete,
 /// and the loop restore ([`plan_loop_restore_for_queue`]) is what removes the
 /// struck copy. A drain that erases the body when the queue empties (the
 /// closeout consume, the preflight drained-queue clear) would leave the item
 /// neither live nor struck, so the pass would complete with nothing to
-/// restore. Keyed on the bare `loop` attribute, not on a valid spec, so a
-/// malformed `loop=` value still takes the non-lossy direction.
+/// restore. Legacy `agent:run loop` / `agent:queue loop` markers retain via the
+/// `loop` attribute even when they predate the explicit `keep` projection. Both
+/// flags are presence-based, so a malformed value still takes the non-lossy
+/// direction.
 pub fn queue_retains_struck_heads(attrs: &HashMap<String, String>) -> bool {
-    attrs.contains_key(QUEUE_LOOP_ATTR)
+    attrs.contains_key(QUEUE_KEEP_ATTR) || attrs.contains_key(QUEUE_LOOP_ATTR)
 }
 
 fn declares_schedule(attrs: &HashMap<String, String>) -> bool {
@@ -398,11 +407,13 @@ pub fn live_heads_for_queue(content: &str, queue_id: &str) -> anyhow::Result<Vec
     let block = graph
         .block(queue_id)
         .ok_or_else(|| anyhow::anyhow!("agent:queue id `{queue_id}` not found"))?;
+    let executable = document_queue::executable_prompt_indexes(&block.entries);
     Ok(block
         .entries
         .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => Some(prompt.text.clone()),
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            QueueEntry::Prompt(prompt) if executable.contains(&index) => Some(prompt.text.clone()),
             QueueEntry::Freeform(line) if !document_queue::is_noise_freeform_line(line) => {
                 Some(line.clone())
             }
@@ -1711,7 +1722,12 @@ mod tests {
     }
 
     #[test]
-    fn loop_queue_marker_retains_struck_heads() {
+    fn keep_and_loop_queue_markers_retain_struck_heads() {
+        assert!(queue_retains_struck_heads(&attrs(&[("keep", "")])));
+        assert!(queue_retains_struck_heads(&attrs(&[
+            ("keep", "true"),
+            ("interval", "1h")
+        ])));
         assert!(queue_retains_struck_heads(&attrs(&[("loop", "")])));
         assert!(queue_retains_struck_heads(&attrs(&[
             ("loop", "3"),

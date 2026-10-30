@@ -2451,9 +2451,8 @@ fn plan_queue_prompt_consumption_inner(
             };
 
             let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
-            // GH #327: a `loop` queue keeps its struck rows on drain; they are
-            // the scheduler's completion evidence and the loop restore removes
-            // them.
+            // Retaining queues keep struck rows as history. A `loop` queue
+            // additionally uses them as restoration evidence.
             let retain_struck =
                 agent_doc_queue::queue_schedule::queue_retains_struck_heads(&comp.attrs);
             let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
@@ -2875,8 +2874,8 @@ fn plan_queue_prompt_consumption_inner(
     };
 
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&comp.attrs);
-    // GH #327: a `loop` queue keeps its struck rows on drain; they are the
-    // scheduler's completion evidence and the loop restore removes them.
+    // Retaining queues keep struck rows as history. A `loop` queue additionally
+    // uses them as restoration evidence.
     let retain_struck = agent_doc_queue::queue_schedule::queue_retains_struck_heads(&comp.attrs);
     let remaining = agent_doc_queue::document_queue::prompts(&completed_entries).len();
     let queue_empty = remaining == 0;
@@ -4129,14 +4128,80 @@ mod core_tests {
     }
 
     #[test]
-    /// GH #327: the done-id consume path keeps a drained `loop` queue's struck
-    /// row too; a non-loop queue still clears its drained body.
-    fn done_id_drain_keeps_struck_rows_only_in_a_loop_queue() {
+    fn keep_queue_retains_a_completed_prompt_tree_without_rerunning_it() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
-        for (attrs, keeps) in [("loop id=issues", true), ("id=issues", false)] {
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:run keep id=pull-request -->\n",
+            "- Track pull request\n",
+            "  - Open the pull request\n",
+            "  - Merge after review\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let mut current_document = content.to_string();
+        let mut current_snapshot = content.to_string();
+        let mut drained = false;
+        for _ in 0..2 {
+            let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
+                &doc,
+                &current_document,
+                Some(&current_snapshot),
+                &[],
+                1,
+            )
+            .unwrap()
+            .expect("the next prompt-tree leaf is consumed");
+            current_document = planned.new_document;
+            current_snapshot = planned.new_snapshot;
+            drained = planned.drained;
+            if drained {
+                break;
+            }
+        }
+        assert!(drained, "{current_document}");
+        for (label, text) in [
+            ("document", &current_document),
+            ("snapshot", &current_snapshot),
+        ] {
+            assert!(
+                text.contains("- Track pull request\n"),
+                "{label}: the parent remains visible and unstruck: {text}"
+            );
+            assert!(
+                !text.contains("~~Track pull request~~"),
+                "{label}: the parent must remain unstruck: {text}"
+            );
+            assert!(
+                text.contains("~~Open the pull request~~"),
+                "{label}: {text}"
+            );
+            assert!(text.contains("~~Merge after review~~"), "{label}: {text}");
+            assert!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, "pull-request")
+                    .unwrap()
+                    .is_empty(),
+                "{label}: retained rows must not become live again: {text}"
+            );
+        }
+    }
+
+    #[test]
+    /// The done-id consume path honors explicit `keep` on both runnable marker
+    /// spellings and the retention implied by `agent:loop`; an ordinary run
+    /// still clears its drained body.
+    fn done_id_drain_keeps_struck_rows_for_every_public_keep_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        for (marker, attrs, keeps) in [
+            ("run", "keep id=issues", true),
+            ("queue", "keep id=issues", true),
+            ("loop", "id=issues", true),
+            ("run", "id=issues", false),
+        ] {
             let content = format!(
-                "---\nqueue_active: true\n---\n\n<!-- agent:queue {attrs} -->\n- do [#ping]\n<!-- /agent:queue -->\n"
+                "---\nqueue_active: true\n---\n\n<!-- agent:{marker} {attrs} -->\n- do [#ping]\n<!-- /agent:{marker} -->\n"
             );
             let planned = plan_queue_prompt_consumption_with_snapshot_and_count(
                 &doc,
@@ -4147,17 +4212,17 @@ mod core_tests {
             )
             .unwrap()
             .expect("the done id consumes its head");
-            assert!(planned.drained, "{attrs}");
+            assert!(planned.drained, "{marker} {attrs}");
             for text in [&planned.new_document, &planned.new_snapshot] {
                 let completed =
                     agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
                         .unwrap();
-                assert_eq!(!completed.is_empty(), keeps, "{attrs}: {text}");
+                assert_eq!(!completed.is_empty(), keeps, "{marker} {attrs}: {text}");
                 assert!(
                     agent_doc_queue::queue_schedule::live_heads_for_queue(text, "issues")
                         .unwrap()
                         .is_empty(),
-                    "{attrs}"
+                    "{marker} {attrs}"
                 );
             }
         }

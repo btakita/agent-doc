@@ -6877,12 +6877,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     let drained_body_clearable = (need_strip_activation || need_clear_non_auto_residue)
         && !activation.deferred
         && queue_body_clear_is_lossless(&activation.entries_after);
-    // GH #327: a `loop` queue keeps its struck rows when it drains. They are
-    // the scheduler's evidence that the pass ran each item, and the loop
-    // restore removes them when it re-appends the items. Blanking the body
-    // here (in the same write as the residue strike) left the item neither
-    // live nor struck, so the pass completed with `restore_items=0` and the
-    // loop lost its program.
+    // Retaining queues keep struck rows when they drain. An explicit `keep`
+    // leaves them as history; a `loop` additionally needs them as evidence that
+    // the pass ran each item. Blanking a loop here (in the same write as the
+    // residue strike) left the item neither live nor struck, so the pass
+    // completed with `restore_items=0` and lost its program.
     let selected_queue_retains_struck = agent_doc_element::element::parse(&current_content)
         .ok()
         .and_then(|comps| {
@@ -7537,10 +7536,13 @@ pub fn run_queue_maintenance_with_coin_gate(
     // context. Once every existing leaf is terminal, close a plain context row
     // or move unresolved lifecycle/operator evidence to one executable child.
     // Never leave a blocked/lost/operator-gated parent as an inert queue end.
-    if let Some(settled_entries) = agent_doc_queue::document_queue::settle_inert_group_parents(
-        &activation.entries_after,
-        &open_todo_ids,
-    ) {
+    if !selected_queue_retains_struck
+        && let Some(settled_entries) =
+            agent_doc_queue::document_queue::settle_inert_group_parents(
+                &activation.entries_after,
+                &open_todo_ids,
+            )
+    {
         let new_body = agent_doc_queue::document_queue::render(&settled_entries);
         current_content = {
             let comps = agent_doc_element::element::parse(&current_content)?;
@@ -16764,6 +16766,71 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                     .unwrap(),
                 vec!["do [#alpha]".to_string(), "do [#beta]".to_string()],
                 "{label}: the drain kept the loop queue's struck rows: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn queue_maintenance_keeps_a_drained_keep_queue_as_history() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run auto keep id=history -->\n",
+            "- Track pull request\n",
+            "  - do [#alpha]\n",
+            "  - do [#beta]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Done\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] First done.\n",
+            "- [x] [#beta] Second done.\n",
+            "<!-- /agent:done -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        for (label, text) in [("document", &updated), ("snapshot", &snap)] {
+            assert!(
+                text.contains("- Track pull request\n"),
+                "{label}: keep leaves the context parent unstruck: {text}"
+            );
+            assert!(
+                !text.contains("~~Track pull request~~"),
+                "{label}: keep never strikes the context parent: {text}"
+            );
+            assert!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, "history")
+                    .unwrap()
+                    .is_empty(),
+                "{label}: retained rows are completed: {text}"
+            );
+            assert_eq!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "history")
+                    .unwrap(),
+                vec!["do [#alpha]".to_string(), "do [#beta]".to_string()],
+                "{label}: keep retains the completed queue rows: {text}"
             );
         }
     }

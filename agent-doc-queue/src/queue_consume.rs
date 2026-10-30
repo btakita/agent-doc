@@ -676,12 +676,9 @@ pub fn node_replace_ops_from_diff(
     Ok(ops)
 }
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
-    entries
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => Some(strip_in_progress_marker(&prompt.text)),
-            _ => None,
-        })
+    document_queue::prompts(entries)
+        .into_iter()
+        .map(|prompt| strip_in_progress_marker(&prompt.text))
         .take(count)
         .collect()
 }
@@ -1489,11 +1486,6 @@ pub fn queue_prompt_node_keys_for_count(
     // surfaces, but this text correspondence remains the fail-closed proof for
     // any future or malformed shape. A count-only match could otherwise target
     // the next enumerable node and strike unrun work.
-    let unstruck = nodes
-        .into_iter()
-        .filter(|node| !node.item.struck)
-        .take(count)
-        .collect::<Vec<_>>();
     let parsed_heads = crate::document_queue::parse(selected.component.content(content))
         .ok()
         .map(|entries| {
@@ -1503,24 +1495,18 @@ pub fn queue_prompt_node_keys_for_count(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let corresponds = unstruck.len() >= count
-        && unstruck
-            .iter()
-            .enumerate()
-            .take(count)
-            .all(|(index, node)| {
-                parsed_heads.get(index).is_some_and(|head| {
-                    queue_prompt_texts_match_for_consumption(&node.item.text, head)
-                })
-            });
-    if corresponds {
-        return Ok(QueuePromptNodeKeys {
-            keys: unstruck
-                .into_iter()
-                .map(|node| node.node_key)
+    if parsed_heads.len() >= count
+        && let Some(matched) = queue_prompt_node_keys_for_texts(
+            content,
+            &parsed_heads[..count],
+            &nodes
+                .iter()
+                .filter(|node| !node.item.struck)
+                .map(|node| node.node_key.clone())
                 .collect::<Vec<_>>(),
-            ast_backed: true,
-        });
+        )?
+    {
+        return Ok(matched);
     }
 
     let queue_component = selected.component;

@@ -134,6 +134,9 @@ fn apply_component_implied_attrs(name: &str, attrs: &mut HashMap<String, String>
         // `agent:loop` is the canonical replacement for `agent:queue loop`.
         // An explicit `loop=N` still wins and preserves finite-pass behavior.
         attrs.entry("loop".to_string()).or_default();
+        // Repeating queues need their struck rows as restoration evidence, so
+        // `agent:loop` also projects the public retention default explicitly.
+        attrs.entry("keep".to_string()).or_default();
     }
 }
 
@@ -646,7 +649,7 @@ fn normalize_queue_tag_token(token: &str) -> String {
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "priority" | "go" | "start" | "stop" | "clear" | "disable-auto-clear"
+        "auto" | "priority" | "go" | "start" | "stop" | "clear" | "keep" | "disable-auto-clear"
     )
 }
 
@@ -2865,6 +2868,7 @@ mod tests {
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].name, QUEUE_COMPONENT);
         assert_eq!(ranges[0].attrs.get("loop"), Some(&String::new()));
+        assert_eq!(ranges[0].attrs.get("keep"), Some(&String::new()));
         assert_eq!(
             ranges[0].attrs.get("interval").map(String::as_str),
             Some("5m")
@@ -4290,7 +4294,7 @@ Fix applied to skip non-agent <!-- sequences.
     #[test]
     fn converge_queue_auto_normalizes_boolean_attrs_without_corrupting_preset() {
         let doc = concat!(
-            "<!-- agent:queue auto=true priority=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->\n",
+            "<!-- agent:queue auto=true priority=true keep=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->\n",
             "- do [#x]\n",
             "<!-- /agent:queue -->\n",
         );
@@ -4298,7 +4302,7 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(
             result,
             concat!(
-                "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->\n",
+                "<!-- agent:queue priority keep preset=\"#spec-test-build-install-commit-push\" go -->\n",
                 "- do [#x]\n",
                 "<!-- /agent:queue -->\n",
             )

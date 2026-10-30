@@ -23,6 +23,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
     crate::queue_schedule::QUEUE_TIME_ATTR,
     crate::queue_schedule::QUEUE_LOOP_ATTR,
+    crate::queue_schedule::QUEUE_KEEP_ATTR,
 ];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
@@ -77,6 +78,7 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
             | "clear"
             | "disable-auto-clear"
             | "loop"
+            | "keep"
     )
 }
 
@@ -319,6 +321,24 @@ mod tests {
         let warning = component_attr_warning(backlog).expect("clear on backlog must warn");
         assert!(warning.message_body().contains("queue-only attribute"));
         assert!(warning.message_body().contains("agent:queue clear"));
+    }
+
+    #[test]
+    fn keep_is_queue_only_and_valid_as_a_bare_queue_flag() {
+        for marker in ["agent:run", "agent:queue", "agent:loop"] {
+            let queue = format!("<!-- {marker} keep -->\n- a\n<!-- /{marker} -->\n");
+            assert!(
+                component_attr_warning(&queue).is_none(),
+                "{marker}: {:?}",
+                component_attr_warning(&queue)
+            );
+        }
+
+        let backlog =
+            "<!-- agent:backlog keep -->\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n";
+        let warning = component_attr_warning(backlog).expect("keep on backlog must warn");
+        assert!(warning.message_body().contains("queue-only attribute"));
+        assert!(warning.message_body().contains("agent:queue keep"));
     }
 
     #[test]

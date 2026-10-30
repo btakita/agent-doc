@@ -3145,7 +3145,15 @@ fn queue_tag_token_key(token: &str) -> &str {
 fn is_queue_boolean_attr(key: &str) -> bool {
     matches!(
         key,
-        "auto" | "priority" | "go" | "start" | "stop" | "pause" | "clear" | "disable-auto-clear"
+        "auto"
+            | "priority"
+            | "go"
+            | "start"
+            | "stop"
+            | "pause"
+            | "clear"
+            | "keep"
+            | "disable-auto-clear"
     )
 }
 
@@ -5340,8 +5348,9 @@ pub fn mark_first_prompt_completed(entries: &[QueueEntry]) -> Vec<QueueEntry> {
 pub fn mark_first_n_prompts_completed(entries: &[QueueEntry], count: usize) -> Vec<QueueEntry> {
     let mut result = Vec::with_capacity(entries.len());
     let mut marked = 0usize;
-    for entry in entries {
+    for (index, entry) in entries.iter().enumerate() {
         if marked < count
+            && !entry_is_group_parent(entries, index)
             && let QueueEntry::Prompt(prompt) = entry
         {
             let mut completed = prompt.clone();
@@ -8376,9 +8385,9 @@ mod tests {
     fn normalize_queue_tag_attrs_repairs_boolean_true_regression() {
         assert_eq!(
             normalize_queue_tag_attrs(
-                "<!-- agent:queue priority=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->"
+                "<!-- agent:queue priority=true keep=true preset=\"#spec-test-build-install-commit-push\"=true go=true -->"
             ),
-            "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->"
+            "<!-- agent:queue priority keep preset=\"#spec-test-build-install-commit-push\" go -->"
         );
     }
 

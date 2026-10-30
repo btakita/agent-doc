@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.562
+
+- **Large steering payloads now travel through compact, one-use CLI/MCP references.** The full payload is persisted before the hook watermark advances, while the composer receives one document- and cycle-bound token with a five-minute TTL. Wrong-document, stale-cycle, expired, replayed, and unknown tokens fail closed without disclosing the payload. Claude Code, Codex, OpenCode, and Grok Build share the same transport policy.
+- **Running-turn steering is acknowledged only after the harness proves the composer consumed it.** A still-visible draft receives a bounded bare-Enter retry; protected, unreadable, idle, and exhausted states fail closed instead of silently baselining an unsubmitted prompt. Cross-harness projection and scripted tmux coverage pin the behavior.
+- **Nested queue trees preserve executable leaves, context, and authorization.** Comment-only children no longer suppress their runnable parent, group ancestry and preset authorization follow the selected leaf, repeated and late-added prompts remain dispatchable, resolved decision trees settle cleanly, and terminal prompt trees can be deleted without resurrection.
+- **Subagent queues recover and publish their lifecycle consistently.** Planning ranges across every eligible queue section, lost workers and unavailable owners recover without dropping steering, follow-ups added after a worker report are dispatched, and publication markers follow the actual state transition.
+- **Explicit Run Agent Doc steering reaches every live harness while closeout protects the busy owner.** Focused-tab layout synchronization and JetBrains component outlines also avoid treating inert list comments as actionable structure.
+
 ## 0.35.561
 
 - **A paused earlier `agent:run` does not hide the other runs.** A queue held by `pause` (a legacy marker `stop` included) stays live for `after=` and is skipped. The other `agent:run`, `agent:loop`, and legacy `agent:queue` elements are still processed in that turn, including when three runs are present and the first is paused. An earlier inline queue that still has owner-available work gates later queues. A `[focused-cycle]` head is not a pause and still gates.

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-archive-io"
-version = "0.35.561"
+version = "0.35.562"
 edition = "2024"
 description = "Compact archive file I/O adapters for agent-doc"
 license = "Apache-2.0"
@@ -11,8 +11,8 @@ publish = false
 name = "agent_doc_archive_io"
 
 [dependencies]
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.561" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.561" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.562" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.562" }
 
 [dev-dependencies]
 tempfile = "3"

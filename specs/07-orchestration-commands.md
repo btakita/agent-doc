@@ -678,6 +678,14 @@ A bare target against several annotated descendants is an ambiguity error
 listing the exact rows; claim resolution never chooses the first annotated
 effect.
 
+When a row also carries binary report-state metadata, the effect suffix MUST
+precede the one trailing report-state annotation: `… ⟦effect:N⟧
+⟦published⟧`. Convergence canonicalizes the historical state-before-effect form
+and collapses a duplicated report state to one trailing annotation. Claim
+identity ignores report-state metadata but retains the effect suffix, so
+canonicalization cannot split one reported attempt into a second running
+attempt or make its visible marker alternate between `☑️` and `🚧`.
+
 **A claim is bound to the row it was issued for, never to a text-identical
 sibling (`#claimrowmigrate`).** Annotation is an edit of the claimed row, so
 the claim follows that row's annotated successor, exactly like any other

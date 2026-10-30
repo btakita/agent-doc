@@ -1503,10 +1503,16 @@ pub fn guard_ipc_snapshot_adoption_against_response_contamination(
     else {
         return false;
     };
-    let contaminated = agent_doc_workflow::session_check::queue_response_contamination_candidates(
-        queue.content(&decision.snapshot_content),
-        exchange.content(ours),
-    );
+    let baseline_queue_body = canonical_components
+        .iter()
+        .find(|component| component.name == "queue")
+        .map(|component| component.content(ours));
+    let contaminated =
+        agent_doc_workflow::session_check::queue_response_contamination_candidates_since_baseline(
+            queue.content(&decision.snapshot_content),
+            exchange.content(ours),
+            baseline_queue_body,
+        );
     if contaminated.is_empty() {
         return false;
     }

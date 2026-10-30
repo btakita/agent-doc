@@ -7462,6 +7462,53 @@ Body\n\
             "legitimate free-text queue prompt must not be flagged"
         );
     }
+    #[test]
+    fn queue_contamination_guard_uses_capture_baseline_for_operator_context() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        let doc = tmp.path().join("doc.md");
+        let parent = "If I have a long list of agent:run items, it is difficult to see what was worked on recently.";
+        let baseline = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- ⚠️ {parent}\n",
+                "  - Add timestamp and numeric recency affordances.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            parent = parent,
+        );
+        fs::write(&doc, &baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(&baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            "### Re: recent-run affordance — gpt-5\n\nAudit complete.\n",
+            &baseline,
+        )
+        .unwrap();
+
+        let current = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: recent-run affordance — gpt-5\n\n",
+                "{parent} The audit is complete.\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n- {parent}\n<!-- /agent:queue -->\n",
+            ),
+            parent = parent,
+        );
+        fs::write(&doc, current).unwrap();
+
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::None
+            ),
+            "operator-authored context from the response capture baseline is not response contamination"
+        );
+    }
     /// `#jb-run-agent-doc-response-queue-contamination` blockquote-echo false
     /// positive: a still-live free-text queue HEAD whose verbatim text the
     /// answering `### Re:` response quotes in its `> **Queue prompt:**` echo must

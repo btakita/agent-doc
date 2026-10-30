@@ -526,9 +526,48 @@ pub fn queue_response_contamination_candidates(
     queue_body: &str,
     exchange_body: &str,
 ) -> Vec<String> {
+    queue_response_contamination_candidates_since_baseline(queue_body, exchange_body, None)
+}
+
+/// The same contamination check with committed queue provenance. Queue rows
+/// already present in the baseline are operator-authored ancestry, even when a
+/// later response quotes them at the start of a prose line.
+pub fn queue_response_contamination_candidates_since_baseline(
+    queue_body: &str,
+    exchange_body: &str,
+    baseline_queue_body: Option<&str>,
+) -> Vec<String> {
     let response_text = agent_doc_turn::closeout_signal::assistant_response_text(exchange_body);
     if response_text.trim().is_empty() {
         return Vec::new();
+    }
+    let normalized_queue_prompt = |text: &str| {
+        let bare = agent_doc_element_queue::strip_priority_markers(text);
+        agent_doc_turn::closeout_signal::normalized_prompt_for_match(&bare)
+    };
+
+    let mut baseline_prefixes = std::collections::HashSet::new();
+    if let Some(baseline) = baseline_queue_body {
+        if let Ok(entries) = agent_doc_queue::document_queue::parse(baseline) {
+            for entry in entries {
+                let text = match entry {
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                    | agent_doc_queue::document_queue::QueueEntry::Completed(prompt) => prompt.text,
+                    _ => continue,
+                };
+                let normalized = normalized_queue_prompt(&text);
+                if normalized.chars().count() >= 20 {
+                    baseline_prefixes.insert(normalized.chars().take(40).collect::<String>());
+                }
+            }
+        }
+        baseline_prefixes.extend(
+            baseline
+                .lines()
+                .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
+                .filter(|line| line.chars().count() >= 20)
+                .map(|line| line.chars().take(40).collect::<String>()),
+        );
     }
 
     let mut contaminated = Vec::new();
@@ -541,11 +580,14 @@ pub fn queue_response_contamination_candidates(
             if agent_doc_queue::queue_command::mentions_slash_command_reference(text) {
                 continue;
             }
-            let normalized = agent_doc_turn::closeout_signal::normalized_prompt_for_match(text);
+            let normalized = normalized_queue_prompt(text);
             if normalized.chars().count() < 20 {
                 continue;
             }
             let needle: String = normalized.chars().take(40).collect();
+            if baseline_prefixes.contains(&needle) {
+                continue;
+            }
             if response_text
                 .lines()
                 .any(|line| line.trim_start().starts_with(&needle))
@@ -572,7 +614,7 @@ pub fn queue_response_contamination_candidates(
             .filter(|line| line.chars().count() >= 40)
             .find(|response_line| {
                 let needle: String = response_line.chars().take(40).collect();
-                queue_line_prefixes.contains(&needle)
+                queue_line_prefixes.contains(&needle) && !baseline_prefixes.contains(&needle)
             })
         {
             contaminated.push(response_line.chars().take(80).collect::<String>());
@@ -1114,6 +1156,31 @@ mod tests {
         let queue = format!("- {head}\n");
 
         assert!(queue_response_contamination_candidates(&queue, &exchange).is_empty());
+    }
+
+    #[test]
+    fn queue_response_contamination_ignores_preexisting_operator_context_ancestry() {
+        let parent = "If I have a long list of agent:run items, it is difficult to see what was worked on recently.";
+        let baseline =
+            format!("- ⚠️ {parent}\n  - Add timestamp and numeric recency affordances.\n");
+        let queue = format!("- {parent}\n");
+        let exchange =
+            format!("### Re: recent-run affordance\n\n{parent} The audit is complete.\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates(&queue, &exchange),
+            vec![parent.chars().take(80).collect::<String>()],
+            "without provenance this is indistinguishable from copied response prose"
+        );
+        assert!(
+            queue_response_contamination_candidates_since_baseline(
+                &queue,
+                &exchange,
+                Some(&baseline),
+            )
+            .is_empty(),
+            "an operator-authored parent already in the committed queue is not contamination"
+        );
     }
 
     #[test]

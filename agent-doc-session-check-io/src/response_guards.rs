@@ -78,10 +78,40 @@ pub fn check_queue_response_contamination_guard(
     };
 
     let queue_body = &content[queue.open_end..queue.close_start];
-    let contaminated = agent_doc_workflow::session_check::queue_response_contamination_candidates(
-        queue_body,
-        exchange.content(&content),
-    );
+    let cycle_state = rc.cycle_state();
+    let capture = match cycle_state
+        .as_deref()
+        .and_then(|state| state.capture_id.as_deref())
+    {
+        Some(capture_id) => agent_doc_capture_io::load_by_id(file, capture_id)?,
+        None => None,
+    };
+    let head_content = rc.head_content();
+    let baseline_content = capture
+        .as_ref()
+        .and_then(|capture| capture.baseline_content.as_deref())
+        .or_else(|| {
+            head_content
+                .as_deref()
+                .map(String::as_str)
+                .filter(|head| *head != content)
+        });
+    let baseline_components =
+        baseline_content.and_then(|baseline| agent_doc_element::element::parse(baseline).ok());
+    let baseline_queue_body = baseline_content.and_then(|baseline| {
+        baseline_components.as_ref().and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "queue")
+                .map(|component| component.content(baseline))
+        })
+    });
+    let contaminated =
+        agent_doc_workflow::session_check::queue_response_contamination_candidates_since_baseline(
+            queue_body,
+            exchange.content(&content),
+            baseline_queue_body,
+        );
 
     if contaminated.is_empty() {
         return Ok(GuardResult::None);

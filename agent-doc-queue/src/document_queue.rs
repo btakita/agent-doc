@@ -1951,6 +1951,130 @@ pub fn set_prompt_operator_actions(
     changed.then_some(updated)
 }
 
+/// Settle a nested context row after every executable descendant has reached a
+/// terminal presentation (`#queueactionablecontext`). A context row without
+/// unresolved runtime evidence is history and closes with its children. When
+/// lifecycle or operator-action evidence still says work remains, move that
+/// evidence to one concrete child so the queue never ends at an inert parent.
+///
+/// Process deepest parents first. A synthesized child then also makes every
+/// ancestor executable through that leaf, avoiding duplicate follow-ups at
+/// each level of one nested lineage.
+pub fn settle_inert_group_parents(
+    entries: &[QueueEntry],
+    open_todo_ids: &std::collections::HashSet<String>,
+) -> Option<Vec<QueueEntry>> {
+    use agent_doc_document::queue_projection::{
+        QueueLifecycleMarker, apply_lifecycle_marker_with_blockers, apply_operator_action_ids,
+        apply_owner_projection, blocked_marker_ids, lifecycle_marker, operator_action_ids,
+        owner_projection, remove_operator_action_ids,
+    };
+
+    let mut updated = entries.to_vec();
+    let group_indexes = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            matches!(entry, QueueEntry::Prompt(_))
+                .then_some(index)
+                .filter(|index| entry_is_group_parent(entries, *index))
+        })
+        .collect::<Vec<_>>();
+    let mut changed = false;
+
+    for index in group_indexes.into_iter().rev() {
+        let own_indent = entry_indent(&updated[index]).unwrap_or(0);
+        let end = updated[index + 1..]
+            .iter()
+            .position(|entry| entry_indent(entry).is_some_and(|indent| indent <= own_indent))
+            .map_or(updated.len(), |offset| index + 1 + offset);
+        let has_live_leaf = (index + 1..end).any(|descendant| {
+            matches!(updated[descendant], QueueEntry::Prompt(_))
+                && !entry_is_group_parent(&updated, descendant)
+        });
+        if has_live_leaf {
+            continue;
+        }
+
+        let QueueEntry::Prompt(parent) = &updated[index] else {
+            continue;
+        };
+        let marker = lifecycle_marker(&parent.text);
+        let owner = owner_projection(&parent.text);
+        let blockers = blocked_marker_ids(&parent.text);
+        let action_ids = operator_action_ids(&parent.text)
+            .into_iter()
+            .filter(|id| open_todo_ids.contains(id))
+            .collect::<Vec<_>>();
+        let mut parent_text = strip_in_progress_marker_for_display(&parent.text)
+            .unwrap_or_else(|| parent.text.clone());
+        parent_text = apply_owner_projection(&parent_text, None);
+        parent_text = remove_operator_action_ids(&parent_text, &action_ids);
+
+        if marker.is_none() && action_ids.is_empty() {
+            let mut completed = parent.clone();
+            completed.text = parent_text;
+            updated[index] = QueueEntry::Completed(completed);
+            changed = true;
+            continue;
+        }
+
+        if parent_text != parent.text {
+            let mut clean_parent = parent.clone();
+            clean_parent.text = parent_text;
+            updated[index] = QueueEntry::Prompt(clean_parent);
+        }
+
+        let follow_up_text = if !action_ids.is_empty() {
+            "Resolve the open operator action to complete the parent item."
+        } else {
+            match marker {
+                Some(QueueLifecycleMarker::Blocked) => {
+                    "Resolve the blockers and complete the remaining work for the parent item."
+                }
+                Some(QueueLifecycleMarker::Lost) => {
+                    "Retry the lost work and complete the parent item."
+                }
+                Some(QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running) => {
+                    "Complete the in-progress work for the parent item."
+                }
+                Some(QueueLifecycleMarker::Reported | QueueLifecycleMarker::Reconciling) => {
+                    "Reconcile the reported work, then complete the parent item."
+                }
+                Some(QueueLifecycleMarker::Unknown) => {
+                    "Diagnose the conflicting work state, then complete the parent item."
+                }
+                Some(QueueLifecycleMarker::Skipped) => {
+                    "Resume or explicitly close the skipped work for the parent item."
+                }
+                Some(QueueLifecycleMarker::AwaitingOperator) => {
+                    "Resolve the operator decision needed to complete the parent item."
+                }
+                Some(QueueLifecycleMarker::Pending) | None => {
+                    "Complete the remaining work for the parent item."
+                }
+            }
+        };
+        let mut child_text = apply_operator_action_ids(follow_up_text, &action_ids);
+        if let Some(marker) = marker {
+            child_text = apply_lifecycle_marker_with_blockers(&child_text, marker, &blockers);
+        }
+        child_text = apply_owner_projection(&child_text, owner.as_ref());
+        updated.insert(
+            end,
+            QueueEntry::Prompt(QueuePrompt {
+                text: child_text,
+                multiline: false,
+                indent: own_indent + 2,
+                ordered_marker: None,
+            }),
+        );
+        changed = true;
+    }
+
+    changed.then_some(updated)
+}
+
 fn without_lifecycle_marker(entry: &QueueEntry) -> QueueEntry {
     let mut normalized = entry.clone();
     match &mut normalized {
@@ -10583,6 +10707,72 @@ mod tests {
             cleared,
             "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
         );
+    }
+
+    #[test]
+    fn inert_plain_group_closes_with_its_completed_leaves() {
+        let entries = parse(
+            "- Recent-run affordances\n  - ~~Add timestamp and ranked highlight affordances.~~\n",
+        )
+        .unwrap();
+        let settled = settle_inert_group_parents(&entries, &std::collections::HashSet::new())
+            .expect("the context parent closes");
+
+        assert_eq!(
+            render(&settled),
+            "- ~~Recent-run affordances~~\n  - ~~Add timestamp and ranked highlight affordances.~~\n"
+        );
+        assert!(prompts(&settled).is_empty());
+        assert!(settle_inert_group_parents(&settled, &std::collections::HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn inert_blocked_group_moves_the_blocker_to_an_actionable_child() {
+        let entries = parse(concat!(
+            "- ⛔ ⟦blocked by editor-api⟧ Parent still needs editor verification.\n",
+            "  - ~~Audit the existing implementation.~~\n",
+        ))
+        .unwrap();
+        let settled = settle_inert_group_parents(&entries, &std::collections::HashSet::new())
+            .expect("an actionable child is projected");
+
+        assert_eq!(
+            render(&settled),
+            concat!(
+                "- Parent still needs editor verification.\n",
+                "  - ~~Audit the existing implementation.~~\n",
+                "  - ⛔ ⟦blocked by editor-api⟧ Resolve the blockers and complete the remaining work for the parent item.\n",
+            )
+        );
+        assert_eq!(prompts(&settled).len(), 1);
+        assert_eq!(
+            agent_doc_document::queue_projection::lifecycle_marker(&prompts(&settled)[0].text),
+            Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked)
+        );
+        assert!(settle_inert_group_parents(&settled, &std::collections::HashSet::new()).is_none());
+    }
+
+    #[test]
+    fn inert_operator_gated_group_moves_the_request_to_an_actionable_child() {
+        let request_id = "subagent-operator-request-choice".to_string();
+        let open = std::collections::HashSet::from([request_id]);
+        let entries = parse(concat!(
+            "- 🙋 Decide the stable decision annotation [#subagent-operator-request-choice]\n",
+            "  - ~~Audit value versus surrogate ids.~~\n",
+        ))
+        .unwrap();
+        let settled = settle_inert_group_parents(&entries, &open)
+            .expect("the operator gate becomes an executable child");
+
+        assert_eq!(
+            render(&settled),
+            concat!(
+                "- Decide the stable decision annotation\n",
+                "  - ~~Audit value versus surrogate ids.~~\n",
+                "  - 🙋 Resolve the open operator action to complete the parent item. [#subagent-operator-request-choice]\n",
+            )
+        );
+        assert_eq!(prompts(&settled).len(), 1);
     }
 
     /// A request packet may retain the whole prompt tree as origin context.

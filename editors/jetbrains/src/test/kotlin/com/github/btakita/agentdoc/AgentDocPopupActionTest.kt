@@ -45,6 +45,7 @@ class AgentDocPopupActionTest {
     fun `overflow popup actions keep junie and force claim available`() {
         assertEquals(
             listOf(
+                "AgentDoc.StartAgentDoc",
                 "AgentDoc.InstallCli",
                 "AgentDoc.UpdateChannel",
                 "AgentDoc.RunWithJunie",

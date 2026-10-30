@@ -395,6 +395,87 @@ enum RunningTurnSteeringClaim {
     NotDelivered(String),
 }
 
+const ROUTE_SYNC_SUBMIT_ATTEMPTS: usize = 3;
+const ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT: usize = 3;
+const ROUTE_SYNC_SUBMIT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RunningTurnSubmissionObservation {
+    Delivered,
+    Draft,
+    Blocked(String),
+    Unreadable,
+}
+
+fn running_turn_submission_observation(
+    harness: &str,
+    capture: &str,
+) -> RunningTurnSubmissionObservation {
+    let harness_cfg = HarnessConfig::from_agent_name(harness);
+    if !harness_cfg.has_busy_cue(capture) {
+        return RunningTurnSubmissionObservation::Unreadable;
+    }
+    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, capture) {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
+            RunningTurnSubmissionObservation::Delivered
+        }
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
+            RunningTurnSubmissionObservation::Draft
+        }
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
+            RunningTurnSubmissionObservation::Blocked(reason)
+        }
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
+            RunningTurnSubmissionObservation::Unreadable
+        }
+    }
+}
+
+/// Prove that the just-pasted steering left the composer while the same turn is
+/// still busy. A large bracketed paste can absorb the first Enter; bounded
+/// retries are safe because the pre-send gate proved the composer empty and a
+/// retry is issued only while the injected draft is still visibly present.
+fn confirm_running_turn_submission(
+    tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
+    pane: &str,
+    harness: &str,
+    poll_interval: Duration,
+) -> Result<usize, String> {
+    let mut last_observation = RunningTurnSubmissionObservation::Unreadable;
+    'attempts: for attempt in 1..=ROUTE_SYNC_SUBMIT_ATTEMPTS {
+        for _ in 0..ROUTE_SYNC_SUBMIT_POLLS_PER_ATTEMPT {
+            std::thread::sleep(poll_interval);
+            let capture = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+                .map_err(|err| format!("the pane could not be read ({})", one_line_error(&err)))?;
+            last_observation = running_turn_submission_observation(harness, &capture);
+            match &last_observation {
+                RunningTurnSubmissionObservation::Delivered => return Ok(attempt - 1),
+                RunningTurnSubmissionObservation::Blocked(reason) => return Err(reason.clone()),
+                RunningTurnSubmissionObservation::Draft
+                | RunningTurnSubmissionObservation::Unreadable => {}
+            }
+        }
+        if attempt < ROUTE_SYNC_SUBMIT_ATTEMPTS
+            && matches!(last_observation, RunningTurnSubmissionObservation::Draft)
+        {
+            agent_doc_tmux_io::send_key(tmux, pane, "Enter").map_err(|err| {
+                format!(
+                    "tmux did not accept a follow-up submit retry ({})",
+                    one_line_error(&err)
+                )
+            })?;
+        } else {
+            break 'attempts;
+        }
+    }
+    match last_observation {
+        RunningTurnSubmissionObservation::Draft => Err(format!(
+            "the composer still holds the steering draft after {ROUTE_SYNC_SUBMIT_ATTEMPTS} submit attempts"
+        )),
+        _ => Err("the submitted steering could not be proven in the busy composer".to_string()),
+    }
+}
+
 fn route_sync_steering_not_delivered(file: &Path, reason: &str) -> String {
     format!(
         "[route] the latest diff since the last send was not handed to the agent already running for {}: {reason}. No second turn was started. steering_delivered=0 sent=explicit {}",
@@ -453,6 +534,12 @@ fn running_turn_steering_claim(
         return RunningTurnSteeringClaim::Count(pending_explicit_send_count(file));
     }
     match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, &capture) {
+        agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Draft => {
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                "the composer holds an unsent draft",
+            ));
+        }
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked { reason } => {
             return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
                 file, &reason,
@@ -504,6 +591,27 @@ fn running_turn_steering_claim(
             ),
         ));
     }
+    let submit_retries = match confirm_running_turn_submission(
+        tmux,
+        pane,
+        harness,
+        ROUTE_SYNC_SUBMIT_POLL_INTERVAL,
+    ) {
+        Ok(retries) => retries,
+        Err(reason) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} reason={} (#routesyncsteer)",
+                    file.display(),
+                    reason
+                ),
+            );
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file, &reason,
+            ));
+        }
+    };
     if let Err(err) =
         agent_doc_session_check_io::midturn_steering::record_route_sync_steering_delivered(
             file,
@@ -523,11 +631,12 @@ fn running_turn_steering_claim(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "route_sync_steering_delivered file={} pane={pane} harness={} items={} bytes={} (#routesyncsteer)",
+            "route_sync_steering_delivered file={} pane={pane} harness={} items={} bytes={} submit_retries={} (#routesyncsteer)",
             file.display(),
             harness_cfg.binary,
             prepared.pending_items,
-            prepared.instructions.len()
+            prepared.instructions.len(),
+            submit_retries
         ),
     );
     RunningTurnSteeringClaim::Count(prepared.pending_items.max(1))
@@ -2085,6 +2194,57 @@ pub fn route_via_authoritative_actor(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct ScriptedTmux {
+        outputs: std::sync::Mutex<std::collections::VecDeque<String>>,
+    }
+
+    impl ScriptedTmux {
+        fn new(outputs: impl IntoIterator<Item = &'static str>) -> Self {
+            Self {
+                outputs: std::sync::Mutex::new(outputs.into_iter().map(str::to_string).collect()),
+            }
+        }
+    }
+
+    impl agent_doc_tmux_io::TmuxCommandRunner for ScriptedTmux {
+        fn run(
+            &self,
+            _command: &agent_doc_tmux_commands::TmuxCommand,
+        ) -> std::result::Result<String, agent_doc_tmux_io::TmuxIoError> {
+            Ok(self
+                .outputs
+                .lock()
+                .expect("script lock")
+                .pop_front()
+                .expect("scripted tmux output"))
+        }
+    }
+
+    #[test]
+    fn multiline_steering_retries_enter_until_the_busy_composer_is_empty() {
+        let draft = "• Working (1m 34s • esc to interrupt)\n\n› first page of steering\n  second page\ntab to queue message\ngpt-5.4 high · Context 54% used";
+        let delivered =
+            "• Waiting for background terminal (18m 36s • esc to interrupt)\n\n›\n29% context left";
+        let tmux = ScriptedTmux::new([draft, draft, draft, "", delivered]);
+
+        assert_eq!(
+            confirm_running_turn_submission(&tmux, "%1", "codex", Duration::ZERO),
+            Ok(1)
+        );
+        assert!(tmux.outputs.lock().expect("script lock").is_empty());
+    }
+
+    #[test]
+    fn unreadable_post_submit_capture_never_authorizes_an_enter_retry() {
+        let tmux = ScriptedTmux::new(["redrawing", "redrawing", "redrawing"]);
+
+        let error = confirm_running_turn_submission(&tmux, "%1", "claude", Duration::ZERO)
+            .expect_err("unreadable composer fails closed");
+        assert!(error.contains("could not be proven"), "{error}");
+        assert!(tmux.outputs.lock().expect("script lock").is_empty());
+    }
 
     #[test]
     fn actor_record_selects_live_pane_transport_harness() {

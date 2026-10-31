@@ -18,6 +18,23 @@ Scalar presets remain valid. `agent-doc runbook create <FILE> release --preset
 '#release'` promotes the scalar to this structured form while preserving its
 prompt body and unrelated frontmatter.
 
+When guidance differs by harness, use an agent-aware structured preset. The
+active agent receives its canonical override and every other agent receives the
+`default` fallback:
+
+```yaml
+presets:
+  '#release':
+    default: release + publish
+    codex: release + publish; report the worktree branch and commit
+    claude: release + publish; include file-and-line citations
+    runbook: runbooks/release.md
+```
+
+The canonical override keys are `claude`, `codex`, `opencode`, and `grok`.
+Scalar presets continue to apply to every agent, and legacy `prompt:` remains a
+valid fallback in structured entries.
+
 Runbook paths are project-relative Markdown files under `runbooks/` or
 `.agent-doc/runbooks/`. Absolute paths, `..`, missing files, paths outside those
 directories, and symlink escapes are rejected.

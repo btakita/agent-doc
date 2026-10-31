@@ -834,6 +834,19 @@ later status write keeps as its last paragraph, exactly once; see
 `#queuemarkerlegend` in `07-orchestration-commands.md`. Opt out with
 `queue-legend=off` on the status marker.
 
+**Managed List completion intent (`#managedlistcompletionintent`).** Every
+unfinished row in `agent:run`, `agent:todo`, `agent:backlog`,
+`agent:review`, or `agent:icebox` represents a durable objective whose
+eventual goal is completion, not indefinite tracking. When queue order,
+activation, or an explicit directive selects an item, the agent workflow must
+proactively perform every authorized agent-actionable step available in that
+cycle. If the item cannot complete, the response must communicate current
+evidence, the exact missing condition, the actor or system that must satisfy it,
+and the next action, while preserving or reclassifying the unfinished item.
+Claimed, dispatched, reported, status-only, and gated states are intermediate,
+not completion. This intent does not activate parked icebox work, reorder a
+queue, expand authorization, or bypass an operator gate.
+
 **Operator-todo advisory.** When a closeout opens a human gate in
 `agent:review` (`--review-add`, `--backlog-add-gated`, or `--backlog-gate`) and
 the resulting `agent:todo` does not reference that id as `#id`, the write prints

@@ -36024,6 +36024,14 @@ fn test_skill_md_contains_required_steps() {
         "session-cycle.md should require reconciling the changed exchange tail oldest-first"
     );
     assert!(
+        cycle.contains("#managedlistcompletionintent")
+            && cycle.contains("incomplete Managed List Item is a durable completion objective")
+            && cycle.contains(
+                "the exact missing condition, who or what must satisfy it, and the next action"
+            ),
+        "session-cycle.md should make each selected managed item completion-seeking and require concrete blockage communication"
+    );
+    assert!(
         content.contains("runbooks/command-synonyms.md"),
         "SKILL.md should point agents to the orchestrate synonym runbook"
     );

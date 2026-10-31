@@ -5122,6 +5122,13 @@ mod tests {
         assert!(session_cycle.contains("agent-doc session-check <FILE>"));
         assert!(session_cycle.contains("Imperative edits are executable directives"));
         assert!(session_cycle.contains("never the harness label (`codex`, `claude`)"));
+        assert!(session_cycle.contains("#managedlistcompletionintent"));
+        assert!(session_cycle.contains(
+            "incomplete Managed List Item is a durable completion objective"
+        ));
+        assert!(session_cycle.contains(
+            "the exact missing condition, who or what must satisfy it, and the next action"
+        ));
         assert!(persist_closeout.contains("Agent harnesses own tiered verification"));
         assert!(persist_closeout.contains("make check-fast"));
         assert!(persist_closeout.contains("exactly one\nauthoritative `make check`"));

@@ -663,6 +663,8 @@ The pure policy owner is
 | One bare row | Unchanged |
 | Two or more lawful bare rows | Append `⟦effect:1⟧`, `⟦effect:2⟧`, ... in queue order |
 | Completed nested-command occurrence followed by a live bare recurrence | Leave the completed row unchanged; reserve its queue-order id and append the next id to the live row |
+| Live claimed/running/reported occurrence followed by an operator-typed identical row | Durable editor-op evidence raises the snapshot multiplicity ceiling by exactly the number of whole rows inserted; retain each proven recurrence and assign distinct effect ids (`#repeatpromptauthorship`) |
+| Live multiplicity beyond the snapshot with no matching operator row-insert evidence | Collapse the excess as replay residue; lifecycle markers or stale editor text alone never authorize another attempt |
 | Existing unique positive effect ids plus bare rows | Preserve existing ids; assign each bare row the lowest unused positive id in queue order |
 | A repeated or zero effect id | Preserve the first valid occurrence; deterministically reassign later/missing occurrences |
 | One annotated survivor | Preserve its id; never compact or renumber |
@@ -677,6 +679,21 @@ Therefore convergence remains replay-safe, while `release + publish
 A bare target against several annotated descendants is an ambiguity error
 listing the exact rows; claim resolution never chooses the first annotated
 effect.
+
+An in-flight or reported occurrence is still a live queue row, so its rerun
+cannot rely on the struck-row reservation rule. For this transition the durable
+operator editor-op epoch is the authorship source: each inserted run that parses
+as a whole prompt row matching a live snapshot identity contributes one
+additional live occurrence allowance. Convergence reads that evidence only when
+current multiplicity exceeds the snapshot, fails closed when the epoch is
+unreadable, and consumes no allowance for fragments, struck text, unrelated
+rows, or stale replica flushes. The allowance changes only cardinality; the
+normal effect projection remains the identity owner and assigns
+`⟦effect:N⟧` before claim/receipt projection. Therefore a new `  - #address`
+beneath the same parent is fresh dispatchable work even while the earlier
+`#address` shows `☑️`, while the earlier attempt remains bound to its own row.
+The fresh occurrence may be dispatched to a new subagent, but repeated text
+does not itself require a different worker implementation.
 
 **A claim is bound to the row it was issued for, never to a text-identical
 sibling (`#claimrowmigrate`).** Annotation is an edit of the claimed row, so

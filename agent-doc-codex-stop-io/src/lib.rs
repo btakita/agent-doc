@@ -3251,7 +3251,10 @@ fn auto_queue_continuation_response(
                     == agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::Pending)
         })
         .collect::<Vec<_>>();
-    if !stop_action_items.is_empty() || !coordinator_drain.snapshot.scan_errors.is_empty() {
+    if !stop_action_items.is_empty()
+        || !coordinator_drain.snapshot.scan_errors.is_empty()
+        || !coordinator_drain.snapshot.placement_reconcile.is_empty()
+    {
         use agent_doc_queue::queue_sync_payload::QueueSyncOperation;
 
         let snapshot = &coordinator_drain.snapshot;
@@ -3280,16 +3283,29 @@ fn auto_queue_continuation_response(
         for item in &stop_action_items {
             *component_counts.entry(item.queue_id.clone()).or_default() += 1;
         }
+        let placement_reconcile = snapshot
+            .placement_reconcile
+            .iter()
+            .map(|debt| {
+                (
+                    debt.document_path.as_str(),
+                    debt.item_id.as_str(),
+                    debt.requested_queue_id.as_deref(),
+                    debt.eligible_queue_ids.as_slice(),
+                )
+            })
+            .collect::<Vec<_>>();
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "codex_stop_coordinator_drain_blocked dispatch={} inline={} forward={} integrate={} recover={} reconcile={} scan_errors={} running={} components={:?} action=continue (#coordinatordrain)",
+                "codex_stop_coordinator_drain_blocked dispatch={} inline={} forward={} integrate={} recover={} reconcile={} placement_reconcile={} scan_errors={} running={} components={:?} action=continue (#coordinatordrain)",
                 dispatch.len(),
                 inline.len(),
                 forward.len(),
                 integrate.len(),
                 recover.len(),
                 reconcile.len(),
+                placement_reconcile.len(),
                 snapshot.scan_errors.len(),
                 snapshot.running.len(),
                 component_counts,
@@ -3298,7 +3314,7 @@ fn auto_queue_continuation_response(
         return Ok(Some(StopResponse::ContinueTurn {
             class: StopContinuationClass::Queue,
             reason: format!(
-                "agent-doc Stop hook refused terminal success for {file}: the FULL project queue sync still has coordinator-owned work by component {components:?}. Delegated dispatch/start debt: {dispatch:?}. Coordinator-inline execute/reconcile debt (do NOT native-spawn): {inline:?}. Steering to forward to existing owners: {forward:?}. Worker results to integrate/close: {integrate:?}. Lost attempts to recover/requeue: {recover:?}. Unknown/projection debt to reconcile: {reconcile:?}. Fail-closed document scan errors: {scan_errors:?}. For delegated work the coordinator claims BEFORE native spawn and immediately binds the concrete worker with queue start; for queues without `subagents`, the main agent executes inline and also reconciles lifecycle/document state. Workers never self-claim or self-close the session queue. Do not send the final answer while any action or unexplained sync debt remains.",
+                "agent-doc Stop hook refused terminal success for {file}: the FULL project queue sync still has coordinator-owned work by component {components:?}. Delegated dispatch/start debt: {dispatch:?}. Coordinator-inline execute/reconcile debt (do NOT native-spawn): {inline:?}. Steering to forward to existing owners: {forward:?}. Worker results to integrate/close: {integrate:?}. Lost attempts to recover/requeue: {recover:?}. Unknown/projection debt to reconcile: {reconcile:?}. Unresolved queue-placement debt: {placement_reconcile:?}. Fail-closed document scan errors: {scan_errors:?}. For delegated work the coordinator claims BEFORE native spawn and immediately binds the concrete worker with queue start; for queues without `subagents`, the main agent executes inline and also reconciles lifecycle/document state. Workers never self-claim or self-close the session queue. Do not send the final answer while any action or unexplained sync debt remains.",
                 file = file.display(),
                 components = component_counts,
                 scan_errors = snapshot.scan_errors,

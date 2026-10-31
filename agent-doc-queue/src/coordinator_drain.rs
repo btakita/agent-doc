@@ -76,7 +76,9 @@ impl CoordinatorDrainDecision {
     }
 
     pub fn required_action_count(&self) -> usize {
-        self.snapshot.scan_errors.len() + self.action_items().count()
+        self.snapshot.scan_errors.len()
+            + self.snapshot.placement_reconcile.len()
+            + self.action_items().count()
     }
 }
 
@@ -85,6 +87,7 @@ pub fn observe_coordinator_drain(
     snapshot: &CoordinatorDrainSnapshot,
 ) -> Option<CoordinatorDrainDecision> {
     let action_required = !snapshot.scan_errors.is_empty()
+        || !snapshot.placement_reconcile.is_empty()
         || snapshot
             .items()
             .any(|item| operation_requires_action(item.operation));
@@ -139,7 +142,7 @@ mod tests {
     use super::*;
     use crate::queue_sync_payload::{
         QueueCoordinatorRole, QueueExecutionMode, QueueExecutorRole, QueueSyncDocumentScope,
-        QueueSyncItem, QueueSyncLifecycle, QueueSyncScanError,
+        QueueSyncItem, QueueSyncLifecycle, QueueSyncPlacementDebt, QueueSyncScanError,
     };
 
     fn item(
@@ -278,6 +281,22 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
+
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let decision = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+            placement_reconcile: vec![QueueSyncPlacementDebt {
+                document_path: "tasks/bugs.md".into(),
+                document_scope: QueueSyncDocumentScope::Current,
+                item_id: "unplaced".into(),
+                item_text: "do [#unplaced]".into(),
+                requested_queue_id: Some("missing".into()),
+                eligible_queue_ids: vec!["active".into(), "inactive".into()],
+                operation: QueueSyncOperation::Reconcile,
+            }],
+            ..Default::default()
+        });
+        assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
+        assert_eq!(decision.required_action_count(), 1);
     }
 
     #[test]

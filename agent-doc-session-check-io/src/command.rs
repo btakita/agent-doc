@@ -2211,43 +2211,49 @@ fn run_with_options_inner(
                 if coordinator_drain.phase
                     == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
                 {
+                    use agent_doc_queue::queue_sync_payload::QueueSyncOperation;
+
                     let snapshot = &coordinator_drain.snapshot;
-                    let pending = snapshot
-                        .pending_dispatch
-                        .iter()
-                        .map(|item| item.item.as_str())
-                        .collect::<Vec<_>>();
+                    let action_items = coordinator_drain.action_items().collect::<Vec<_>>();
+                    let operation_count = |operation| {
+                        action_items
+                            .iter()
+                            .filter(|item| item.operation == operation)
+                            .count()
+                    };
+                    let dispatch = operation_count(QueueSyncOperation::Dispatch);
+                    let inline = operation_count(QueueSyncOperation::InlineExecuteThenReconcile);
+                    let forward = operation_count(QueueSyncOperation::ForwardSteering);
+                    let integrate = operation_count(QueueSyncOperation::IntegrateClose);
+                    let recover = operation_count(QueueSyncOperation::RecoverRequeue);
+                    let reconcile = operation_count(QueueSyncOperation::Reconcile);
                     let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
-                    for item in &snapshot.pending_dispatch {
-                        *component_counts
-                            .entry(item.queue_id.as_deref().unwrap_or("unknown").to_string())
-                            .or_default() += 1;
+                    for item in &action_items {
+                        *component_counts.entry(item.queue_id.clone()).or_default() += 1;
                     }
                     let dispatch_prompt = format!(
-                        "finish the full document queue obligation: claim each of {pending:?}, spawn its worker, and immediately run queue start with the concrete worker id; recover/requeue {} lost attempt(s), start {} claimed attempt(s), and integrate/close {} reported attempt(s)",
-                        snapshot.lost.len(),
-                        snapshot.claimed_unstarted.len(),
-                        snapshot.reported.len(),
+                        "finish the project queue sync obligation: dispatch/start {dispatch} delegated row(s); execute/reconcile {inline} coordinator-inline row(s) without spawning; forward {forward} steering edit(s); integrate/close {integrate} report(s); recover/requeue {recover} lost attempt(s); reconcile {reconcile} unknown state(s); resolve {} scan error(s)",
+                        snapshot.scan_errors.len(),
                     );
                     println!(
-                        "queue_continuation_required=true queue_subagent_dispatch_required={} queue_subagent_dispatch_count={} queue_claimed_unstarted_count={} queue_lost_count={} queue_reported_count={} queue_running_count={} inactive_pending_components={:?} document_queue_terminal=false next_queue_prompt={:?}",
-                        !snapshot.pending_dispatch.is_empty(),
-                        snapshot.pending_dispatch.len(),
-                        snapshot.claimed_unstarted.len(),
-                        snapshot.lost.len(),
-                        snapshot.reported.len(),
+                        "queue_continuation_required=true queue_subagent_dispatch_required={} queue_subagent_dispatch_count={} queue_inline_action_count={} queue_forward_steering_count={} queue_recover_count={} queue_integrate_count={} queue_reconcile_count={} queue_scan_error_count={} queue_running_count={} inactive_pending_components={:?} document_queue_terminal=false next_queue_prompt={:?}",
+                        dispatch > 0,
+                        dispatch,
+                        inline,
+                        forward,
+                        recover,
+                        integrate,
+                        reconcile,
+                        snapshot.scan_errors.len(),
                         snapshot.running.len(),
                         component_counts,
                         dispatch_prompt,
                     );
                     eprintln!(
-                        "[session-check] document queue action is still required for {}: {} eligible dispatch row(s) across components {:?}, {} claimed-but-unstarted attempt(s), {} lost attempt(s), and {} reported result(s). The coordinator owns claim → harness spawn → `agent-doc queue start --worker <id>`, recovery/requeue, and report integration/closeout for the FULL set; workers never self-claim or self-close. Do not report completion or drain these delegated rows inline (#coordinatordrain).",
+                        "[session-check] project queue sync action is still required for {} across components {:?}: {dispatch} delegated dispatch/start, {inline} coordinator-inline execute/reconcile, {forward} steering forward, {recover} recover/requeue, {integrate} integrate/close, {reconcile} unknown reconciliation, and {} scan error(s). Only queues with `subagents` use claim → native spawn → queue start; the main agent executes queues without `subagents` inline and owns their lifecycle/document convergence. Workers never self-claim or self-close. Do not report completion (#coordinatordrain).",
                         file.display(),
-                        snapshot.pending_dispatch.len(),
                         component_counts,
-                        snapshot.claimed_unstarted.len(),
-                        snapshot.lost.len(),
-                        snapshot.reported.len(),
+                        snapshot.scan_errors.len(),
                     );
                     if codex_final_gate {
                         crate::profile::report_now(file);
@@ -2258,22 +2264,58 @@ fn run_with_options_inner(
                 if coordinator_drain.phase
                     == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::WaitingForWorkers
                 {
-                    let running_components = coordinator_drain
+                    let waiting = coordinator_drain
                         .snapshot
-                        .running
-                        .iter()
-                        .map(|item| item.queue_id.as_deref().unwrap_or("unknown"))
+                        .items()
+                        .filter(|item| {
+                            item.operation
+                                == agent_doc_queue::queue_sync_payload::QueueSyncOperation::Wait
+                        })
+                        .map(|item| (item.document_path.as_str(), item.queue_id.as_str()))
                         .collect::<Vec<_>>();
+                    let running = coordinator_drain.snapshot.running.len();
+                    let blocked = coordinator_drain.snapshot.blocked.len();
                     println!(
-                        "queue_continuation_required=false queue_workers_running={} running_components={:?} document_queue_terminal=false ui_outcome=waiting_for_workers next_action=wait_for_owner_reports",
-                        coordinator_drain.snapshot.running.len(),
-                        running_components,
+                        "queue_continuation_required=false queue_waiting_count={} queue_workers_running={} queue_blocked_count={} waiting_components={:?} document_queue_terminal=false ui_outcome=waiting_on_queue_state next_action=wait_for_owner_or_blocker_resolution",
+                        waiting.len(),
+                        running,
+                        blocked,
+                        waiting,
                     );
                     eprintln!(
-                        "[session-check] document queue is not complete for {}: {} row(s) remain owned by running workers in components {:?}. Yielding is allowed only to await their reports; integrate and close them before reporting terminal success (#coordinatordrain).",
+                        "[session-check] project queue is not complete for {}: {} row(s) are explicitly waiting ({} running, {} blocked/paused) in components {:?}. Yielding is allowed only to await owner reports or blocker resolution; reconcile the next payload before reporting terminal success (#coordinatordrain).",
                         file.display(),
-                        coordinator_drain.snapshot.running.len(),
-                        running_components,
+                        waiting.len(),
+                        running,
+                        blocked,
+                        waiting,
+                    );
+                    return Ok(());
+                }
+                if coordinator_drain.phase
+                    == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::OperatorBlocked
+                {
+                    let gates = coordinator_drain
+                        .snapshot
+                        .operator_gated
+                        .iter()
+                        .map(|item| {
+                            (
+                                item.document_path.as_str(),
+                                item.queue_id.as_str(),
+                                item.item.as_str(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    println!(
+                        "queue_continuation_required=false queue_operator_gated_count={} operator_gates={:?} document_queue_terminal=false ui_outcome=operator_blocked next_action=request_operator_action",
+                        gates.len(),
+                        gates,
+                    );
+                    eprintln!(
+                        "[session-check] project queue is not complete for {}: only explicit operator gates remain: {:?}. Yielding is allowed for operator input, but this is not document-wide completion (#coordinatordrain).",
+                        file.display(),
+                        gates,
                     );
                     return Ok(());
                 }

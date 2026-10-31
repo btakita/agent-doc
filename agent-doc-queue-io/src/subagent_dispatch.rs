@@ -186,90 +186,19 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
     Ok(Vec::new())
 }
 
-fn coordinator_item(
-    file: &Path,
-    content: &str,
-    item: String,
-    owner: Option<String>,
-    worker_id: Option<String>,
-) -> Result<agent_doc_queue::coordinator_drain::CoordinatorQueueItem> {
-    let authorization =
-        subagent_authorization_for_content(file, content, &item).with_context(|| {
-            format!(
-                "resolve origin queue for coordinator drain item {item:?} in {}",
-                file.display()
-            )
-        })?;
-    Ok(agent_doc_queue::coordinator_drain::CoordinatorQueueItem {
-        item,
-        queue_id: authorization.queue_id,
-        owner,
-        worker_id,
-    })
-}
-
 /// Document-wide coordinator boundary projection (`#coordinatordrain`).
 ///
-/// Unlike the ordinary active-queue selector, this observes every runnable
-/// component and every live claim state. It is the single policy input for
-/// session-check and Stop: neither boundary may infer document completion from
-/// one selected prompt or one active `agent:run` tree.
+/// This consumes the exact project-wide sync payload preflight emits after its
+/// repair pass: current and related documents, every active/inactive run,
+/// durable attempts, and fail-closed scan errors. Session-check and Stop must
+/// not infer completion from one selected prompt or one active run tree.
 pub fn coordinator_drain_decision_for_content(
     file: &Path,
     content: &str,
 ) -> Result<agent_doc_queue::coordinator_drain::CoordinatorDrainDecision> {
-    use agent_doc_queue::queue_claim::QueueClaimState;
-
-    let claims = crate::queue_claim::claim_states_for_content(file, content)?;
-    let lost_identities = claims
-        .iter()
-        .filter(|claim| claim.state == QueueClaimState::Lost)
-        .map(|claim| claim.identity.clone())
-        .collect::<std::collections::HashSet<_>>();
-
-    let pending_dispatch = pending_subagent_dispatch_for_content(file, content)?
-        .into_iter()
-        // A retained lost attempt is a recovery/requeue obligation, not a
-        // second independent fresh-dispatch obligation.
-        .filter(|item| {
-            !lost_identities.contains(&agent_doc_queue::queue_claim::claim_identity(item))
-        })
-        .map(|item| coordinator_item(file, content, item, None, None))
-        .collect::<Result<Vec<_>>>()?;
-
-    let mut claimed_unstarted = Vec::new();
-    let mut running = Vec::new();
-    let mut reported = Vec::new();
-    let mut lost = Vec::new();
-    for claim in claims {
-        let item = coordinator_item(
-            file,
-            content,
-            claim.item_text,
-            Some(claim.owner),
-            claim.worker.map(|worker| worker.worker_id),
-        )?;
-        match claim.state {
-            QueueClaimState::Claimed => claimed_unstarted.push(item),
-            QueueClaimState::Running => running.push(item),
-            QueueClaimState::Reported => reported.push(item),
-            QueueClaimState::Lost => lost.push(item),
-        }
-    }
-
-    let operator_gated_count = agent_doc_queue::queue_continuation::all_queue_head_texts(content)
-        .unwrap_or_default()
-        .iter()
-        .filter(|head| !agent_doc_document::queue_projection::operator_action_ids(head).is_empty())
-        .count();
-    let snapshot = agent_doc_queue::coordinator_drain::CoordinatorDrainSnapshot {
-        pending_dispatch,
-        claimed_unstarted,
-        running,
-        reported,
-        lost,
-        operator_gated_count,
-    };
+    let previous = agent_doc_snapshot_io::load_document_baseline(file)?;
+    let snapshot =
+        crate::sync_payload::build_project_queue_sync_payload(file, content, previous.as_deref())?;
     let scope = agent_doc_state_scope::DocumentScope::new();
     Ok(
         agent_doc_queue::coordinator_drain::CoordinatorDrainMachine::new_in(&scope)
@@ -785,11 +714,55 @@ queue: go
         assert_eq!(
             decision
                 .snapshot
-                .pending_dispatch
+                .pending
                 .iter()
-                .map(|item| (item.item.as_str(), item.queue_id.as_deref()))
+                .map(|item| (item.item.as_str(), item.queue_id.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("do [#b]", Some("other")), ("do [#c]", Some("inactive"))]
+            vec![("do [#b]", "other"), ("do [#c]", "inactive")]
+        );
+        assert!(!decision.may_yield());
+    }
+
+    /// Exact `#inactive-run-stranding` repro from api.md: a pending nested
+    /// rebase child in an inactive subagent run is still project action debt.
+    #[test]
+    fn coordinator_drain_observes_inactive_pr809_nested_pending_rebase() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("api.md");
+        let content = concat!(
+            "---\nagent_doc_session: api\n---\n\n",
+            "<!-- agent:run id=active subagents go -->\n",
+            "- 🚧 do [#active]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=api-prs subagents -->\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/809\n",
+            "  - 📥 #rebase\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let decision = coordinator_drain_decision_for_content(&file, content).unwrap();
+        assert_eq!(
+            decision.phase,
+            agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
+        );
+        let stranded = decision
+            .snapshot
+            .pending
+            .iter()
+            .find(|item| item.queue_id == "api-prs")
+            .expect("inactive api-prs pending row must remain visible");
+        assert_eq!(stranded.item, "📥 #rebase", "{stranded:?}");
+        assert!(
+            content.contains(
+                "- https://github.com/haiven-dev/haiven-api/pull/809\n  - 📥 #rebase"
+            ),
+            "test must preserve the operator's exact nested repro"
+        );
+        assert_eq!(
+            stranded.execution_mode,
+            agent_doc_queue::queue_sync_payload::QueueExecutionMode::SubagentDispatch
         );
         assert!(!decision.may_yield());
     }

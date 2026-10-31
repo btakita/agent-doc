@@ -10,8 +10,9 @@
 //!   that strikes an orphaned id-backed head whose backing backlog item was
 //!   already reaped (or is gone), so it stops re-firing the auto-loop.
 //! - `agent-doc queue consume <FILE> --ack-id <id>` — explicit acknowledgement
-//!   (#freshqueueauth) for an id-backed correction head while leaving the open
-//!   backlog item unresolved.
+//!   (#freshqueueauth) for one top-level bare id-backed correction head, or
+//!   report-proven closeout of runnable work, while leaving the tracked item
+//!   unresolved. Supplying the flag is never acknowledgement provenance.
 //! - `agent-doc queue consume <FILE> --ack-text <text>` — exact acknowledgement
 //!   for a completed free-text head, including a unique active nested lineage.
 

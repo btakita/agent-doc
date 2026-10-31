@@ -351,6 +351,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      recorded. A publication annotation alone is not proof. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.
+     This closeout is valid because the worker has Reported evidence. Never use
+     `--ack-id` as a completion shortcut for an undispatched runnable row: the
+     only non-reported exception is one unique, top-level bare `[#id]`
+     correction head outside a `subagents` / `fan-out` queue.
      The binary appends immediate, deduplicated completion feedback to `agent:exchange` through
      its cross-process document owner and editor/CRDT authority while leaving
      the claim active; the worker never edits the session document. The

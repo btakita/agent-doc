@@ -4904,14 +4904,14 @@ enum QueueAction {
         /// when the id still names an OPEN backlog item (use `--done` instead).
         #[arg(long, conflicts_with = "count", conflicts_with = "ack_text")]
         id: Option<String>,
-        /// Explicit acknowledgement (#freshqueueauth): strike an exact id-backed
-        /// correction head while preserving the still-open backlog or Todo item.
-        /// Also closes a reported (☑️) `do [#id]` dispatch row whose worker
-        /// finished while its tracked item stays open, ending the reported
-        /// attempt (#nestedechostrike); a Todo-backed row needs that dispatch
-        /// evidence. Refuses a claimed, running or lost attempt. Do not use for
-        /// runnable work; leave live `do [#id]` heads queued until done, gated,
-        /// or intentionally acknowledged as a correction.
+        /// Explicit acknowledgement (#freshqueueauth): strike one unique,
+        /// column-zero bare `[#id]` correction head outside a subagents/fan-out
+        /// queue while preserving the still-open backlog or Todo item. Also
+        /// closes an ordinary runnable row only when a Reported attempt or
+        /// reported-release receipt proves its worker finished while the tracked
+        /// item stays open (#nestedechostrike). The flag alone is never proof.
+        /// Refuses claimed, running, lost, undispatched runnable, mirrored,
+        /// nested, and dispatch-owned rows.
         #[arg(
             long,
             conflicts_with = "count",

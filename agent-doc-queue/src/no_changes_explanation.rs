@@ -21,8 +21,8 @@
 //! the agent relays instead of inventing one: which source preflight read, which
 //! queue items are waiting on a go-ahead, and the guidance text.
 
-use agent_doc_element_queue::strip_priority_markers;
 use crate::queue_claim::QueueClaimState;
+use agent_doc_element_queue::strip_priority_markers;
 use serde::{Deserialize, Serialize};
 
 /// Where the preflight read the current document from.
@@ -35,6 +35,24 @@ pub enum NoChangesReadSource {
     /// Disk, with no agent-doc editor buffer attached. An edit in an editor
     /// without the agent-doc plugin is invisible until it is saved.
     Disk,
+}
+
+/// The queue lifecycle state that explains why an unchanged document did not
+/// open a turn (`#nochangepausephantom`).
+///
+/// This is deliberately distinct from drainability. An active `go` queue can
+/// have no fresh drainable head while workers are running or lifecycle rows
+/// await coordinator reconciliation; that state is not an explicit pause.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoChangesQueueLifecycle {
+    Absent,
+    ExplicitlyPaused,
+    ControllerPaused,
+    Deferred,
+    Halted,
+    Inactive,
+    ActiveNoDrainableHead,
 }
 
 impl NoChangesReadSource {
@@ -102,9 +120,13 @@ pub struct NoChangesFacts<'a> {
     pub read_source: NoChangesReadSource,
     /// The document content preflight compared against the baseline.
     pub content: &'a str,
-    /// Whether the queue will run on its own: active, or deferred to a start
-    /// time. Waiting items are only reported when it will not.
-    pub queue_runs: bool,
+    /// The settled queue activation projection. `Some(false)` is not by itself
+    /// proof of an explicit pause; the visible control is classified below.
+    pub queue_active: Option<bool>,
+    pub queue_deferred: bool,
+    pub queue_halted: Option<&'a str>,
+    /// Controller `admin queue pause`, which only pauses unattended dispatch.
+    pub queue_controller_paused: bool,
     /// Live heads a durable claim holds. They are reserved from this session,
     /// but the claim alone is not a worker heartbeat or external-job status.
     pub claimed_queue_items: &'a [ClaimedQueueItemFact],
@@ -114,6 +136,9 @@ pub struct NoChangesFacts<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NoChangesExplanation {
     pub read_source: NoChangesReadSource,
+    /// The actual queue lifecycle state. This prevents callers from translating
+    /// every `drainable_head_count == 0` outcome into a fictitious pause.
+    pub queue_lifecycle: NoChangesQueueLifecycle,
     /// Queue items present in a stopped `agent:queue`, verbatim (markers
     /// stripped). They are why an operator may expect work that never starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -125,6 +150,49 @@ pub struct NoChangesExplanation {
     pub claimed_queue_items: Vec<ClaimedQueueItemFact>,
     /// What to tell the operator. Relay this instead of improvising a cause.
     pub guidance: String,
+}
+
+fn has_queue_component(content: &str) -> bool {
+    agent_doc_element::element::parse(content)
+        .ok()
+        .is_some_and(|components| components.iter().any(|component| component.name == "queue"))
+}
+
+fn explicitly_paused(content: &str) -> bool {
+    let Ok((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(content) else {
+        return false;
+    };
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return false;
+    };
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return false;
+    };
+    crate::control_binding::explicit_queue_pause_mode(
+        &queue.attrs,
+        crate::control_binding::frontmatter_queue_control(&frontmatter),
+    )
+}
+
+fn queue_lifecycle(facts: NoChangesFacts<'_>) -> NoChangesQueueLifecycle {
+    if !has_queue_component(facts.content) {
+        NoChangesQueueLifecycle::Absent
+    } else if explicitly_paused(facts.content) {
+        NoChangesQueueLifecycle::ExplicitlyPaused
+    } else if facts.queue_halted.is_some() {
+        NoChangesQueueLifecycle::Halted
+    } else if facts.queue_deferred {
+        NoChangesQueueLifecycle::Deferred
+    } else if facts.queue_controller_paused {
+        NoChangesQueueLifecycle::ControllerPaused
+    } else if facts.queue_active == Some(true) {
+        NoChangesQueueLifecycle::ActiveNoDrainableHead
+    } else {
+        NoChangesQueueLifecycle::Inactive
+    }
 }
 
 /// Items in the document's `agent:queue`, in order, priority/lifecycle markers
@@ -244,10 +312,12 @@ pub fn explain_no_changes(facts: NoChangesFacts<'_>) -> NoChangesExplanation {
                 .to_string()
         }
     };
-    let waiting_queue_items = if facts.queue_runs {
-        Vec::new()
+    let queue_lifecycle = queue_lifecycle(facts);
+    let queue_items = queue_item_texts(facts.content);
+    let waiting_queue_items = if queue_lifecycle == NoChangesQueueLifecycle::ExplicitlyPaused {
+        queue_items.clone()
     } else {
-        queue_item_texts(facts.content)
+        Vec::new()
     };
     if !waiting_queue_items.is_empty() {
         let listed = waiting_queue_items
@@ -256,12 +326,58 @@ pub fn explain_no_changes(facts: NoChangesFacts<'_>) -> NoChangesExplanation {
             .collect::<Vec<_>>()
             .join(", ");
         guidance.push_str(&format!(
-            " The `agent:queue` holds {} item(s) that will not run because the queue is \
-             held (`queue: pause`): {listed}. Tell the operator these are waiting on a go-ahead; \
+            " The `agent:queue` is explicitly paused by visible queue control and holds {} \
+             item(s): {listed}. Tell the operator these are waiting on that explicit go-ahead; \
              to run them they delete the `queue: pause` line (or write `go` on the \
              `agent:queue` marker). Do not start them without that.",
             waiting_queue_items.len()
         ));
+    } else if !queue_items.is_empty() {
+        let listed = queue_items
+            .iter()
+            .map(|item| format!("`{item}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let lifecycle_guidance = match queue_lifecycle {
+            NoChangesQueueLifecycle::ControllerPaused => {
+                "The queue is in `go` mode with an `admin queue pause` controlling unattended \
+                 supervisor dispatch; it is not paused by a `queue: pause` line. Name the \
+                 controller pause and use `agent-doc admin queue resume` only if the operator \
+                 wants unattended dispatch resumed"
+            }
+            NoChangesQueueLifecycle::Deferred => {
+                "The queue is deferred by its current time gate; it is not explicitly paused"
+            }
+            NoChangesQueueLifecycle::Halted => {
+                "The queue is halted at a stop fence; it is not explicitly paused by frontmatter"
+            }
+            NoChangesQueueLifecycle::Inactive => {
+                "The queue is inactive without an explicit pause; add an accepted `go` control \
+                 to start it rather than telling the operator to remove a nonexistent pause"
+            }
+            NoChangesQueueLifecycle::ActiveNoDrainableHead => {
+                "The queue is active in `go` mode but currently has no selected drainable head. \
+                 This is a lifecycle wait (for example running work or non-drainable rows), not \
+                 an explicit pause; do NOT tell the operator to remove a `queue: pause` line"
+            }
+            NoChangesQueueLifecycle::Absent | NoChangesQueueLifecycle::ExplicitlyPaused => "",
+        };
+        if !lifecycle_guidance.is_empty() {
+            guidance.push_str(&format!(
+                " Queue lifecycle `{}`: {lifecycle_guidance}. Live queue item(s): {listed}.",
+                match queue_lifecycle {
+                    NoChangesQueueLifecycle::Absent => "absent",
+                    NoChangesQueueLifecycle::ExplicitlyPaused => "explicitly_paused",
+                    NoChangesQueueLifecycle::ControllerPaused => "controller_paused",
+                    NoChangesQueueLifecycle::Deferred => "deferred",
+                    NoChangesQueueLifecycle::Halted => "halted",
+                    NoChangesQueueLifecycle::Inactive => "inactive",
+                    NoChangesQueueLifecycle::ActiveNoDrainableHead => {
+                        "active_no_drainable_head"
+                    }
+                }
+            ));
+        }
     }
     let claimed_queue_items = facts.claimed_queue_items.to_vec();
     if !claimed_queue_items.is_empty() {
@@ -272,6 +388,7 @@ pub fn explain_no_changes(facts: NoChangesFacts<'_>) -> NoChangesExplanation {
     }
     NoChangesExplanation {
         read_source: facts.read_source,
+        queue_lifecycle,
         waiting_queue_items,
         claimed_queue_items,
         guidance,
@@ -299,10 +416,17 @@ mod tests {
         let explanation = explain_no_changes(NoChangesFacts {
             read_source: NoChangesReadSource::LiveEditor,
             content: STOPPED_QUEUE_DOC,
-            queue_runs: false,
+            queue_active: Some(false),
+            queue_deferred: false,
+            queue_halted: None,
+            queue_controller_paused: false,
             claimed_queue_items: &[],
         });
         assert_eq!(explanation.read_source, NoChangesReadSource::LiveEditor);
+        assert_eq!(
+            explanation.queue_lifecycle,
+            NoChangesQueueLifecycle::ExplicitlyPaused
+        );
         assert_eq!(explanation.waiting_queue_items, vec!["do [#lzwiremodel]"]);
         assert!(
             explanation
@@ -324,24 +448,36 @@ mod tests {
         let explanation = explain_no_changes(NoChangesFacts {
             read_source: NoChangesReadSource::Disk,
             content: "no queue here\n",
-            queue_runs: false,
+            queue_active: None,
+            queue_deferred: false,
+            queue_halted: None,
+            queue_controller_paused: false,
             claimed_queue_items: &[],
         });
+        assert_eq!(explanation.queue_lifecycle, NoChangesQueueLifecycle::Absent);
         assert!(explanation.waiting_queue_items.is_empty());
         assert!(explanation.guidance.contains("saved to disk"));
         assert!(!explanation.guidance.contains("agent:queue"));
     }
 
     #[test]
-    fn a_running_queue_reports_no_waiting_items() {
+    fn visible_pause_control_wins_over_a_stale_active_projection() {
         let explanation = explain_no_changes(NoChangesFacts {
             read_source: NoChangesReadSource::LiveEditor,
             content: STOPPED_QUEUE_DOC,
-            queue_runs: true,
+            queue_active: Some(true),
+            queue_deferred: false,
+            queue_halted: None,
+            queue_controller_paused: false,
             claimed_queue_items: &[],
         });
-        assert!(explanation.waiting_queue_items.is_empty());
-        assert!(!explanation.guidance.contains("agent:queue"));
+        // Visible pause control is authoritative even if a stale caller says
+        // active; lifecycle classification never invents a running queue.
+        assert_eq!(
+            explanation.queue_lifecycle,
+            NoChangesQueueLifecycle::ExplicitlyPaused
+        );
+        assert!(!explanation.waiting_queue_items.is_empty());
     }
 
     /// `#explicitrunqueue`: an explicit Run Agent Doc whose only live head is
@@ -363,11 +499,28 @@ mod tests {
         let explanation = explain_no_changes(NoChangesFacts {
             read_source: NoChangesReadSource::LiveEditor,
             content: "<!-- agent:queue -->\n- do [#runctrlclaude]\n<!-- /agent:queue -->\n",
-            queue_runs: true,
+            queue_active: Some(true),
+            queue_deferred: false,
+            queue_halted: None,
+            queue_controller_paused: false,
             claimed_queue_items: &claimed,
         });
         assert_eq!(explanation.claimed_queue_items, claimed.to_vec());
         assert!(explanation.waiting_queue_items.is_empty());
+        assert_eq!(
+            explanation.queue_lifecycle,
+            NoChangesQueueLifecycle::ActiveNoDrainableHead
+        );
+        assert!(
+            explanation
+                .guidance
+                .contains("not an explicit pause; do NOT tell the operator to remove")
+        );
+        assert!(
+            !explanation
+                .guidance
+                .contains("delete the `queue: pause` line")
+        );
         assert!(
             explanation.guidance.contains(
                 "`do [#runctrlclaude]` has durable state `claimed` (dispatching, no worker bound) for subagent:runctrlclaude generation 1; coordinator session live; expires 2026-10-10T19:32:32Z"

@@ -3735,6 +3735,122 @@ mod core_tests {
     }
 
     #[test]
+    fn exact_text_ack_strikes_unique_sdk_operator_request_lineage() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = concat!(
+            "#subagent-operator-request-deploy-schedule-prereqs: ",
+            "Complete the in-progress work for the parent item."
+        );
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_format: template\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: completed SDK worker result\n\n",
+                "> **Queue prompt:** {target}\n\n",
+                "The remaining deployment prerequisites were supplied.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=main subagents -->\n",
+                "- [#subagent-operator-request-deploy-schedule-prereqs]\n",
+                "  - ☑️ [#subagent:deploy-parent-complete#1] Complete the in-progress work for the parent item. [#subagent-operator-request-deploy-parent-remaining]\n",
+                "- ☑️ [#subagent:adr-acceptance#1] Keep ADR 0041 acceptance separate from the SDK deployment work.\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=haiven-sdk-prs subagents -->\n",
+                "- https://github.com/haiven-dev/haiven-sdk/pull/172\n",
+                "  - ☑️ [#subagent:pr172-address-current#1] #address\n",
+                "<!-- /agent:run -->\n",
+            ),
+            target = target,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            target,
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("unique SDK operator-request lineage should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_text, target);
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 2);
+        assert!(updated.contains("queue_active: true"), "{updated}");
+        assert!(
+            updated.contains(
+                "~~Complete the in-progress work for the parent item. [#subagent-operator-request-deploy-parent-remaining]~~"
+            ),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("Keep ADR 0041 acceptance separate from the SDK deployment work."),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("https://github.com/haiven-dev/haiven-sdk/pull/172\n  - ☑️ [#subagent:pr172-address-current#1] #address"),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_rejects_duplicate_sdk_nested_and_vector_lineage() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "https://github.com/haiven-dev/haiven-sdk/pull/172: #address";
+        let content = concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: completed SDK PR reviews\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-sdk/pull/172: #address\n\n",
+            "All requested PR feedback was addressed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=haiven-sdk-prs subagents -->\n",
+            "- https://github.com/haiven-dev/haiven-sdk/pull/172\n",
+            "  - ☑️ [#subagent:pr172-address-current#1] #address\n",
+            "  - ☑️ [#subagent:pr172-address-current#2] #address\n",
+            "- ☑️ [#subagent:pr172-address-current#3] https://github.com/haiven-dev/haiven-sdk/pull/172: #address\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let ambiguous = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            target,
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+
+        assert!(
+            ambiguous
+                .to_string()
+                .contains("matches more than one executable queue lineage"),
+            "{ambiguous}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
     fn exact_text_ack_repairs_inactive_subagents_queue_with_bare_head() {
         let tmp = TempDir::new().unwrap();
         fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();

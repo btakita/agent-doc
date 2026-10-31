@@ -361,28 +361,17 @@ pub fn diagnose_lifecycle(
 }
 
 /// `#strikeisterminal`: the one rule for whether durable state may reopen a
-/// struck (`~~...~~`) queue row. Every projection that can reopen a struck
-/// row (preflight lifecycle markers, the claim command projection, and the
-/// relay attempt projection) calls this instead of keeping its own copy.
+/// struck (`~~...~~`) queue row.
 ///
-/// `claim` is the row identity's expiry-adjusted claim attempt. A strike is
-/// the row's terminal presentation, and finished-work evidence agrees with
-/// it: a `Reported` or `Lost` attempt, a reported-release receipt, and a
-/// binary completion cell all say the worker is done, and striking reported
-/// work is exactly how integration closes it. None of them reopens the row.
-/// Only an attempt that is still dispatching or running (`Claimed` /
-/// `Running`) contradicts the strike, so only it reopens the row as `❔`.
+/// A strike is operator-visible terminal authority regardless of the claim's
+/// expiry-adjusted state. Durable state is still reconciled and retired, but
+/// it never rewrites the row live. Only the operator can reopen the item by
+/// removing its strike in the document.
 ///
-/// Before this rule, receipts and completion cells also reopened struck
-/// rows. Neither is retired by every strike path (only closeout `queue
-/// consume` strips completion cells, and receipts are pruned at closeout
-/// reconciliation), so the preflight residue strike, the orphan-id strike,
-/// and the controller's completion projection were each undone by the next
-/// projection: the row came back as `❔`, then `☑️` (receipt) or `🔄`
-/// (completion cell), and a go-mode queue offered finished work for a new
-/// dispatch.
-pub fn struck_row_reopened_by_claim(claim: Option<&QueueClaim>) -> bool {
-    claim.is_some_and(|claim| claim.state.reopens_struck_row())
+/// Keeping this predicate centralized makes every projection path share the
+/// same fail-closed answer and preserves a stable API for reconciliation.
+pub fn struck_row_reopened_by_claim(_claim: Option<&QueueClaim>) -> bool {
+    false
 }
 
 /// The work identities carried by the live (unstruck) rows of one queue body.
@@ -402,41 +391,20 @@ pub fn live_row_identities(
         .collect()
 }
 
-/// `#strikeisterminal`, per queue: [`struck_row_reopened_by_claim`] scoped to the queue body
-/// that holds the struck row. Every projection that can reopen a struck row
-/// calls this one.
-///
-/// A live attempt reopens a struck row only when that queue holds no live row
-/// of the same identity. When it does, the claim belongs to that live row
-/// (`queue claim` counts only unstruck rows as occurrences), and the struck
-/// row is an earlier attempt's terminal record.
-///
-/// Reopening it anyway duplicated the row. Observed live 2026-10-28 on
-/// `haiven-dev/tasks/sdk/game-sessions.md`: at 06:01Z `--ack-id` struck four
-/// reported heads, and at 06:02Z `backlog requeue` appended fresh live rows
-/// for the same ids. At 06:05Z each new `Claimed` attempt then painted `🟡`
-/// on the live row AND reopened the struck row as `❔`, a `+84`-byte successor
-/// with `markers` rising by two per claim. The retry pass turned `❔` into
-/// `🟡`. From then on both rows carried the same owner and generation, and
-/// every later projection kept both (`☑️` at 06:10Z, first committed at
-/// 06:11:38Z).
+/// `#strikeisterminal`, per queue: terminal rows remain terminal. The queue
+/// identity inputs are retained for call-site/API stability and diagnostics;
+/// they cannot authorize an automatic reopen.
 pub fn struck_row_reopened_in_queue(
-    claim: Option<&QueueClaim>,
-    identity: &QueueItemIdentity,
-    live_rows: &HashSet<QueueItemIdentity>,
+    _claim: Option<&QueueClaim>,
+    _identity: &QueueItemIdentity,
+    _live_rows: &HashSet<QueueItemIdentity>,
 ) -> bool {
-    !live_rows.contains(identity) && struck_row_reopened_by_claim(claim)
+    false
 }
 
 impl QueueClaimState {
     pub fn blocks_dispatch(self) -> bool {
         matches!(self, Self::Claimed | Self::Running | Self::Reported)
-    }
-
-    /// Whether this (expiry-adjusted) attempt state contradicts a strike on
-    /// its row. See [`struck_row_reopened_by_claim`].
-    pub fn reopens_struck_row(self) -> bool {
-        matches!(self, Self::Claimed | Self::Running)
     }
 
     pub fn projection_marker(self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
@@ -2176,18 +2144,14 @@ impl QueueClaimLedger {
         pruned
     }
 
-    /// End the finished attempts of rows a strike closed (`#strikeretires`),
+    /// End the attempts of rows a strike closed (`#strikeretires`),
     /// at the strike's own successor rather than at the next closeout prune.
     ///
     /// A claim is dropped when its identity is in `struck`, has no live row
-    /// in `live` (a mirror copy or duplicate keeps its attempt), and its
-    /// expiry-adjusted state agrees with the strike: `Reported` or `Lost`
-    /// ([`struck_row_reopened_by_claim`] is false). An attempt that is still
-    /// dispatching or running contradicts the strike and stays, so its worker
-    /// keeps its fence and the struck row reopens as `❔`. Without this, a
-    /// `Reported` attempt outlived every non-closeout strike and projected
-    /// `☑️` onto a later row with the same text. Returns the dropped claims,
-    /// with their expiry-adjusted state.
+    /// in `live` (a mirror copy or duplicate keeps its attempt). The strike is
+    /// terminal document authority for every expiry-adjusted attempt state;
+    /// no claim can reopen it. Returns the dropped claims with their
+    /// expiry-adjusted state.
     pub fn retire_struck(
         &mut self,
         now_secs: u64,
@@ -3488,11 +3452,11 @@ mod tests {
         assert_eq!(ledger.claims[0].item_text, "do [#a]");
     }
 
-    /// `#strikeisterminal`, per queue: a live attempt reopens a struck row only when no live row
-    /// in the same queue carries its identity. The struck row's marker and
-    /// order do not matter; only live rows count as the claim's row.
+    /// `#strikeisterminal`: no claim state reopens a struck row. A live
+    /// duplicate remains live on its own occurrence while the struck
+    /// occurrence remains terminal.
     #[test]
-    fn struck_row_reopens_only_without_a_live_row_of_its_identity() {
+    fn struck_row_never_reopens_from_claim_state() {
         use crate::document_queue::{QueueEntry, parse};
         let mut ledger = QueueClaimLedger::default();
         ledger.claim("do [#a]", "subagent:a", 100, 3600);
@@ -3502,7 +3466,7 @@ mod tests {
         let lone: Vec<QueueEntry> = parse("- ~~do [#a]~~\n- other\n").unwrap();
         let lone_live = live_row_identities(&lone);
         assert!(!lone_live.contains(&identity), "a struck row is not live");
-        assert!(struck_row_reopened_in_queue(
+        assert!(!struck_row_reopened_in_queue(
             Some(&claim),
             &identity,
             &lone_live
@@ -3525,11 +3489,10 @@ mod tests {
         assert!(!struck_row_reopened_in_queue(None, &identity, &lone_live));
     }
 
-    /// `#strikeretires`: a strike ends the struck row's finished attempt
-    /// (`Reported`, or `Lost` by expiry) at once; a still-dispatching or
-    /// running attempt, and an attempt whose identity keeps a live row, stay.
+    /// `#strikeretires`: a strike ends the struck row's attempt in every state;
+    /// only an identity that still has a live row keeps its attempt.
     #[test]
-    fn retire_struck_ends_only_finished_attempts_without_a_live_row() {
+    fn retire_struck_ends_every_attempt_without_a_live_row() {
         let mut ledger = reported_release_ledger(100);
         ledger.claim("running item", "subagent:run", 100, 3600);
         let generation = ledger.claims[1].generation;
@@ -3581,6 +3544,8 @@ mod tests {
             retired_states,
             vec![
                 ("release + publish", QueueClaimState::Reported),
+                ("running item", QueueClaimState::Running),
+                ("dispatching item", QueueClaimState::Claimed),
                 ("expired item", QueueClaimState::Lost),
             ]
         );
@@ -3591,13 +3556,8 @@ mod tests {
             .collect();
         assert_eq!(
             kept,
-            vec![
-                "running item",
-                "dispatching item",
-                "mirrored item",
-                "unstruck item"
-            ],
-            "a live attempt, a mirrored identity, and an unstruck row keep their claims"
+            vec!["mirrored item", "unstruck item"],
+            "a mirrored identity and an unstruck row keep their claims"
         );
     }
 
@@ -4577,8 +4537,7 @@ Add new issues into the backlog + queue except issue #40 + #45.";
         for head in [GH380, GH381, LOOP_WATCH] {
             assert!(!claimed_items.claims(head), "{head} must stay dispatchable");
         }
-        // The running attempt contradicts the strike: its own row reopens `❔`.
-        assert!(struck_row_reopened_by_claim(Some(claim)));
+        assert!(!struck_row_reopened_by_claim(Some(claim)));
     }
 
     /// `#claimclosureallqueues`: closure is judged against the claim's own
@@ -4706,7 +4665,7 @@ Add new issues into the backlog + queue except issue #40 + #45.";
         assert_eq!(claim.identity, claim_identity(KOTLINFLUSH));
         assert_eq!(claim.item_text, KOTLINFLUSH);
         assert!(claim.followed_from.is_empty());
-        assert!(struck_row_reopened_by_claim(Some(claim)));
+        assert!(!struck_row_reopened_by_claim(Some(claim)));
         let live: HashSet<_> = view_of(&content)
             .rows()
             .iter()

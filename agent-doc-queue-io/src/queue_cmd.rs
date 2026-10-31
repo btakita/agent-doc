@@ -349,7 +349,6 @@ fn derive_runtime_projection_scoped(
     >| {
         // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
         // queue is an earlier attempt's record, never the claim's row.
-        let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         let targets = block
             .entries
             .iter()
@@ -379,15 +378,9 @@ fn derive_runtime_projection_scoped(
                     {
                         log_queue_invariant_once(file, claim, diagnosis);
                     }
-                    // `#strikeisterminal`: only a live attempt reopens a struck
-                    // row; receipts and completion cells agree with the strike.
-                    let durable_on_struck = struck
-                        && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
-                            claim_states.get(&identity),
-                            &identity,
-                            &live_rows,
-                        );
-                    if struck && !durable_on_struck {
+                    // `#terminalitemstability`: runtime evidence never reopens
+                    // a struck row. The operator removes the strike to reopen it.
+                    if struck {
                         return None;
                     }
                     let claim = (cleared_identity.as_ref() != Some(&identity))
@@ -415,7 +408,7 @@ fn derive_runtime_projection_scoped(
                     {
                         return None;
                     }
-                    let marker = if state_degraded || durable_on_struck {
+                    let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
                         claim.state.projection_marker()
@@ -482,7 +475,6 @@ fn derive_runtime_projection_scoped(
                         },
                         marker,
                         owner,
-                        reopen_completed: durable_on_struck,
                     })
                 }
                 _ => None,
@@ -1639,12 +1631,12 @@ mod tests {
                  - 📥 release + publish ⟦effect:2⟧\n",
                 &format!(
                     // Case 1: the loop copy shows the live generation, not the
-                    // expired #1. Case 2: the released report's annotation
-                    // goes; no attempt governs the bare loop copy. Case 3: a
-                    // `🚧` with no worker binding and no in-session selection
-                    // is not a lifecycle state.
+                    // expired #1. Case 2: the reported row is terminal document
+                    // authority even after its attempt is gone. Case 3: a `🚧`
+                    // with no worker binding and no in-session selection is not
+                    // a lifecycle state.
                     "- 🟡 [#subagent:layout_liveverify#2] do [#layoutunprovenliveverify]\n\
-                     - 📥 release + publish\n\
+                     - ☑️ [#subagent:release_publish_patch#3] release + publish\n\
                      - 📥 {onboarding}\n"
                 ),
             ),
@@ -2057,7 +2049,7 @@ mod tests {
         // The operator restores an identical row directly above the claimed
         // one, and preflight annotates both copies in the same queue cut. The
         // historical projection placed effect identity after publication
-        // state, which must be repaired rather than duplicated.
+        // state. A reported row is now preserved byte-for-byte.
         let restored = projection.target_content.replace(
             &format!("{reported_row}\n"),
             &format!("- release + publish ⟦effect:1⟧\n{reported_row} ⟦effect:2⟧\n"),
@@ -2067,7 +2059,7 @@ mod tests {
         let projection = derive_claim_runtime_projection(&doc, &restored, None).unwrap();
         assert!(
             projection.target_content.contains(&format!(
-                "- ☑️ [#{owner}#{}] release + publish ⟦effect:2⟧ ⟦published⟧\n",
+                "- ☑️ [#{owner}#{}] release + publish ⟦published⟧ ⟦effect:2⟧\n",
                 claim.generation
             )),
             "{}",
@@ -2295,7 +2287,7 @@ mod tests {
     }
 
     #[test]
-    fn manually_struck_row_with_live_claim_reopens_as_explicit_unknown() {
+    fn manually_struck_row_with_live_claim_stays_terminal() {
         let dir = tempfile::tempdir().unwrap();
         let item = "#gh-issue https://github.com/example/project/issues/299";
         let doc = write_claim_projection_doc(dir.path(), &format!("- {item}\n"));
@@ -2315,8 +2307,8 @@ mod tests {
             live_projection.target_content
         );
 
-        // Markdown strike styling cannot retire an exact live attempt. The
-        // projection reopens the row as degraded, preserving owner/generation.
+        // The operator's strike is terminal document authority even while the
+        // old exact attempt remains in durable state.
         let terminal = live_projection.target_content.replace(
             &format!("- 🚧 [#subagent:gh299#1] {item}\n"),
             &format!("- ~~{item}~~\n"),
@@ -2325,7 +2317,7 @@ mod tests {
         assert!(
             terminal_projection
                 .target_content
-                .contains(&format!("- ❔ [#subagent:gh299#1] {item}\n")),
+                .contains(&format!("- ~~{item}~~\n")),
             "{}",
             terminal_projection.target_content
         );

@@ -1346,7 +1346,6 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
     >| {
         // `#strikeisterminal`, per queue: a struck row whose identity is also live in this
         // queue is an earlier attempt's record, never the claim's row.
-        let live_rows = agent_doc_queue::queue_claim::live_row_identities(block.entries);
         block
             .entries
             .iter()
@@ -1367,16 +1366,12 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         });
                     let claim = claim_states.get(&identity);
                     let receipt = receipts.get(&identity);
-                    // `#strikeisterminal`: only a live attempt reopens a struck
-                    // row; receipts and completion cells agree with the strike.
-                    let durable_on_struck = struck
-                        && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
-                            claim, &identity, &live_rows,
-                        );
-                    if struck && !durable_on_struck {
+                    // `#terminalitemstability`: runtime evidence never reopens
+                    // a struck row. The operator removes the strike to reopen it.
+                    if struck {
                         return None;
                     }
-                    let marker = if state_degraded || durable_on_struck {
+                    let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
                         claim.state.projection_marker()
@@ -1431,7 +1426,6 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
                         },
                         marker,
                         owner,
-                        reopen_completed: durable_on_struck,
                     })
                 }
                 _ => None,
@@ -9139,11 +9133,10 @@ mod tests {
         );
     }
 
-    /// `#strikeisterminal`: controller hydration reopens a struck row only
-    /// for a live (`Claimed`/`Running`) attempt. A reported attempt agrees
-    /// with the strike and stays struck.
+    /// `#terminalitemstability`: controller hydration never reopens a struck
+    /// row, regardless of the durable attempt state.
     #[test]
-    fn controller_hydration_keeps_a_struck_reported_row_struck() {
+    fn controller_hydration_keeps_every_struck_attempt_state_struck() {
         let (dir, doc) = temp_doc("struck-reported-hydration.md");
         let struck = "<!-- agent:queue -->\n\
 - ~~reported item~~\n\
@@ -9175,8 +9168,8 @@ mod tests {
         let projected = durable_queue_attempt_projection(&doc, struck).unwrap();
         assert!(projected.contains("- ~~reported item~~\n"), "{projected}");
         assert!(
-            projected.contains("- ❔ [#subagent:running#1] running item\n"),
-            "a live attempt still contradicts a strike: {projected}"
+            projected.contains("- ~~running item~~\n"),
+            "a running attempt cannot contradict terminal document authority: {projected}"
         );
     }
 
@@ -9219,14 +9212,22 @@ mod tests {
              <!-- agent:queue -->\n- 📤 [#subagent:sdk#1] {item}\n<!-- /agent:queue -->\n"
         );
         let projected = durable_queue_attempt_projection(&doc, &stale).unwrap();
-        assert!(projected.contains(&format!("- 📥 {item}\n")), "{projected}");
-        assert!(!projected.contains("[#subagent:sdk#"), "{projected}");
-        assert!(!projected.contains("🔄"), "{projected}");
+        assert!(
+            projected.contains(&format!("- 📤 [#subagent:sdk#1] {item}\n")),
+            "reported presentation remains terminal until the operator reopens it: {projected}"
+        );
 
         claims.claim(item, "subagent:sdk-retry", now + 3, 3600);
         assert_eq!(claims.claims[0].generation, 2);
         persist_queue_claim_ledger(dir.path(), &doc, &claims);
         let replacement = durable_queue_attempt_projection(&doc, &projected).unwrap();
+        assert_eq!(replacement, projected);
+
+        let operator_reopened = replacement.replace(
+            &format!("- 📤 [#subagent:sdk#1] {item}\n"),
+            &format!("- {item}\n"),
+        );
+        let replacement = durable_queue_attempt_projection(&doc, &operator_reopened).unwrap();
         assert!(
             replacement.contains("- 🟡 [#subagent:sdk-retry#2] finish sdk demo\n"),
             "{replacement}"

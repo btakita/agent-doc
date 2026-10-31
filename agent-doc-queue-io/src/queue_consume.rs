@@ -31,7 +31,7 @@ use agent_doc_queue::{
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
-        queue_prompt_text_is_free_text,
+        queue_prompt_done_id, queue_prompt_text_is_free_text,
     },
 };
 
@@ -2296,19 +2296,21 @@ fn converge_id_backed_head_strike(
 /// work, without marking that item done or gated (#freshqueueauth).
 ///
 /// This is intentionally separate from [`strike_orphan_id_backed_queue_head`]:
-/// `--id` proves the head is an orphan, while `--ack-id` proves the operator is
-/// acknowledging a correction/reminder head and wants the underlying work to
-/// remain open. The command still refuses prose that merely mentions `#id`;
-/// those are free-text heads and should be answered + consumed through the
-/// normal free-text path.
+/// `--id` proves the head is an orphan, while `--ack-id` accepts only one
+/// unique, top-level bare `[#id]` correction head or durable Reported evidence.
+/// Supplying the flag is not evidence. The command refuses runnable, mirrored,
+/// nested, and dispatch-owned rows without a Reported attempt/release receipt,
+/// and refuses prose that merely mentions `#id`; prose stays on the normal
+/// free-text answer + consume path.
 ///
 /// `#nestedechostrike`: it is also how a coordinator closes a ☑️ reported
 /// dispatch row (`do [#id]`) whose worker finished while the tracked item stays
 /// open, for example a Todo that waits on an operator check, where `--done`
 /// would resolve the Todo. The open item may be a backlog item or an
-/// `agent:todo` item. A Todo-backed row must carry dispatch evidence (a reported
-/// attempt or reported-release receipt): `--ack-id` never strikes an operator's
-/// undispatched Todo row. Every row is refused while its attempt is claimed,
+/// `agent:todo` item. Every non-correction row must carry dispatch evidence (a
+/// reported attempt or reported-release receipt): `--ack-id` never strikes an
+/// undispatched runnable row merely because its id is still open. Every row is
+/// refused while its attempt is claimed,
 /// running or lost, or when another live coordinator session owns its report
 /// ([`id_head_dispatch_guard`]). The strike ends the reported attempt and
 /// retires its completion cell and release receipt (`#strikeretires`).
@@ -2348,6 +2350,12 @@ pub fn acknowledge_open_id_backed_queue_head(
     }
     let keys = id_backed_head_node_keys(&content, &target_id)?;
     if keys.is_empty() {
+        if id_backed_head_was_already_struck(&content, &target_id)? {
+            // A retry after the exact strike is a successful no-op. In
+            // particular, do not let the missing live row fall through to a
+            // weaker prose/id heuristic that could target another occurrence.
+            return Ok(false);
+        }
         if queue_head_is_free_text_prompt(&content)? {
             anyhow::bail!(
                 "{}: the active queue head is free-text prose that merely mentions the id, \
@@ -2366,15 +2374,20 @@ pub fn acknowledge_open_id_backed_queue_head(
         );
     }
     let evidence = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
-    if !open_backlog && !evidence.dispatched() {
-        anyhow::bail!(
-            "{}: [#{target_id}] names an open Todo and its queue row was never dispatched \
-             (no reported attempt or release receipt). `--ack-id` closes a Todo-backed row \
-             only after its worker reported; leave the row queued, or resolve the Todo with \
-             `--done {target_id}` when its work is finished.",
-            file.display()
-        );
-    }
+    let correction_head = exact_top_level_correction_head(&content, &target_id, &keys)?;
+    let proof = OpenIdAckProof::from_evidence(&evidence, correction_head).ok_or_else(|| {
+        let tracked = if open_backlog { "backlog" } else { "Todo" };
+        anyhow::anyhow!(
+            "{}: [#{target_id}] names an open {tracked} item, but its queue row has no \
+             acknowledgement proof. `--ack-id` accepts only (a) one top-level bare \
+             `[#{}]` correction head outside a `subagents`/`fan-out` queue, or (b) a \
+             runnable row backed by a Reported attempt or reported-release receipt. \
+             Leave runnable work queued until its worker reports, or resolve/gate the \
+             tracked item through the normal closeout path.",
+            file.display(),
+            target_id,
+        )
+    })?;
     if !converge_id_backed_head_strike(
         file,
         effects,
@@ -2410,20 +2423,112 @@ pub fn acknowledge_open_id_backed_queue_head(
     eprintln!(
         "[queue] acknowledged id-backed head [#{target_id}] ({} node(s); {preserved} item left open; {}; #freshqueueauth)",
         keys.len(),
-        evidence.outcome_token(),
+        proof.outcome_token(),
     );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "open_id_head_ack file={} id={} struck={} base_hash={} preserved={preserved} claim_outcome={} source_component=queue operation=strike_head proof=operator_acknowledged_correction_preserve_open_backlog",
+            "open_id_head_ack file={} id={} struck={} base_hash={} preserved={preserved} claim_outcome={} source_component=queue operation=strike_head proof={}",
             file.display(),
             target_id,
             keys.len(),
             agent_doc_hash::content_hash(&content),
-            evidence.outcome_token(),
+            proof.outcome_token(),
+            proof.audit_token(),
         ),
     );
     Ok(true)
+}
+
+/// The two and only two authority classes accepted by `queue consume
+/// --ack-id`: a structurally unambiguous correction head, or durable proof that
+/// a dispatched worker reported. Supplying the CLI flag is never itself proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum OpenIdAckProof {
+    CorrectionHead,
+    ReportedAttempt { owner: String, generation: u64 },
+    ReportedReceipt,
+}
+
+impl OpenIdAckProof {
+    fn from_evidence(evidence: &IdHeadDispatchEvidence, correction_head: bool) -> Option<Self> {
+        if let Some((owner, generation)) = &evidence.reported {
+            return Some(Self::ReportedAttempt {
+                owner: owner.clone(),
+                generation: *generation,
+            });
+        }
+        if evidence.reported_receipt {
+            return Some(Self::ReportedReceipt);
+        }
+        correction_head.then_some(Self::CorrectionHead)
+    }
+
+    fn outcome_token(&self) -> String {
+        match self {
+            Self::CorrectionHead => "correction_head_acknowledged".to_string(),
+            Self::ReportedAttempt { owner, generation } => {
+                format!("reported_attempt_closed owner={owner} generation={generation}")
+            }
+            Self::ReportedReceipt => "reported_receipt_closed".to_string(),
+        }
+    }
+
+    fn audit_token(&self) -> &'static str {
+        match self {
+            Self::CorrectionHead => "explicit_bare_correction_head",
+            Self::ReportedAttempt { .. } => "reported_attempt_closeout",
+            Self::ReportedReceipt => "reported_release_closeout",
+        }
+    }
+}
+
+/// A correction head is intentionally much narrower than an arbitrary
+/// id-backed row. It is one unique, column-zero `- [#id]` row, carries no
+/// runnable/nested prose, and belongs to a queue that is not dispatch-owned.
+fn exact_top_level_correction_head(
+    content: &str,
+    target_id: &str,
+    keys: &[String],
+) -> Result<bool> {
+    if keys.len() != 1 {
+        return Ok(false);
+    }
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("open-id ack: failed to inspect queue rows: {err}"))?;
+    let Some(node) = nodes.iter().find(|node| node.node_key == keys[0]) else {
+        return Ok(false);
+    };
+    let expected = format!("[#{target_id}]");
+    if node.item.struck || !node.item.work_text().trim().eq_ignore_ascii_case(&expected) {
+        return Ok(false);
+    }
+    let line = content
+        .get(node.item.start_byte..node.item.end_byte)
+        .unwrap_or_default();
+    if !line.starts_with("- ") {
+        return Ok(false);
+    }
+    let components = element::parse(content)?;
+    let Some(component) = components.iter().find(|component| {
+        component.name == "queue"
+            && component.open_end <= node.item.start_byte
+            && node.item.start_byte < component.close_start
+    }) else {
+        return Ok(false);
+    };
+    Ok(!component.attrs.contains_key("subagents") && !component.attrs.contains_key("fan-out"))
+}
+
+fn id_backed_head_was_already_struck(content: &str, target_id: &str) -> Result<bool> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+        .map_err(|err| anyhow::anyhow!("open-id ack: failed to inspect queue rows: {err}"))?;
+    Ok(nodes.iter().any(|node| {
+        let text = node.item.text.trim();
+        node.item.struck
+            && !queue_prompt_text_is_free_text(content, text)
+            && queue_prompt_done_id(text).as_deref() == Some(target_id)
+    }))
 }
 
 pub fn mark_completed_queue_prompts_for_done_ids(
@@ -8428,6 +8533,13 @@ Old.
                 && ops_log.contains("transport=disk_detached"),
             "detached acknowledgement writeback must be auditable:\n{ops_log}"
         );
+
+        let after_first_ack = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth").unwrap(),
+            "retrying the exact acknowledged correction must be an idempotent no-op"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), after_first_ack);
     }
 
     /// `#nestedechostrike` live shape (agent-doc-bugs.md 2026-10-27): a
@@ -8638,10 +8750,83 @@ Old.
             .expect_err("an undispatched Todo row is operator work");
         let message = err.to_string();
         assert!(
-            message.contains("never dispatched") && message.contains("--done ahfe"),
+            message.contains("no acknowledgement proof")
+                && message.contains("Reported attempt")
+                && message.contains("top-level bare"),
             "{message}"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+    }
+
+    #[test]
+    fn ack_id_refuses_open_runnable_backlog_row_without_report_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:run go -->\n",
+            "- do [#ordinary-work]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#ordinary-work] ordinary runnable work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let err = acknowledge_open_id_backed_queue_head(&doc, "ordinary-work")
+            .expect_err("the flag alone must not acknowledge runnable backlog work");
+        let message = err.to_string();
+        assert!(
+            message.contains("no acknowledgement proof")
+                && message.contains("Reported attempt")
+                && message.contains("normal closeout path"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn ack_id_refuses_mirrored_nested_and_dispatch_owned_rows_without_report_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("bugs.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:run subagents go -->\n",
+            "- do [#mirrored]\n",
+            "- do [#mirrored]\n",
+            "- parent group\n",
+            "  - [#nested]\n",
+            "- [#dispatch-owned]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#mirrored] mirrored runnable work\n",
+            "- [ ] [#nested] nested runnable work\n",
+            "- [ ] [#dispatch-owned] bare dispatch-owned work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        for id in ["mirrored", "nested", "dispatch-owned"] {
+            let err = acknowledge_open_id_backed_queue_head(&doc, id)
+                .expect_err("non-correction runnable rows need reported provenance");
+            assert!(
+                err.to_string().contains("no acknowledgement proof"),
+                "{id}: {err}"
+            );
+            assert_eq!(std::fs::read_to_string(&doc).unwrap(), content, "{id}");
+        }
     }
 
     #[test]

@@ -631,7 +631,7 @@ fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
     let refused = run_agent_doc(dir.path(), &["queue", "consume", path, "--ack-id", "ahfe"]);
     assert!(!refused.status.success());
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("never dispatched"),
+        String::from_utf8_lossy(&refused.stderr).contains("no acknowledgement proof"),
         "an undispatched Todo row is refused: {}",
         String::from_utf8_lossy(&refused.stderr)
     );

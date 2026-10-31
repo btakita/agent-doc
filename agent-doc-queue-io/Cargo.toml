@@ -42,6 +42,7 @@ agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.564" }
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.564" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.564" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.564" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.564" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.564" }
 agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.564" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.564" }

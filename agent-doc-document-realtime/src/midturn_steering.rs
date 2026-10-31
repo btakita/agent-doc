@@ -1488,19 +1488,24 @@ fn item_header_suffix(item: &SteeringItem) -> String {
 ///
 /// `owner_of` answers the claim owner for a queue line's text (the caller's
 /// claim ledger, which follows operator annotations, `#claimfollowsedit`).
-/// A claimed item that is not this turn's own current item becomes
-/// [`SteeringDispatch::ForwardToOwner`] with its owner: an edit is forwarded
-/// to the running worker instead of offered as a NEW subagent dispatch. The
-/// edit's previous text is consulted too, so a legacy claim without an anchor
-/// still routes conservatively to its owner.
+/// A claimed item becomes [`SteeringDispatch::ForwardToOwner`] with its owner:
+/// an edit is forwarded to the running worker instead of offered as a NEW
+/// subagent dispatch. A main-agent current item stays local unless its live
+/// claim belongs to a `subagent:*` worker; a delegated row may remain the
+/// watermark's selected item after claim/spawn/start and must still forward.
+/// The edit's previous text is consulted too, so a legacy claim without an
+/// anchor still routes conservatively to its owner.
 pub fn apply_claim_owners(items: &mut [SteeringItem], owner_of: impl Fn(&str) -> Option<String>) {
     for item in items.iter_mut() {
-        if item.source != SteeringSource::Queue || item.current_item {
+        if item.source != SteeringSource::Queue {
             continue;
         }
         let owner =
             owner_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&owner_of));
         if let Some(owner) = owner {
+            if item.current_item && !owner.starts_with("subagent:") {
+                continue;
+            }
             item.dispatch = SteeringDispatch::ForwardToOwner;
             item.presets.clear();
             item.owner = Some(owner);
@@ -1518,12 +1523,15 @@ pub fn apply_claim_attempts(
     claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
 ) {
     for item in items.iter_mut() {
-        if item.source != SteeringSource::Queue || item.current_item {
+        if item.source != SteeringSource::Queue {
             continue;
         }
         let claim =
             claim_of(&item.verbatim).or_else(|| item.previous.as_deref().and_then(&claim_of));
         if let Some(claim) = claim {
+            if item.current_item && !claim.owner.starts_with("subagent:") {
+                continue;
+            }
             item.dispatch = SteeringDispatch::ForwardToOwner;
             item.presets.clear();
             item.owner = Some(claim.owner);
@@ -3941,6 +3949,61 @@ mod tests {
             assert!(text.contains("not a chat reply"), "{text}");
             assert!(!text.contains("DISPATCH NOW"), "{text}");
             assert!(!text.contains("dispatch this item NOW"), "{text}");
+        }
+    }
+
+    /// A delegated row can remain the selected/current watermark item after
+    /// claim → spawn → start. Lifecycle/attempt projection and repeated edits
+    /// must continue to route to that live worker, never become fresh dispatch.
+    #[test]
+    fn projected_current_item_claimed_by_subagent_forwards_repeated_edits() {
+        let original = "do [#artifact_response_refs]: include any snippets";
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(original, "subagent:artifact_response_refs", 100, 3600);
+        let claim = ledger.claims[0].clone();
+        let mut items = [
+            SteeringItem {
+                source: SteeringSource::Queue,
+                change: SteeringChange::Edited,
+                dispatch: SteeringDispatch::Subagent,
+                current_item: true,
+                verbatim: "🚧 [#subagent:artifact_response_refs#1] do [#artifact_response_refs]: include any salient snippets".into(),
+                previous: Some(original.into()),
+                presets: Vec::new(),
+                possibly_partial: false,
+                owner: None,
+                generation: None,
+                worker_id: None,
+                explicit: false,
+            },
+            SteeringItem {
+                source: SteeringSource::Queue,
+                change: SteeringChange::Edited,
+                dispatch: SteeringDispatch::Subagent,
+                current_item: true,
+                verbatim: "🚧 [#subagent:artifact_response_refs#1] do [#artifact_response_refs]: include any especially salient snippets".into(),
+                previous: Some(
+                    "🚧 [#subagent:artifact_response_refs#1] do [#artifact_response_refs]: include any salient snippets".into(),
+                ),
+                presets: Vec::new(),
+                possibly_partial: false,
+                owner: None,
+                generation: None,
+                worker_id: None,
+                explicit: false,
+            },
+        ];
+        apply_claim_attempts(&mut items, |text| {
+            (agent_doc_queue::queue_claim::claim_identity(text) == claim.identity)
+                .then(|| claim.clone())
+        });
+
+        for item in &items {
+            assert_eq!(item.dispatch, SteeringDispatch::ForwardToOwner);
+            assert_eq!(
+                item.owner.as_deref(),
+                Some("subagent:artifact_response_refs")
+            );
         }
     }
 

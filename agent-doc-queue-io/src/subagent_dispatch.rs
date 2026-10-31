@@ -145,9 +145,7 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .collect::<Vec<_>>();
     let lost_identities = crate::queue_claim::claim_states_for_content(file, content)?
         .into_iter()
-        .filter(|claim| {
-            claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
-        })
+        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .map(|claim| claim.identity)
         .collect::<Vec<_>>();
     if fresh_identities.is_empty() && lost_identities.is_empty() {
@@ -186,6 +184,97 @@ pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Resu
     }
 
     Ok(Vec::new())
+}
+
+fn coordinator_item(
+    file: &Path,
+    content: &str,
+    item: String,
+    owner: Option<String>,
+    worker_id: Option<String>,
+) -> Result<agent_doc_queue::coordinator_drain::CoordinatorQueueItem> {
+    let authorization =
+        subagent_authorization_for_content(file, content, &item).with_context(|| {
+            format!(
+                "resolve origin queue for coordinator drain item {item:?} in {}",
+                file.display()
+            )
+        })?;
+    Ok(agent_doc_queue::coordinator_drain::CoordinatorQueueItem {
+        item,
+        queue_id: authorization.queue_id,
+        owner,
+        worker_id,
+    })
+}
+
+/// Document-wide coordinator boundary projection (`#coordinatordrain`).
+///
+/// Unlike the ordinary active-queue selector, this observes every runnable
+/// component and every live claim state. It is the single policy input for
+/// session-check and Stop: neither boundary may infer document completion from
+/// one selected prompt or one active `agent:run` tree.
+pub fn coordinator_drain_decision_for_content(
+    file: &Path,
+    content: &str,
+) -> Result<agent_doc_queue::coordinator_drain::CoordinatorDrainDecision> {
+    use agent_doc_queue::queue_claim::QueueClaimState;
+
+    let claims = crate::queue_claim::claim_states_for_content(file, content)?;
+    let lost_identities = claims
+        .iter()
+        .filter(|claim| claim.state == QueueClaimState::Lost)
+        .map(|claim| claim.identity.clone())
+        .collect::<std::collections::HashSet<_>>();
+
+    let pending_dispatch = pending_subagent_dispatch_for_content(file, content)?
+        .into_iter()
+        // A retained lost attempt is a recovery/requeue obligation, not a
+        // second independent fresh-dispatch obligation.
+        .filter(|item| {
+            !lost_identities.contains(&agent_doc_queue::queue_claim::claim_identity(item))
+        })
+        .map(|item| coordinator_item(file, content, item, None, None))
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut claimed_unstarted = Vec::new();
+    let mut running = Vec::new();
+    let mut reported = Vec::new();
+    let mut lost = Vec::new();
+    for claim in claims {
+        let item = coordinator_item(
+            file,
+            content,
+            claim.item_text,
+            Some(claim.owner),
+            claim.worker.map(|worker| worker.worker_id),
+        )?;
+        match claim.state {
+            QueueClaimState::Claimed => claimed_unstarted.push(item),
+            QueueClaimState::Running => running.push(item),
+            QueueClaimState::Reported => reported.push(item),
+            QueueClaimState::Lost => lost.push(item),
+        }
+    }
+
+    let operator_gated_count = agent_doc_queue::queue_continuation::all_queue_head_texts(content)
+        .unwrap_or_default()
+        .iter()
+        .filter(|head| !agent_doc_document::queue_projection::operator_action_ids(head).is_empty())
+        .count();
+    let snapshot = agent_doc_queue::coordinator_drain::CoordinatorDrainSnapshot {
+        pending_dispatch,
+        claimed_unstarted,
+        running,
+        reported,
+        lost,
+        operator_gated_count,
+    };
+    let scope = agent_doc_state_scope::DocumentScope::new();
+    Ok(
+        agent_doc_queue::coordinator_drain::CoordinatorDrainMachine::new_in(&scope)
+            .observe(snapshot),
+    )
 }
 
 /// The queue-level subagents attribute (`<!-- agent:queue subagents=N -->`)
@@ -650,6 +739,61 @@ mod tests {
         );
     }
 
+    /// A running claim in the first run must not make pending rows in sibling
+    /// or later runs disappear at the coordinator boundary.
+    #[test]
+    fn coordinator_drain_observes_running_and_inactive_run_pending_rows_together() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = r#"---
+session: sid
+agent_doc_format: template
+queue: go
+---
+
+## Active <!-- agent:run id="active" subagents go -->
+- do [#a]
+<!-- /agent:run -->
+
+## Other <!-- agent:run id="other" subagents -->
+- do [#b]
+<!-- /agent:run -->
+
+## Inactive <!-- agent:run id="inactive" subagents -->
+- do [#c]
+<!-- /agent:run -->
+"#;
+        std::fs::write(&file, content).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&file, "#a", "subagent:a", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            "#a",
+            "subagent:a",
+            "worker-a",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let decision = coordinator_drain_decision_for_content(&file, content).unwrap();
+        assert_eq!(
+            decision.phase,
+            agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
+        );
+        assert_eq!(decision.snapshot.running.len(), 1);
+        assert_eq!(
+            decision
+                .snapshot
+                .pending_dispatch
+                .iter()
+                .map(|item| (item.item.as_str(), item.queue_id.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![("do [#b]", Some("other")), ("do [#c]", Some("inactive"))]
+        );
+        assert!(!decision.may_yield());
+    }
+
     /// `#lostsubagentrestart`: Run Agent Doc must not strand an old nested
     /// subagent row after its prior worker becomes unavailable. A retained
     /// Lost attempt is offered again by the queue-level subagent run, while
@@ -722,8 +866,7 @@ mod tests {
         std::fs::write(&file, &content).unwrap();
         seed(&file, "cycle-prev", &content);
 
-        let (_, prior) =
-            crate::queue_claim::claim(&file, item, "subagent:prior", 600).unwrap();
+        let (_, prior) = crate::queue_claim::claim(&file, item, "subagent:prior", 600).unwrap();
         crate::queue_claim::start_attempt(
             &file,
             item,
@@ -733,13 +876,7 @@ mod tests {
             prior.generation,
         )
         .unwrap();
-        release_attempt(
-            &file,
-            item,
-            ReleaseKind::Requeue,
-            Some(prior.generation),
-        )
-        .unwrap();
+        release_attempt(&file, item, ReleaseKind::Requeue, Some(prior.generation)).unwrap();
 
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),

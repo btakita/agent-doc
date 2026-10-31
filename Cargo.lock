@@ -1834,6 +1834,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-scope",
  "agent-doc-turn",
  "agent-doc-turn-status-io",
  "agent-doc-workflow-io",

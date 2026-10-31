@@ -884,10 +884,18 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
     let components = element::parse(doc).context("failed to parse components")?;
     let code_ranges = element::find_code_ranges(doc);
     let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
+    let folded_queue_ranges = agent_doc_markdown_ast::overlay::components(doc)
+        .into_iter()
+        .filter(|component| component.name == "queue")
+        .flat_map(|component| component.items)
+        .filter(|item| agent_doc_markdown_ast::overlay::queue_item_opens_folded_context(&item.raw))
+        .map(|item| (item.start_byte, item.end_byte))
+        .collect::<Vec<_>>();
     let ignored = |position: usize| {
         code_ranges
             .iter()
             .chain(comment_ranges.iter())
+            .chain(folded_queue_ranges.iter())
             .any(|&(start, end)| position >= start && position < end)
     };
 
@@ -1744,6 +1752,23 @@ mod tests {
         let error = guard_no_conversation_content_inside_tracked_components(document)
             .expect_err("welded response debris must fail closed");
         assert!(error.to_string().contains("agent:review"));
+    }
+
+    #[test]
+    fn guard_allows_response_scaffold_as_explicit_folded_queue_evidence() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=main subagents -->\n",
+            "- This response was incomplete; investigate it: >-\n",
+            "  ### Re: Subagent completed — agent-doc\n",
+            "  > **Queue prompt:** prior task\n",
+            "  > Worker response omitted required evidence.\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        guard_no_conversation_content_inside_tracked_components(document).unwrap();
     }
 
     const GH86_WELDED_BACKLOG: &str = concat!(

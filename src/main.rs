@@ -1415,6 +1415,86 @@ fn queue_command_consume_outcome(
     }
 }
 
+fn ack_text_selector(
+    occurrence: Option<usize>,
+    owner: Option<&str>,
+) -> anyhow::Result<Option<agent_doc_queue_io::queue_consume::AckTextSelector>> {
+    use agent_doc_queue_io::queue_consume::AckTextSelector;
+
+    match (occurrence, owner) {
+        (Some(_), Some(_)) => anyhow::bail!(
+            "--ack-occurrence and --ack-owner are alternative selectors; pass exactly one"
+        ),
+        (Some(0), None) => anyhow::bail!(
+            "--ack-occurrence is one-based and must be greater than zero"
+        ),
+        (Some(occurrence), None) => Ok(Some(AckTextSelector::Occurrence(occurrence))),
+        (None, Some(raw)) => {
+            let raw = raw.trim();
+            let (owner, generation) = raw.rsplit_once('#').with_context(|| {
+                format!(
+                    "invalid --ack-owner {raw:?}; expected OWNER#GENERATION, for example subagent:worker#2"
+                )
+            })?;
+            if owner.is_empty() {
+                anyhow::bail!("invalid --ack-owner {raw:?}; OWNER must not be empty");
+            }
+            let generation = generation.parse::<u64>().with_context(|| {
+                format!(
+                    "invalid --ack-owner {raw:?}; GENERATION must be a positive integer"
+                )
+            })?;
+            if generation == 0 {
+                anyhow::bail!(
+                    "invalid --ack-owner {raw:?}; GENERATION must be greater than zero"
+                );
+            }
+            Ok(Some(AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: owner.to_string(),
+                    generation,
+                },
+            )))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod ack_text_selector_tests {
+    use super::*;
+
+    #[test]
+    fn occurrence_selector_is_one_based() {
+        assert_eq!(
+            ack_text_selector(Some(2), None).unwrap(),
+            Some(agent_doc_queue_io::queue_consume::AckTextSelector::Occurrence(2))
+        );
+        assert!(ack_text_selector(Some(0), None).is_err());
+    }
+
+    #[test]
+    fn owner_selector_parses_exact_attempt_identity() {
+        let selector = ack_text_selector(None, Some("subagent:pr172-address-current#2"))
+            .unwrap()
+            .expect("owner selector");
+        assert_eq!(
+            selector,
+            agent_doc_queue_io::queue_consume::AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: "subagent:pr172-address-current".to_string(),
+                    generation: 2,
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn selector_helper_refuses_two_discriminators() {
+        assert!(ack_text_selector(Some(2), Some("subagent:worker#2")).is_err());
+    }
+}
+
 impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffects {
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
         agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
@@ -1492,6 +1572,21 @@ impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffec
         agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_outcome(
             file,
             expected_head,
+            &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+        )
+        .map(|outcome| outcome.map(queue_command_consume_outcome))
+    }
+
+    fn acknowledge_paused_free_text_queue_head_with_selector(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&agent_doc_queue_io::queue_consume::AckTextSelector>,
+    ) -> anyhow::Result<Option<agent_doc_queue_io::queue_cmd::QueueCommandConsumeOutcome>> {
+        agent_doc_queue_io::queue_consume::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            file,
+            expected_head,
+            selector,
             &CLI_QUEUE_CONSUME_WRITE_EFFECTS,
         )
         .map(|outcome| outcome.map(queue_command_consume_outcome))
@@ -4931,6 +5026,25 @@ enum QueueAction {
             conflicts_with = "force_disk"
         )]
         ack_text: Option<String>,
+        /// Select the one-based document-order occurrence among duplicate exact
+        /// `--ack-text` matches. The exact text match is still required.
+        #[arg(
+            long,
+            value_name = "N",
+            requires = "ack_text",
+            conflicts_with = "ack_owner"
+        )]
+        ack_occurrence: Option<usize>,
+        /// Select the durable worker attempt among duplicate exact `--ack-text`
+        /// matches, spelled `OWNER#GENERATION` (for example
+        /// `subagent:pr172-address-current#2`).
+        #[arg(
+            long,
+            value_name = "OWNER#GENERATION",
+            requires = "ack_text",
+            conflicts_with = "ack_occurrence"
+        )]
+        ack_owner: Option<String>,
     },
     /// Strike every non-drainable NOISE queue head at any position (#goqstall2):
     /// pasted console output, agent-response fragments, and bare observations that
@@ -8661,6 +8775,8 @@ fn try_main() -> anyhow::Result<()> {
                 id,
                 ack_id,
                 ack_text,
+                ack_occurrence,
+                ack_owner,
             } => {
                 let queue_effects = CliQueueCommandEffects;
                 if let Some(id) = id {
@@ -8668,10 +8784,12 @@ fn try_main() -> anyhow::Result<()> {
                 } else if let Some(id) = ack_id {
                     agent_doc_queue_io::queue_cmd::acknowledge_open_id(&queue_effects, &file, &id)
                 } else if let Some(text) = ack_text {
+                    let selector = ack_text_selector(ack_occurrence, ack_owner.as_deref())?;
                     agent_doc_queue_io::queue_cmd::acknowledge_paused_free_text(
                         &queue_effects,
                         &file,
                         &text,
+                        selector.as_ref(),
                     )
                 } else {
                     agent_doc_queue_io::queue_cmd::consume_with_options(

@@ -3,8 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use agent_doc_queue::queue_sync_payload::{
-    QueueSyncDocumentScope, QueueSyncOperation, QueueSyncPayload, QueueSyncScanError,
-    normalize_claims_for_queue_sync, project_document_queue_sync,
+    QueueSyncDocumentScope, QueueSyncOperation, QueueSyncPayload, QueueSyncPlacementDebt,
+    QueueSyncScanError, normalize_claims_for_queue_sync, project_document_queue_sync,
 };
 use anyhow::Result;
 
@@ -79,11 +79,39 @@ pub fn build_project_queue_sync_payload(
             previous.as_deref(),
             &claims,
         ) {
-            Ok(document_payload) => payload.extend(document_payload),
+            Ok(document_payload) => {
+                payload.extend(document_payload);
+                match collect_placement_debt(&key, scope, &content) {
+                    Ok(debt) => payload.placement_reconcile.extend(debt),
+                    Err(error) => payload.scan_errors.push(scan_error(&document, error)),
+                }
+            }
             Err(error) => payload.scan_errors.push(scan_error(&document, error)),
         }
     }
     Ok(payload)
+}
+
+fn collect_placement_debt(
+    document: &Path,
+    scope: QueueSyncDocumentScope,
+    content: &str,
+) -> Result<Vec<QueueSyncPlacementDebt>> {
+    let components = agent_doc_element::element::parse(content)?;
+    Ok(
+        agent_doc_queue::backlog_sync::collect_backlog_queue_placement_debt(&components, content)?
+            .into_iter()
+            .map(|debt| QueueSyncPlacementDebt {
+                document_path: document.display().to_string(),
+                document_scope: scope,
+                item_id: debt.item_id,
+                item_text: debt.item_text,
+                requested_queue_id: debt.requested_queue_id,
+                eligible_queue_ids: debt.eligible_queue_ids,
+                operation: QueueSyncOperation::Reconcile,
+            })
+            .collect(),
+    )
 }
 
 fn canonical_key(path: &Path) -> PathBuf {
@@ -134,5 +162,31 @@ mod tests {
             agent_doc_queue::queue_sync_payload::QueueExecutionMode::SubagentDispatch
         );
         assert_eq!(sibling_item.operation, QueueSyncOperation::Dispatch);
+    }
+
+    #[test]
+    fn retains_ambiguous_backlog_queue_placement_as_reconcile_debt() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".agent-doc")).unwrap();
+        let current = root.path().join("current.md");
+        let current_content = concat!(
+            "---\nagent_doc_session: current-session\n---\n",
+            "<!-- agent:backlog queue -->\n- [ ] [#choose] choose a queue\n<!-- /agent:backlog -->\n",
+            "<!-- agent:run id=one -->\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=two -->\n<!-- /agent:run -->\n",
+        );
+        std::fs::write(&current, current_content).unwrap();
+
+        let payload = build_project_queue_sync_payload(&current, current_content, None).unwrap();
+
+        assert!(payload.scan_errors.is_empty(), "{:?}", payload.scan_errors);
+        assert_eq!(payload.placement_reconcile.len(), 1);
+        let debt = &payload.placement_reconcile[0];
+        assert_eq!(debt.item_id, "choose");
+        assert_eq!(debt.item_text, "choose a queue");
+        assert_eq!(debt.requested_queue_id, None);
+        assert_eq!(debt.eligible_queue_ids, ["one", "two"]);
+        assert_eq!(debt.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(debt.document_scope, QueueSyncDocumentScope::Current);
     }
 }

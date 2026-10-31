@@ -946,7 +946,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_state_repair_reaps_only_proven_orphans_and_reprojects_other_states() {
+    fn managed_state_repair_reaps_only_proven_orphans_and_preserves_terminal_rows() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         let doc = dir.path().join("sdk.md");
@@ -991,18 +991,18 @@ mod tests {
         let audit = repair_managed_state(&doc, false, &keys).unwrap();
         assert_eq!(audit.stale.stale_cells.len(), 1);
         assert_eq!(audit.stale.stale_cells[0].key, "old-key");
-        assert!(audit.projection_drift);
+        assert!(!audit.projection_drift);
         assert!(!audit.projection_applied);
         assert_eq!(fs::read_to_string(&doc).unwrap(), original);
 
         let repaired = repair_managed_state(&doc, true, &keys).unwrap();
         assert_eq!(repaired.stale.stale_cells.len(), 1);
         assert!(repaired.stale.applied);
-        assert!(repaired.projection_applied);
+        assert!(!repaired.projection_applied);
         let content = fs::read_to_string(&doc).unwrap();
         assert!(!content.contains("old-key"), "{content}");
         assert!(
-            content.contains("- 🚧 [#subagent:live#1] still running"),
+            content.contains("- ☑️ [#subagent:live#1] still running"),
             "{content}"
         );
 

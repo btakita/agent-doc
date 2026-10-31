@@ -131,7 +131,9 @@ clause in the tracked item. The exact rule is in
 integrated its result yet. The state comes from one of two records: a
 `Reported` claim attempt (`queue report-complete`), or a release receipt
 (`queue release` without `--requeue`). agent-doc never strikes a `☑️` row by
-itself, and time never clears it. The coordinator closes it in a closeout, and
+itself, never downgrades or reopens it from later runtime evidence, and time
+never clears it. Only the operator can reopen it by removing the `☑️` marker
+in the document. The coordinator closes it in a closeout, and
 which close works depends on the row's shape:
 
 Closure is not tied to the end of a harness turn. As soon as the coordinator
@@ -145,8 +147,10 @@ boundary than the queue item authorized, so `report-complete` never auto-strikes
 
 Do not delete a live `☑️` row: it is the coordinator's integration/writeback
 debt. A struck row (`~~row~~`) is integrated terminal history and may be
-deleted. For a nested prompt tree, wait until every parent and leaf is struck;
-if even one row remains live, the tree must remain in `agent:run`.
+deleted. Automatic lifecycle projection never removes its strike, even if a
+claim remains or a descendant is live; only the operator can reopen it by
+removing the strike. For a nested prompt tree, wait until every parent and leaf
+is struck; if even one row remains live, the tree must remain in `agent:run`.
 
 | Row | What strikes it |
 | --- | --- |

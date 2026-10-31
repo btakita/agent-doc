@@ -1609,7 +1609,6 @@ pub fn set_prompt_lifecycle_markers(
             marker: *marker,
             owner: None,
             blockers: Vec::new(),
-            reopen_completed: false,
         })
         .collect::<Vec<_>>();
     set_prompt_runtime_projections(entries, &targets)
@@ -1628,15 +1627,13 @@ pub struct QueueRowProjection {
     ///
     /// [`QueueLifecycleMarker::Blocked`]: agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
     pub blockers: Vec<String>,
-    /// Set only when durable live evidence contradicts a struck presentation.
-    /// A target for a later live duplicate must not reopen an earlier terminal
-    /// row that happens to have the same work identity.
-    pub reopen_completed: bool,
 }
 
-/// Derive every projected prefix from an exact occurrence target. A target on
-/// a struck row reopens it with the supplied degraded marker: Markdown strike
-/// styling alone cannot retire durable claim/report evidence.
+/// Derive every projected prefix from an exact live occurrence target.
+///
+/// Reported (`☑️`) and struck rows are terminal document authority. Runtime
+/// evidence never rewrites a reported row or reopens a strike. The operator reopens work
+/// by removing the reported marker or strike in the document.
 pub fn set_prompt_runtime_projections(
     entries: &[QueueEntry],
     targets: &[QueueRowProjection],
@@ -1663,7 +1660,30 @@ pub fn set_prompt_runtime_projections(
         .iter()
         .enumerate()
         .map(|(index, entry)| match entry {
-            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+            QueueEntry::Completed(prompt) => {
+                let mut next = prompt.clone();
+                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                    next.text = stripped;
+                    changed = true;
+                }
+                if let Some(cleaned) =
+                    agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
+                {
+                    next.text = cleaned;
+                    changed = true;
+                }
+                QueueEntry::Completed(next)
+            }
+            QueueEntry::Prompt(prompt) => {
+                let reported = matches!(
+                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                    Some(
+                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                    )
+                );
+                if reported {
+                    return entry.clone();
+                }
                 let mut next = prompt.clone();
                 if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
                     next.text = stripped;
@@ -1677,16 +1697,11 @@ pub fn set_prompt_runtime_projections(
                 }
                 let key = projection_key(&next.text);
                 let group_label = entry_is_group_parent(entries, index);
-                let struck_parent_has_live_leaf = matches!(entry, QueueEntry::Completed(_))
-                    && group_label
-                    && group_parent_has_live_executable_descendant(entries, index);
                 let target = targets
                     .iter_mut()
                     .find(|(target_key, target, consumed)| {
                         target_key == &key
                             && !*consumed
-                            && (!matches!(entry, QueueEntry::Completed(_))
-                                || target.reopen_completed)
                             && !(
                                 group_label
                                     && target.marker
@@ -1697,7 +1712,6 @@ pub fn set_prompt_runtime_projections(
                         *consumed = true;
                         target
                     });
-                let has_target = target.is_some();
                 if let Some(target) = target {
                     if !crate::queue_command::is_slash_command(&next.text) {
                         let publication_state = target
@@ -1735,32 +1749,7 @@ pub fn set_prompt_runtime_projections(
                         changed = true;
                     }
                 }
-                if (has_target || struck_parent_has_live_leaf)
-                    && matches!(entry, QueueEntry::Completed(_))
-                {
-                    changed = true;
-                    QueueEntry::Prompt(next)
-                } else if matches!(entry, QueueEntry::Completed(_)) {
-                    // `#struckparentkids`: a closed parent's children read
-                    // closed. A whole-block strike that left them unstruck (a
-                    // hand strike, or a 0.35.558 strike) is made canonical
-                    // here, so a row written under it later is told apart
-                    // from the answered ones and reopens the block.
-                    if !next.multiline
-                        && let (head, Some(block)) =
-                            agent_doc_element_queue::subprompts::split_subprompt_block(&next.text)
-                    {
-                        let struck =
-                            agent_doc_element_queue::subprompts::strike_subprompt_block(block);
-                        if struck != block {
-                            next.text = format!("{head}\n{struck}");
-                            changed = true;
-                        }
-                    }
-                    QueueEntry::Completed(next)
-                } else {
-                    QueueEntry::Prompt(next)
-                }
+                QueueEntry::Prompt(next)
             }
             _ => entry.clone(),
         })
@@ -3325,18 +3314,6 @@ pub fn entry_has_nested_list_comment(entries: &[QueueEntry], idx: usize) -> bool
         }
     }
     false
-}
-
-fn group_parent_has_live_executable_descendant(entries: &[QueueEntry], parent_idx: usize) -> bool {
-    entries
-        .iter()
-        .enumerate()
-        .skip(parent_idx + 1)
-        .any(|(idx, entry)| {
-            entry_is_ancestor_of(entries, parent_idx, idx)
-                && matches!(entry, QueueEntry::Prompt(_))
-                && !entry_is_group_parent(entries, idx)
-        })
 }
 
 /// Work text of a queue row for nest-vector display and identity compare.
@@ -5883,7 +5860,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_lifecycle_projection_replaces_state_without_retargeting_identity() {
+    fn typed_lifecycle_projection_replaces_live_state_without_reopening_reported() {
         use agent_doc_document::queue_projection::QueueLifecycleMarker;
 
         let entries = parse("- 🚧 do [#a]\n- do [#b]\n- 📤 do [#c]\n").unwrap();
@@ -5895,12 +5872,12 @@ mod tests {
         let marked = set_prompt_lifecycle_markers(&entries, &targets).unwrap();
         assert_eq!(
             render(&marked),
-            "- ☑️ do [#a]\n- ⚠️ do [#b]\n- 🟡 do [#c]\n"
+            "- ☑️ do [#a]\n- ⚠️ do [#b]\n- 📤 do [#c]\n"
         );
     }
 
     #[test]
-    fn runtime_projection_reopens_struck_work_and_preserves_choice_and_whitespace() {
+    fn runtime_projection_never_reopens_struck_work() {
         use agent_doc_document::queue_projection::{QueueLifecycleMarker, QueueOwnerProjection};
         let body = "- ~~  🙋 [#subagent-operator-request-choice] fix sdk demo  ~~\n- untouched\n";
         let targets = vec![QueueRowProjection {
@@ -5911,16 +5888,29 @@ mod tests {
                 generation: 4,
             }),
             blockers: Vec::new(),
-            reopen_completed: true,
         }];
-        let (projected, entries) = project_prompt_runtime_projections(body, &targets)
-            .unwrap()
-            .expect("durable evidence must reopen manual strike");
         assert_eq!(
-            projected,
-            "- 🙋❔ [#subagent:sdk#4] fix sdk demo [#subagent-operator-request-choice]\n- untouched\n"
+            project_prompt_runtime_projections(body, &targets).unwrap(),
+            None
         );
-        assert!(matches!(entries[0], QueueEntry::Prompt(_)));
+    }
+
+    #[test]
+    fn runtime_projection_never_downgrades_reported_work() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let body = "- ☑️ [#subagent:sdk#4] fix sdk demo\n";
+        let targets = vec![QueueRowProjection {
+            text: "fix sdk demo".to_string(),
+            marker: QueueLifecycleMarker::Running,
+            owner: None,
+            blockers: Vec::new(),
+        }];
+
+        assert_eq!(project_prompt_runtime_projections(body, &[]).unwrap(), None);
+        assert_eq!(
+            project_prompt_runtime_projections(body, &targets).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -5934,7 +5924,6 @@ mod tests {
                 generation: 1,
             }),
             blockers: Vec::new(),
-            reopen_completed: false,
         }];
         let projected = project_prompt_runtime_projections("- dispatched worker work\n", &targets)
             .unwrap()
@@ -5959,7 +5948,6 @@ mod tests {
             marker: QueueLifecycleMarker::Reported,
             owner: None,
             blockers: Vec::new(),
-            reopen_completed: false,
         }];
         let projected = project_prompt_runtime_projections("- worker work\n", &targets)
             .unwrap()
@@ -5997,7 +5985,6 @@ mod tests {
                 generation: 1,
             }),
             blockers: Vec::new(),
-            reopen_completed: false,
         }];
 
         let (projected, entries) = project_prompt_runtime_projections(body, &targets)
@@ -9701,23 +9688,21 @@ mod tests {
     }
 
     /// `#struckparentkids`: a canonical child is independent work. A struck
-    /// parent with a live executable child therefore reopens during runtime
-    /// projection without swallowing or completing that child.
+    /// parent remains terminal while its live child stays independently
+    /// executable until the operator explicitly removes the parent strike.
     #[test]
-    fn a_parent_strike_reopens_without_swallowing_live_leaves() {
+    fn a_parent_strike_stays_terminal_without_swallowing_live_leaves() {
         let legacy = format!("- ~~{STRUCK_PARENT_ID}~~\n  - {ANSWERED_CHILD}\n");
         let entries = parse(&legacy).unwrap();
         assert!(
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
-        let (projected, _) = project_prompt_runtime_projections(&legacy, &[])
-            .unwrap()
-            .expect("a struck parent with a live leaf reopens");
         assert_eq!(
-            projected,
-            format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n")
+            project_prompt_runtime_projections(&legacy, &[]).unwrap(),
+            None
         );
+        assert_eq!(prompts(&entries)[0].text, ANSWERED_CHILD);
         let added = format!("{legacy}  - {NEW_CHILD}\n");
         let entries = parse(&added).unwrap();
         assert!(
@@ -9734,10 +9719,10 @@ mod tests {
     }
 
     /// Regression from `tasks/tools.md`: PR 29 was struck while four reported
-    /// children remained visibly nonterminal. Reported children keep their
-    /// lifecycle evidence and force the group parent open.
+    /// children remained visibly nonterminal. Both terminal states are stable:
+    /// the parent stays struck and each child stays reported.
     #[test]
-    fn reported_tools_pr_children_keep_the_parent_open() {
+    fn reported_tools_pr_children_do_not_reopen_the_parent() {
         const PARENT: &str = "https://github.com/haiven-dev/haiven-tools/pull/29";
         const REPORTED: [&str; 4] = [
             "[#subagent:pr29_review_threads#1] #address: answer each review item",
@@ -9759,20 +9744,15 @@ mod tests {
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
                 owner: None,
                 blockers: Vec::new(),
-                reopen_completed: false,
             })
             .collect::<Vec<_>>();
 
-        let (projected, _) = project_prompt_runtime_projections(&body, &targets)
-            .unwrap()
-            .expect("the inconsistent parent is reopened");
-
-        assert!(
-            projected.starts_with(&format!("- {PARENT}\n")),
-            "{projected}"
+        assert_eq!(
+            project_prompt_runtime_projections(&body, &targets).unwrap(),
+            None
         );
-        assert_eq!(projected.matches("☑️").count(), REPORTED.len());
-        assert!(!projected.contains(&format!("~~{PARENT}~~")));
+        assert!(body.starts_with(&format!("- ~~{PARENT}~~\n")), "{body}");
+        assert_eq!(body.matches("☑️").count(), REPORTED.len());
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one
@@ -9817,7 +9797,6 @@ mod tests {
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
                 blockers: Vec::new(),
-                reopen_completed: false,
             }],
         )
         .unwrap()
@@ -9842,7 +9821,6 @@ mod tests {
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
                 owner: None,
                 blockers: Vec::new(),
-                reopen_completed: false,
             }],
         )
         .unwrap()
@@ -9873,7 +9851,6 @@ mod tests {
                 marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Pending,
                 owner: None,
                 blockers: Vec::new(),
-                reopen_completed: false,
             }],
         )
         .unwrap()
@@ -9917,7 +9894,6 @@ mod tests {
                         }
                     }),
                     blockers: Vec::new(),
-                    reopen_completed: false,
                 }),
                 _ => None,
             })
@@ -11706,7 +11682,6 @@ mod tests {
                     generation: 1,
                 }),
                 blockers: Vec::new(),
-                reopen_completed: false,
             }],
         )
         .expect("a reserved request answer has a nonempty stable projection key");
@@ -11734,7 +11709,6 @@ mod tests {
                     generation: 3,
                 }),
                 blockers: Vec::new(),
-                reopen_completed: false,
             }],
         )
         .expect("the repaired row should match its durable claim identity");
@@ -11891,14 +11865,12 @@ mod tests {
                         generation: 1,
                     }),
                     blockers: Vec::new(),
-                    reopen_completed: false,
                 },
                 QueueRowProjection {
                     text: answer_row,
                     marker: QueueLifecycleMarker::Pending,
                     owner: None,
                     blockers: Vec::new(),
-                    reopen_completed: false,
                 },
             ],
         )

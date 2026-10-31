@@ -7502,7 +7502,6 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let row_blockers = agent_doc_queue::queue_blocked::queue_blockers(&current_content);
     // `#strikeisterminal`, per queue: a struck row whose identity is also live in this queue
     // is an earlier attempt's record, never the claim's row.
-    let live_rows = agent_doc_queue::queue_claim::live_row_identities(&activation.entries_after);
     let lifecycle_targets = activation
         .entries_after
         .iter()
@@ -7518,23 +7517,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                     .unwrap_or_else(|| agent_doc_queue::queue_claim::claim_identity(&prompt.text));
             let claim = claim_by_identity.get(&identity).copied();
             let receipt = receipt_by_identity.get(&identity).copied();
-            // `#strikeisterminal`: only a live attempt reopens a struck row;
-            // a receipt or completion cell agrees with the strike, so the
-            // residue strike earlier in this pass is never undone here.
-            let durable_on_struck = matches!(
-                entry,
-                agent_doc_queue::document_queue::QueueEntry::Completed(_)
-            ) && agent_doc_queue::queue_claim::struck_row_reopened_in_queue(
-                claim, &identity, &live_rows,
-            );
+            // `#terminalitemstability`: runtime evidence never reopens a
+            // struck row. The operator removes the strike to reopen it.
             if matches!(
                 entry,
                 agent_doc_queue::document_queue::QueueEntry::Completed(_)
-            ) && !durable_on_struck
-            {
+            ) {
                 return None;
             }
-            let marker = if lifecycle_state_degraded || durable_on_struck {
+            let marker = if lifecycle_state_degraded {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
             } else if let Some(claim) = claim {
                 claim.state.projection_marker()
@@ -7582,7 +7573,6 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 },
                 marker,
                 owner,
-                reopen_completed: durable_on_struck,
             })
         })
         .collect::<Vec<_>>();

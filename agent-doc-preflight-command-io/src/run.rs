@@ -1436,10 +1436,10 @@ fn run_with_options_to_writer_in_pass(
     // `auto` queue stalls after every item. A real user prompt typed mid-queue
     // keeps `diff_result` non-None here, so this flag stays false and the
     // prompt is surfaced normally.
-    // `#rt83`: only synthesize the queue head as a prompt diff when SOME drainer
-    // will actually act on it — the queue is not controller-paused AND the head is
-    // supervisor-scope drainable (`[operator-verify]`/noise heads excluded). An
-    // operator-verify-only or paused queue previously synthesized a phantom
+    // `#rt83`: only synthesize the queue head as a prompt diff when queue
+    // projection selected coordinator work or the supervisor found a drainable
+    // head (`[operator-verify]`/noise heads are excluded from both). An
+    // operator-verify-only queue previously synthesized a phantom
     // `+:pushpin: do [#id]` add every preflight, keeping `no_changes:false` and
     // sustaining the qchurn flood even though no head was actionable. The supervisor
     // idle-watch dispatches `[focused-cycle]`/`[clean-session]` heads via its own
@@ -1451,11 +1451,12 @@ fn run_with_options_to_writer_in_pass(
     // fallback (and `queue_supervisor_drainable` ignored claims), so an explicit
     // Run Agent Doc on a queue whose only head a subagent had claimed
     // synthesized `+do [#id]` on every press and opened a no-op cycle; the
-    // claimed head now yields `no_changes` naming its owner and expiry.
+    // claimed/running-only head now yields `no_changes` naming its owner and
+    // expiry. A Reported/Lost/pending coordinator-selected head is different:
+    // even when fresh/supervisor drainability is zero, it is lifecycle work the
+    // coordinator must integrate or recover (`#nochangepausephantom`).
     let mut diff_from_queue_head_only = false;
     if diff_result.is_none()
-        && !queue_state.queue_paused
-        && queue_state.queue_supervisor_drainable
         && let Some(head_prompt) = queue_state.continuation_head()
     {
         let slash_command = agent_doc_queue::queue_command::slash_command_text(head_prompt);
@@ -2835,8 +2836,10 @@ fn run_with_options_to_writer_in_pass(
         explain_no_changes(NoChangesFacts {
             read_source,
             content: &diff_result_with_current.current,
-            queue_runs: preflight_read_projection.queue.active == Some(true)
-                || preflight_read_projection.queue.deferred,
+            queue_active: preflight_read_projection.queue.active,
+            queue_deferred: preflight_read_projection.queue.deferred,
+            queue_halted: preflight_read_projection.queue.halted.as_deref(),
+            queue_controller_paused: preflight_read_projection.queue.paused,
             claimed_queue_items: &queue_state.claimed_queue_heads,
         })
     });
@@ -3666,6 +3669,10 @@ mod tests {
         let explanation = &parsed["no_changes_explanation"];
         assert_eq!(explanation["read_source"], "disk", "{parsed:#}");
         assert_eq!(
+            explanation["queue_lifecycle"], "explicitly_paused",
+            "{parsed:#}"
+        );
+        assert_eq!(
             explanation["waiting_queue_items"],
             serde_json::json!(["do [#lzwiremodel]"]),
             "{parsed:#}"
@@ -3884,6 +3891,10 @@ mod tests {
             );
             let explanation = &parsed["no_changes_explanation"];
             assert_eq!(
+                explanation["queue_lifecycle"], "active_no_drainable_head",
+                "{parsed:#}"
+            );
+            assert_eq!(
                 explanation["claimed_queue_items"][0]["item"], "do [#runctrlclaude]",
                 "{parsed:#}"
             );
@@ -3914,6 +3925,11 @@ mod tests {
                 guidance.contains("not a worker heartbeat or proof of progress in an external job"),
                 "{guidance}"
             );
+            assert!(
+                guidance.contains("not an explicit pause")
+                    && !guidance.contains("delete the `queue: pause` line"),
+                "{guidance}"
+            );
             let state = agent_doc_cycle_state_io::load(&doc).unwrap();
             assert!(
                 state
@@ -3929,6 +3945,53 @@ mod tests {
                 .unwrap();
         assert_eq!(claims.len(), 1, "{claims:?}");
         assert_eq!(claims[0].owner, "subagent:runctrlclaude");
+    }
+
+    /// `#nochangepausephantom`: Reported is coordinator integration debt, not
+    /// fresh worker dispatch. Its durable claim can therefore make the
+    /// supervisor drainability projection zero while queue selection still
+    /// names the row the coordinator must close. That selected lifecycle work
+    /// must open a turn instead of being collapsed into `no_changes`.
+    #[test]
+    fn reported_head_opens_a_coordinator_turn_even_with_zero_fresh_drainability() {
+        let dir = setup_project();
+        let doc = seed_claimed_head_doc(&dir);
+        let owner = "subagent:runctrlclaude";
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "do [#runctrlclaude]", owner, 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#runctrlclaude]",
+            owner,
+            "codex-worker-runctrlclaude",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::report_attempt(
+            &doc,
+            "do [#runctrlclaude]",
+            Some(claim.generation),
+        )
+        .unwrap();
+
+        let parsed = claimed_head_preflight(&doc);
+        assert_eq!(
+            parsed["queue_drainable_head_count"], 0,
+            "the fixture must retain the fresh-dispatch gap: {parsed:#}"
+        );
+        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+        assert!(
+            parsed["diff"]
+                .as_str()
+                .is_some_and(|diff| diff.contains("#runctrlclaude")),
+            "the reported lifecycle row must drive the coordinator turn: {parsed:#}"
+        );
+        assert!(
+            closeout_cycle_is_open(&doc).unwrap(),
+            "reported coordinator writeback debt must open a response cycle"
+        );
     }
 
     /// `#claimownerliveness` (haiven-dev tasks/sdk.md, 2026-10-11): the

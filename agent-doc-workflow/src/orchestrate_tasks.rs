@@ -683,14 +683,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_prompt_preset_block_prefixes_task_prompt() {
+    fn apply_prompt_preset_block_preserves_symbolic_lookup_before_task() {
         let rendered = apply_prompt_preset_block(
             "do #prep",
-            Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
+            Some(
+                "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Today is 2026-04-25.\n    Keep the work tree clean.\n\nTask:\n",
+            ),
         );
         assert_eq!(
             rendered,
-            "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
+            "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Today is 2026-04-25.\n    Keep the work tree clean.\n\nTask:\ndo #prep"
         );
     }
 

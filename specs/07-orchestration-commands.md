@@ -81,7 +81,10 @@ This file covers binary-owned planning/orchestration and the queue surface that 
 ### `--dry-run` and `--plan`
 
 - `--dry-run` prints the task labels and exits before preset expansion.
-- `--plan` prints the fully expanded per-task prompt after preset expansion and before execution.
+- `--plan` prints the effective per-task prompt before execution. Requested
+  presets remain visible as `#preset` symbols and their effective values are
+  supplied in a deterministic symbol-to-value lookup table; preset bodies are
+  not anonymously expanded into the task text.
 
 ### Shared subprocess arg rules
 

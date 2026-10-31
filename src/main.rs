@@ -3427,7 +3427,7 @@ enum Commands {
         /// Show the resolved plan without executing
         #[arg(long)]
         dry_run: bool,
-        /// Show each task's fully expanded prompt (with presets applied) without executing
+        /// Show each task prompt with symbolic presets and their lookup table without executing
         #[arg(long)]
         plan: bool,
     },

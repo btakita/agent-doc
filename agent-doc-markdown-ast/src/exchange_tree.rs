@@ -19,8 +19,8 @@
 //! here intentionally mirror `agent-doc-merge::document_cell_merge` (`is_h3_heading` /
 //! `normalize_heading_key`) and should be unified into this module in Phase 3.
 
-use agent_doc_hash::short_content_hash;
-use std::collections::HashSet;
+use agent_doc_hash::{content_hash, short_content_hash};
+use std::{collections::HashSet, ops::Range};
 
 /// What a single exchange node represents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,16 +144,38 @@ fn is_transient_boundary(trimmed: &str) -> bool {
 
 /// Is `trimmed` the binary-owned lookup marker for a response cell?
 ///
-/// The marker contains the cell id derived from the response body, so it must
-/// be identity-neutral to avoid a self-referential hash. Human-authored
+/// The marker contains a public id derived from the response cell, so it must be
+/// identity-neutral to avoid a self-referential hash. Human-authored
 /// `%% response … %%` salient snippets remain identity-bearing; only the
-/// `r:<hash>` lookup form is transient.
+/// A binary-owned response lookup marker is transient. Current markers expose a
+/// compact bracketed id (`%% response [#r-<hash>] %%`); the legacy `r:<hash>`
+/// form remains accepted so old documents normalize without changing identity.
 pub fn is_response_id_lookup_marker(trimmed: &str) -> bool {
-    trimmed
-        .strip_prefix("%% response r:")
-        .and_then(|rest| rest.strip_suffix(" %%"))
-        .is_some_and(|hash| {
+    response_id_from_lookup_marker(trimmed).is_some()
+}
+
+/// Return the response id carried by a binary-owned lookup marker.
+pub fn response_id_from_lookup_marker(trimmed: &str) -> Option<&str> {
+    let response_id = trimmed.strip_prefix("%% response ")?.strip_suffix(" %%")?;
+    if is_compact_response_id(response_id) {
+        return Some(response_id);
+    }
+    response_id
+        .strip_prefix("r:")
+        .filter(|hash| {
             !hash.is_empty() && hash.chars().all(|character| character.is_ascii_hexdigit())
+        })
+        .map(|_| response_id)
+}
+
+/// Public response ids use the normal document lookup shape while keeping the
+/// structural response-node/cell identity private.
+pub fn is_compact_response_id(response_id: &str) -> bool {
+    response_id
+        .strip_prefix("[#r-")
+        .and_then(|rest| rest.strip_suffix(']'))
+        .is_some_and(|hash| {
+            hash.len() >= 12 && hash.chars().all(|character| character.is_ascii_hexdigit())
         })
 }
 
@@ -194,6 +216,7 @@ pub fn response_identity_digest(lines: &[String]) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseTurnCellPolicy {
     cell_id: String,
+    response_id: String,
     node_ids: Vec<String>,
     order_signature_lines: HashSet<String>,
 }
@@ -226,6 +249,7 @@ impl ResponseTurnCellPolicy {
             [node_id] => node_id.clone(),
             node_ids => format!("response-cell:{}", node_ids.join("+")),
         };
+        let response_id = compact_response_id(&cell_id, 12);
         let order_signature_lines = response_nodes
             .iter()
             .flat_map(|node| node.lines.iter())
@@ -237,6 +261,7 @@ impl ResponseTurnCellPolicy {
             .collect();
         Self {
             cell_id,
+            response_id,
             node_ids,
             order_signature_lines,
         }
@@ -244,6 +269,12 @@ impl ResponseTurnCellPolicy {
 
     pub fn cell_id(&self) -> &str {
         &self.cell_id
+    }
+
+    /// Compact operator-facing lookup id. The ordered composite [`Self::cell_id`]
+    /// remains the internal replay/idempotence identity.
+    pub fn response_id(&self) -> &str {
+        &self.response_id
     }
 
     pub fn node_ids(&self) -> &[String] {
@@ -286,6 +317,76 @@ impl ResponseTurnCellPolicy {
             .map(|(index, _)| index)
             .last()
     }
+}
+
+fn compact_response_id(cell_id: &str, hash_len: usize) -> String {
+    if cell_id.is_empty() {
+        return String::new();
+    }
+    let hash = content_hash(cell_id);
+    let hash_len = hash_len.clamp(12, hash.len());
+    format!("[#r-{}]", &hash[..hash_len])
+}
+
+fn response_cell_node_range(
+    nodes: &[ExchangeNode],
+    policy: &ResponseTurnCellPolicy,
+) -> Option<Range<usize>> {
+    let width = policy.node_ids.len();
+    if width == 0 || width > nodes.len() {
+        return None;
+    }
+    nodes
+        .windows(width)
+        .enumerate()
+        .filter(|(_, window)| {
+            window.iter().zip(&policy.node_ids).all(|(node, expected)| {
+                matches!(node.kind, ExchangeNodeKind::Response { .. })
+                    && node.node_id() == *expected
+            })
+        })
+        .map(|(start, _)| start..start + width)
+        .next_back()
+}
+
+/// Whether the exact internal response-cell identity is present in this exchange.
+pub fn response_cell_materialized(inner: &str, policy: &ResponseTurnCellPolicy) -> bool {
+    response_cell_node_range(&parse_exchange_nodes(inner), policy).is_some()
+}
+
+/// Resolve the public id for a response cell in one exchange. A retry reuses the
+/// marker already attached to that cell. A short-prefix collision with another
+/// response extends the hash deterministically until the id is unique.
+pub fn response_lookup_id(inner: &str, policy: &ResponseTurnCellPolicy) -> String {
+    if policy.cell_id.is_empty() {
+        return String::new();
+    }
+    let nodes = parse_exchange_nodes(inner);
+    let Some(target) = response_cell_node_range(&nodes, policy) else {
+        return policy.response_id.clone();
+    };
+    if let Some(existing) = nodes[target.clone()]
+        .iter()
+        .flat_map(|node| &node.lines)
+        .find_map(|line| response_id_from_lookup_marker(line.trim()))
+        .filter(|response_id| is_compact_response_id(response_id))
+    {
+        return existing.to_string();
+    }
+
+    let occupied = nodes
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !target.contains(index))
+        .flat_map(|(_, node)| &node.lines)
+        .filter_map(|line| response_id_from_lookup_marker(line.trim()))
+        .filter(|response_id| is_compact_response_id(response_id))
+        .collect::<HashSet<_>>();
+    let full_hash_len = content_hash(&policy.cell_id).len();
+    (12..=full_hash_len)
+        .map(|hash_len| compact_response_id(&policy.cell_id, hash_len))
+        .find(|candidate| !occupied.contains(candidate.as_str()))
+        .unwrap_or_else(|| policy.response_id.clone())
 }
 
 /// Normalize transient response-turn framing for order matching. ` (HEAD)` is a
@@ -403,33 +504,34 @@ pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
 }
 
-/// Add the stable response-cell id to the matching response as a terse lookup
-/// marker. The marker is inserted before the node's trailing blank lines and
-/// is identity-neutral, so replay is idempotent and the response keeps the id
-/// that selected it.
-pub fn annotate_response_with_lookup_id(inner: &str, response_id: &str) -> String {
-    if response_id.is_empty() {
+/// Add one compact public id to the matching response cell as a terse lookup
+/// marker. Multi-section cells receive one marker on their final response node.
+/// The internal ordered node identity selects the cell but is never rendered.
+pub fn annotate_response_with_lookup_id(
+    inner: &str,
+    policy: &ResponseTurnCellPolicy,
+    response_id: &str,
+) -> String {
+    if !is_compact_response_id(response_id) {
         return inner.to_string();
     }
     let marker = format!("%% response {response_id} %%");
     let mut nodes = parse_exchange_nodes(inner);
-    for node in &mut nodes {
-        if !matches!(node.kind, ExchangeNodeKind::Response { .. }) || node.node_id() != response_id
-        {
-            continue;
-        }
-        if node.lines.iter().any(|line| line.trim() == marker) {
-            break;
-        }
-        let insert_at = node
-            .lines
-            .iter()
-            .rposition(|line| !line.trim().is_empty())
-            .map(|index| index + 1)
-            .unwrap_or(node.lines.len());
-        node.lines.insert(insert_at, format!("{marker}\n"));
-        break;
+    let Some(target) = response_cell_node_range(&nodes, policy) else {
+        return inner.to_string();
+    };
+    for node in &mut nodes[target.clone()] {
+        node.lines
+            .retain(|line| !is_response_id_lookup_marker(line.trim()));
     }
+    let node = &mut nodes[target.end - 1];
+    let insert_at = node
+        .lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .map(|index| index + 1)
+        .unwrap_or(node.lines.len());
+    node.lines.insert(insert_at, format!("{marker}\n"));
     render_exchange_nodes(&nodes)
 }
 
@@ -895,28 +997,79 @@ mod tests {
     #[test]
     fn response_lookup_marker_is_searchable_but_identity_neutral() {
         let inner = "### Re: lookup\n\nCompleted the work.\n\n❯ Next prompt.\n";
-        let response_id = parse_exchange_nodes(inner)
-            .into_iter()
-            .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-            .unwrap()
-            .node_id();
+        let policy =
+            ResponseTurnCellPolicy::from_response(Some("### Re: lookup\n\nCompleted the work.\n"));
+        let response_id = response_lookup_id(inner, &policy);
 
-        let annotated = annotate_response_with_lookup_id(inner, &response_id);
+        let annotated = annotate_response_with_lookup_id(inner, &policy, &response_id);
 
         assert!(
             annotated.contains(&format!("%% response {response_id} %%\n\n❯ Next prompt.")),
             "{annotated}"
         );
-        let annotated_id = parse_exchange_nodes(&annotated)
-            .into_iter()
-            .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-            .unwrap()
-            .node_id();
-        assert_eq!(annotated_id, response_id);
+        assert!(is_compact_response_id(&response_id));
+        assert!(!annotated.contains(policy.cell_id()));
         assert_eq!(
-            annotate_response_with_lookup_id(&annotated, &response_id),
+            ResponseTurnCellPolicy::from_response(Some(&annotated)).cell_id(),
+            policy.cell_id()
+        );
+        assert_eq!(
+            response_lookup_id(&annotated, &policy),
+            response_id,
+            "a retry reuses the cell's public id"
+        );
+        assert_eq!(
+            annotate_response_with_lookup_id(&annotated, &policy, &response_id),
             annotated
         );
+    }
+
+    #[test]
+    fn multi_section_response_cell_exposes_one_compact_id() {
+        let response = concat!(
+            "### Re: lookup — test\n\nCompleted the work.\n\n",
+            "### Verification\n\nAll focused tests pass.\n",
+        );
+        let inner = format!("{response}\n❯ Next prompt.\n");
+        let policy = ResponseTurnCellPolicy::from_response(Some(response));
+        assert!(policy.cell_id().starts_with("response-cell:r:"));
+
+        let response_id = response_lookup_id(&inner, &policy);
+        let annotated = annotate_response_with_lookup_id(&inner, &policy, &response_id);
+
+        assert_eq!(annotated.matches(&response_id).count(), 1, "{annotated}");
+        assert!(
+            annotated.contains(&format!(
+                "All focused tests pass.\n%% response {response_id} %%\n\n❯ Next prompt."
+            )),
+            "{annotated}"
+        );
+        assert!(!annotated.contains(policy.cell_id()));
+    }
+
+    #[test]
+    fn compact_response_ids_distinguish_same_heading_different_bodies() {
+        let first = ResponseTurnCellPolicy::from_response(Some("### Re: topic\n\nFirst body.\n"));
+        let second = ResponseTurnCellPolicy::from_response(Some("### Re: topic\n\nSecond body.\n"));
+
+        assert_ne!(first.cell_id(), second.cell_id());
+        assert_ne!(first.response_id(), second.response_id());
+    }
+
+    #[test]
+    fn compact_response_id_extends_on_short_prefix_collision() {
+        let response = "### Re: target\n\nTarget body.\n";
+        let policy = ResponseTurnCellPolicy::from_response(Some(response));
+        let inner = format!(
+            "### Re: older\n\nOlder body.\n%% response {} %%\n\n{response}",
+            policy.response_id()
+        );
+
+        let resolved = response_lookup_id(&inner, &policy);
+
+        assert!(resolved.starts_with(policy.response_id().trim_end_matches(']')));
+        assert_eq!(resolved.len(), policy.response_id().len() + 1);
+        assert_ne!(resolved, policy.response_id());
     }
 
     #[test]

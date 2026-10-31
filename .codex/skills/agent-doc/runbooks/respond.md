@@ -341,7 +341,14 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `☑️` is not an end-of-turn timer: as soon as the coordinator integrates
      the result and verifies the queue item's authorized delivery boundary
      (for example PR delivery versus target-branch delivery), strike it in the
-     current turn. A publication annotation alone is not that proof. For an
+     current turn. Apply that immediate closeout to every verified reported
+     row already available; do not leave the rest until final status or a
+     later cycle. At the next safe admission boundary, any still-open
+     `Reported` attempt or reported-release receipt blocks fresh subagent
+     dispatch. Let already-running atomic operations and workers finish, keep
+     later dispatch candidates out of the inline drain loop, and resume fresh
+     dispatch only after the reported debt closes or its concrete blocker is
+     recorded. A publication annotation alone is not proof. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.
      The binary appends immediate, deduplicated completion feedback to `agent:exchange` through

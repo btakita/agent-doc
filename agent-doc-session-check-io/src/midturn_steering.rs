@@ -552,6 +552,10 @@ fn route_claimed_items(
                 .cloned()
         });
     }
+    if agent_doc_queue_io::subagent_dispatch::reported_writeback_pending_for_content(file, content)?
+    {
+        core::hold_subagent_dispatch_for_reported(items);
+    }
     Ok(struck_removals)
 }
 
@@ -4703,8 +4707,9 @@ mod tests {
     }
 
     /// A reported leaf worker cannot receive more steering. A later sibling or
-    /// descendant leaf therefore remains independently dispatchable at every
-    /// depth (`#nestedclaimsteer`).
+    /// descendant remains independent at every depth, but fresh dispatch is
+    /// held until the coordinator closes the Reported attempt
+    /// (`#nestedclaimsteer`, `#reportedwritebackdebt`).
     #[test]
     fn reported_nested_claim_routes_the_first_later_child_at_every_depth() {
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/169";
@@ -4757,17 +4762,23 @@ mod tests {
             .find(|item| item.verbatim.contains(follow_up))
             .unwrap_or_else(|| panic!("reported leaf follow-up missing: {hook:?}"));
         assert_eq!(routed.change, core::SteeringChange::Added);
-        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
+        assert_eq!(
+            routed.dispatch,
+            core::SteeringDispatch::AwaitReportedCloseout
+        );
         assert_eq!(routed.owner, None);
+        let context = hook.render().expect("held steering context");
+        assert!(
+            context.contains("Do NOT dispatch or drain it inline now"),
+            "{context}"
+        );
+        assert!(!context.contains("DISPATCH NOW"), "{context}");
         let dispatch =
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
                 &file, &edited,
             )
             .unwrap();
-        assert!(
-            dispatch.iter().any(|head| head == follow_up),
-            "{dispatch:?}"
-        );
+        assert!(dispatch.is_empty(), "{dispatch:?}");
 
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/174";
         let first = "Review the pull request.";
@@ -4822,7 +4833,10 @@ mod tests {
             .find(|item| item.verbatim.contains(response))
             .unwrap_or_else(|| panic!("reported nested follow-up missing: {hook:?}"));
         assert_eq!(routed.change, core::SteeringChange::Added);
-        assert_eq!(routed.dispatch, core::SteeringDispatch::Subagent);
+        assert_eq!(
+            routed.dispatch,
+            core::SteeringDispatch::Subagent
+        );
         assert_eq!(routed.owner, None);
         let dispatch =
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(

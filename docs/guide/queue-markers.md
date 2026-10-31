@@ -130,10 +130,13 @@ clause in the tracked item. The exact rule is in
 `☑️` (reported) means **keep this row**: a worker finished and reported back, but nobody has
 integrated its result yet. The state comes from one of two records: a
 `Reported` claim attempt (`queue report-complete`), or a release receipt
-(`queue release` without `--requeue`). agent-doc never strikes a `☑️` row by
-itself, never downgrades or reopens it from later runtime evidence, and time
-never clears it. Only the operator can reopen it by removing the `☑️` marker
-in the document. The coordinator closes it in a closeout, and
+(`queue release` without `--requeue`). For an executable leaf, agent-doc never
+strikes a `☑️` row by itself, never downgrades or reopens it from later runtime
+evidence, and time never clears it. Only the operator can reopen that leaf by
+removing the `☑️` marker in the document. A structural parent is different: it
+owns no worker lifecycle, so agent-doc removes a stale parent marker and lazily
+derives its strike from the leaves (struck only while every leaf is struck).
+The coordinator closes a reported leaf in a closeout, and
 which close works depends on the row's shape:
 
 Closure is not tied to the end of a harness turn. As soon as the coordinator

@@ -25,11 +25,10 @@ use crate::queue_graph::QueueGraph;
 pub struct QueueProjectionBlock<'a> {
     /// Canonical queue id (`default` for a lone unkeyed queue).
     pub queue_id: &'a str,
-    /// True for the queue the scheduler selects (or the only queue). Only this
-    /// queue may reopen a struck row on durable live evidence; a sibling's
-    /// struck row is that sibling's own terminal or pass-owned evidence
-    /// (`agent:loop` keeps struck rows for its restore), so another queue's
-    /// claim must never resurrect it.
+    /// True for the queue the scheduler selects (or the only queue). Executable
+    /// leaf strikes remain terminal in every queue. Structural parent strikes
+    /// may be lazily derived away inside their own tree when a live child is
+    /// present; that is context projection, never claim-driven resurrection.
     pub scheduler_selected: bool,
     /// Parsed body entries of this queue.
     pub entries: &'a [QueueEntry],

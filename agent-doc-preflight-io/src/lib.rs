@@ -16925,12 +16925,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap();
         for (label, text) in [("document", &updated), ("snapshot", &snap)] {
             assert!(
-                text.contains("- Track pull request\n"),
-                "{label}: keep leaves the context parent unstruck: {text}"
-            );
-            assert!(
-                !text.contains("~~Track pull request~~"),
-                "{label}: keep never strikes the context parent: {text}"
+                text.contains("- ~~Track pull request~~\n"),
+                "{label}: all terminal leaves lazily close the context parent: {text}"
             );
             assert!(
                 agent_doc_queue::queue_schedule::live_heads_for_queue(text, "history")
@@ -16941,8 +16937,12 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             assert_eq!(
                 agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "history")
                     .unwrap(),
-                vec!["do [#alpha]".to_string(), "do [#beta]".to_string()],
-                "{label}: keep retains the completed queue rows: {text}"
+                vec![
+                    "Track pull request".to_string(),
+                    "do [#alpha]".to_string(),
+                    "do [#beta]".to_string(),
+                ],
+                "{label}: keep retains derived parent and completed leaves: {text}"
             );
         }
     }

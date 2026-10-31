@@ -1454,6 +1454,18 @@ pub fn find_quoted_ranges(doc: &str) -> Vec<(usize, usize)> {
     ranges
 }
 
+/// True when `offset` is on a line explicitly introduced as a Markdown
+/// blockquote. Component-looking HTML comments in quoted evidence are inert:
+/// their source bytes stay visible, but they must not join the live component
+/// stack. The completion-feedback cell relies on this boundary when it carries
+/// a worker's response verbatim.
+fn explicit_blockquote_contains(doc: &str, offset: usize) -> bool {
+    let line_start = doc[..offset].rfind('\n').map_or(0, |pos| pos + 1);
+    let prefix = &doc[line_start..offset];
+    let leading_spaces = prefix.bytes().take_while(|byte| *byte == b' ').count();
+    leading_spaces <= 3 && prefix[leading_spaces..].starts_with('>')
+}
+
 /// Find byte ranges for ordinary HTML comments, skipping code spans/blocks and
 /// preserving `agent:` markers for the component parser.
 ///
@@ -1533,12 +1545,14 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
             continue;
         }
 
-        // Skip markers inside code regions or double-quoted prose spans
-        // (a quoted `"<!-- agent:* -->"` is content, not a real marker — `#0kjc`).
-        if code_ranges
-            .iter()
-            .chain(quoted_ranges.iter())
-            .any(|&(start, end)| pos >= start && pos < end)
+        // Skip markers inside code regions, double-quoted prose spans, or
+        // explicit Markdown blockquotes. All three carry literal evidence,
+        // not live document structure (`#0kjc`, `#completionfeedbackscope`).
+        if explicit_blockquote_contains(doc, pos)
+            || code_ranges
+                .iter()
+                .chain(quoted_ranges.iter())
+                .any(|&(start, end)| pos >= start && pos < end)
         {
             pos += 4;
             continue;
@@ -3438,6 +3452,32 @@ new content here\n\
         let components = parse(doc).expect("prompt glyphs near markers must not panic");
         assert_eq!(components.len(), 1);
         assert_eq!(components[0].name, "exchange");
+    }
+
+    #[test]
+    fn parse_ignores_component_markers_in_explicit_blockquotes() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "> worker found a malformed component:\n",
+            "> <!-- agent:run -->\n",
+            "> - queued work\n",
+            "> <!-- agent:run -->\n",
+            "> and expected this close:\n",
+            "> <!-- /agent:run -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- finish integration\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let components = parse(doc).expect("quoted component evidence must stay inert");
+        assert_eq!(
+            components
+                .iter()
+                .map(|component| component.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["exchange", "queue"]
+        );
+        assert!(components[0].content(doc).contains("> <!-- /agent:run -->"));
     }
 
     #[test]

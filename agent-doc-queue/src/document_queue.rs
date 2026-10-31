@@ -505,7 +505,9 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 let mut end_i = i + 1;
                 if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
                     let mut continuation =
-                        agent_doc_markdown_ast::overlay::QueueContinuationState::default();
+                        agent_doc_markdown_ast::overlay::QueueContinuationState::for_item(
+                            rest, indent,
+                        );
                     while end_i < lines.len() && continuation.accepts_line(lines[end_i]) {
                         end_i += 1;
                     }
@@ -7769,6 +7771,36 @@ mod tests {
                 indent: 0,
                 ordered_marker: None,
             })
+        );
+    }
+
+    #[test]
+    fn parse_folded_context_as_one_executable_parent() {
+        let body = concat!(
+            "- Investigate holdover queue rows: >-\n",
+            "  - 📥 first stale row\n",
+            "    - 📥 nested stale row\n",
+            "  - ☑️ reported stale row\n",
+            "- next task\n",
+        );
+        let entries = parse(body).unwrap();
+        let parsed = prompts(&entries);
+
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(
+            parsed[0].text,
+            concat!(
+                "Investigate holdover queue rows: >-\n",
+                "  - 📥 first stale row\n",
+                "    - 📥 nested stale row\n",
+                "  - ☑️ reported stale row",
+            )
+        );
+        assert_eq!(parsed[1].text, "next task");
+        assert_eq!(
+            render(&entries),
+            body,
+            "parse/render preserves the literal block"
         );
     }
 

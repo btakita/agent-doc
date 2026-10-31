@@ -390,17 +390,41 @@ pub fn queue_continuation_line(line: &str) -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct QueueContinuationState {
     terminal_tree_evidence: bool,
+    folded_context_parent_indent: Option<usize>,
 }
 
 impl QueueContinuationState {
+    /// Build continuation state for one queue list item.
+    ///
+    /// A free-text row ending in `: >-` deliberately owns its indented block as
+    /// literal context. List-looking rows, headings, and response quotations in
+    /// that block are evidence for the parent task, not independent queue work.
+    pub fn for_item(item_content: &str, parent_indent: usize) -> Self {
+        Self {
+            folded_context_parent_indent: queue_item_opens_folded_context(item_content)
+                .then_some(parent_indent),
+            ..Self::default()
+        }
+    }
+
     /// Return whether `line` belongs to the open item and advance the state.
     pub fn accepts_line(&mut self, line: &str) -> bool {
+        if let Some(parent_indent) = self.folded_context_parent_indent {
+            return line.trim().is_empty() || queue_line_indent_width(line) > parent_indent;
+        }
         if queue_continuation_line(line) {
             self.terminal_tree_evidence |= terminal_tree_evidence_line(line);
             return true;
         }
         self.terminal_tree_evidence && queue_bare_prompt_continuation_line(line)
     }
+}
+
+fn queue_line_indent_width(line: &str) -> usize {
+    line.chars()
+        .take_while(|character| matches!(character, ' ' | '\t'))
+        .map(|character| if character == '\t' { 4 } else { 1 })
+        .sum()
 }
 
 fn terminal_tree_evidence_line(line: &str) -> bool {
@@ -499,6 +523,18 @@ fn queue_prompt_content_line(line: &str) -> bool {
 pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
     let item = parse_item(item_content, 0, item_content.len());
     !item.struck && queue_item_work_text(&item.text).is_some_and(|work| !work.starts_with("[#"))
+}
+
+/// Whether a queue row opens an indented, literal context block.
+///
+/// `: >-` mirrors the compact folded-block notation operators already use in
+/// queue bug reports. The marker is intentionally explicit: ordinary nested
+/// Markdown list rows remain executable leaves.
+pub fn queue_item_opens_folded_context(item_content: &str) -> bool {
+    let head = item_content.lines().next().unwrap_or(item_content);
+    let item = parse_item(head, 0, head.len());
+    !item.struck
+        && queue_item_work_text(&item.text).is_some_and(|work| work.trim_end().ends_with(": >-"))
 }
 
 /// The work text of a parsed queue row for segmentation decisions: the row's
@@ -1278,7 +1314,13 @@ pub fn components(source: &str) -> Vec<Component> {
             // `line_start`.
             let raw_start = line_start + (content.len() - item_content.len());
             if is_runnable_component(&comp.name) && queue_item_accepts_continuation(item_content) {
-                continuable_item = Some((raw_start, QueueContinuationState::default()));
+                continuable_item = Some((
+                    raw_start,
+                    QueueContinuationState::for_item(
+                        item_content,
+                        queue_line_indent_width(content),
+                    ),
+                ));
             }
         }
     }
@@ -1400,6 +1442,35 @@ trailing residue
         assert!(!queue.items[3].text.contains("beta"));
         assert!(queue.items[4].struck);
         assert!(!queue.items[4].text.contains("residue"));
+    }
+
+    #[test]
+    fn folded_context_item_owns_indented_list_and_response_evidence() {
+        let doc = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- Investigate stale queue state: >-\n",
+            "  - 📥 stale example; do not dispatch\n",
+            "  ### Re: prior response\n",
+            "  > **Queue prompt:** prior task\n",
+            "- independent task\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let queue = components(doc)
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert_eq!(queue.items.len(), 2, "literal evidence is not typed work");
+        assert_eq!(
+            queue.items[0].text,
+            concat!(
+                "Investigate stale queue state: >-\n",
+                "  - 📥 stale example; do not dispatch\n",
+                "  ### Re: prior response\n",
+                "  > **Queue prompt:** prior task",
+            )
+        );
+        assert_eq!(queue.items[1].text, "independent task");
     }
 
     /// GH #374: an opener that shares a line with its matching ATX heading is a

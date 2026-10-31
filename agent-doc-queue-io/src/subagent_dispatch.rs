@@ -1363,6 +1363,28 @@ queue: go
         );
     }
 
+    #[test]
+    fn queue_attr_dispatches_folded_context_parent_not_its_stale_examples() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:run id=main subagents priority go -->\n",
+            "- Agent-doc issues\n",
+            "  - Investigate holdover queue rows: >-\n",
+            "    - 📥 stale row already owned elsewhere\n",
+            "    - ☑️ stale reported row\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let dispatch = pending_subagent_dispatch_for_content(&file, content).unwrap();
+        assert_eq!(dispatch.len(), 1);
+        assert!(dispatch[0].starts_with("Investigate holdover queue rows: >-"));
+        assert!(dispatch[0].contains("stale row already owned elsewhere"));
+    }
+
     fn two_runs(main_attr: &str, main_body: &str, prs_attr: &str, prs_body: &str) -> String {
         format!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n\

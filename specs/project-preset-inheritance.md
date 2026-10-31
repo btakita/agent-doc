@@ -46,6 +46,23 @@ whose relative path is anchored at the project root. Users invoke a shared
 preset exactly as they invoke a document-local preset: `#name` in prompt text,
 `preset name`, or the corresponding queue reference.
 
+A preset can instead specialize its prompt by active agent. Use `default:` for
+the fallback and canonical harness keys for overrides:
+
+```yaml
+presets:
+  "#review":
+    default: Review the change and run focused tests.
+    codex: Review the change, run focused tests, and report the worktree branch.
+    claude: Review the change and include file-and-line citations.
+```
+
+Scalar bodies still apply to every harness. The supported override keys are
+`claude`, `codex`, `opencode`, and `grok`. The effective `agent:` is selected
+after project/document overlay; when its override is absent, `default` is used.
+Legacy structured `prompt:` is also a valid fallback and can carry the same
+harness overrides.
+
 ## Resolution
 
 For a session document under one or more nested project roots:
@@ -64,8 +81,9 @@ For a session document under one or more nested project roots:
    Project-relative runbook paths continue to resolve from the project root.
 5. Resolve on read (or invalidate a cache by project-file identity and content
    change). Never write inherited entries into a session document.
-6. After overlaying document declarations, recursively interpolate references
-   in every effective preset body. A bare hashtag token is substituted only
+6. After overlaying document declarations, select each preset body for the
+   effective `agent:` (harness override, then `default`/legacy `prompt`) and
+   recursively interpolate references in those selected bodies. A bare hashtag token is substituted only
    when that exact key is declared in the effective map, so ordinary hashtags
    remain prose. `{{#name}}` is the explicit form: it requires `#name` to be
    declared. Missing explicit references, declared-but-unset values, malformed

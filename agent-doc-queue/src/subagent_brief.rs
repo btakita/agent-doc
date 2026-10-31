@@ -833,6 +833,35 @@ mod tests {
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
     }
 
+    #[test]
+    fn preset_queue_carries_guidance_for_the_active_agent() {
+        let presets = concat!(
+            "agent: codex\n",
+            "prompt_presets:\n",
+            "  '#authorize':\n",
+            "    default: shared authorization\n",
+            "    codex: codex authorization\n",
+            "    claude: claude authorization\n",
+        );
+        let content = doc(presets, "subagents preset=#authorize", &["fix it"], &[]);
+        let auth = subagent_authorization("doc.md", &content, "fix it");
+        assert_eq!(auth.status, AuthorizationStatus::Resolved);
+        assert_eq!(auth.presets[0].body.as_deref(), Some("codex authorization"));
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("> codex authorization"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+        assert!(
+            !auth
+                .subagent_prompt_preamble
+                .contains("> shared authorization"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+    }
+
     /// `#nestsubmit`: the preamble quotes the parent lineage as the work, and
     /// the operator-request `queue_item` stays the leaf that claims the row.
     #[test]

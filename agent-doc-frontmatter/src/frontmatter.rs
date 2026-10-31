@@ -885,6 +885,9 @@ pub struct Frontmatter {
     ///   "#1": |
     ///     Today is 2026-04-25.
     ///     Keep the work tree clean.
+    ///   "#review":
+    ///     default: Review the change and run focused tests.
+    ///     codex: Review the change, run tests, and report the worktree branch.
     /// ```
     ///
     /// `presets:` is an alias (`#presetsalias`). [`write_preserving`] writes the
@@ -1069,10 +1072,34 @@ impl PromptPresets {
     /// source values so serialization and structured runbook metadata continue
     /// to round-trip unchanged.
     pub fn resolve_nested_references(&mut self) -> anyhow::Result<()> {
+        self.resolve_nested_references_for_harness(None)
+    }
+
+    /// Resolve preset references after selecting the body for `harness`.
+    ///
+    /// Scalar presets apply to every harness. Structured presets may declare a
+    /// `default:` body plus canonical harness overrides (`claude`, `codex`,
+    /// `opencode`, or `grok`); an absent override falls back to `default`.
+    /// Legacy structured `prompt:` bodies remain the fallback when `default:`
+    /// is absent.
+    pub fn resolve_nested_references_for_agent(&mut self, harness: &str) -> anyhow::Result<()> {
+        self.resolve_nested_references_for_harness(Some(harness))
+    }
+
+    fn resolve_nested_references_for_harness(
+        &mut self,
+        harness: Option<&str>,
+    ) -> anyhow::Result<()> {
         let declared = self
             .entries
             .iter()
-            .map(|(key, value)| (key.clone(), value.as_ref().and_then(PresetValue::body)))
+            .map(|(key, value)| {
+                let body = value.as_ref().and_then(|value| match harness {
+                    Some(harness) => value.body_for_agent(harness),
+                    None => value.body(),
+                });
+                (key.clone(), body)
+            })
             .collect::<indexmap::IndexMap<_, _>>();
         let mut resolved = indexmap::IndexMap::new();
         let mut stack = Vec::new();
@@ -1086,6 +1113,23 @@ impl PromptPresets {
         }
         self.resolved = resolved;
         Ok(())
+    }
+
+    /// Select the prompt bodies visible to `harness` without interpolating
+    /// nested preset references. Parsing uses this projection so every direct
+    /// document-local consumer observes the active agent's guidance; effective
+    /// project resolution uses [`Self::resolve_nested_references_for_agent`].
+    pub fn select_agent(&mut self, harness: &str) {
+        self.resolved = self
+            .entries
+            .iter()
+            .filter_map(|(key, value)| {
+                value
+                    .as_ref()
+                    .and_then(|value| value.body_for_agent(harness))
+                    .map(|body| (key.clone(), body))
+            })
+            .collect();
     }
 
     fn rebuild_resolved(&mut self) {
@@ -1102,9 +1146,12 @@ impl PromptPresets {
     }
 
     /// `#presetshape` (GH #69 §1): operator-readable problems with declared
-    /// presets. A structured entry is accepted when it carries a string
-    /// `prompt:` (the preset body) and may carry a string `runbook:` path; any
-    /// other shape is preserved verbatim but
+    /// presets. A structured entry is accepted when it carries either a string
+    /// `prompt:` (the legacy preset body) or a string `default:` fallback. The
+    /// latter may be accompanied by canonical harness keys (`claude`, `codex`,
+    /// `opencode`, and `grok`) whose string values override the fallback for
+    /// that harness. Structured entries may also carry a string `runbook:`
+    /// path; any other shape is preserved verbatim but
     /// does not resolve. These are warnings, never parse errors -- one
     /// malformed preset must not make `mode` / `session-check` unable to read
     /// the whole document.
@@ -1115,24 +1162,50 @@ impl PromptPresets {
                 continue;
             };
             let map = raw.as_mapping();
-            let has_prompt = map
-                .and_then(|m| m.get(serde_yaml::Value::from("prompt")))
-                .is_some_and(serde_yaml::Value::is_string);
-            if !has_prompt {
+            let has_fallback = map.is_some_and(|m| {
+                ["default", "prompt"].into_iter().any(|field| {
+                    m.get(serde_yaml::Value::from(field))
+                        .is_some_and(serde_yaml::Value::is_string)
+                })
+            });
+            if !has_fallback {
                 out.push(format!(
-                    "prompt_presets.{key}: unsupported shape; a preset is `<name>: <string>` or `<name>: {{prompt: <string>}}` -- this entry is kept as written but does not resolve"
+                    "prompt_presets.{key}: unsupported shape; a preset is `<name>: <string>`, `<name>: {{prompt: <string>}}`, or `<name>: {{default: <string>, <harness>: <string>}}` -- this entry is kept as written but does not resolve"
                 ));
                 continue;
+            }
+            for harness in ["claude", "codex", "opencode", "grok"] {
+                if map
+                    .and_then(|m| m.get(serde_yaml::Value::from(harness)))
+                    .is_some_and(|value| !value.is_string())
+                {
+                    out.push(format!(
+                        "prompt_presets.{key}.{harness}: harness guidance must be a string; the default fallback is used"
+                    ));
+                }
             }
             let ignored: Vec<String> = map
                 .into_iter()
                 .flat_map(|m| m.keys())
                 .filter_map(|k| k.as_str().map(str::to_string))
-                .filter(|k| k != "prompt" && k != "runbook" && k != "model" && k != "effort")
+                .filter(|k| {
+                    !matches!(
+                        k.as_str(),
+                        "default"
+                            | "prompt"
+                            | "claude"
+                            | "codex"
+                            | "opencode"
+                            | "grok"
+                            | "runbook"
+                            | "model"
+                            | "effort"
+                    )
+                })
                 .collect();
             if !ignored.is_empty() {
                 out.push(format!(
-                    "prompt_presets.{key}: supported fields are `prompt`, `runbook`, `model`, and `effort`; ignored field(s): {}",
+                    "prompt_presets.{key}: supported fields are `default`, `prompt`, `claude`, `codex`, `opencode`, `grok`, `runbook`, `model`, and `effort`; ignored field(s): {}",
                     ignored.join(", ")
                 ));
             }
@@ -1307,11 +1380,39 @@ impl PresetValue {
     pub fn body(&self) -> Option<String> {
         match self {
             PresetValue::Text(text) => Some(text.clone()),
-            PresetValue::Structured(raw) => raw
-                .as_mapping()
-                .and_then(|m| m.get(serde_yaml::Value::from("prompt")))
-                .and_then(serde_yaml::Value::as_str)
-                .map(str::to_string),
+            PresetValue::Structured(raw) => {
+                let mapping = raw.as_mapping()?;
+                ["default", "prompt"]
+                    .into_iter()
+                    .find_map(|field| {
+                        mapping
+                            .get(serde_yaml::Value::from(field))
+                            .and_then(serde_yaml::Value::as_str)
+                    })
+                    .map(str::to_string)
+            }
+        }
+    }
+
+    /// The body visible to one active agent harness.
+    pub fn body_for_agent(&self, harness: &str) -> Option<String> {
+        match self {
+            PresetValue::Text(text) => Some(text.clone()),
+            PresetValue::Structured(raw) => {
+                let mapping = raw.as_mapping()?;
+                let harness = canonical_resume_harness(harness);
+                mapping
+                    .get(serde_yaml::Value::from(harness))
+                    .and_then(serde_yaml::Value::as_str)
+                    .or_else(|| {
+                        ["default", "prompt"].into_iter().find_map(|field| {
+                            mapping
+                                .get(serde_yaml::Value::from(field))
+                                .and_then(serde_yaml::Value::as_str)
+                        })
+                    })
+                    .map(str::to_string)
+            }
         }
     }
 }
@@ -1639,6 +1740,15 @@ pub fn normalize_queue_control(fm: &mut Frontmatter) {
     }
 }
 
+/// Project prompt presets onto the document's active harness.
+///
+/// Keep this beside the other post-deserialization normalization so every
+/// direct frontmatter consumer sees the same agent-specific body.
+fn select_active_prompt_presets(fm: &mut Frontmatter) {
+    let harness = fm.active_resume_harness();
+    fm.prompt_presets.select_agent(harness);
+}
+
 /// `#queuestopremove`: whether a raw `queue:` value is the retired `stop`.
 pub fn is_retired_queue_stop(raw: &str) -> bool {
     raw.trim().eq_ignore_ascii_case("stop")
@@ -1710,6 +1820,7 @@ impl FrontmatterDefaults {
             let mut fm: Frontmatter =
                 serde_yaml::from_value(serde_yaml::Value::Mapping(self.merged.clone()))?;
             normalize_queue_control(&mut fm);
+            select_active_prompt_presets(&mut fm);
             return Ok((fm, content));
         };
         // Preserve the normal document-local diagnostics before combining it
@@ -1720,6 +1831,7 @@ impl FrontmatterDefaults {
         overlay_frontmatter_mapping(&mut merged, local);
         let mut fm: Frontmatter = serde_yaml::from_value(serde_yaml::Value::Mapping(merged))?;
         normalize_queue_control(&mut fm);
+        select_active_prompt_presets(&mut fm);
         Ok((fm, body))
     }
 }
@@ -1811,6 +1923,7 @@ pub fn parse(content: &str) -> Result<(Frontmatter, &str)> {
     };
     let mut fm = deserialize_frontmatter_yaml(yaml)?;
     normalize_queue_control(&mut fm);
+    select_active_prompt_presets(&mut fm);
     Ok((fm, body))
 }
 
@@ -2018,6 +2131,7 @@ pub fn parse_for_startup(file_display: &str, content: &str) -> StartupFrontmatte
                 Some(repaired_yaml) => match deserialize_frontmatter_yaml(&repaired_yaml) {
                     Ok(mut fm) => {
                         normalize_queue_control(&mut fm);
+                        select_active_prompt_presets(&mut fm);
                         StartupFrontmatter::Repaired {
                             frontmatter: fm,
                             repaired_yaml,
@@ -2080,6 +2194,7 @@ pub fn parse_with_ssh_resolver<'a>(
     match serde_yaml::from_str(yaml) {
         Ok(mut fm) => {
             normalize_queue_control(&mut fm);
+            select_active_prompt_presets(&mut fm);
             apply_required_ssh_defaults(&mut fm, ctx)?;
             Ok((fm, body))
         }
@@ -5026,6 +5141,63 @@ mod tests {
         assert!(
             written.contains("response"),
             "structured form kept: {written}"
+        );
+    }
+
+    #[test]
+    fn agent_specific_prompt_presets_select_override_and_fallback() {
+        let codex = "---\nagent: codex\npresets:\n  '#scalar': all agents\n  '#review':\n    default: shared review\n    codex: codex review\n    claude: claude review\n  '#legacy':\n    prompt: legacy fallback\n    codex: codex legacy\n---\nBody\n";
+        let (codex_fm, body) = parse(codex).unwrap();
+        assert_eq!(
+            codex_fm.prompt_presets.get("#scalar").map(String::as_str),
+            Some("all agents")
+        );
+        assert_eq!(
+            codex_fm.prompt_presets.get("#review").map(String::as_str),
+            Some("codex review")
+        );
+        assert_eq!(
+            codex_fm.prompt_presets.get("#legacy").map(String::as_str),
+            Some("codex legacy")
+        );
+        assert!(codex_fm.prompt_presets.diagnostics().is_empty());
+
+        let written = write(&codex_fm, body).unwrap();
+        assert!(written.contains("default: shared review"), "{written}");
+        assert!(written.contains("claude: claude review"), "{written}");
+
+        let grok = codex.replacen("agent: codex", "agent: grok", 1);
+        let (grok_fm, _) = parse(&grok).unwrap();
+        assert_eq!(
+            grok_fm.prompt_presets.get("#review").map(String::as_str),
+            Some("shared review")
+        );
+        assert_eq!(
+            grok_fm.prompt_presets.get("#legacy").map(String::as_str),
+            Some("legacy fallback")
+        );
+    }
+
+    #[test]
+    fn invalid_agent_specific_guidance_warns_and_uses_default() {
+        let content = "---\nagent: codex\npresets:\n  '#review':\n    default: shared review\n    codex:\n      - not text\n    other: ignored\n---\nBody\n";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(
+            fm.prompt_presets.get("#review").map(String::as_str),
+            Some("shared review")
+        );
+        let diagnostics = fm.prompt_presets.diagnostics();
+        assert!(
+            diagnostics
+                .iter()
+                .any(|warning| warning.contains("#review.codex") && warning.contains("string")),
+            "{diagnostics:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|warning| warning.contains("ignored field(s): other")),
+            "{diagnostics:?}"
         );
     }
 

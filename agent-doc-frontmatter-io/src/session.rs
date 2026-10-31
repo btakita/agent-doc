@@ -132,15 +132,17 @@ pub fn project_frontmatter_defaults_for_file(file: &Path) -> Result<FrontmatterD
 /// documents. Missing project files are skipped. Other read failures and malformed
 /// project frontmatter fail closed with the project-file path in the error.
 pub fn effective_prompt_presets_for_file(content: &str, file: &Path) -> Result<PromptPresets> {
-    let mut local = parse_effective_project_frontmatter(content, file)?
-        .0
-        .prompt_presets;
-    local.resolve_nested_references().map_err(|err| {
-        anyhow::anyhow!(
-            "failed to resolve effective prompt presets for {}: {err}",
-            file.display()
-        )
-    })?;
+    let (effective, _) = parse_effective_project_frontmatter(content, file)?;
+    let harness = effective.active_resume_harness();
+    let mut local = effective.prompt_presets;
+    local
+        .resolve_nested_references_for_agent(harness)
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "failed to resolve effective prompt presets for {}: {err}",
+                file.display()
+            )
+        })?;
     Ok(local)
 }
 
@@ -651,6 +653,53 @@ mod tests {
             Some("Prepare and publish the release.")
         );
         assert_eq!(effective.runbook("#release"), Some("runbooks/release.md"));
+    }
+
+    #[test]
+    fn effective_presets_use_active_agent_before_nested_expansion() {
+        let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\n",
+                "agent: codex\n",
+                "presets:\n",
+                "  '#audience':\n",
+                "    default: every agent\n",
+                "    codex: Codex\n",
+                "  '#review':\n",
+                "    default: 'Review for #audience'\n",
+                "    codex: 'Review with #audience'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("tasks/work.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        let content = "---\npresets:\n  '#local':\n    default: local fallback\n    codex: codex local\n---\nbody\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let effective = effective_prompt_presets_for_file(content, &doc).unwrap();
+        assert_eq!(
+            effective.get("#review").map(String::as_str),
+            Some("Review with Codex")
+        );
+        assert_eq!(
+            effective.get("#local").map(String::as_str),
+            Some("codex local")
+        );
+
+        let claude_content = content.replacen("---\n", "---\nagent: claude\n", 1);
+        let effective = effective_prompt_presets_for_file(&claude_content, &doc).unwrap();
+        assert_eq!(
+            effective.get("#review").map(String::as_str),
+            Some("Review for every agent")
+        );
+        assert_eq!(
+            effective.get("#local").map(String::as_str),
+            Some("local fallback")
+        );
     }
 
     #[test]

@@ -150,13 +150,18 @@ if even one row remains live, the tree must remain in `agent:run`.
 
 | Row | What strikes it |
 | --- | --- |
-| Free text (`Setup … channel.`) | The coordinator's response quotes the row exactly as `> **Queue prompt:** <row>`, with no `**Deferred:**` line beside the quote. The row must also be in the turn's baseline, or be backed by its claim or release receipt. |
+| Free text (`Setup … channel.`) | The coordinator's response quotes the row exactly as `> **Queue prompt:** <row>`, with no `**Deferred:**` line beside the quote. The row must also be in the turn's baseline, or be backed by its claim or release receipt. In a multi-item closeout, a quoted `> **Queue response:** …` immediately after the prompt makes that pair individually answer-bearing even when another prompt echo follows. |
 | Id-backed, and the work is done (`do [#id]`, `[#id]`, `#review [#id]`) | `--done <id>` in the closeout (it resolves the backlog item or Todo and strikes the row). If the id no longer names an open backlog item, use `agent-doc queue consume <FILE> --id <id>`. |
 | Id-backed, and the item must stay open | `agent-doc queue consume <FILE> --ack-id <id>`. The backlog item or Todo stays open. For a backlog item, the id is also recorded as kept open, so session-check does not requeue the row. |
 
 A quote never closes an id-backed row; it needs one of the id commands. A
 leading tag such as `#review` is not the row's id: `#review [#adr0043-publish]`
 closes as `adr0043-publish`, the same id its claim uses.
+
+There is no age-based expiry for `☑️`: it remains until one of these explicit
+closeout paths succeeds. This keeps an unintegrated worker result from being
+silently discarded, but a successfully integrated row should be closed in the
+same coordinator cycle rather than left for a later timeout.
 
 These keep a `☑️` row open on purpose:
 

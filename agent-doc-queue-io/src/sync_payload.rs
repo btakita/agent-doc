@@ -227,13 +227,246 @@ fn recover_agent_history_response(
     ) else {
         return HistoryResponse::Missing;
     };
-    if !matches!(harness, "claude" | "claude-code") {
-        return HistoryResponse::Unsupported;
-    }
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return HistoryResponse::Missing;
     };
-    recover_claude_history_response(&home, session_id, worker_id)
+    match harness {
+        "claude" | "claude-code" => recover_claude_history_response(&home, session_id, worker_id),
+        "codex" => {
+            if claim.generation == 0 {
+                return HistoryResponse::Unsupported;
+            }
+            let Ok(attempt_completion_key) = crate::queue_claim::completion_feedback_key(claim)
+            else {
+                return HistoryResponse::Unsupported;
+            };
+            recover_codex_history_response(
+                &home,
+                CodexHistoryLocator {
+                    coordinator_thread_id: session_id,
+                    native_subagent_id: worker_id,
+                    attempt_completion_key: &attempt_completion_key,
+                },
+            )
+        }
+        _ => HistoryResponse::Unsupported,
+    }
+}
+
+/// Exact durable coordinates for one Codex queue attempt. The completion key
+/// binds the recorded worker to the queue claim generation; the transcript is
+/// then selected only by the two native thread identities.
+struct CodexHistoryLocator<'a> {
+    coordinator_thread_id: &'a str,
+    native_subagent_id: &'a str,
+    attempt_completion_key: &'a str,
+}
+
+fn recover_codex_history_response(
+    home: &Path,
+    locator: CodexHistoryLocator<'_>,
+) -> HistoryResponse {
+    if locator.attempt_completion_key.is_empty()
+        || !codex_thread_id_is_safe(locator.coordinator_thread_id)
+        || !codex_thread_id_is_safe(locator.native_subagent_id)
+    {
+        return HistoryResponse::Unsupported;
+    }
+    let sessions = home.join(".codex/sessions");
+    let mut candidates = Vec::new();
+    collect_codex_rollout_candidates(&sessions, locator.native_subagent_id, &mut candidates);
+    let mut matches = candidates
+        .into_iter()
+        .filter(|path| codex_rollout_matches(path, &locator))
+        .collect::<Vec<_>>();
+    matches.sort();
+    matches.dedup();
+    match matches.as_slice() {
+        [] => HistoryResponse::Missing,
+        [path] => parse_codex_subagent_final_response(path),
+        _ => HistoryResponse::Ambiguous,
+    }
+}
+
+fn codex_thread_id_is_safe(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+}
+
+fn collect_codex_rollout_candidates(root: &Path, worker_id: &str, matches: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let filename_suffix = format!("-{worker_id}.jsonl");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            collect_codex_rollout_candidates(&path, worker_id, matches);
+        } else if file_type.is_file()
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(&filename_suffix))
+        {
+            matches.push(path);
+        }
+    }
+}
+
+fn codex_rollout_matches(path: &Path, locator: &CodexHistoryLocator<'_>) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let mut matching_metadata = 0;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            return false;
+        };
+        if codex_session_metadata_matches(&value, locator) {
+            matching_metadata += 1;
+        }
+    }
+    matching_metadata == 1
+}
+
+fn codex_session_metadata_matches(
+    value: &serde_json::Value,
+    locator: &CodexHistoryLocator<'_>,
+) -> bool {
+    if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+        return false;
+    }
+    let Some(payload) = value.get("payload") else {
+        return false;
+    };
+    payload.get("id").and_then(serde_json::Value::as_str) == Some(locator.native_subagent_id)
+        && payload
+            .get("parent_thread_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(locator.coordinator_thread_id)
+        && payload
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(locator.coordinator_thread_id)
+        && payload
+            .pointer("/source/subagent/thread_spawn/parent_thread_id")
+            .and_then(serde_json::Value::as_str)
+            == Some(locator.coordinator_thread_id)
+        && payload
+            .get("thread_source")
+            .and_then(serde_json::Value::as_str)
+            == Some("subagent")
+}
+
+fn parse_codex_subagent_final_response(path: &Path) -> HistoryResponse {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return HistoryResponse::Missing;
+    };
+    let values = match content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(values) => values,
+        Err(_) => return HistoryResponse::Missing,
+    };
+    let started_turns = values
+        .iter()
+        .filter_map(|value| {
+            (value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
+                && value
+                    .pointer("/payload/type")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("task_started"))
+            .then(|| {
+                value
+                    .pointer("/payload/turn_id")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .flatten()
+        })
+        .collect::<Vec<_>>();
+    let completed = values
+        .iter()
+        .filter(|value| {
+            value.get("type").and_then(serde_json::Value::as_str) == Some("event_msg")
+                && value
+                    .pointer("/payload/type")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("task_complete")
+        })
+        .collect::<Vec<_>>();
+    if started_turns.is_empty() || completed.is_empty() {
+        return HistoryResponse::Missing;
+    }
+    if started_turns.len() != 1 || completed.len() != 1 {
+        return HistoryResponse::Ambiguous;
+    }
+    let Some(completed_turn) = completed[0]
+        .pointer("/payload/turn_id")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return HistoryResponse::Missing;
+    };
+    if started_turns[0] != completed_turn {
+        return HistoryResponse::Ambiguous;
+    }
+    let Some(completed_response) = completed[0]
+        .pointer("/payload/last_agent_message")
+        .and_then(serde_json::Value::as_str)
+        .filter(|response| !response.trim().is_empty())
+    else {
+        return HistoryResponse::Missing;
+    };
+    let responses = values
+        .iter()
+        .filter(|value| {
+            value.get("type").and_then(serde_json::Value::as_str) == Some("response_item")
+                && value
+                    .pointer("/payload/type")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("message")
+                && value
+                    .pointer("/payload/role")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("assistant")
+                && value
+                    .pointer("/payload/phase")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("final_answer")
+                && value
+                    .pointer("/payload/internal_chat_message_metadata_passthrough/turn_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(completed_turn)
+        })
+        .filter_map(|value| {
+            let response = value
+                .pointer("/payload/content")
+                .and_then(serde_json::Value::as_array)?
+                .iter()
+                .filter(|block| {
+                    block.get("type").and_then(serde_json::Value::as_str) == Some("output_text")
+                })
+                .filter_map(|block| block.get("text").and_then(serde_json::Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!response.trim().is_empty()).then_some(response)
+        })
+        .collect::<Vec<_>>();
+    match responses.as_slice() {
+        [] => HistoryResponse::Missing,
+        [response] if response == completed_response => {
+            HistoryResponse::Recovered(response.clone())
+        }
+        [_] => HistoryResponse::Ambiguous,
+        _ => HistoryResponse::Ambiguous,
+    }
 }
 
 fn recover_claude_history_response(
@@ -636,6 +869,156 @@ mod tests {
         .unwrap();
         assert_eq!(
             recover_claude_history_response(home.path(), "session-1", "worker-1"),
+            HistoryResponse::Missing
+        );
+    }
+
+    fn write_codex_rollout(
+        home: &Path,
+        directory: &str,
+        parent: &str,
+        worker: &str,
+        turns: &[(&str, &str)],
+    ) -> PathBuf {
+        let history = home.join(".codex/sessions").join(directory);
+        std::fs::create_dir_all(&history).unwrap();
+        let transcript = history.join(format!("rollout-arbitrary-{worker}.jsonl"));
+        let mut records = vec![serde_json::json!({
+            "type": "session_meta",
+            "payload": {
+                "id": worker,
+                "session_id": parent,
+                "parent_thread_id": parent,
+                "cwd": "/deliberately/not/a/lookup/key",
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent}}},
+                "thread_source": "subagent"
+            }
+        })];
+        for (turn_id, response) in turns {
+            records.push(serde_json::json!({
+                "type": "event_msg",
+                "payload": {"type": "task_started", "turn_id": turn_id}
+            }));
+            records.push(serde_json::json!({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "phase": "final_answer",
+                    "content": [{"type": "output_text", "text": response}],
+                    "internal_chat_message_metadata_passthrough": {"turn_id": turn_id}
+                }
+            }));
+            records.push(serde_json::json!({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "turn_id": turn_id,
+                    "last_agent_message": response
+                }
+            }));
+        }
+        let content = records
+            .into_iter()
+            .map(|record| record.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&transcript, format!("{content}\n")).unwrap();
+        transcript
+    }
+
+    #[test]
+    fn exact_codex_subagent_history_uses_native_attempt_coordinates_only() {
+        let home = tempfile::tempdir().unwrap();
+        write_codex_rollout(
+            home.path(),
+            "not-a-date",
+            "parent-thread-1",
+            "worker-thread-1",
+            &[("turn-1", "Exact Codex response.")],
+        );
+        let locator = CodexHistoryLocator {
+            coordinator_thread_id: "parent-thread-1",
+            native_subagent_id: "worker-thread-1",
+            attempt_completion_key: "immutable-generation-key",
+        };
+        assert_eq!(
+            recover_codex_history_response(home.path(), locator),
+            HistoryResponse::Recovered("Exact Codex response.".to_string())
+        );
+    }
+
+    #[test]
+    fn codex_history_fails_closed_on_missing_attempt_key_or_multiple_matches() {
+        let home = tempfile::tempdir().unwrap();
+        write_codex_rollout(
+            home.path(),
+            "one",
+            "parent-thread-1",
+            "worker-thread-1",
+            &[("turn-1", "First copy.")],
+        );
+        assert_eq!(
+            recover_codex_history_response(
+                home.path(),
+                CodexHistoryLocator {
+                    coordinator_thread_id: "parent-thread-1",
+                    native_subagent_id: "worker-thread-1",
+                    attempt_completion_key: "",
+                },
+            ),
+            HistoryResponse::Unsupported
+        );
+        write_codex_rollout(
+            home.path(),
+            "two",
+            "parent-thread-1",
+            "worker-thread-1",
+            &[("turn-1", "Second copy.")],
+        );
+        assert_eq!(
+            recover_codex_history_response(
+                home.path(),
+                CodexHistoryLocator {
+                    coordinator_thread_id: "parent-thread-1",
+                    native_subagent_id: "worker-thread-1",
+                    attempt_completion_key: "immutable-generation-key",
+                },
+            ),
+            HistoryResponse::Ambiguous
+        );
+    }
+
+    #[test]
+    fn codex_history_fails_closed_on_multiple_terminal_turns_or_wrong_parent() {
+        let home = tempfile::tempdir().unwrap();
+        write_codex_rollout(
+            home.path(),
+            "one",
+            "parent-thread-1",
+            "worker-thread-1",
+            &[("turn-1", "First."), ("turn-2", "Second.")],
+        );
+        assert_eq!(
+            recover_codex_history_response(
+                home.path(),
+                CodexHistoryLocator {
+                    coordinator_thread_id: "parent-thread-1",
+                    native_subagent_id: "worker-thread-1",
+                    attempt_completion_key: "immutable-generation-key",
+                },
+            ),
+            HistoryResponse::Ambiguous
+        );
+        assert_eq!(
+            recover_codex_history_response(
+                home.path(),
+                CodexHistoryLocator {
+                    coordinator_thread_id: "different-parent",
+                    native_subagent_id: "worker-thread-1",
+                    attempt_completion_key: "immutable-generation-key",
+                },
+            ),
             HistoryResponse::Missing
         );
     }

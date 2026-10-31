@@ -566,18 +566,9 @@ fn expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String>
     agent_doc_queue::queue_claim::resolve_claim_target(item, &heads).ok()
 }
 
-fn plain_or_expanded_claim_head(file: &Path, item: &str, content: &str) -> Option<String> {
-    let heads =
-        agent_doc_queue::queue_continuation::all_queue_head_texts(content).unwrap_or_default();
-    agent_doc_queue::queue_claim::resolve_claim_target(item, &heads)
-        .ok()
-        .or_else(|| expanded_claim_head(file, item, content))
-}
-
 /// `agent-doc queue brief`: resolve `item` (`#id` / `do [#id]` / the line's
-/// text) to the live queue head it names, on disk or, while an editor save is
-/// deferred, in the editor authority's text (the view preflight dispatched
-/// from), and build that head's authorization.
+/// text) to the live queue head it names in the editor authority's current cut,
+/// or on disk while detached, and build that exact view's authorization.
 pub fn subagent_authorization_for_item(
     file: &Path,
     item: &str,
@@ -587,27 +578,8 @@ pub fn subagent_authorization_for_item(
     }
     let disk = std::fs::read_to_string(file)
         .with_context(|| format!("read {} to brief queue item {item:?}", file.display()))?;
-    let disk_heads =
-        agent_doc_queue::queue_continuation::all_queue_head_texts(&disk).unwrap_or_default();
-    let (content, head) =
-        match agent_doc_queue::queue_claim::resolve_claim_target(item, &disk_heads) {
-            Ok(head) => (disk, head),
-            Err(miss) if miss.ambiguous.is_empty() => {
-                if let Some(head) = expanded_claim_head(file, item, &disk) {
-                    (disk, head)
-                } else if let Some(authority) =
-                    crate::queue_claim::editor_authority_text(file, "queue_brief")
-                {
-                    let Some(head) = plain_or_expanded_claim_head(file, item, &authority) else {
-                        return Err(miss.into());
-                    };
-                    (authority, head)
-                } else {
-                    return Err(miss.into());
-                }
-            }
-            Err(miss) => return Err(miss.into()),
-        };
+    let authority = crate::queue_claim::editor_authority_text(file, "queue_brief");
+    let (content, head) = resolve_brief_view(file, item, disk, authority)?;
     let head = agent_doc_document::queue_projection::strip_priority_markers(&head)
         .trim()
         .to_string();
@@ -626,6 +598,28 @@ pub fn subagent_authorization_for_item(
             Some(submitted.as_str()),
         ),
     )
+}
+
+/// Resolve a brief against the same live-document boundary as `queue claim`:
+/// an attached editor/CRDT cut is authoritative, and disk is authoritative
+/// only while detached. Returning the chosen content with the head keeps queue
+/// identity, presets, and submitted lineage on that one exact cut.
+fn resolve_brief_view(
+    file: &Path,
+    item: &str,
+    disk: String,
+    authority: Option<String>,
+) -> Result<(String, String)> {
+    let content = authority.unwrap_or(disk);
+    let heads =
+        agent_doc_queue::queue_continuation::all_queue_head_texts(&content).unwrap_or_default();
+    match agent_doc_queue::queue_claim::resolve_claim_target(item, &heads) {
+        Ok(head) => Ok((content, head)),
+        Err(miss) if miss.ambiguous.is_empty() => expanded_claim_head(file, item, &content)
+            .map(|head| (content, head))
+            .ok_or_else(|| miss.into()),
+        Err(miss) => Err(miss.into()),
+    }
 }
 
 /// Whether `prompt` is one of the `dispatch` lines (marker-invariant identity).
@@ -661,6 +655,44 @@ mod tests {
             1,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn brief_uses_live_authority_queue_id_instead_of_stale_disk_kind_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let item = "do [#canonical-origin]";
+        let disk = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             ## Run <!-- agent:run subagents -->\n- {item}\n<!-- /agent:run -->\n\n\
+             ## Loop <!-- agent:loop interval=\"1h\" -->\n- watch\n<!-- /agent:loop -->\n"
+        );
+        let authority = disk.replace("agent:run subagents", "agent:run id=\"main\" subagents");
+        std::fs::write(&file, &disk).unwrap();
+
+        let (content, head) =
+            resolve_brief_view(&file, item, disk, Some(authority.clone())).unwrap();
+        assert_eq!(content, authority);
+        assert_eq!(head, item);
+
+        let authorization = subagent_authorization_for_content(&file, &content, &head).unwrap();
+        assert_eq!(authorization.queue_id.as_deref(), Some("main"));
+        assert!(
+            authorization
+                .subagent_prompt_preamble
+                .contains("Origin queue id (dispatch-time provenance):\n> main")
+        );
+        assert!(
+            authorization
+                .subagent_prompt_preamble
+                .contains("--id main --after <origin>")
+        );
+        assert!(
+            !authorization
+                .subagent_prompt_preamble
+                .contains("--id run --after <origin>")
+        );
     }
 
     #[test]

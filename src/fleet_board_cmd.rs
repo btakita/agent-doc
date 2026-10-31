@@ -252,12 +252,15 @@ pub(crate) fn document_facts(content: &str) -> DocumentFacts {
     let frontmatter_active = agent_doc_frontmatter::frontmatter::parse(content)
         .ok()
         .and_then(|(frontmatter, _)| frontmatter.queue_active);
+    let pending_components = document_pending_components(content);
     DocumentFacts {
         queue_active: frontmatter_active == Some(true)
             || queue_heads::active_queue_prompt(content).is_some(),
         queue_stopped: queue_heads::queue_is_explicitly_stopped(content),
         drainable_heads: continuation::drainable_head_count(content),
         deferred_heads: continuation::deferred_head_count(content),
+        eligible_pending_heads: pending_components.iter().map(|(_, count)| count).sum(),
+        pending_components: pending_components.into_iter().map(|(id, _)| id).collect(),
         backlog_open: open_backlog_item_count(content),
         review_open: continuation::open_review_item_count(content),
         review_gated: continuation::gated_review_ids(content).len(),
@@ -266,6 +269,43 @@ pub(crate) fn document_facts(content: &str) -> DocumentFacts {
             .unwrap_or_default(),
         ..DocumentFacts::default()
     }
+}
+
+/// Pending rows are a document fact, not an active-queue fact. Keep component
+/// provenance so the board can expose an inactive run that would otherwise be
+/// mistaken for a drained document.
+fn document_pending_components(content: &str) -> Vec<(String, usize)> {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return Vec::new();
+    };
+    let Ok(graph) = agent_doc_queue::queue_set::QueueSet::parse(content, &components) else {
+        return Vec::new();
+    };
+    graph
+        .blocks()
+        .iter()
+        .filter_map(|block| {
+            let count = agent_doc_queue::document_queue::executable_prompt_indexes(&block.entries)
+                .into_iter()
+                .filter(|index| {
+                    let agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) =
+                        &block.entries[*index]
+                    else {
+                        return false;
+                    };
+                    agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+                        .is_empty()
+                        && matches!(
+                            agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                            None | Some(
+                                agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
+                            )
+                        )
+                })
+                .count();
+            (count > 0).then(|| (block.id.clone(), count))
+        })
+        .collect()
 }
 
 fn open_backlog_item_count(content: &str) -> usize {
@@ -490,6 +530,29 @@ mod tests {
             "# path = commented/out\n",
         ));
         assert_eq!(paths, vec!["src/haiven-dev", "src/sample-app"]);
+    }
+
+    #[test]
+    fn document_facts_surface_pending_rows_in_every_run_component() {
+        let content = concat!(
+            "---\nqueue: go\n---\n\n",
+            "<!-- agent:run id=active subagents go -->\n",
+            "- 🚧 do [#running]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=api-prs subagents -->\n",
+            "- 📥 do [#rebase]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:run id=contracts-prs subagents -->\n",
+            "- do [#review]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let facts = document_facts(content);
+        assert_eq!(facts.eligible_pending_heads, 2);
+        assert_eq!(facts.pending_components, vec!["api-prs", "contracts-prs"]);
+        assert_eq!(
+            agent_doc_work_graph::fleet_board::queue_cell(&facts),
+            "2 pending [api-prs,contracts-prs]"
+        );
     }
 
     #[test]

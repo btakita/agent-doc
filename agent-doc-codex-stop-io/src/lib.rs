@@ -3225,6 +3225,71 @@ fn auto_queue_continuation_response(
             input.stop_hook_active,
         )));
     }
+    // #coordinatordrain: Stop is a document boundary, so the full runnable
+    // graph is authoritative. The ordinary auto-queue selector below returns
+    // one inline prompt and deliberately excludes delegated heads; consulting
+    // only that selector allowed other agent:run components to strand.
+    let content = current_document_content(file, "codex_stop_coordinator_drain")?;
+    let coordinator_drain =
+        agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
+            file, &content,
+        )?;
+    if coordinator_drain.phase
+        == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
+    {
+        let snapshot = &coordinator_drain.snapshot;
+        let pending = snapshot
+            .pending_dispatch
+            .iter()
+            .map(|item| item.item.as_str())
+            .collect::<Vec<_>>();
+        let claimed = snapshot
+            .claimed_unstarted
+            .iter()
+            .map(|item| {
+                (
+                    item.item.as_str(),
+                    item.owner.as_deref().unwrap_or("unknown"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let lost = snapshot
+            .lost
+            .iter()
+            .map(|item| item.item.as_str())
+            .collect::<Vec<_>>();
+        let reported = snapshot
+            .reported
+            .iter()
+            .map(|item| item.item.as_str())
+            .collect::<Vec<_>>();
+        let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
+        for item in &snapshot.pending_dispatch {
+            *component_counts
+                .entry(item.queue_id.as_deref().unwrap_or("unknown").to_string())
+                .or_default() += 1;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_coordinator_drain_blocked pending_dispatch={} claimed_unstarted={} lost={} reported={} running={} components={:?} action=continue (#coordinatordrain)",
+                pending.len(),
+                claimed.len(),
+                lost.len(),
+                reported.len(),
+                snapshot.running.len(),
+                component_counts,
+            ),
+        );
+        return Ok(Some(StopResponse::ContinueTurn {
+            class: StopContinuationClass::Queue,
+            reason: format!(
+                "agent-doc Stop hook refused terminal success for {file}: the FULL document queue still has coordinator-owned work. Eligible pending rows by component {components:?}: {pending:?}. Claimed but not started attempts: {claimed:?}. Lost attempts to recover or requeue: {lost:?}. Reported worker results to integrate and close: {reported:?}. The coordinator must claim each eligible row BEFORE native spawn, immediately run `agent-doc queue start {file} --item <item> --worker <concrete-worker-id>` after spawn, recover/requeue lost attempts, and integrate/report-complete/close reported attempts. Forward steering to an existing running owner where applicable. Workers never self-claim or self-close the session queue. Do not send the final answer while any of these sets is non-empty.",
+                file = file.display(),
+                components = component_counts,
+            ),
+        }));
+    }
     let Some(prompt) = active_auto_queue_prompt(file)? else {
         return Ok(None);
     };
@@ -6202,6 +6267,93 @@ Done.\n\
         let resolver = &resolver[..resolver.find("\nfn ").unwrap()];
         assert!(resolver.contains("resolve_document_content_uncached("));
         assert!(resolver.contains("active_auto_queue_prompt_for_content(file, &content)"));
+    }
+
+    /// Stop must consult the full coordinator state machine before the singular
+    /// inline auto-queue selector. One running worker never hides eligible rows
+    /// in sibling/inactive agent:run components.
+    #[test]
+    fn stop_refuses_success_with_running_head_and_other_pending_run_heads() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = r#"---
+session: sid
+agent_doc_format: template
+queue: go
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
+
+## Active <!-- agent:run id="active" subagents go -->
+- do [#a]
+<!-- /agent:run -->
+
+## Other <!-- agent:run id="other" subagents -->
+- do [#b]
+<!-- /agent:run -->
+
+## Inactive <!-- agent:run id="inactive" subagents -->
+- do [#c]
+<!-- /agent:run -->
+"#;
+        fs::write(&doc, content).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&doc, "#a", "subagent:a", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#a",
+            "subagent:a",
+            "worker-a",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state = SessionState {
+            identity_origin: Default::default(),
+            harness: None,
+            session_id: "codex-session".to_string(),
+            doc_path: doc.display().to_string(),
+            last_turn_id: "turn".to_string(),
+            last_prompt: format!("agent-doc {}", doc.display()),
+            last_auto_queue_head: None,
+            last_context_clear_at: None,
+            last_prompt_cycle: None,
+            preflight_admitted: None,
+            updated_at: 20,
+        };
+        let roots = tracking_roots(dir.path(), Some(&doc));
+        let response = auto_queue_continuation_response(
+            &doc,
+            &roots,
+            &root,
+            &state,
+            &StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn".to_string(),
+                cwd: dir.path().display().to_string(),
+                last_assistant_message: "done".to_string(),
+                stop_hook_active: false,
+            },
+        )
+        .unwrap()
+        .expect("pending sibling runs must block terminal success");
+
+        let StopResponse::ContinueTurn { reason, .. } = response else {
+            panic!("full queue action debt must continue the coordinator turn: {response:?}");
+        };
+        assert!(reason.contains("do [#b]"), "{reason}");
+        assert!(reason.contains("do [#c]"), "{reason}");
+        assert!(reason.contains("\"other\": 1"), "{reason}");
+        assert!(reason.contains("\"inactive\": 1"), "{reason}");
+        assert!(
+            reason.contains("Workers never self-claim or self-close"),
+            "{reason}"
+        );
     }
 
     #[test]

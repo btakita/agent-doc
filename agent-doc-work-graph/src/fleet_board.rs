@@ -128,6 +128,11 @@ pub struct DocumentFacts {
     pub drainable_heads: usize,
     /// Heads deferred to an operator (`[operator-verify]` and friends).
     pub deferred_heads: usize,
+    /// Document-wide pending rows across every runnable component, including
+    /// components that are not the active inline drain selection.
+    pub eligible_pending_heads: usize,
+    /// Runnable component ids that own those pending rows, in document order.
+    pub pending_components: Vec<String>,
     /// Open `agent:backlog` items.
     pub backlog_open: usize,
     /// Open `agent:review` items.
@@ -155,13 +160,18 @@ pub fn classify_document(facts: &DocumentFacts) -> DocState {
     if facts.lanes.blocked > 0 {
         return DocState::Blocked;
     }
-    if facts.queue_active && facts.drainable_heads > 0 && !facts.actor_alive {
+    if (facts.queue_active && facts.drainable_heads > 0
+        || !facts.queue_stopped && facts.eligible_pending_heads > 0)
+        && !facts.actor_alive
+    {
         return DocState::Stalled;
     }
     if facts.drainable_heads == 0 && facts.deferred_heads > 0 {
         return DocState::OperatorVerify;
     }
-    if facts.queue_active && facts.drainable_heads > 0 {
+    if facts.queue_active && facts.drainable_heads > 0
+        || !facts.queue_stopped && facts.eligible_pending_heads > 0
+    {
         return DocState::Draining;
     }
     if facts.open_work() > 0 {
@@ -176,6 +186,11 @@ pub fn attention_reason(facts: &DocumentFacts, state: DocState) -> Option<String
         DocState::Blocked => Some(format!(
             "{} item(s) blocked on a decision",
             facts.lanes.blocked
+        )),
+        DocState::Stalled if facts.eligible_pending_heads > 0 => Some(format!(
+            "{} pending head(s) across run component(s) [{}], no live actor; activate/drain the full document queue",
+            facts.eligible_pending_heads,
+            facts.pending_components.join(", "),
         )),
         DocState::Stalled => Some(format!(
             "{} drainable head(s), no live actor",
@@ -328,6 +343,13 @@ const HEADERS: [&str; 8] = [
 pub fn queue_cell(facts: &DocumentFacts) -> String {
     if facts.queue_stopped {
         return "stopped".to_string();
+    }
+    if !facts.pending_components.is_empty() {
+        return format!(
+            "{} pending [{}]",
+            facts.eligible_pending_heads,
+            facts.pending_components.join(","),
+        );
     }
     if !facts.queue_active {
         return "—".to_string();
@@ -523,6 +545,24 @@ mod tests {
         assert_eq!(state, DocState::Draining);
         assert!(!state.needs_attention());
         assert_eq!(attention_reason(&f, state), None);
+    }
+
+    #[test]
+    fn inactive_component_pending_rows_are_never_clear() {
+        let mut f = facts("agent-doc", "tasks/bugs.md");
+        f.eligible_pending_heads = 2;
+        f.pending_components = vec!["api-prs".into(), "contracts-prs".into()];
+        assert_eq!(classify_document(&f), DocState::Stalled);
+        assert_eq!(
+            attention_reason(&f, DocState::Stalled).as_deref(),
+            Some(
+                "2 pending head(s) across run component(s) [api-prs, contracts-prs], no live actor; activate/drain the full document queue"
+            )
+        );
+        assert_eq!(queue_cell(&f), "2 pending [api-prs,contracts-prs]");
+
+        f.actor_alive = true;
+        assert_eq!(classify_document(&f), DocState::Draining);
     }
 
     #[test]

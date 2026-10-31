@@ -2196,35 +2196,85 @@ fn run_with_options_inner(
                 // (`[clean-session]` under live IPC, or `[operator-verify]`),
                 // surface a one-line deferred-heads note so the idle queue reads
                 // as deferred work, not a silent stall.
-                let content =
-                    crate::resolve_current_document_content(file, "deferred_queue_head_count").ok();
-                // #queuesubagents (GH #308): an unclaimed queue-level
-                // subagent head belongs to the coordinator's dispatch loop, not
-                // to this session's inline drain loop. Name that next action
-                // explicitly so session-check cannot turn an unclaimed dispatch
-                // head into "drain it in this session now" guidance.
-                if let Some(dispatch_head) = content.as_deref().and_then(|content| {
-                    agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
-                        file, content,
-                    )
-                    .ok()
-                    .and_then(|heads| heads.into_iter().next())
-                }) {
-                    let dispatch_prompt =
-                        format!("claim and dispatch a subagent for queue head {dispatch_head:?}");
+                let content = Some(crate::resolve_current_document_content(
+                    file,
+                    "deferred_queue_head_count",
+                )?);
+                // #coordinatordrain: the document-wide state machine, not one
+                // selected queue or one `.next()` head, owns the terminal gate.
+                // It observes every agent:run plus the durable claim ledger.
+                let coordinator_drain =
+                    agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
+                        file,
+                        content.as_deref().unwrap_or_default(),
+                    )?;
+                if coordinator_drain.phase
+                    == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
+                {
+                    let snapshot = &coordinator_drain.snapshot;
+                    let pending = snapshot
+                        .pending_dispatch
+                        .iter()
+                        .map(|item| item.item.as_str())
+                        .collect::<Vec<_>>();
+                    let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
+                    for item in &snapshot.pending_dispatch {
+                        *component_counts
+                            .entry(item.queue_id.as_deref().unwrap_or("unknown").to_string())
+                            .or_default() += 1;
+                    }
+                    let dispatch_prompt = format!(
+                        "finish the full document queue obligation: claim each of {pending:?}, spawn its worker, and immediately run queue start with the concrete worker id; recover/requeue {} lost attempt(s), start {} claimed attempt(s), and integrate/close {} reported attempt(s)",
+                        snapshot.lost.len(),
+                        snapshot.claimed_unstarted.len(),
+                        snapshot.reported.len(),
+                    );
                     println!(
-                        "queue_continuation_required=true queue_subagent_dispatch_required=true next_queue_prompt={:?}",
-                        dispatch_prompt
+                        "queue_continuation_required=true queue_subagent_dispatch_required={} queue_subagent_dispatch_count={} queue_claimed_unstarted_count={} queue_lost_count={} queue_reported_count={} queue_running_count={} inactive_pending_components={:?} document_queue_terminal=false next_queue_prompt={:?}",
+                        !snapshot.pending_dispatch.is_empty(),
+                        snapshot.pending_dispatch.len(),
+                        snapshot.claimed_unstarted.len(),
+                        snapshot.lost.len(),
+                        snapshot.reported.len(),
+                        snapshot.running.len(),
+                        component_counts,
+                        dispatch_prompt,
                     );
                     eprintln!(
-                        "[session-check] queue awaits subagent dispatch for {}: {:?} is an unclaimed subagent-intent head. Claim and dispatch it; do not drain it inline (#queuesubagents, GH #308).",
+                        "[session-check] document queue action is still required for {}: {} eligible dispatch row(s) across components {:?}, {} claimed-but-unstarted attempt(s), {} lost attempt(s), and {} reported result(s). The coordinator owns claim → harness spawn → `agent-doc queue start --worker <id>`, recovery/requeue, and report integration/closeout for the FULL set; workers never self-claim or self-close. Do not report completion or drain these delegated rows inline (#coordinatordrain).",
                         file.display(),
-                        dispatch_head
+                        snapshot.pending_dispatch.len(),
+                        component_counts,
+                        snapshot.claimed_unstarted.len(),
+                        snapshot.lost.len(),
+                        snapshot.reported.len(),
                     );
                     if codex_final_gate {
                         crate::profile::report_now(file);
                         std::process::exit(2);
                     }
+                    return Ok(());
+                }
+                if coordinator_drain.phase
+                    == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::WaitingForWorkers
+                {
+                    let running_components = coordinator_drain
+                        .snapshot
+                        .running
+                        .iter()
+                        .map(|item| item.queue_id.as_deref().unwrap_or("unknown"))
+                        .collect::<Vec<_>>();
+                    println!(
+                        "queue_continuation_required=false queue_workers_running={} running_components={:?} document_queue_terminal=false ui_outcome=waiting_for_workers next_action=wait_for_owner_reports",
+                        coordinator_drain.snapshot.running.len(),
+                        running_components,
+                    );
+                    eprintln!(
+                        "[session-check] document queue is not complete for {}: {} row(s) remain owned by running workers in components {:?}. Yielding is allowed only to await their reports; integrate and close them before reporting terminal success (#coordinatordrain).",
+                        file.display(),
+                        coordinator_drain.snapshot.running.len(),
+                        running_components,
+                    );
                     return Ok(());
                 }
                 let deferred = content
@@ -5132,11 +5182,7 @@ mod terminal_convergence_tests {
                 committed_content: &str,
                 expected_current: &str,
             ) -> Result<()> {
-                TestEffects.settle_committed_projection(
-                    file,
-                    committed_content,
-                    expected_current,
-                )
+                TestEffects.settle_committed_projection(file, committed_content, expected_current)
             }
             fn settle_retained_committed_projection(
                 &self,
@@ -5832,14 +5878,11 @@ mod settle_window_tests {
             "{detail}"
         );
         let calls = Cell::new(0);
-        let outcome = settle_until_converged(
-            Duration::from_secs(5),
-            Duration::from_millis(1),
-            || {
+        let outcome =
+            settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
                 calls.set(calls.get() + 1);
                 anyhow::bail!(line.clone());
-            },
-        );
+            });
         assert_eq!(calls.get(), 1, "an operator-owned state is not resampled");
         assert!(format!("{:#}", outcome.unwrap_err()).contains("operator_action="));
     }
@@ -5855,19 +5898,20 @@ mod settle_window_tests {
         );
         let rejected = "[session-check] INTERRUPTED: binary-owned response delivery is retained; the registered editor endpoint rejected the delivery receipt; restart or reload the editor";
 
-        let outcome = settle_until_converged(
-            Duration::from_secs(5),
-            Duration::from_millis(1),
-            || {
+        let outcome =
+            settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
                 calls.set(calls.get() + 1);
                 if calls.get() == 1 {
                     anyhow::bail!(pending.clone());
                 }
                 anyhow::bail!(rejected);
-            },
-        );
+            });
 
-        assert_eq!(calls.get(), 2, "the pending native-save state must be resampled");
+        assert_eq!(
+            calls.get(),
+            2,
+            "the pending native-save state must be resampled"
+        );
         assert!(format!("{:#}", outcome.unwrap_err()).contains("rejected"));
     }
 

@@ -4868,15 +4868,19 @@ mod tests {
         let cycle =
             agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
                 .unwrap();
-        seed_for_cycle(
+        seed_for_cycle(&file, &cycle.cycle_id, &baseline, Some(&head), Vec::new()).unwrap();
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(&file, &head, "subagent:ghfix126", 3600)
+                .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
             &file,
-            &cycle.cycle_id,
-            &baseline,
-            Some("current task"),
-            Vec::new(),
+            &head,
+            "subagent:ghfix126",
+            "worker:ghfix126",
+            3600,
+            claim.generation,
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::claim(&file, &head, "subagent:ghfix126", 3600).unwrap();
         let closed = baseline.replace("- current task\n", "");
         std::fs::write(&file, &closed).unwrap();
         close_cycle(&file, &closed);
@@ -4885,7 +4889,8 @@ mod tests {
         assert!(observe_for_wake(&file).unwrap().items.is_empty());
 
         // Idle: the operator annotates the claimed head.
-        let annotated_head = format!("{head}: note this is in a Coder environment");
+        let annotated_head =
+            format!("🚧 [#subagent:ghfix126#1] {head}: note this is in a Coder environment");
         let annotated = closed.replace(&format!("- {head}\n"), &format!("- {annotated_head}\n"));
         std::fs::write(&file, &annotated).unwrap();
         backdate(&file);
@@ -4943,7 +4948,10 @@ mod tests {
         agent_doc_queue_io::queue_claim::prune_closed_claims(&file, &period).unwrap();
         let stored = agent_doc_queue_io::queue_claim::load_ledger(&file).unwrap();
         assert_eq!(stored.claims.len(), 1, "{stored:?}");
-        assert_eq!(stored.claims[0].item_text, format!("{annotated_head}."));
+        assert_eq!(
+            stored.claims[0].item_text,
+            agent_doc_element_queue::strip_attempt_projection_prefix(&format!("{annotated_head}."))
+        );
 
         // `#krwr`: replacing the row with a different request in its slot is
         // a deletion plus new work, not an edit: the owner is cancelled and

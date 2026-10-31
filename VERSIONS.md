@@ -4,6 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.564
 
+- **Idle supervisors now wake coordinators for reported queue work.** `Claimed` and `Running` attempts still suppress double dispatch, while `Reported` attempts remain drainable integration/writeback debt so `☑️` rows do not wait forever for an unrelated document edit.
 - **Managed List work now stays completion-seeking through every lifecycle state.** Selected incomplete items must either reach their authorized delivery boundary or retain explicit evidence, the exact blocker, its owner, and the next action; claims, reports, and gates are no longer mistaken for completion.
 - **Executable leaves keep terminal state while structural parents derive lazily.** Completed or reported leaves are not reopened automatically, parents strike only when every descendant is terminal, and adding or recovering a live child reopens only the structural parent.
 - **Reported completion evidence survives rekeying and closes before fresh dispatch.** A reported attempt cannot time out into Lost, same-generation rekeys preserve its evidence, and coordinators must integrate and persist verified reports at the next safe boundary before starting new sibling work.

@@ -1671,11 +1671,14 @@ fn idle_watch_disk_queue_head(file: &Path) -> QueueHeadObservation {
     }
 }
 
-/// The supervisor's drainable head, skipping heads a worker has claimed
-/// (`#queueclaim`, `#steeringwake`). A claimed head is in flight elsewhere;
-/// waking the idle parent for it is a double dispatch.
+/// The supervisor's drainable head, skipping heads a worker still has in
+/// flight (`#queueclaim`, `#steeringwake`). A `Claimed` or `Running` head is
+/// active elsewhere, so waking the idle parent for it is a double dispatch.
+/// A `Reported` head is instead coordinator integration/writeback debt and
+/// must wake the idle parent (`#reportedwritebackdebt`).
 fn supervisor_drainable_head(file: &Path, content: &str) -> Option<String> {
-    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, content);
+    let claimed =
+        agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, content);
     // GH #381: a head naming a `.agent-doc/project.md` preset wakes the idle
     // supervisor exactly as a document-local preset head does.
     agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed_with_presets(
@@ -7047,6 +7050,66 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#reportedwritebackdebt`: api.md accumulated `☑️` rows in both its
+    /// `main` and `contracts-prs` runs after workers reported while the
+    /// coordinator was idle. The idle selector excluded every ledger claim,
+    /// including `Reported`, so no document revision arrived to wake the
+    /// coordinator that owed integration. Only `Claimed`/`Running` attempts
+    /// suppress that wake; a reported attempt must expose the same head again.
+    #[test]
+    fn supervisor_drainable_head_wakes_for_reported_claim_writeback_debt() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        for (file_name, run_id) in [("main", "main"), ("contracts-prs", "\"contracts-prs\"")] {
+            let doc = dir.path().join(format!("{file_name}.md"));
+            let item_id = format!("reported-{file_name}");
+            let item = format!("#{item_id}");
+            let owner = format!("subagent:{file_name}");
+            let worker = format!("worker:{file_name}");
+            let content = format!(
+                "<!-- agent:run id={run_id} subagents priority keep go -->\n\
+- integrate worker result [{item}]\n\
+<!-- /agent:run -->\n"
+            );
+            std::fs::write(&doc, &content).unwrap();
+
+            let expected = supervisor_drainable_head(&doc, &content)
+                .expect("an unclaimed run head must wake the supervisor");
+            let (_, claim) = agent_doc_queue_io::queue_claim::claim_with_session(
+                &doc, &item, &owner, 3600, None,
+            )
+            .unwrap();
+            assert_eq!(
+                supervisor_drainable_head(&doc, &content),
+                None,
+                "a claimed attempt is still in flight"
+            );
+
+            let running = agent_doc_queue_io::queue_claim::start_attempt(
+                &doc,
+                &item,
+                &owner,
+                &worker,
+                3600,
+                claim.generation,
+            )
+            .unwrap();
+            assert_eq!(
+                supervisor_drainable_head(&doc, &content),
+                None,
+                "a running attempt is still in flight"
+            );
+
+            agent_doc_queue_io::queue_claim::report_attempt(&doc, &item, Some(running.generation))
+                .unwrap();
+            assert_eq!(
+                supervisor_drainable_head(&doc, &content),
+                Some(expected),
+                "reported work must wake its coordinator for integration"
+            );
+        }
+    }
 
     #[test]
     fn codex_capacity_recovery_precedes_the_quiescent_fast_path() {

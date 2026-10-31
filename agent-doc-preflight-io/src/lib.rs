@@ -1347,6 +1347,17 @@ pub struct PreflightOutput {
     /// Realtime-selected active queue prompts for this cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_queue_prompts: Vec<String>,
+    /// Beginning-of-turn reconciliation debt across every queue component in
+    /// this and related session documents.  Derived repairs have already run;
+    /// every remaining entry names the main-agent operation that must follow.
+    #[serde(
+        default,
+        skip_serializing_if = "agent_doc_queue::queue_sync_payload::QueueSyncPayload::is_empty"
+    )]
+    pub queue_sync: agent_doc_queue::queue_sync_payload::QueueSyncPayload,
+    /// Main-agent responsibilities for a non-empty [`Self::queue_sync`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_sync_guidance: Option<String>,
     /// `#closeout-steering`: new queue lines with subagent intent (`#subagents`
     /// tag or a preset expanding to subagent work) that no worker has claimed.
     /// They are NOT in `selected_queue_prompts`: claim each with its

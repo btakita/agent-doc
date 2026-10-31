@@ -1349,6 +1349,15 @@ fn run_with_options_to_writer_in_pass(
         .authoritative_content
         .as_deref()
         .unwrap_or(&diff_result_with_current.current);
+    // `#queuesyncpayload`: queue maintenance above is the deterministic repair
+    // pass.  Inspect its settled cut before normal selection/dispatch and retain
+    // every unresolved item -- including inactive components and sibling
+    // session documents -- as typed coordinator action debt.
+    let queue_sync = agent_doc_queue_io::sync_payload::build_project_queue_sync_payload(
+        file,
+        queue_authoritative_content,
+        Some(&diff_result_with_current.previous),
+    )?;
     warnings.extend(queue_state.warnings.clone());
     // #qconvbaseline: the queue maintenance above may converge the live editor
     // buffer to a corrected queue shape (auto-pins, backlog→queue mirrors, do-prompt
@@ -2919,6 +2928,9 @@ fn run_with_options_to_writer_in_pass(
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
+        queue_sync_guidance: (!queue_sync.is_empty())
+            .then(|| agent_doc_queue::queue_sync_payload::QUEUE_SYNC_GUIDANCE.to_string()),
+        queue_sync,
         exchange_subagent_dispatch_guidance: (!exchange_subagent_dispatch.is_empty())
             .then(|| agent_doc_preflight_io::EXCHANGE_SUBAGENT_DISPATCH_GUIDANCE.to_string()),
         exchange_subagent_dispatch,

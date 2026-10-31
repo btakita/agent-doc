@@ -291,6 +291,10 @@ fn await_durable_owner_progress_with(
 }
 
 /// What [`reopen_terminal_cycle_before_stop_capture`] did before capture.
+///
+/// The function also returns the exact cycle projection it inspected (or the
+/// freshly reopened state) so downstream Stop classification never repeats
+/// the same potentially blocking projection read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StopCaptureReopen {
     /// No terminal predecessor or no replayable payload: capture proceeds on
@@ -300,6 +304,27 @@ enum StopCaptureReopen {
     Reopened,
     /// The committed predecessor's HEAD already holds the payload verbatim.
     PayloadAlreadyCommitted,
+}
+
+/// Whether the terminal-reopen check read the cycle projection, including an
+/// authoritative observation that no cycle state exists.
+#[derive(Debug, Clone)]
+struct StopCycleObservation {
+    read: bool,
+    cycle: Option<agent_doc_cycle_state_io::CycleState>,
+}
+
+impl StopCycleObservation {
+    fn not_read() -> Self {
+        Self {
+            read: false,
+            cycle: None,
+        }
+    }
+
+    fn observed(cycle: Option<agent_doc_cycle_state_io::CycleState>) -> Self {
+        Self { read: true, cycle }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3592,9 +3617,8 @@ fn attempt_stop_closeout(
         agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(_)
     );
     stop_phase("closeout_reopen_terminal_cycle");
-    if reopen_terminal_cycle_before_stop_capture(file, &payload)?
-        == StopCaptureReopen::PayloadAlreadyCommitted
-    {
+    let (reopen, observed_cycle) = reopen_terminal_cycle_before_stop_capture(file, &payload)?;
+    if reopen == StopCaptureReopen::PayloadAlreadyCommitted {
         return Ok(StopCloseAttempt::AlreadyCommitted);
     }
     invalidate_stop_document_cache();
@@ -3627,8 +3651,17 @@ fn attempt_stop_closeout(
     stop_phase("closeout_active_queue_prompt");
     let active_queue_prompt = active_auto_queue_prompt(file)?;
     stop_phase("closeout_open_cycle_check");
-    let queue_synthetic_cycle =
-        active_queue_prompt.is_some() && open_cycle_started_from_unchanged_file(file)?;
+    // `#stophookprojectionreuse`: the terminal-reopen check already read the
+    // authoritative cycle projection for every replayable Stop payload. Reuse
+    // that exact observation here. Starting another controller RPC and then a
+    // cold ledger replay when the live actor was momentarily busy consumed
+    // 38s of the Stop hook's 45s internal budget in production.
+    let observed_cycle =
+        cycle_for_queue_classification_with(active_queue_prompt.is_some(), observed_cycle, || {
+            agent_doc_cycle_state_io::load_with_closeout_projection(file)
+        })?;
+    let queue_synthetic_cycle = active_queue_prompt.is_some()
+        && open_cycle_started_from_unchanged_file(observed_cycle.as_ref());
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
         match &payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
@@ -3908,14 +3941,37 @@ fn repair_failure_is_binary_owned_deferral(
 fn reopen_terminal_cycle_before_stop_capture(
     file: &Path,
     payload: &agent_doc_template::replay_guard::ReplayPayloadClassification<'_>,
-) -> Result<StopCaptureReopen> {
+) -> Result<(StopCaptureReopen, StopCycleObservation)> {
     let agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) =
         payload
     else {
-        return Ok(StopCaptureReopen::NotNeeded);
+        return Ok((
+            StopCaptureReopen::NotNeeded,
+            StopCycleObservation::not_read(),
+        ));
     };
-    let Some(previous_cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
-        return Ok(StopCaptureReopen::NotNeeded);
+    let observed_cycle = match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+        Ok(cycle) => cycle,
+        // Preserve the old `cycle_already_committed` behavior: this check is
+        // opportunistic, so an unavailable projection means "not observed",
+        // not a new Stop failure. Queue patchback classification may make its
+        // one required retry below.
+        Err(_) => {
+            return Ok((
+                StopCaptureReopen::NotNeeded,
+                StopCycleObservation::not_read(),
+            ));
+        }
+    };
+    let Some(previous_cycle_id) = observed_cycle
+        .as_ref()
+        .filter(|cycle| cycle.phase == agent_doc_turn::CyclePhase::Committed)
+        .map(|cycle| cycle.cycle_id.clone())
+    else {
+        return Ok((
+            StopCaptureReopen::NotNeeded,
+            StopCycleObservation::observed(observed_cycle),
+        ));
     };
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         anyhow::bail!(
@@ -3929,7 +3985,10 @@ fn reopen_terminal_cycle_before_stop_capture(
                 "codex_stop_post_commit_payload_already_committed cycle_id={previous_cycle_id} capture_created=false reopened=false (#fixlazilycodex)"
             ),
         );
-        return Ok(StopCaptureReopen::PayloadAlreadyCommitted);
+        return Ok((
+            StopCaptureReopen::PayloadAlreadyCommitted,
+            StopCycleObservation::observed(observed_cycle),
+        ));
     }
 
     let current = current_document_content(file, "codex_stop_post_commit_cycle_baseline")?;
@@ -3964,7 +4023,10 @@ fn reopen_terminal_cycle_before_stop_capture(
             previous_cycle_id, reopened.cycle_id
         ),
     );
-    Ok(StopCaptureReopen::Reopened)
+    Ok((
+        StopCaptureReopen::Reopened,
+        StopCycleObservation::observed(Some(reopened)),
+    ))
 }
 
 /// `#stoprecapturesupersede`: the open cycle already holds a live capture whose
@@ -4304,22 +4366,40 @@ fn active_auto_queue_prompt_for_content(file: &Path, content: &str) -> Result<Op
     )
 }
 
-fn open_cycle_started_from_unchanged_file(file: &Path) -> Result<bool> {
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(false);
+fn open_cycle_started_from_unchanged_file(
+    state: Option<&agent_doc_cycle_state_io::CycleState>,
+) -> bool {
+    let Some(state) = state else {
+        return false;
     };
     if !state.is_open() {
-        return Ok(false);
+        return false;
     }
-    Ok(
-        match (&state.normalized_snapshot_hash, &state.normalized_file_hash) {
+    match (&state.normalized_snapshot_hash, &state.normalized_file_hash) {
+        (Some(snapshot), Some(file)) => snapshot == file,
+        _ => match (&state.snapshot_hash, &state.file_hash) {
             (Some(snapshot), Some(file)) => snapshot == file,
-            _ => match (&state.snapshot_hash, &state.file_hash) {
-                (Some(snapshot), Some(file)) => snapshot == file,
-                _ => false,
-            },
+            _ => false,
         },
-    )
+    }
+}
+
+fn cycle_for_queue_classification_with(
+    active_queue_prompt: bool,
+    observation: StopCycleObservation,
+    load: impl FnOnce() -> Result<Option<agent_doc_cycle_state_io::CycleState>>,
+) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
+    if observation.read {
+        return Ok(observation.cycle);
+    }
+    // A non-replayable payload normally returns before queue classification.
+    // The sole path that reaches here is a detected direct patchback, for which
+    // no terminal-reopen read was needed; perform its one required read now.
+    if active_queue_prompt {
+        load()
+    } else {
+        Ok(None)
+    }
 }
 
 fn now_secs() -> u64 {
@@ -10124,7 +10204,9 @@ Reviewed the gated items.\n\
 
         let in_head = agent_doc_template::replay_guard::classify_replay_payload(status);
         assert_eq!(
-            reopen_terminal_cycle_before_stop_capture(&doc, &in_head).unwrap(),
+            reopen_terminal_cycle_before_stop_capture(&doc, &in_head)
+                .unwrap()
+                .0,
             StopCaptureReopen::PayloadAlreadyCommitted
         );
         let still = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -10167,7 +10249,9 @@ Reviewed the gated items.\n\
             "### Re: Hello — gpt-5\n\nA genuinely new answer.\n",
         );
         assert_eq!(
-            reopen_terminal_cycle_before_stop_capture(&doc, &fresh).unwrap(),
+            reopen_terminal_cycle_before_stop_capture(&doc, &fresh)
+                .unwrap()
+                .0,
             StopCaptureReopen::Reopened
         );
         assert_ne!(
@@ -10177,6 +10261,54 @@ Reviewed the gated items.\n\
                 .cycle_id,
             previous.cycle_id
         );
+    }
+
+    /// `#stophookprojectionreuse`: queue-closeout classification must consume
+    /// the cycle observation already made by the terminal-reopen check. The
+    /// prior second load could fall back from a busy controller to a full cold
+    /// ledger replay and exhaust the Stop hook's internal budget.
+    #[test]
+    fn queue_synthetic_classification_reuses_terminal_reopen_cycle_observation() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let content = fs::read_to_string(&doc).unwrap();
+        let opened =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content))
+                .unwrap();
+        let payload = agent_doc_template::replay_guard::classify_replay_payload(
+            "### Re: Hello — gpt-5\n\nCompleted the requested work.\n",
+        );
+
+        let (outcome, observed) =
+            reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap();
+
+        assert_eq!(outcome, StopCaptureReopen::NotNeeded);
+        assert!(observed.read);
+        let Some(observed) = observed.cycle else {
+            panic!("terminal-reopen check must return its cycle observation");
+        };
+        assert_eq!(observed.cycle_id, opened.cycle_id);
+        let reused = cycle_for_queue_classification_with(
+            true,
+            StopCycleObservation::observed(Some(observed)),
+            || panic!("an observed cycle must not trigger a second projection read"),
+        )
+        .unwrap()
+        .expect("observed open cycle");
+        assert!(open_cycle_started_from_unchanged_file(Some(&reused)));
+    }
+
+    #[test]
+    fn blocked_payload_does_not_add_a_cycle_projection_read_before_early_return() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let payload = agent_doc_template::replay_guard::classify_replay_payload("");
+
+        let (outcome, observed) =
+            reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap();
+
+        assert_eq!(outcome, StopCaptureReopen::NotNeeded);
+        assert!(!observed.read);
     }
 
     fn write_claimed_subagent_queue_doc(dir: &tempfile::TempDir, status: &str) -> PathBuf {
@@ -10413,7 +10545,9 @@ Reviewed the gated items.\n\
         );
 
         assert_eq!(
-            reopen_terminal_cycle_before_stop_capture(&doc, &payload).unwrap(),
+            reopen_terminal_cycle_before_stop_capture(&doc, &payload)
+                .unwrap()
+                .0,
             StopCaptureReopen::Reopened
         );
 

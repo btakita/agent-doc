@@ -2078,6 +2078,63 @@ mod tests {
         );
     }
 
+    /// `#queueeffectidentity` (api.md, 2026-10-30): claiming a newly-added
+    /// bare nested command must not project the attempt onto its older effect
+    /// siblings.
+    #[test]
+    fn claiming_a_new_duplicate_nested_effect_does_not_start_prior_occurrences() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = "https://github.com/haiven-dev/haiven-contracts/pull/179";
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            &format!(
+                "- {parent}\n  - #address ⟦effect:1⟧\n  - #address ⟦effect:3⟧\n  - #address\n"
+            ),
+        );
+        let owner = "subagent:contracts_pr179_address_latest";
+        let (_, claim) =
+            crate::queue_claim::claim_with_session(&doc, "#address", owner, 600, None).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            &claim.item_text,
+            owner,
+            "worker:address-latest",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(
+            projection
+                .target_content
+                .contains("  - 📥 #address ⟦effect:1⟧\n"),
+            "the first prior effect stays pending:\n{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("  - 📥 #address ⟦effect:3⟧\n"),
+            "the second prior effect stays pending:\n{}",
+            projection.target_content
+        );
+        assert!(
+            projection.target_content.contains(&format!(
+                "  - 🚧 [#{owner}#{}] #address\n",
+                claim.generation
+            )),
+            "only the newly-added bare occurrence is running:\n{}",
+            projection.target_content
+        );
+        assert_eq!(
+            projection.target_content.matches("🚧 [#").count(),
+            1,
+            "one claim attempt must project onto one nested effect"
+        );
+    }
+
     #[test]
     fn claim_projection_marks_only_the_exact_duplicate_effect() {
         let dir = tempfile::tempdir().unwrap();

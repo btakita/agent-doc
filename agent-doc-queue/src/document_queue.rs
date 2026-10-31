@@ -3411,11 +3411,26 @@ pub fn prompt_index_for_text(entries: &[QueueEntry], prompt_text: &str) -> Optio
 /// a struck child still echoes the operator's item. A multi-line leaf keeps
 /// every line after the first unchanged.
 pub fn nest_vector_at(entries: &[QueueEntry], index: usize, item_text: &str) -> Option<String> {
+    nest_vector_at_with_work(entries, index, &nest_row_work_text(item_text))
+}
+
+/// Nest vector used by claim/receipt identity (`#queueeffectidentity`).
+///
+/// Structural queue comparisons intentionally erase `⟦effect:N⟧` through
+/// [`nest_vector_at`]. A claim is a row effect, however, so its lineage must
+/// retain that suffix or repeated nested commands collapse onto one attempt.
+fn nest_vector_claim_at(entries: &[QueueEntry], index: usize, item_text: &str) -> Option<String> {
+    let unstruck = unwrap_nest_strike(item_text.trim());
+    let projected = agent_doc_element_queue::strip_attempt_projection_prefix(unstruck);
+    let work = strip_priority_markers(unwrap_nest_strike(projected.trim()));
+    nest_vector_at_with_work(entries, index, &work)
+}
+
+fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -> Option<String> {
     let own_indent = entries.get(index).and_then(entry_indent)?;
     if own_indent == 0 {
         return None;
     }
-    let shown = nest_row_work_text(item_text);
     if shown.trim().is_empty() {
         return None;
     }
@@ -3440,7 +3455,7 @@ pub fn nest_vector_at(entries: &[QueueEntry], index: usize, item_text: &str) -> 
         return None;
     }
     labels.reverse();
-    Some(prefix_nest_vector(&labels.join(": "), &shown))
+    Some(prefix_nest_vector(&labels.join(": "), shown))
 }
 
 /// Nest vector of the row whose work text is `prompt_text`.
@@ -3498,7 +3513,7 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     if head.is_empty() {
         return Some(bare);
     }
-    Some(nest_vector_at(entries, index, head).unwrap_or(bare))
+    Some(nest_vector_claim_at(entries, index, &bare).unwrap_or(bare))
 }
 
 /// Whether row `index` is the live head named by `head_text`.
@@ -3526,13 +3541,12 @@ pub fn row_matches_submitted_head_text(
     if row_matches_head_text(entries, index, head_text) {
         return true;
     }
-    if !entry_is_group_parent(entries, index) {
-        return false;
-    }
     let Some(prompt) = entries.get(index).and_then(prompt_of) else {
         return false;
     };
     let identity = strip_in_progress_marker(prompt.text.trim());
+    // Submission/authorization treats the effect annotation as metadata;
+    // durable claim identity remains exact in `lineage_claim_text`.
     nest_vector_at(entries, index, &identity)
         .is_some_and(|lineage| same_prompt(&lineage, head_text))
 }

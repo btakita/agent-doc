@@ -736,6 +736,28 @@ fn located_prompt(
             return Some((entries.clone(), index));
         }
     }
+    // Submission and authorization historically identify a nested leaf with
+    // an effect-free nest vector. Keep that compatibility lookup separate
+    // from the exact claim-lineage pass above: claim/receipt projection must
+    // distinguish repeated `⟦effect:N⟧` rows, while authorization treats the
+    // annotation as inert metadata.
+    for entries in &parsed {
+        if let Some(index) = entries.iter().enumerate().find_map(|(index, entry)| {
+            if !matches!(entry, crate::document_queue::QueueEntry::Prompt(_))
+                || crate::document_queue::entry_is_group_parent(entries, index)
+            {
+                return None;
+            }
+            crate::document_queue::row_matches_submitted_head_text(
+                entries,
+                index,
+                prompt_text,
+            )
+            .then_some(index)
+        }) {
+            return Some((entries.clone(), index));
+        }
+    }
     for entries in parsed {
         if let Some(index) = crate::document_queue::prompt_index_for_text(&entries, prompt_text) {
             return Some((entries, index));

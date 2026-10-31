@@ -6477,6 +6477,17 @@ pub fn run_queue_maintenance_with_coin_gate(
                 _ => None,
             })
             .collect();
+        // `#qftbklgclaimed`: lifecycle projection is eventually consistent with
+        // the claim ledger. In the claim -> worker-binding window the row may
+        // still be bare, so classification alone cannot protect it from this
+        // semantic strike. Fence Claim/Running attempts from the strike using
+        // the authoritative ledger; Reported/Lost attempts remain eligible and
+        // are retired with the accepted strike by `#strikeretires` below.
+        let in_flight_claimed =
+            agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(
+                file,
+                &current_content,
+            );
         match agent_doc_memory_io::session::semantic_queue_strike_matches(
             file,
             None,
@@ -6509,6 +6520,7 @@ pub fn run_queue_maintenance_with_coin_gate(
                             // `deploy` request gets struck with no action taken.
                             if !agent_doc_queue::queue_continuation::is_recurring_imperative_head(&p.text)
                                 && queue_prompt_text_is_free_text(&current_content, &p.text)
+                                && !in_flight_claimed.claims(&p.text)
                                 && committed_free_text.contains(&gate_norm(&p.text)) =>
                         {
                             match by_norm.get(&gate_norm(&p.text)) {
@@ -20846,6 +20858,78 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         let readded = updated.replace(&struck, &format!("{struck}- {item}\n"));
         assert_readded_row_projects_pending(&doc, &readded, item);
+    }
+
+    /// `#qftbklgclaimed`: a claim is authoritative before its lifecycle marker
+    /// reaches the document. The semantic done/backlog strike must consult the
+    /// ledger, or it can strike the still-bare row between `queue claim` and
+    /// `queue claim-start`, leaving the live claim to reopen and re-serve it.
+    #[test]
+    fn backlog_strike_leaves_bare_claimed_row_before_worker_binding() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join("tasks.done.md"),
+            "- 2026-06-07 [#jbcache] Fix JB File Cache Conflict dialogs on every save\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let item = "Fix JB File Cache Conflict dialogs on every save";
+        let owner = "subagent:jbcache";
+        let content = format!(
+            concat!(
+                "---\n",
+                "agent_doc_session: test\n",
+                "agent_doc_format: template\n",
+                "agent_doc_write: crdt\n",
+                "queue: start\n",
+                "---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: unrelated — opus-4-8\n\n",
+                "An answer about a different topic.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue priority go -->\n",
+                "- {item}\n",
+                "- do [#stillopen]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:backlog priority queue -->\n",
+                "- [ ] [#stillopen] unrelated open work item\n",
+                "<!-- /agent:backlog -->\n\n",
+                "<!-- agent:done archive=tasks.done.md -->\n",
+                "<!-- /agent:done -->\n",
+            ),
+            item = item,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, item, owner, 3600).unwrap();
+
+        // Reproduce the race: the durable claim exists, but the controller has
+        // not yet painted its `🟡 [#owner#generation]` projection into the row.
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            !updated.contains("#qftbklgstrike") && !updated.contains(&format!("~~{item}")),
+            "the unbound claimed row must not be semantically struck:\n{updated}"
+        );
+        assert!(
+            updated.contains(item),
+            "the claimed row remains live for worker binding:\n{updated}"
+        );
+        assert_eq!(claim_texts(&doc), vec![item.to_string()]);
     }
 
     /// `#qftbklgclaimed` (#decisionbacklogstrike): the backlog/done strike

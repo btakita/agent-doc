@@ -3234,49 +3234,63 @@ fn auto_queue_continuation_response(
         agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
             file, &content,
         )?;
-    if coordinator_drain.phase
-        == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
-    {
+    let stop_action_items = coordinator_drain
+        .action_items()
+        // Ordinary pending work in this document's inline queue remains owned
+        // by the mature selector/replay path below. The sync machine still
+        // classifies it as action debt; Stop must not preempt response-target
+        // recognition, `/clear`, repeated-head recovery, or one-head-at-a-time
+        // continuation. Related-document inline work and every cleanup state
+        // remain terminal-gate debt here.
+        .filter(|item| {
+            !(item.document_scope
+                == agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current
+                && item.execution_mode
+                    == agent_doc_queue::queue_sync_payload::QueueExecutionMode::MainInline
+                && item.lifecycle
+                    == agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::Pending)
+        })
+        .collect::<Vec<_>>();
+    if !stop_action_items.is_empty() || !coordinator_drain.snapshot.scan_errors.is_empty() {
+        use agent_doc_queue::queue_sync_payload::QueueSyncOperation;
+
         let snapshot = &coordinator_drain.snapshot;
-        let pending = snapshot
-            .pending_dispatch
-            .iter()
-            .map(|item| item.item.as_str())
-            .collect::<Vec<_>>();
-        let claimed = snapshot
-            .claimed_unstarted
-            .iter()
-            .map(|item| {
-                (
-                    item.item.as_str(),
-                    item.owner.as_deref().unwrap_or("unknown"),
-                )
-            })
-            .collect::<Vec<_>>();
-        let lost = snapshot
-            .lost
-            .iter()
-            .map(|item| item.item.as_str())
-            .collect::<Vec<_>>();
-        let reported = snapshot
-            .reported
-            .iter()
-            .map(|item| item.item.as_str())
-            .collect::<Vec<_>>();
+        let describe = |operation| {
+            stop_action_items
+                .iter()
+                .filter(|item| item.operation == operation)
+                .map(|item| {
+                    (
+                        item.document_path.as_str(),
+                        item.queue_id.as_str(),
+                        item.item.as_str(),
+                        item.owner.as_deref(),
+                        item.worker_id.as_deref(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let dispatch = describe(QueueSyncOperation::Dispatch);
+        let inline = describe(QueueSyncOperation::InlineExecuteThenReconcile);
+        let forward = describe(QueueSyncOperation::ForwardSteering);
+        let integrate = describe(QueueSyncOperation::IntegrateClose);
+        let recover = describe(QueueSyncOperation::RecoverRequeue);
+        let reconcile = describe(QueueSyncOperation::Reconcile);
         let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
-        for item in &snapshot.pending_dispatch {
-            *component_counts
-                .entry(item.queue_id.as_deref().unwrap_or("unknown").to_string())
-                .or_default() += 1;
+        for item in &stop_action_items {
+            *component_counts.entry(item.queue_id.clone()).or_default() += 1;
         }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "codex_stop_coordinator_drain_blocked pending_dispatch={} claimed_unstarted={} lost={} reported={} running={} components={:?} action=continue (#coordinatordrain)",
-                pending.len(),
-                claimed.len(),
-                lost.len(),
-                reported.len(),
+                "codex_stop_coordinator_drain_blocked dispatch={} inline={} forward={} integrate={} recover={} reconcile={} scan_errors={} running={} components={:?} action=continue (#coordinatordrain)",
+                dispatch.len(),
+                inline.len(),
+                forward.len(),
+                integrate.len(),
+                recover.len(),
+                reconcile.len(),
+                snapshot.scan_errors.len(),
                 snapshot.running.len(),
                 component_counts,
             ),
@@ -3284,9 +3298,10 @@ fn auto_queue_continuation_response(
         return Ok(Some(StopResponse::ContinueTurn {
             class: StopContinuationClass::Queue,
             reason: format!(
-                "agent-doc Stop hook refused terminal success for {file}: the FULL document queue still has coordinator-owned work. Eligible pending rows by component {components:?}: {pending:?}. Claimed but not started attempts: {claimed:?}. Lost attempts to recover or requeue: {lost:?}. Reported worker results to integrate and close: {reported:?}. The coordinator must claim each eligible row BEFORE native spawn, immediately run `agent-doc queue start {file} --item <item> --worker <concrete-worker-id>` after spawn, recover/requeue lost attempts, and integrate/report-complete/close reported attempts. Forward steering to an existing running owner where applicable. Workers never self-claim or self-close the session queue. Do not send the final answer while any of these sets is non-empty.",
+                "agent-doc Stop hook refused terminal success for {file}: the FULL project queue sync still has coordinator-owned work by component {components:?}. Delegated dispatch/start debt: {dispatch:?}. Coordinator-inline execute/reconcile debt (do NOT native-spawn): {inline:?}. Steering to forward to existing owners: {forward:?}. Worker results to integrate/close: {integrate:?}. Lost attempts to recover/requeue: {recover:?}. Unknown/projection debt to reconcile: {reconcile:?}. Fail-closed document scan errors: {scan_errors:?}. For delegated work the coordinator claims BEFORE native spawn and immediately binds the concrete worker with queue start; for queues without `subagents`, the main agent executes inline and also reconciles lifecycle/document state. Workers never self-claim or self-close the session queue. Do not send the final answer while any action or unexplained sync debt remains.",
                 file = file.display(),
                 components = component_counts,
+                scan_errors = snapshot.scan_errors,
             ),
         }));
     }
@@ -6300,6 +6315,17 @@ queue: go
 <!-- /agent:run -->
 "#;
         fs::write(&doc, content).unwrap();
+        let sibling = dir.path().join("sibling.md");
+        fs::write(
+            &sibling,
+            concat!(
+                "---\nagent_doc_session: sibling\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:run id=related -->\n",
+                "- do [#d]\n",
+                "<!-- /agent:run -->\n",
+            ),
+        )
+        .unwrap();
         let (_, claim) =
             agent_doc_queue_io::queue_claim::claim(&doc, "#a", "subagent:a", 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
@@ -6348,8 +6374,11 @@ queue: go
         };
         assert!(reason.contains("do [#b]"), "{reason}");
         assert!(reason.contains("do [#c]"), "{reason}");
+        assert!(reason.contains("do [#d]"), "{reason}");
         assert!(reason.contains("\"other\": 1"), "{reason}");
         assert!(reason.contains("\"inactive\": 1"), "{reason}");
+        assert!(reason.contains("\"related\": 1"), "{reason}");
+        assert!(reason.contains("do NOT native-spawn"), "{reason}");
         assert!(
             reason.contains("Workers never self-claim or self-close"),
             "{reason}"

@@ -1,70 +1,36 @@
 //! Document-wide coordinator drain policy (`#coordinatordrain`).
 //!
 //! A coordinator is allowed to yield only when every live queue item is either
-//! owned by a running worker, explicitly operator-gated, or terminal.  The
-//! policy deliberately consumes a snapshot of *every* `agent:run` component;
-//! selecting one active queue is an execution concern and must never hide work
-//! at a terminal boundary.
+//! waiting on a running/blocked attempt, explicitly operator-gated, or
+//! terminal. The state machine consumes the same project-wide, post-repair
+//! [`QueueSyncPayload`] preflight emits: selecting one active queue is an
+//! execution concern and must never hide work at a terminal boundary.
 //! Background execution keeps the main agent responsive; it does not transfer
 //! operator conversation, steering, integration, or document reconciliation
 //! ownership away from the coordinator.
 
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 
-/// One queue obligation, with its component provenance when available.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CoordinatorQueueItem {
-    pub item: String,
-    pub queue_id: Option<String>,
-    pub owner: Option<String>,
-    pub worker_id: Option<String>,
-}
+use crate::queue_sync_payload::{QueueSyncOperation, QueueSyncPayload};
 
-impl CoordinatorQueueItem {
-    pub fn pending(item: impl Into<String>, queue_id: Option<impl Into<String>>) -> Self {
-        Self {
-            item: item.into(),
-            queue_id: queue_id.map(Into::into),
-            owner: None,
-            worker_id: None,
-        }
-    }
-}
+/// Authoritative project queue observation supplied by preflight or a terminal
+/// gate. It includes the current document, inactive runs, related session
+/// documents, and fail-closed scan errors.
+pub type CoordinatorDrainSnapshot = QueueSyncPayload;
 
-/// Authoritative document observation supplied by the I/O adapter.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CoordinatorDrainSnapshot {
-    /// Eligible, unclaimed rows. The coordinator must claim, spawn, then start
-    /// every row in this set before it may yield.
-    pub pending_dispatch: Vec<CoordinatorQueueItem>,
-    /// Claims that have not yet been bound to a concrete harness worker.
-    pub claimed_unstarted: Vec<CoordinatorQueueItem>,
-    /// Claims with positive worker-binding evidence.
-    pub running: Vec<CoordinatorQueueItem>,
-    /// Worker reports awaiting integration and queue closeout.
-    pub reported: Vec<CoordinatorQueueItem>,
-    /// Lost attempts requiring recovery or a new fenced dispatch generation.
-    pub lost: Vec<CoordinatorQueueItem>,
-    /// Live rows that explicitly require operator action.
-    pub operator_gated_count: usize,
-}
-
-/// Exhaustive coordinator boundary state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoordinatorDrainPhase {
-    /// Claim/spawn/start, recovery, or report integration is still required in
-    /// the coordinator turn. A Stop boundary must fail closed.
+    /// Dispatch/start, inline execution, steering delivery, recovery, report
+    /// integration, or reconciliation is still required. Stop fails closed.
     ActionRequired,
-    /// All remaining agent-owned rows have concrete running workers.
+    /// All remaining non-operator rows are explicitly waiting.
     WaitingForWorkers,
     /// Only explicit operator gates remain.
     OperatorBlocked,
-    /// No live queue work remains.
+    /// No live queue work and no scan debt remain.
     Terminal,
 }
 
-/// State-machine output retained as one value so every boundary observes the
-/// same full work set instead of independently choosing a singular head.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoordinatorDrainDecision {
     pub phase: CoordinatorDrainPhase,
@@ -80,8 +46,20 @@ impl Default for CoordinatorDrainDecision {
     }
 }
 
+fn operation_requires_action(operation: QueueSyncOperation) -> bool {
+    matches!(
+        operation,
+        QueueSyncOperation::Dispatch
+            | QueueSyncOperation::InlineExecuteThenReconcile
+            | QueueSyncOperation::ForwardSteering
+            | QueueSyncOperation::IntegrateClose
+            | QueueSyncOperation::RecoverRequeue
+            | QueueSyncOperation::Reconcile
+    )
+}
+
 impl CoordinatorDrainDecision {
-    /// A coordinator may yield, but may report document-wide completion only
+    /// A coordinator may yield, but may report project-wide completion only
     /// for [`CoordinatorDrainPhase::Terminal`].
     pub fn may_yield(&self) -> bool {
         self.phase != CoordinatorDrainPhase::ActionRequired
@@ -91,28 +69,36 @@ impl CoordinatorDrainDecision {
         self.phase == CoordinatorDrainPhase::Terminal
     }
 
+    pub fn action_items(&self) -> impl Iterator<Item = &crate::queue_sync_payload::QueueSyncItem> {
+        self.snapshot
+            .items()
+            .filter(|item| operation_requires_action(item.operation))
+    }
+
     pub fn required_action_count(&self) -> usize {
-        self.snapshot.pending_dispatch.len()
-            + self.snapshot.claimed_unstarted.len()
-            + self.snapshot.reported.len()
-            + self.snapshot.lost.len()
+        self.snapshot.scan_errors.len() + self.action_items().count()
     }
 }
 
-/// Pure exhaustive transition for a new document observation.
 pub fn observe_coordinator_drain(
     _current: &CoordinatorDrainDecision,
     snapshot: &CoordinatorDrainSnapshot,
 ) -> Option<CoordinatorDrainDecision> {
-    let action_required = !snapshot.pending_dispatch.is_empty()
-        || !snapshot.claimed_unstarted.is_empty()
-        || !snapshot.reported.is_empty()
-        || !snapshot.lost.is_empty();
+    let action_required = !snapshot.scan_errors.is_empty()
+        || snapshot
+            .items()
+            .any(|item| operation_requires_action(item.operation));
+    let waiting = snapshot
+        .items()
+        .any(|item| item.operation == QueueSyncOperation::Wait);
+    let operator_blocked = snapshot
+        .items()
+        .any(|item| item.operation == QueueSyncOperation::OperatorGate);
     let phase = if action_required {
         CoordinatorDrainPhase::ActionRequired
-    } else if !snapshot.running.is_empty() {
+    } else if waiting {
         CoordinatorDrainPhase::WaitingForWorkers
-    } else if snapshot.operator_gated_count > 0 {
+    } else if operator_blocked {
         CoordinatorDrainPhase::OperatorBlocked
     } else {
         CoordinatorDrainPhase::Terminal
@@ -123,10 +109,9 @@ pub fn observe_coordinator_drain(
     })
 }
 
-/// Lazily-backed state machine joined to a document scope. The document text,
-/// claim ledger, and worker receipts are sources; this is their computed policy
-/// boundary. One-shot adapters create a bounded document scope per authoritative
-/// read, while the controller can retain the same machine across invalidations.
+/// Lazily-backed state machine joined to a document scope. Document text,
+/// claim ledger, worker receipts, and related-document discovery are sources;
+/// this is their computed policy boundary.
 pub struct CoordinatorDrainMachine {
     ctx: ThreadSafeContext,
     machine: ThreadSafeStateMachine<CoordinatorDrainDecision, CoordinatorDrainSnapshot>,
@@ -152,23 +137,77 @@ impl CoordinatorDrainMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::queue_sync_payload::{
+        QueueCoordinatorRole, QueueExecutionMode, QueueExecutorRole, QueueSyncDocumentScope,
+        QueueSyncItem, QueueSyncLifecycle, QueueSyncScanError,
+    };
 
-    fn item(text: &str, queue: &str) -> CoordinatorQueueItem {
-        CoordinatorQueueItem::pending(text, Some(queue))
+    fn item(
+        text: &str,
+        queue: &str,
+        lifecycle: QueueSyncLifecycle,
+        operation: QueueSyncOperation,
+        execution_mode: QueueExecutionMode,
+    ) -> QueueSyncItem {
+        let (coordinator_role, executor_role) = match execution_mode {
+            QueueExecutionMode::SubagentDispatch => (
+                QueueCoordinatorRole::DispatchAndCoordinate,
+                QueueExecutorRole::Subagent,
+            ),
+            QueueExecutionMode::MainInline => (
+                QueueCoordinatorRole::ExecuteAndCoordinate,
+                QueueExecutorRole::MainAgent,
+            ),
+        };
+        QueueSyncItem {
+            document_path: "tasks/bugs.md".into(),
+            document_scope: QueueSyncDocumentScope::Current,
+            queue_id: queue.into(),
+            component_occurrence: 0,
+            item: text.into(),
+            lifecycle,
+            operation,
+            execution_mode,
+            coordinator_role,
+            executor_role,
+            incomplete_since_previous_turn: true,
+            owner: None,
+            worker_id: None,
+            generation: None,
+        }
     }
 
     #[test]
     fn running_head_does_not_hide_other_pending_heads() {
         let scope = agent_doc_state_scope::DocumentScope::new();
         let machine = CoordinatorDrainMachine::new_in(&scope);
+        let mut running = item(
+            "do [#a]",
+            "active",
+            QueueSyncLifecycle::Running,
+            QueueSyncOperation::Wait,
+            QueueExecutionMode::SubagentDispatch,
+        );
+        running.owner = Some("subagent:a".into());
+        running.worker_id = Some("worker-a".into());
         let decision = machine.observe(CoordinatorDrainSnapshot {
-            pending_dispatch: vec![item("do [#b]", "other"), item("do [#c]", "inactive")],
-            running: vec![CoordinatorQueueItem {
-                item: "do [#a]".into(),
-                queue_id: Some("active".into()),
-                owner: Some("subagent:a".into()),
-                worker_id: Some("worker-a".into()),
-            }],
+            pending: vec![
+                item(
+                    "do [#b]",
+                    "other",
+                    QueueSyncLifecycle::Pending,
+                    QueueSyncOperation::Dispatch,
+                    QueueExecutionMode::SubagentDispatch,
+                ),
+                item(
+                    "do [#c]",
+                    "inactive",
+                    QueueSyncLifecycle::Pending,
+                    QueueSyncOperation::Dispatch,
+                    QueueExecutionMode::SubagentDispatch,
+                ),
+            ],
+            running: vec![running],
             ..Default::default()
         });
 
@@ -178,42 +217,99 @@ mod tests {
         assert_eq!(
             decision
                 .snapshot
-                .pending_dispatch
+                .pending
                 .iter()
-                .filter_map(|item| item.queue_id.as_deref())
+                .map(|item| item.queue_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["other", "inactive"]
         );
     }
 
     #[test]
-    fn claimed_lost_and_reported_attempts_all_fail_closed() {
-        for snapshot in [
-            CoordinatorDrainSnapshot {
-                claimed_unstarted: vec![item("do [#claim]", "run")],
-                ..Default::default()
-            },
-            CoordinatorDrainSnapshot {
-                lost: vec![item("do [#lost]", "run")],
-                ..Default::default()
-            },
-            CoordinatorDrainSnapshot {
-                reported: vec![item("do [#report]", "run")],
-                ..Default::default()
-            },
+    fn every_cleanup_operation_and_scan_error_fails_closed() {
+        for (lifecycle, operation) in [
+            (
+                QueueSyncLifecycle::ClaimedUnstarted,
+                QueueSyncOperation::Dispatch,
+            ),
+            (
+                QueueSyncLifecycle::ReportedCheckmark,
+                QueueSyncOperation::IntegrateClose,
+            ),
+            (QueueSyncLifecycle::Lost, QueueSyncOperation::RecoverRequeue),
+            (
+                QueueSyncLifecycle::ReconcileUnknown,
+                QueueSyncOperation::Reconcile,
+            ),
+            (
+                QueueSyncLifecycle::Running,
+                QueueSyncOperation::ForwardSteering,
+            ),
         ] {
             let scope = agent_doc_state_scope::DocumentScope::new();
+            let mut snapshot = CoordinatorDrainSnapshot::default();
+            let row = item(
+                "do [#debt]",
+                "run",
+                lifecycle,
+                operation,
+                QueueExecutionMode::SubagentDispatch,
+            );
+            match lifecycle {
+                QueueSyncLifecycle::ClaimedUnstarted => snapshot.claimed_unstarted.push(row),
+                QueueSyncLifecycle::ReportedCheckmark => snapshot.reported_checkmark.push(row),
+                QueueSyncLifecycle::Lost => snapshot.lost.push(row),
+                QueueSyncLifecycle::ReconcileUnknown => snapshot.reconcile_unknown.push(row),
+                QueueSyncLifecycle::Running => snapshot.running.push(row),
+                _ => unreachable!(),
+            }
             let decision = CoordinatorDrainMachine::new_in(&scope).observe(snapshot);
             assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
             assert!(!decision.may_yield());
         }
+
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let decision = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+            scan_errors: vec![QueueSyncScanError {
+                document_path: "tasks/unreadable.md".into(),
+                detail: "read failed".into(),
+                operation: QueueSyncOperation::Reconcile,
+            }],
+            ..Default::default()
+        });
+        assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
     }
 
     #[test]
-    fn only_running_or_operator_gated_work_may_yield_without_claiming_completion() {
+    fn inline_debt_fails_closed_without_requesting_a_worker() {
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let inline = item(
+            "do [#inline]",
+            "main",
+            QueueSyncLifecycle::Pending,
+            QueueSyncOperation::InlineExecuteThenReconcile,
+            QueueExecutionMode::MainInline,
+        );
+        let decision = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+            pending: vec![inline.clone()],
+            ..Default::default()
+        });
+        assert_eq!(inline.executor_role, QueueExecutorRole::MainAgent);
+        assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
+        assert_eq!(decision.required_action_count(), 1);
+    }
+
+    #[test]
+    fn only_wait_or_operator_gated_work_may_yield_without_claiming_completion() {
         let scope = agent_doc_state_scope::DocumentScope::new();
         let running = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
-            running: vec![item("do [#a]", "run")],
+            running: vec![item(
+                "do [#a]",
+                "run",
+                QueueSyncLifecycle::Running,
+                QueueSyncOperation::Wait,
+                QueueExecutionMode::SubagentDispatch,
+            )],
             ..Default::default()
         });
         assert_eq!(running.phase, CoordinatorDrainPhase::WaitingForWorkers);
@@ -222,7 +318,13 @@ mod tests {
 
         let scope = agent_doc_state_scope::DocumentScope::new();
         let blocked = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
-            operator_gated_count: 1,
+            operator_gated: vec![item(
+                "approve [#a]",
+                "run",
+                QueueSyncLifecycle::OperatorGated,
+                QueueSyncOperation::OperatorGate,
+                QueueExecutionMode::MainInline,
+            )],
             ..Default::default()
         });
         assert_eq!(blocked.phase, CoordinatorDrainPhase::OperatorBlocked);

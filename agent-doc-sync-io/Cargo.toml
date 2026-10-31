@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-sync-io"
-version = "0.35.563"
+version = "0.35.564"
 edition = "2024"
 description = "Sync lock and process-effect adapters for agent-doc"
 license = "Apache-2.0"
@@ -11,44 +11,44 @@ publish = false
 name = "agent_doc_sync_io"
 
 [dependencies]
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.563" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.564" }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.563" }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.563" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.563" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.563" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.563" }
-agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.563" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.563" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.563" }
-agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.563" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.563" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.563" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.563" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.563" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.563" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.563" }
-agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.35.563" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.563" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.563" }
-agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.35.563" }
-agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.563" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.563" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.563" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.563" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.563" }
-agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.563" }
-agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.563" }
-agent-doc-sync = { path = "../agent-doc-sync", version = "0.35.563" }
-agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.563" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.563" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.563" }
-agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.563" }
-agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.563" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.564" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.564" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.564" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.564" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.564" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.564" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.564" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.564" }
+agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.564" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.564" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.564" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.564" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.564" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.564" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.564" }
+agent-doc-process-owner-io = { path = "../agent-doc-process-owner-io", version = "0.35.564" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.564" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.564" }
+agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.35.564" }
+agent-doc-session-actor-io = { path = "../agent-doc-session-actor-io", version = "0.35.564" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.564" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.564" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.564" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.564" }
+agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.564" }
+agent-doc-supervisor-process = { path = "../agent-doc-supervisor-process", version = "0.35.564" }
+agent-doc-sync = { path = "../agent-doc-sync", version = "0.35.564" }
+agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.564" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.564" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.564" }
+agent-doc-turn-status-io = { path = "../agent-doc-turn-status-io", version = "0.35.564" }
+agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.564" }
 anyhow = "1"
 libc = "0.2"
 lazily = "0.61.0"
@@ -65,6 +65,6 @@ uuid = { version = "1", features = ["v4"] }
 # bindings the way the workspace run does. Without this feature the test build
 # asks a real controller for the binding instead of the durable store, so a
 # package-scoped run and a `--workspace` run exercised different code.
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.563", features = ["test-support"] }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.564", features = ["test-support"] }
 portable-pty = "0.9"
 tempfile = "3"

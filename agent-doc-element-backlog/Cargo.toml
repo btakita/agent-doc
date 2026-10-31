@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-element-backlog"
-version = "0.35.563"
+version = "0.35.564"
 edition = "2024"
 description = "Backlog element model and descriptor for agent-doc"
 license = "Apache-2.0"
@@ -11,10 +11,10 @@ publish = false
 name = "agent_doc_element_backlog"
 
 [dependencies]
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.563" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.563" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.563" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.563" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.564" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.564" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.564" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.564" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"

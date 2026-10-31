@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.564
+
+- **Managed List work now stays completion-seeking through every lifecycle state.** Selected incomplete items must either reach their authorized delivery boundary or retain explicit evidence, the exact blocker, its owner, and the next action; claims, reports, and gates are no longer mistaken for completion.
+- **Executable leaves keep terminal state while structural parents derive lazily.** Completed or reported leaves are not reopened automatically, parents strike only when every descendant is terminal, and adding or recovering a live child reopens only the structural parent.
+- **Reported completion evidence survives rekeying and closes before fresh dispatch.** A reported attempt cannot time out into Lost, same-generation rekeys preserve its evidence, and coordinators must integrate and persist verified reports at the next safe boundary before starting new sibling work.
+- **Managed-state repair is evidence-based instead of age-based.** `agent-doc queue repair-managed-state` identifies and repairs structurally proven orphan or stuck projections while preserving operator-owned, skipped, runnable, and unresolved state.
+- **Structured reported answers and semantic queue projection agree.** Queue prompt/response pairing closes answered free-text reports, runnable annotated rows are not semantically struck, and stale parents with live or reported descendants remain open.
+
 ## 0.35.563
 
 - **Reported queue work reliably opens a coordinator turn and stays actionable through closeout.** Reported, lost, reconciliation, and other continuation heads are admitted even when no fresh row is drainable; only a real pause emits pause guidance; and worker handoffs carry focused completion evidence instead of being mistaken for finished coordinator work.

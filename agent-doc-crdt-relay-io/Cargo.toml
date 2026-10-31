@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-crdt-relay-io"
-version = "0.35.563"
+version = "0.35.564"
 edition = "2024"
 description = "CRDT relay host IO boundary for agent-doc"
 license = "Apache-2.0"
@@ -12,27 +12,27 @@ name = "agent_doc_crdt_relay_io"
 doctest = false
 
 [dependencies]
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.563" }
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.563" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.563" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.563" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.563" }
-agent-doc-editor-transport-health-io = { path = "../agent-doc-editor-transport-health-io", version = "0.35.563" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.563" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.563" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.563" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.563" }
-agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.563" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.563" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.563" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.563" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.563" }
-agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.563" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.563" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.563" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.563" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.563" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.563" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.564" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.564" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.564" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.564" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.564" }
+agent-doc-editor-transport-health-io = { path = "../agent-doc-editor-transport-health-io", version = "0.35.564" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.564" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.564" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.564" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.564" }
+agent-doc-ipc-protocol = { path = "../agent-doc-ipc-protocol", version = "0.35.564" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.564" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.564" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.564" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.564" }
+agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.564" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.564" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.564" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.564" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.564" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.564" }
 anyhow = "1"
 lazily = { version = "0.61.0", features = ["ipc", "durable-sqlite"] }
 # `#relaylockpoison`: the relay registries use parking_lot, not std::sync::Mutex.
@@ -50,6 +50,6 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 # The editor-attach SimWorld (`src/tests/editor_attach_simworld.rs`) asks the
 # native `registration_projection` derivation the JetBrains plugin asks.
-agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.563" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.564" }
 rusqlite = { version = "0.40", features = ["bundled"] }
 tempfile = "3"

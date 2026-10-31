@@ -2,6 +2,15 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.563
+
+- **Reported queue work reliably opens a coordinator turn and stays actionable through closeout.** Reported, lost, reconciliation, and other continuation heads are admitted even when no fresh row is drainable; only a real pause emits pause guidance; and worker handoffs carry focused completion evidence instead of being mistaken for finished coordinator work.
+- **Repeated and nested queue effects keep their own identity.** Same-cycle replay cannot steal authorship, duplicate prompts and nested claims remain isolated, and operator-authored repeat prompts survive response processing.
+- **Completion markers and backlinks are stable.** Reported markers retain their lifecycle through projection, completion responses normalize without consuming inert component evidence, and addressed prompts link to the response that closed them without marker flicker.
+- **Claims and concurrent document edits no longer cross wires.** Claimed heads are fenced from semantic strike, keyed queue edits stay isolated in the CRDT, and reservation races cannot let one worker consume another row.
+- **Editor-start and session recovery paths are more dependable.** Pane commands start agent-doc directly, reopened surfaces synchronize without an editor-authority cycle, clear-session retries after replica reload, and nested queue slots survive merges and rewrites.
+- **Repair guidance now reflects the operation that can actually fix the document.** Route diagnostics direct broken component boundaries to authoritative editor/HEAD restoration instead of prescribing an incapable generic repair.
+
 ## 0.35.562
 
 - **Route no longer prescribes an incapable repair for broken component markers.** A missing `agent:run` close now produces the shared line-specific editor/HEAD restoration guidance instead of claiming generic `agent-doc repair` can reconstruct an arbitrary deleted boundary.

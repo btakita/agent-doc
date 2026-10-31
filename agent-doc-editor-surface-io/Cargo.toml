@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-editor-surface-io"
-version = "0.35.562"
+version = "0.35.563"
 edition = "2024"
 description = "Project-scoped editor-surface graphs and their tmux consequence for agent-doc"
 license = "Apache-2.0"
@@ -11,12 +11,12 @@ publish = false
 name = "agent_doc_editor_surface_io"
 
 [dependencies]
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.562" }
-agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.562" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.562" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.562" }
-agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.562" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.562" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.563" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.563" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.563" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.563" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.563" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.563" }
 anyhow = "1"
 lazily = { version = "0.61.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

@@ -3,7 +3,7 @@
 //!
 //! A background subagent dispatched for a `queue_subagent_dispatch` item sees
 //! only the prompt its coordinator writes. Without help it gets none of the
-//! operator's authorization: the queue's `preset=` expansion, the item's own
+//! operator's authorization: the queue's `preset=` symbol lookup, the item's own
 //! directive text, or the backlog (or Todo) text an `do [#id]` head points at. It then
 //! either refuses outward actions (commit, push) the operator authorized, or the
 //! coordinator paraphrases the authorization by hand.
@@ -581,7 +581,7 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
 /// (or when the item text is the whole authorization). An unresolved preset
 /// must not inherit example outward actions from this text.
 pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
-    "The queue item and resolved preset bodies above are current operator authorization for the ",
+    "The queue item and resolved preset lookup values above are current operator authorization for the ",
     "work and actions they name. If they say `go`, `push`, `publish`, `commit + push`, or carry an ",
     "authorizing preset such as `#auth`, do the work without asking the operator to repeat those ",
     "words, reconfirm, or invoke the preset again. This task authorization does not itself grant ",
@@ -669,17 +669,38 @@ fn render_preamble(
             quote(&tracked.text)
         ));
     }
-    for preset in auth.presets.iter().filter(|p| p.resolved) {
+    let resolved_presets = auth
+        .presets
+        .iter()
+        .filter(|preset| preset.resolved)
+        .collect::<Vec<_>>();
+    if !resolved_presets.is_empty() {
+        out.push_str(
+            "\nOperator-authorized prompt preset lookup table (symbol keys map to effective values; symbols remain unexpanded):\n",
+        );
+    }
+    for preset in &resolved_presets {
         let origin = match preset.source {
             PresetSource::QueueAttr => "queue preset",
             PresetSource::QueueLine => "queue preset line",
             PresetSource::Item => "item preset",
         };
         out.push_str(&format!(
-            "\nOperator authorization, {origin} `{}` (effective value):\n{}\n",
-            preset.name,
-            quote(preset.body.as_deref().unwrap_or_default())
+            "  # source: {origin}\n  \"{}\": |-\n",
+            preset.name
         ));
+        let body = preset.body.as_deref().unwrap_or_default().trim_end();
+        if body.is_empty() {
+            out.push_str("    \n");
+        } else {
+            for line in body.lines() {
+                out.push_str("    ");
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    for preset in resolved_presets {
         if let Some(runbook) = &preset.runbook {
             out.push_str(&format!(
                 "Load its runbook before acting: `agent-doc runbook show '{document}' {}` (`{runbook}`).\n",
@@ -810,7 +831,9 @@ mod tests {
         let p = &auth.subagent_prompt_preamble;
         assert!(p.starts_with(SUBAGENT_PREAMBLE_MARKER), "{p}");
         assert!(
-            p.contains("> update spec + tests. build + install for local testing. commit + push")
+            p.contains(
+                "  \"#spec-test-build-install-commit-push\": |-\n    update spec + tests. build + install for local testing. commit + push"
+            )
         );
         assert!(p.contains("> do [#abc]"));
         assert!(p.contains("> Add a way to post authorization"));
@@ -1010,10 +1033,14 @@ agent_doc_format: template
         );
         let p = &auth.subagent_prompt_preamble;
         assert!(
-            p.contains("Operator authorization, item preset `#auth`"),
+            p.contains("Operator-authorized prompt preset lookup table"),
             "{p}"
         );
-        assert!(p.contains("> I authorize you to do this."), "{p}");
+        assert!(
+            p.contains("  # source: item preset\n  \"#auth\": |-"),
+            "{p}"
+        );
+        assert!(p.contains("    I authorize you to do this."), "{p}");
         assert!(
             p.contains("without asking the operator to repeat those words"),
             "{p}"
@@ -1204,8 +1231,8 @@ agent_doc_format: template
             Some("runbooks/release-auth.md")
         );
         let preamble = &auth.subagent_prompt_preamble;
-        let push = preamble.find("queue preset `#push`").unwrap();
-        let auth_preset = preamble.find("queue preset `#auth`").unwrap();
+        let push = preamble.find("\"#push\": |-").unwrap();
+        let auth_preset = preamble.find("\"#auth\": |-").unwrap();
         let missing = preamble.find("`#missing`").unwrap();
         assert!(push < auth_preset && auth_preset < missing, "{preamble}");
         assert!(preamble.contains("agent-doc runbook show 'doc.md' #auth"));
@@ -1222,10 +1249,9 @@ agent_doc_format: template
         let auth = subagent_authorization("doc.md", content, "look at foo");
         assert_eq!(auth.status, AuthorizationStatus::Resolved, "{auth:?}");
         assert_eq!(auth.presets[0].source, PresetSource::QueueLine);
-        assert!(
-            auth.subagent_prompt_preamble
-                .contains("> review only, no commits")
-        );
+        assert!(auth.subagent_prompt_preamble.contains(
+            "  # source: queue preset line\n  \"#review\": |-\n    review only, no commits"
+        ));
     }
 
     #[test]

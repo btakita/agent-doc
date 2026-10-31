@@ -11826,7 +11826,16 @@ mod tests {
         );
         assert!(
             auth.subagent_prompt_preamble
-                .contains("Operator authorization, queue preset `#auth`"),
+                .contains("Operator-authorized prompt preset lookup table"),
+            "{auth:?}"
+        );
+        assert!(
+            auth.subagent_prompt_preamble.contains("\"#auth\": |-"),
+            "{auth:?}"
+        );
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains("    I authorize you to do this."),
             "{auth:?}"
         );
         assert!(

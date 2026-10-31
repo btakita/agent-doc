@@ -527,10 +527,13 @@ mod tests {
     }
     #[test]
     fn injected_prompt_diff_preserves_multiline_task_as_prompt_bearing_diff() {
-        let diff = injected_prompt_diff("(preset #1)\nKeep the work tree clean.\ndo #prep");
+        let diff = injected_prompt_diff(
+            "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Keep the work tree clean.\n\nTask:\ndo #prep",
+        );
 
-        assert!(diff.contains("+❯ (preset #1)\n"));
-        assert!(diff.contains("+Keep the work tree clean.\n"));
+        assert!(diff.contains("+❯ Prompt preset symbols: #1\n"));
+        assert!(diff.contains("+  \"#1\": |-\n"));
+        assert!(diff.contains("+    Keep the work tree clean.\n"));
         assert!(diff.contains("+do #prep\n"));
         assert_eq!(
             agent_doc_diff::extract_imperative_directives(&diff),

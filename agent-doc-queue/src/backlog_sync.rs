@@ -236,9 +236,7 @@ pub fn collect_backlog_queue_placement_debt(
                 continue;
             }
             None
-        } else if BacklogQueueSyncMode::parse(value).is_some() {
-            continue;
-        } else if queues.block(value).is_some() {
+        } else if BacklogQueueSyncMode::parse(value).is_some() || queues.block(value).is_some() {
             continue;
         } else {
             Some(value.to_string())

@@ -913,6 +913,27 @@ fn validate_generation(
     }
 }
 
+/// Resolve duplicate legacy records that collapse onto one current work
+/// identity. Generation is the attempt fence; within that fence lifecycle is
+/// monotonic. A report is stronger evidence than loss because it proves the
+/// worker returned a result that the coordinator still owes writeback for.
+fn rekey_claim_supersedes(candidate: &QueueClaim, kept: &QueueClaim) -> bool {
+    fn state_rank(state: QueueClaimState) -> u8 {
+        match state {
+            QueueClaimState::Claimed => 0,
+            QueueClaimState::Running => 1,
+            QueueClaimState::Lost => 2,
+            QueueClaimState::Reported => 3,
+        }
+    }
+
+    candidate.generation > kept.generation
+        || (candidate.generation == kept.generation
+            && (state_rank(candidate.state) > state_rank(kept.state)
+                || (candidate.state == kept.state
+                    && candidate.expires_at_secs > kept.expires_at_secs)))
+}
+
 /// `queue_document_state.state_kind` of the per-document claim ledger row.
 pub const QUEUE_CLAIMS_STATE_KIND: &str = "queue_claims";
 
@@ -992,8 +1013,11 @@ impl QueueClaimLedger {
     }
 
     /// Re-derive every stored identity from its `item_text` with the current
-    /// [`claim_identity`], merging claims that now share one identity (the
-    /// later expiry wins). A ledger written before the identity rule changed
+    /// [`claim_identity`], merging claims that now share one identity. A newer
+    /// generation wins; within one generation, the furthest durable lifecycle
+    /// state wins before expiry breaks ties. In particular, a legacy `Lost`
+    /// copy with a later TTL can never downgrade same-attempt `Reported`
+    /// evidence. A ledger written before the identity rule changed
     /// (tag-sensitive free-text keys) would otherwise hold claims that match
     /// no live head and silently drop. Returns whether anything changed.
     pub fn rekey(&mut self) -> bool {
@@ -1011,7 +1035,7 @@ impl QueueClaimLedger {
             {
                 Some(kept) => {
                     changed = true;
-                    if claim.expires_at_secs > kept.expires_at_secs {
+                    if rekey_claim_supersedes(&claim, kept) {
                         *kept = claim;
                     }
                 }
@@ -3372,6 +3396,80 @@ mod tests {
                 .claims(&format!("#subagents: #gh-fix {url}"))
         );
         assert!(!ledger.rekey(), "rekey is idempotent");
+    }
+
+    /// A rolling-upgrade ledger can contain two old tag-sensitive keys for the
+    /// same current work identity. Reported completion is monotonic within one
+    /// attempt: a later-TTL lost copy must not discard the worker result.
+    #[test]
+    fn rekey_never_downgrades_same_generation_reported_evidence_to_lost() {
+        let url = "https://x/issues/120";
+        let reported_text = format!("#subagents: {url}");
+        let lost_text = format!("#gh-fix {url}");
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&reported_text, "subagent:reported", 1, 10);
+        ledger
+            .start(
+                &reported_text,
+                "subagent:reported",
+                "worker:reported",
+                1,
+                10,
+                Some(1),
+            )
+            .unwrap();
+        ledger.report(&reported_text, Some(1)).unwrap();
+        ledger.claims[0].identity = QueueItemIdentity::FreeText(reported_text.clone());
+
+        let mut lost = ledger.claims[0].clone();
+        lost.identity = QueueItemIdentity::FreeText(lost_text.clone());
+        lost.item_text = lost_text;
+        lost.owner = "subagent:lost-copy".into();
+        lost.state = QueueClaimState::Lost;
+        lost.worker = None;
+        lost.expires_at_secs = 10_000;
+        ledger.claims.push(lost);
+
+        assert!(ledger.rekey());
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
+        assert_eq!(ledger.claims[0].owner, "subagent:reported");
+        assert!(!ledger.claims[0].is_expired(u64::MAX));
+        let live: HashSet<_> = [claim_identity(&reported_text)].into_iter().collect();
+        assert_eq!(ledger.prune(u64::MAX, Some(&live)), 0);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
+    }
+
+    /// Generation remains the outer attempt fence: completion from an older
+    /// worker cannot override a newer, explicitly requeued attempt.
+    #[test]
+    fn rekey_prefers_newer_generation_before_reported_state() {
+        let url = "https://x/issues/120";
+        let reported_text = format!("#subagents: {url}");
+        let lost_text = format!("#gh-fix {url}");
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(&reported_text, "subagent:old", 1, 10);
+        ledger
+            .start(&reported_text, "subagent:old", "worker:old", 1, 10, Some(1))
+            .unwrap();
+        ledger.report(&reported_text, Some(1)).unwrap();
+        ledger.claims[0].identity = QueueItemIdentity::FreeText(reported_text);
+
+        let mut newer = ledger.claims[0].clone();
+        newer.identity = QueueItemIdentity::FreeText(lost_text.clone());
+        newer.item_text = lost_text;
+        newer.owner = "subagent:new".into();
+        newer.generation = 2;
+        newer.state = QueueClaimState::Lost;
+        newer.worker = None;
+        newer.expires_at_secs = 20;
+        ledger.claims.push(newer);
+
+        assert!(ledger.rekey());
+        assert_eq!(ledger.claims.len(), 1);
+        assert_eq!(ledger.claims[0].generation, 2);
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(ledger.claims[0].owner, "subagent:new");
     }
 
     /// GH #124 ask 5: a head present in the editor authority (what dispatch

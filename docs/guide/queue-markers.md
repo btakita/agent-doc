@@ -170,6 +170,16 @@ closeout paths succeeds. This keeps an unintegrated worker result from being
 silently discarded, but a successfully integrated row should be closed in the
 same coordinator cycle rather than left for a later timeout.
 
+A valid `☑️` does not later become `⚠️` because its claim aged or its worker
+exited. If you see that transition, either `queue release --requeue` explicitly
+abandoned the reported attempt, or durable state needs reconciliation. Do not
+strike the row merely because it is lost: recover the worker result when it
+exists, otherwise requeue the unfinished work. A completion cell without a
+governing attempt projects as `🔄`, not as proof that integration happened.
+The current coordinator-admission path selects valid reported rows even when no
+fresh worker row is drainable, but older orphaned state may still need
+`agent-doc queue repair-managed-state <FILE>` (dry-run first, then `--apply`).
+
 These keep a `☑️` row open on purpose:
 
 - **`🙋☑️`**: a blocking operator request is still open. The `🙋` stays until

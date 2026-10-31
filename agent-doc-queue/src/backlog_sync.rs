@@ -222,6 +222,12 @@ pub fn collect_backlog_queue_placement_debt(
         .iter()
         .map(|queue| queue.id.clone())
         .collect::<Vec<_>>();
+    let compatible_run_ids = queues
+        .blocks()
+        .iter()
+        .filter(|queue| !crate::queue_graph::is_loop_queue(queue.component))
+        .map(|queue| queue.id.clone())
+        .collect::<Vec<_>>();
     let mut debt = Vec::new();
     for component in components
         .iter()
@@ -231,15 +237,15 @@ pub fn collect_backlog_queue_placement_debt(
             continue;
         };
         let value = value.trim();
-        let requested_queue_id = if value.is_empty() {
-            if eligible_queue_ids.len() == 1 {
+        let (requested_queue_id, placement_queue_ids) = if value.is_empty() {
+            if compatible_run_ids.len() == 1 {
                 continue;
             }
-            None
+            (None, compatible_run_ids.clone())
         } else if BacklogQueueSyncMode::parse(value).is_some() || queues.block(value).is_some() {
             continue;
         } else {
-            Some(value.to_string())
+            (Some(value.to_string()), eligible_queue_ids.clone())
         };
         debt.extend(
             active_backlog_route_items(component, content)
@@ -248,7 +254,7 @@ pub fn collect_backlog_queue_placement_debt(
                     item_id,
                     item_text,
                     requested_queue_id: requested_queue_id.clone(),
-                    eligible_queue_ids: eligible_queue_ids.clone(),
+                    eligible_queue_ids: placement_queue_ids.clone(),
                 }),
         );
     }
@@ -350,9 +356,11 @@ pub fn collect_backlog_queue_sync(
     components: &[element::Component],
     content: &str,
 ) -> Option<BacklogQueueSyncRequest> {
-    let queue_count = components
+    let compatible_queue_count = components
         .iter()
-        .filter(|component| component.name == "queue")
+        .filter(|component| {
+            component.name == "queue" && !crate::queue_graph::is_loop_queue(component)
+        })
         .count();
     let mut mode: Option<BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
@@ -370,7 +378,7 @@ pub fn collect_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
-        if value.trim().is_empty() && queue_count != 1 {
+        if value.trim().is_empty() && compatible_queue_count != 1 {
             continue;
         }
         let comp_priority = comp.attrs.contains_key("priority");
@@ -419,9 +427,11 @@ pub fn collect_one_shot_backlog_queue_sync(
     components: &[element::Component],
     content: &str,
 ) -> Option<OneShotBacklogQueueSyncRequest> {
-    let queue_count = components
+    let compatible_queue_count = components
         .iter()
-        .filter(|component| component.name == "queue")
+        .filter(|component| {
+            component.name == "queue" && !crate::queue_graph::is_loop_queue(component)
+        })
         .count();
     let mut mode: Option<BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
@@ -435,7 +445,7 @@ pub fn collect_one_shot_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
-        if value.trim().is_empty() && queue_count != 1 {
+        if value.trim().is_empty() && compatible_queue_count != 1 {
             continue;
         }
         let Some(comp_mode) = BacklogQueueSyncMode::parse(value) else {
@@ -1569,6 +1579,27 @@ mod tests {
             }]
         );
         assert!(collect_backlog_queue_sync(&components, content).is_none());
+    }
+
+    #[test]
+    fn bare_queue_with_one_run_and_an_unrelated_loop_is_unambiguous() {
+        let content = concat!(
+            "<!-- agent:loop id=issues -->\n- poll issues\n<!-- /agent:loop -->\n",
+            "<!-- agent:run id=work -->\n- do [#existing]\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#followup] record follow-up\n<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        assert!(
+            collect_backlog_queue_placement_debt(&components, content)
+                .unwrap()
+                .is_empty(),
+            "an unrelated loop is not a compatible inferred mirror target"
+        );
+        let request = collect_backlog_queue_sync(&components, content)
+            .expect("the sole non-loop run is an unambiguous bare-queue target");
+        assert_eq!(request.mode, BacklogQueueSyncMode::Append);
+        assert_eq!(request.ids, vec!["followup".to_string()]);
     }
 
     #[test]

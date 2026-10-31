@@ -13,8 +13,7 @@
 //!   (#freshqueueauth) for an id-backed correction head while leaving the open
 //!   backlog item unresolved.
 //! - `agent-doc queue consume <FILE> --ack-text <text>` — exact acknowledgement
-//!   for a free-text head completed through direct harness steering while the
-//!   queue remained paused.
+//!   for a completed free-text head, including a unique active nested lineage.
 
 use anyhow::{Result, bail};
 use parking_lot::Mutex;
@@ -843,15 +842,12 @@ pub fn acknowledge_paused_free_text(
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     match effects.acknowledge_paused_free_text_queue_head(file, expected_head)? {
         Some(outcome) => println!(
-            "{}: acknowledged exact paused free-text queue head (remaining: {}); \
-             queue stays paused (#paused-free-text-ack).",
+            "{}: acknowledged exact free-text queue head (remaining: {}); \
+             queue activation unchanged (#acktextlineage).",
             file.display(),
             outcome.remaining
         ),
-        None => println!(
-            "{}: no paused free-text queue head to acknowledge.",
-            file.display()
-        ),
+        None => println!("{}: no exact free-text queue head to acknowledge.", file.display()),
     }
     Ok(())
 }

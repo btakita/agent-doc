@@ -956,6 +956,19 @@ thread or in a detached periodic timer.
 `agent-doc layout <FILE>... [--split h|v] [--window W]`
 
 - Mirrors editor split layout in tmux by rejoining the wanted panes into a target window and preserving non-session panes.
+- A project tmux session has one canonical visible `agent-doc` window. Preflight
+  treats duplicate named target windows, or registered live panes stranded
+  across multiple non-stash windows in that session, as `window drift` and
+  immediately runs convergence. Duplicate named targets are merged into the
+  lowest-index target; other proven outliers are parked in `stash` before the
+  retained editor layout places them. User windows and unproven processes are
+  never adopted merely because they share the tmux session.
+- Window recovery is deterministic: the explicitly named `agent-doc` window
+  outranks a pane-count majority, and legacy layouts without a named target use
+  pane count followed by the numeric tmux window id as a stable tie-break.
+- Route startup remains fail-closed when an `agent-doc` window exists but no
+  safe registered split anchor can be proven. It must not allocate a second
+  visible window to escape missing ownership evidence.
 
 ## reliable-sync-status
 
@@ -969,6 +982,11 @@ thread or in a detached periodic timer.
 `agent-doc resync [FILE] [--fix]`
 
 - Prunes dead panes from the registry, reaps idle stash windows, and reports orphaned windows.
+- `WrongWindow` repair chooses the named `agent-doc` window as canonical even
+  when an accidental window contains more registered panes. With no named
+  target it uses a deterministic majority and numeric window-id tie-break, so
+  repeated repair cannot oscillate or strand sessions according to hash-map
+  iteration order.
 - In scoped mode, it must limit repair to the target document and fail closed if ownership is still ambiguous.
 - Scoped mode (`resync FILE`, `fix FILE`, and the route's targeted fix) reads and repairs the
   **document's** store, never the process cwd's (`#cwdfallbackrest`): the nearest `.agent-doc`

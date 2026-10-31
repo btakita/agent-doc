@@ -124,12 +124,17 @@ fn current_tmux_session_name() -> Option<String> {
     agent_doc_tmux_io::configured_tmux().current_session()
 }
 
+/// Immediately converge structural window drift found by [`check_layout`].
+///
+/// The historical name is retained for callers, but the repair now covers both
+/// a missing base index and agent-doc panes split across visible windows.
 pub fn maybe_auto_repair_base_index(file: &Path, layout_issues: &[String]) -> bool {
     let has_base_index_issue = layout_issues
         .iter()
         .any(|i| i.contains("window index 0 missing"));
+    let has_window_drift = layout_issues.iter().any(|i| i.starts_with("window drift:"));
 
-    if !has_base_index_issue {
+    if !has_base_index_issue && !has_window_drift {
         return false;
     }
 
@@ -149,12 +154,27 @@ pub fn maybe_auto_repair_base_index(file: &Path, layout_issues: &[String]) -> bo
         return false;
     };
 
-    eprintln!("[preflight] window index 0 missing — running repair_layout immediately");
+    let reason = if has_window_drift {
+        "registered agent-doc panes span multiple visible windows"
+    } else {
+        "window index 0 missing"
+    };
+    eprintln!("[preflight] {reason} — running layout convergence immediately");
     agent_doc_ops_log_io::log_op(
         file,
-        &format!("auto_repair_base_index immediate session={}", name),
+        &format!(
+            "auto_repair_layout immediate session={} base_index_issue={} window_drift={}",
+            name, has_base_index_issue, has_window_drift
+        ),
     );
     let tmux = agent_doc_tmux_io::configured_tmux();
+    // `repair_layout` directly merges duplicate `agent-doc` windows. For a
+    // registered pane stranded in some other visible window, resync first
+    // parks the deterministic outlier in stash; the retained layout can then
+    // place it without preserving a second visible workspace.
+    if has_window_drift && let Err(e) = agent_doc_sync_io::resync::run(true, None, None) {
+        eprintln!("[preflight] window-drift resync failed: {e}");
+    }
     if let Err(e) = agent_doc_sync_io::sync::repair_layout(&tmux, &name, "agent-doc") {
         eprintln!(
             "[preflight] auto repair_layout failed: {}; run `agent-doc session doctor {} --repair`",
@@ -191,35 +211,62 @@ pub fn check_layout() -> Vec<String> {
     let window_output = match agent_doc_tmux_io::list_windows(
         &tmux_runner,
         Some(&format!("{}:", session_name)),
-        "#{window_index}\t#{window_name}\t#{window_panes}",
+        "#{window_index}\t#{window_id}\t#{window_name}\t#{window_panes}",
     ) {
         Ok(output) => output,
         Err(_) => return issues,
     };
 
-    let windows: Vec<u32> = window_output
+    let windows: Vec<(u32, String, String)> = window_output
         .lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(3, '\t');
+            let mut parts = line.splitn(4, '\t');
             let index: u32 = parts.next()?.parse().ok()?;
-            Some(index)
+            let id = parts.next()?.to_string();
+            let name = parts.next()?.to_string();
+            Some((index, id, name))
         })
         .collect();
 
-    if !windows.contains(&0) {
+    if !windows.iter().any(|(index, _, _)| *index == 0) {
         issues.push(format!(
             "window index 0 missing in session '{}' (base-index compliance)",
             session_name,
         ));
     }
 
+    let target_window_ids: Vec<String> = windows
+        .iter()
+        .filter(|(_, _, name)| name == "agent-doc")
+        .map(|(_, id, _)| id.clone())
+        .collect();
+    if target_window_ids.len() > 1 {
+        let mut ids = target_window_ids.clone();
+        ids.sort_by(|left, right| compare_tmux_window_ids(left, right));
+        issues.push(format!(
+            "window drift: session '{}' has {} 'agent-doc' windows: {}",
+            session_name,
+            ids.len(),
+            ids.join(", "),
+        ));
+    }
+
     let registry: Option<tmux_router::Registry> = agent_doc_session_registry_io::load().ok();
     if let Some(registry) = registry {
         let mut pane_sessions: HashSet<String> = HashSet::new();
+        let mut registered_visible_windows: HashMap<String, String> = HashMap::new();
         for entry in registry.values() {
             let pane = &entry.pane;
             if let Some(pane_sess) = agent_doc_tmux_io::target_session_name(&tmux_runner, pane) {
-                pane_sessions.insert(pane_sess);
+                pane_sessions.insert(pane_sess.clone());
+                if pane_sess == session_name
+                    && let Some(window_id) = agent_doc_tmux_io::target_window_id(&tmux_runner, pane)
+                    && let Some(window_name) =
+                        agent_doc_tmux_io::target_window_name(&tmux_runner, pane)
+                    && !is_stash_window_name(&window_name)
+                {
+                    registered_visible_windows.insert(window_id, window_name);
+                }
             }
         }
         if pane_sessions.len() > 1 {
@@ -232,10 +279,50 @@ pub fn check_layout() -> Vec<String> {
             ));
         }
 
+        let mut visible_ids: Vec<String> = registered_visible_windows.keys().cloned().collect();
+        visible_ids.sort_by(|left, right| compare_tmux_window_ids(left, right));
+        let outside_canonical = target_window_ids.len() == 1
+            && visible_ids.iter().any(|id| id != &target_window_ids[0]);
+        if visible_ids.len() > 1 || outside_canonical {
+            let placement = visible_ids
+                .iter()
+                .map(|id| {
+                    format!(
+                        "{}:{}",
+                        id,
+                        registered_visible_windows
+                            .get(id)
+                            .map(String::as_str)
+                            .unwrap_or("?")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            issues.push(format!(
+                "window drift: registered panes in session '{}' span visible windows {}",
+                session_name, placement
+            ));
+        }
+
         issues.extend(detect_duplicate_claims(&registry));
     }
 
     issues
+}
+
+fn is_stash_window_name(name: &str) -> bool {
+    name == "stash" || name.starts_with("stash-")
+}
+
+fn compare_tmux_window_ids(left: &str, right: &str) -> std::cmp::Ordering {
+    let number = |id: &str| {
+        id.trim_start_matches('@')
+            .parse::<u64>()
+            .unwrap_or(u64::MAX)
+    };
+    number(left)
+        .cmp(&number(right))
+        .then_with(|| left.cmp(right))
 }
 
 /// Detect duplicate file claims in a registry snapshot.
@@ -276,4 +363,16 @@ pub fn detect_duplicate_claims(registry: &tmux_router::Registry) -> Vec<String> 
         }
     }
     issues
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compare_tmux_window_ids;
+
+    #[test]
+    fn tmux_window_ids_sort_numerically_for_deterministic_repair() {
+        let mut ids = vec!["@10".to_string(), "@2".to_string(), "@1".to_string()];
+        ids.sort_by(|left, right| compare_tmux_window_ids(left, right));
+        assert_eq!(ids, ["@1", "@2", "@10"]);
+    }
 }

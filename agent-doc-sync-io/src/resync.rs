@@ -667,8 +667,8 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
 
     // Check 3: Detect panes for the same tmux session in different non-stash windows.
     // Group alive panes by tmux session, then check for window scatter.
-    let mut by_session: std::collections::HashMap<String, Vec<&PaneInfo>> =
-        std::collections::HashMap::new();
+    let mut by_session: std::collections::BTreeMap<String, Vec<&PaneInfo>> =
+        std::collections::BTreeMap::new();
     for info in &alive_panes {
         if is_stash_window_name(&info.window_name) {
             continue;
@@ -683,17 +683,12 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
         if panes.len() < 2 {
             continue;
         }
-        // Find the majority window (most panes) — that's the "expected" window
-        let mut window_counts: std::collections::HashMap<&str, usize> =
-            std::collections::HashMap::new();
-        for p in panes {
-            *window_counts.entry(&p.window_id).or_insert(0) += 1;
-        }
-        let expected_window = window_counts
-            .iter()
-            .max_by_key(|(_, count)| *count)
-            .map(|(w, _)| *w)
-            .unwrap_or("");
+        // The named `agent-doc` window is the retained layout's canonical
+        // target. A majority vote alone is unsafe: a 1–1 split depended on
+        // HashMap iteration order, and a 2–1 drift could choose the accidental
+        // window over the explicitly named target. Fall back to a stable
+        // majority only for legacy layouts that have no named target.
+        let expected_window = preferred_visible_window(panes).unwrap_or_default();
 
         for p in panes {
             if p.window_id != expected_window {
@@ -702,13 +697,47 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
                     file: p.label.clone(),
                     pane: p.pane.clone(),
                     actual_window: p.window_id.clone(),
-                    expected_window: expected_window.to_string(),
+                    expected_window: expected_window.clone(),
                 });
             }
         }
     }
 
     issues
+}
+
+fn preferred_visible_window(panes: &[&PaneInfo]) -> Option<String> {
+    let mut named_targets: Vec<&str> = panes
+        .iter()
+        .filter(|pane| pane.window_name == "agent-doc")
+        .map(|pane| pane.window_id.as_str())
+        .collect();
+    named_targets.sort_by(|left, right| compare_tmux_window_ids(left, right));
+    if let Some(window) = named_targets.first() {
+        return Some((*window).to_string());
+    }
+
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for pane in panes {
+        *counts.entry(pane.window_id.as_str()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by(|(left_id, left_count), (right_id, right_count)| {
+            left_count.cmp(right_count).then_with(|| {
+                // `max_by` chooses Greater, so reverse the id comparison to
+                // make the lowest tmux window id win an equal-count tie.
+                compare_tmux_window_ids(right_id, left_id)
+            })
+        })
+        .map(|(window, _)| window.to_string())
+}
+
+fn compare_tmux_window_ids(left: &str, right: &str) -> std::cmp::Ordering {
+    let number = |id: &str| id.trim_start_matches('@').parse::<u64>().ok();
+    number(left)
+        .cmp(&number(right))
+        .then_with(|| left.cmp(right))
 }
 
 /// The tmux session a registered pane of `document` (a registry entry of the
@@ -2433,6 +2462,43 @@ mod tests {
             issues.iter().map(|i| i.to_string()).collect::<Vec<_>>()
         );
     }
+
+    fn pane_info(window_id: &str, window_name: &str) -> PaneInfo {
+        PaneInfo {
+            key: format!("key-{window_id}"),
+            label: format!("doc-{window_id}"),
+            pane: format!("pane-{window_id}"),
+            tmux_session: "test".to_string(),
+            window_id: window_id.to_string(),
+            window_name: window_name.to_string(),
+        }
+    }
+
+    #[test]
+    fn preferred_visible_window_uses_named_target_over_majority() {
+        let canonical = pane_info("@9", "agent-doc");
+        let drift_a = pane_info("@4", "operator");
+        let drift_b = pane_info("@4", "operator");
+
+        assert_eq!(
+            preferred_visible_window(&[&drift_a, &canonical, &drift_b]).as_deref(),
+            Some("@9"),
+            "the retained named target must outrank an accidental majority window"
+        );
+    }
+
+    #[test]
+    fn preferred_visible_window_breaks_ties_by_numeric_window_id() {
+        let later = pane_info("@10", "operator");
+        let earlier = pane_info("@2", "operator");
+
+        assert_eq!(
+            preferred_visible_window(&[&later, &earlier]).as_deref(),
+            Some("@2"),
+            "equal-count legacy windows must converge deterministically"
+        );
+    }
+
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn detect_wrong_window_panes_in_different_windows() {

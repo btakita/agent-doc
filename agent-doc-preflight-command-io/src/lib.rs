@@ -13,8 +13,9 @@
 //!   cycle-open. The terminal gate rejects skipped prerequisites. Cycle-open is
 //!   still a durable exactly-once identity, not computed state.
 //! - The layout check calls `check_layout()` to detect tmux structural problems
-//!   (window index, session drift); issues are included in output but do not
-//!   abort the run.
+//!   (window index, session drift, and registered panes split across visible
+//!   windows). Index/window drift is repaired immediately before the check is
+//!   repeated; remaining issues are included in output but do not abort the run.
 //! - The interrupted-cycle guard inspects persisted cycle state.
 //!   For any open prior cycle, preflight auto-attempts `agent_doc_repair_io::run` +
 //!   `git::commit(file)` before diffing again. For an open `preflight_started`
@@ -50,8 +51,10 @@
 //! - Serializes `PreflightOutput` as pretty JSON to stdout; all diagnostic
 //!   messages go to stderr.
 //! - `check_layout()`: inspects the current tmux session for structural issues:
-//!   missing window index 0 (base-index compliance) and session drift. Stash
-//!   windows may have non-idle panes (backgrounded sessions). Read-only; no mutations.
+//!   missing window index 0 (base-index compliance), session drift, duplicate
+//!   `agent-doc` windows, and registered panes scattered across non-stash
+//!   windows. Stash windows may have non-idle panes (backgrounded sessions).
+//!   Read-only; no mutations.
 //!   Returns an empty vec when not inside tmux (silent).
 //! - `read_and_truncate_claims(file)`: locates `.agent-doc/claims.log` relative
 //!   to the project root, collects non-empty lines, truncates the file to empty,

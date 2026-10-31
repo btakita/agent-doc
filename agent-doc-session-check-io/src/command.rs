@@ -6027,4 +6027,66 @@ mod supervisor_scope_claim_tests {
         agent_doc_queue_io::queue_claim::claim(&file, "#a", "subagent:a", 600).unwrap();
         assert_eq!(supervisor_scope_unclaimed_head(&file, content), None);
     }
+
+    #[test]
+    fn terminal_gate_rejects_recovered_loss_until_integration_closes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let base = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue subagents=1 go -->\n- recover me\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&file, base).unwrap();
+        let (_, claimed) =
+            agent_doc_queue_io::queue_claim::claim(&file, "recover me", "subagent:r", 600).unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &file,
+            "recover me",
+            "subagent:r",
+            "worker-r",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::abandon_attempt(
+            &file,
+            "recover me",
+            Some(claimed.generation),
+        )
+        .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Recovered response.",
+        )
+        .unwrap();
+        let content = base.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{cell}\n<!-- /agent:exchange -->"),
+        );
+        std::fs::write(&file, &content).unwrap();
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::reconcile_completion_evidence(&file, &content)
+                .unwrap(),
+            1
+        );
+
+        let decision =
+            agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
+                &file, &content,
+            )
+            .unwrap();
+        assert_eq!(
+            decision.phase,
+            agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
+        );
+        assert!(!decision.is_terminal());
+        assert!(decision.snapshot.lost_reported.iter().any(|item| {
+            item.operation
+                == agent_doc_queue::queue_sync_payload::QueueSyncOperation::IntegrateClose
+        }));
+    }
 }

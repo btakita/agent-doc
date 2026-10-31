@@ -431,9 +431,13 @@ fn derive_runtime_projection_scoped(
                     let marker = if state_degraded {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
                     } else if let Some(claim) = claim {
-                        claim.state.projection_marker()
-                    } else if receipt.is_some() {
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                        claim.projection_marker()
+                    } else if let Some(receipt) = receipt {
+                        if receipt.completion_recovered_after_loss {
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
+                        } else {
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                        }
                     } else if has_completion_evidence {
                         agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     } else if is_selected {

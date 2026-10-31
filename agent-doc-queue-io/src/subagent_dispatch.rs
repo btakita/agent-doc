@@ -14,9 +14,9 @@
 //! dispatch-intent window: once claimed it is excluded by the claim, and once
 //! a later cycle has seeded with it present it drains through the normal
 //! queue (a reported release means the subagent finished and the in-session
-//! loop now closes the item). A retained `Lost` attempt is the exception: it
-//! proves the previous dispatch no longer owns the row, so an eligible
-//! per-line subagent row is offered again even though it predates the seed.
+//! loop now closes the item). A retained `Lost` attempt is offered again only
+//! when its exact lineage proves it never reached worker attachment. A started
+//! or provenance-unknown loss stays reconciliation debt.
 //!
 //! The seed record lives in `state.db` `project_runtime_state`; the key format
 //! is shared with `agent-doc-session-check-io::midturn_steering`.
@@ -143,9 +143,22 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
         .collect::<Vec<_>>();
-    let lost_identities = crate::queue_claim::claim_states_for_content(file, content)?
+    let lost = crate::queue_claim::claim_states_for_content(file, content)?
         .into_iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+        .collect::<Vec<_>>();
+    let lineage = if lost.is_empty() {
+        None
+    } else {
+        Some(crate::queue_lineage::load(file)?)
+    };
+    let lost_identities = lost
+        .into_iter()
+        .filter(|claim| {
+            lineage
+                .as_ref()
+                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
+        })
         .map(|claim| claim.identity)
         .collect::<Vec<_>>();
     if fresh_identities.is_empty() && lost_identities.is_empty() {
@@ -254,6 +267,24 @@ fn queue_attr_subagent_plan_with_presets(
     let mut claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
         .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content));
+    let lost = crate::queue_claim::claim_states_for_content(file, content)
+        .ok()?
+        .into_iter()
+        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
+        .collect::<Vec<_>>();
+    let lineage = (!lost.is_empty())
+        .then(|| crate::queue_lineage::load(file).ok())
+        .flatten();
+    let unsafe_lost = lost
+        .into_iter()
+        .filter(|claim| {
+            !lineage
+                .as_ref()
+                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
+        })
+        .map(|claim| claim.item_text)
+        .collect::<Vec<_>>();
+    claimed = claimed.with_heads(&unsafe_lost);
     let evidence_items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -755,9 +786,7 @@ queue: go
             .expect("inactive api-prs pending row must remain visible");
         assert_eq!(stranded.item, "📥 #rebase", "{stranded:?}");
         assert!(
-            content.contains(
-                "- https://github.com/haiven-dev/haiven-api/pull/809\n  - 📥 #rebase"
-            ),
+            content.contains("- https://github.com/haiven-dev/haiven-api/pull/809\n  - 📥 #rebase"),
             "test must preserve the operator's exact nested repro"
         );
         assert_eq!(
@@ -767,13 +796,11 @@ queue: go
         assert!(!decision.may_yield());
     }
 
-    /// `#lostsubagentrestart`: Run Agent Doc must not strand an old nested
-    /// subagent row after its prior worker becomes unavailable. A retained
-    /// Lost attempt is offered again by the queue-level subagent run, while
-    /// the active attempt before abandonment and the replacement claim after
-    /// redispatch each continue to fence duplicates.
+    /// `#losslessqueuerecovery`: expiry ends ownership but does not erase the
+    /// durable worker attachment. A started attempt fails closed for recovery
+    /// instead of being offered as replacement work.
     #[test]
-    fn expired_nested_subagent_run_item_is_offered_for_replacement_dispatch() {
+    fn expired_started_nested_subagent_item_is_not_redispatched() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -810,25 +837,16 @@ queue: go
         );
 
         let _expired = crate::queue_claim::pin_claim_clock_for_current_thread(pinned + 10);
-        assert_eq!(
-            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            vec![item.to_string()],
-            "the retained Lost nested attempt returns to the run's dispatch set"
-        );
-
-        let (_, replacement) =
-            crate::queue_claim::claim(&file, item, "subagent:replacement", 600).unwrap();
-        assert!(replacement.generation > prior.generation);
         assert!(
             pending_subagent_dispatch_for_content(&file, &content)
                 .unwrap()
                 .is_empty(),
-            "the fresh replacement generation fences duplicate dispatch"
+            "a bound worker makes the lost attempt reconciliation debt, not retry work"
         );
     }
 
     #[test]
-    fn abandoned_old_per_line_subagent_item_bypasses_new_since_seed_gate() {
+    fn abandoned_unstarted_per_line_item_bypasses_new_since_seed_gate() {
         use crate::claim_release_receipt::{ReleaseKind, release_attempt};
 
         let dir = tempfile::tempdir().unwrap();
@@ -840,15 +858,6 @@ queue: go
         seed(&file, "cycle-prev", &content);
 
         let (_, prior) = crate::queue_claim::claim(&file, item, "subagent:prior", 600).unwrap();
-        crate::queue_claim::start_attempt(
-            &file,
-            item,
-            "subagent:prior",
-            "/root/prior",
-            600,
-            prior.generation,
-        )
-        .unwrap();
         release_attempt(&file, item, ReleaseKind::Requeue, Some(prior.generation)).unwrap();
 
         assert_eq!(

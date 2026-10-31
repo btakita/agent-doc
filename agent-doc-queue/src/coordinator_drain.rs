@@ -142,7 +142,8 @@ mod tests {
     use super::*;
     use crate::queue_sync_payload::{
         QueueCoordinatorRole, QueueExecutionMode, QueueExecutorRole, QueueSyncDocumentScope,
-        QueueSyncItem, QueueSyncLifecycle, QueueSyncPlacementDebt, QueueSyncScanError,
+        QueueSyncExecutionEvidence, QueueSyncItem, QueueSyncLifecycle, QueueSyncPlacementDebt,
+        QueueSyncResponseEvidence, QueueSyncScanError,
     };
 
     fn item(
@@ -177,6 +178,13 @@ mod tests {
             owner: None,
             worker_id: None,
             generation: None,
+            execution_evidence: QueueSyncExecutionEvidence::Unknown,
+            completion_outbox_recovered: false,
+            response_evidence: QueueSyncResponseEvidence::NotApplicable,
+            recovered_response: None,
+            missing_response_debt: false,
+            retry_safe: false,
+            recovered_effects: Vec::new(),
         }
     }
 
@@ -239,6 +247,10 @@ mod tests {
                 QueueSyncLifecycle::ReportedCheckmark,
                 QueueSyncOperation::IntegrateClose,
             ),
+            (
+                QueueSyncLifecycle::LostReported,
+                QueueSyncOperation::IntegrateClose,
+            ),
             (QueueSyncLifecycle::Lost, QueueSyncOperation::RecoverRequeue),
             (
                 QueueSyncLifecycle::ReconcileUnknown,
@@ -261,6 +273,7 @@ mod tests {
             match lifecycle {
                 QueueSyncLifecycle::ClaimedUnstarted => snapshot.claimed_unstarted.push(row),
                 QueueSyncLifecycle::ReportedCheckmark => snapshot.reported_checkmark.push(row),
+                QueueSyncLifecycle::LostReported => snapshot.lost_reported.push(row),
                 QueueSyncLifecycle::Lost => snapshot.lost.push(row),
                 QueueSyncLifecycle::ReconcileUnknown => snapshot.reconcile_unknown.push(row),
                 QueueSyncLifecycle::Running => snapshot.running.push(row),

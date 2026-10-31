@@ -25,6 +25,8 @@ pub struct QueueIconConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lost: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lost_reported: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reconciling: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unknown: Option<String>,
@@ -49,6 +51,7 @@ pub struct QueueIconSet {
     pub running: String,
     pub reported: String,
     pub lost: String,
+    pub lost_reported: String,
     pub reconciling: String,
     pub unknown: String,
     pub skipped: String,
@@ -73,19 +76,23 @@ pub enum QueueLifecycleMarker {
     Running,
     Reported,
     Lost,
+    /// The attempt was lost, but its exact fenced completion outbox was later
+    /// recovered. Both facts remain visible while coordinator closeout is due.
+    LostReported,
     Reconciling,
     Unknown,
     Skipped,
     AwaitingOperator,
 }
 
-pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 10] = [
+pub const ALL_LIFECYCLE_STATES: [QueueLifecycleMarker; 11] = [
     QueueLifecycleMarker::Pending,
     QueueLifecycleMarker::Blocked,
     QueueLifecycleMarker::Claimed,
     QueueLifecycleMarker::Running,
     QueueLifecycleMarker::Reported,
     QueueLifecycleMarker::Lost,
+    QueueLifecycleMarker::LostReported,
     QueueLifecycleMarker::Reconciling,
     QueueLifecycleMarker::Unknown,
     QueueLifecycleMarker::Skipped,
@@ -102,6 +109,7 @@ impl QueueLifecycleMarker {
             Self::Running => &icons.running,
             Self::Reported => &icons.reported,
             Self::Lost => &icons.lost,
+            Self::LostReported => &icons.lost_reported,
             Self::Reconciling => &icons.reconciling,
             Self::Unknown => &icons.unknown,
             Self::Skipped => &icons.skipped,
@@ -117,6 +125,7 @@ impl QueueLifecycleMarker {
             Self::Running => "🚧",
             Self::Reported => "☑️",
             Self::Lost => "⚠️",
+            Self::LostReported => "⚠️☑️",
             Self::Reconciling => "🔄",
             Self::Unknown => "❔",
             Self::Skipped => "⏭️",
@@ -134,6 +143,7 @@ impl Default for QueueIconSet {
             running: "🚧".into(),
             reported: "☑️".into(),
             lost: "⚠️".into(),
+            lost_reported: "⚠️☑️".into(),
             reconciling: "🔄".into(),
             unknown: "❔".into(),
             skipped: "⏭️".into(),
@@ -155,6 +165,10 @@ impl QueueIconSet {
             running: config.running.clone().unwrap_or(defaults.running),
             reported: config.reported.clone().unwrap_or(defaults.reported),
             lost: config.lost.clone().unwrap_or(defaults.lost),
+            lost_reported: config
+                .lost_reported
+                .clone()
+                .unwrap_or(defaults.lost_reported),
             reconciling: config.reconciling.clone().unwrap_or(defaults.reconciling),
             unknown: config.unknown.clone().unwrap_or(defaults.unknown),
             skipped: config.skipped.clone().unwrap_or(defaults.skipped),
@@ -180,7 +194,7 @@ impl QueueIconSet {
     /// Validation and the marker legend both read this one list, so a palette
     /// field cannot be validated without also being documented
     /// (`#queuemarkerlegend`).
-    pub fn entries(&self) -> [(&'static str, &str); 13] {
+    pub fn entries(&self) -> [(&'static str, &str); 14] {
         [
             ("pending", self.pending.as_str()),
             ("blocked", self.blocked.as_str()),
@@ -188,6 +202,7 @@ impl QueueIconSet {
             ("running", self.running.as_str()),
             ("reported", self.reported.as_str()),
             ("lost", self.lost.as_str()),
+            ("lost_reported", self.lost_reported.as_str()),
             ("reconciling", self.reconciling.as_str()),
             ("unknown", self.unknown.as_str()),
             ("skipped", self.skipped.as_str()),

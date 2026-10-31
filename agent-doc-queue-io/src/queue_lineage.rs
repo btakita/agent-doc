@@ -350,6 +350,23 @@ pub fn max_generation(file: &Path, item: &str) -> Result<u64> {
         .unwrap_or(0))
 }
 
+/// Whether durable lineage proves this exact attempt never advanced past
+/// creation. Absence, ambiguity, a bound worker, or any later event all fail
+/// closed so callers cannot turn unknown execution into duplicate work.
+pub fn attempt_never_started(ledger: &QueueLineageLedger, claim: &QueueClaim) -> bool {
+    claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+        && claim.worker.is_none()
+        && ledger.attempts.iter().any(|attempt| {
+            attempt.generation == claim.generation
+                && attempt.matches_identity(&claim.identity)
+                && !attempt.events.is_empty()
+                && attempt
+                    .events
+                    .iter()
+                    .all(|event| event.kind == QueueLineageEventKind::Created)
+        })
+}
+
 /// Idempotently establish the durable attempt after `queue claim`.
 pub fn record_claim(file: &Path, claim: &QueueClaim) -> Result<QueueLineageAttempt> {
     mutate(file, |ledger| {

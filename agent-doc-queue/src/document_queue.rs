@@ -2228,9 +2228,11 @@ pub fn settle_inert_group_parents(
                 Some(QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running) => {
                     "Complete the in-progress work for the parent item."
                 }
-                Some(QueueLifecycleMarker::Reported | QueueLifecycleMarker::Reconciling) => {
-                    "Reconcile the reported work, then complete the parent item."
-                }
+                Some(
+                    QueueLifecycleMarker::Reported
+                    | QueueLifecycleMarker::LostReported
+                    | QueueLifecycleMarker::Reconciling,
+                ) => "Reconcile the reported work, then complete the parent item.",
                 Some(QueueLifecycleMarker::Unknown) => {
                     "Diagnose the conflicting work state, then complete the parent item."
                 }

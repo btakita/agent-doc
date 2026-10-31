@@ -7603,7 +7603,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             let marker = if lifecycle_state_degraded {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
             } else if let Some(claim) = claim {
-                claim.state.projection_marker()
+                claim.projection_marker()
             } else if receipt.is_some() {
                 agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
             } else if completion_items.iter().any(|item| {
@@ -7660,6 +7660,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Running
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
             )
@@ -11726,11 +11727,11 @@ mod tests {
         );
     }
 
-    /// `#lostsubagentrestart`: an old row re-offered because its predecessor
-    /// was abandoned carries the reason and exact prior attempt identity in
-    /// the Run Agent Doc dispatch contract.
+    /// A started attempt cannot be retried merely because its release receipt
+    /// requests requeue. Without durable proof that it never ran, dispatch
+    /// must fail closed so an unknown side effect is not duplicated.
     #[test]
-    fn replacement_subagent_dispatch_names_lost_reason_and_prior_worker() {
+    fn started_lost_subagent_is_not_redispatched_after_requeue_release() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "re: [#grok-live-editor]: Also validate real-time steering parity";
@@ -11782,22 +11783,9 @@ mod tests {
                 &doc, &live,
             )
             .unwrap();
-        assert_eq!(dispatch, vec![item.to_string()]);
-        let entries = queue_subagent_dispatch_entries(&doc, &live, &dispatch).unwrap();
-        let recovery = entries[0].recovery.as_ref().unwrap();
-        assert_eq!(recovery.reason, "attempt_abandoned_for_requeue");
-        assert_eq!(recovery.prior_owner, "subagent:rtsteeringparity");
-        assert_eq!(
-            recovery.prior_worker_id.as_deref(),
-            Some("/root/rtsteeringparity")
-        );
-        assert_eq!(recovery.prior_generation, prior.generation);
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("replacement"));
-        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("prior worker/generation"));
-        let json = serde_json::to_value(&entries[0]).unwrap();
-        assert_eq!(
-            json["recovery"]["reason"],
-            "attempt_abandoned_for_requeue"
+        assert!(
+            dispatch.is_empty(),
+            "a started attempt has unknown effects and must not be retried: {dispatch:?}"
         );
     }
 

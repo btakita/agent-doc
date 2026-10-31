@@ -15,7 +15,8 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     document_queue::{QueueEntry, QueuePrompt},
     queue_consume::{
-        ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, approved_queue_head_matches,
+        ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, RESPONSE_ID_NOTE_PREFIX,
+        annotate_newly_struck_queue_items_with_response_id, approved_queue_head_matches,
         consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
@@ -1055,6 +1056,80 @@ fn now_millis() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
+}
+
+/// Persist a searchable response-cell backlink on every managed-list prompt
+/// completed by the current response closeout.
+///
+/// `before` is the authoritative cut captured before queue consumption. The
+/// pure projection compares it with current authority, so repeated prompt text
+/// from an older cycle is never relabeled. Snapshot recovery receives the same
+/// projection to preserve the closeout boundary.
+pub fn annotate_newly_completed_queue_prompts_with_response_id(
+    file: &Path,
+    before: &str,
+    response_body: &str,
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<usize> {
+    if response_body.trim().is_empty() {
+        return Ok(0);
+    }
+    let current = if skip_visible_guard {
+        effects.force_disk_document_content(file, "queue_response_backlink force_disk")?
+    } else {
+        effects.current_document_content(file, "queue_response_backlink")?
+    };
+    if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &current) {
+        return Ok(0);
+    }
+    let target =
+        annotate_newly_struck_queue_items_with_response_id(before, &current, response_body)?;
+    if target == current {
+        return Ok(0);
+    }
+
+    let response_id = agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(
+        Some(response_body),
+    )
+    .cell_id()
+    .to_string();
+    let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
+    let annotated = target
+        .matches(&needle)
+        .count()
+        .saturating_sub(current.matches(&needle).count());
+
+    let replace_ops = node_replace_ops_from_diff(&current, &target, "queue").unwrap_or_default();
+    if skip_visible_guard {
+        effects.atomic_write(file, &target)?;
+    } else if !replace_ops.is_empty() {
+        effects.converge_structural_ops(file, &replace_ops, &current, "queue_response_backlink")?;
+    } else {
+        effects.converge_document_or_disk(file, &target, &current, "queue_response_backlink")?;
+    }
+
+    if let Some(snapshot) = load_snapshot_recovery_only(file, "queue response backlink snapshot") {
+        match annotate_newly_struck_queue_items_with_response_id(before, &snapshot, response_body) {
+            Ok(updated) if updated != snapshot => {
+                save_snapshot_recovery_only(file, &updated, "queue response backlink snapshot")
+            }
+            Ok(_) => {}
+            Err(error) => {
+                log_snapshot_recovery_warning(file, "queue response backlink snapshot", error)
+            }
+        }
+    }
+
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_response_backlink file={} response_id={} prompts={annotated}",
+            file.display(),
+            response_id
+        ),
+    );
+    Ok(annotated)
 }
 
 /// The turn start is a stable, durable timestamp source for every recomputation
@@ -3162,6 +3237,70 @@ mod core_tests {
                 ),
             );
             Ok(())
+        }
+    }
+
+    #[test]
+    fn completed_prompt_backlink_updates_document_and_snapshot() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let response = concat!(
+            "### Re: searchable backlink — test\n\n",
+            "> **Queue prompt:**\n>\n> do [#searchable]\n\n",
+            "Completed.\n",
+        );
+        let before = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#searchable]\n",
+            "- do [#later]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let current = format!(
+            concat!(
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- ~~do [#searchable]~~ — auto-struck: addressed this cycle ⟦addressed-at:2026-10-30T20:00:00Z⟧\n",
+                "- do [#later]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .cell_id()
+            .to_string();
+
+        let count = annotate_newly_completed_queue_prompts_with_response_id(
+            &doc,
+            before,
+            response,
+            false,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+
+        assert_eq!(count, 1);
+        let updated = fs::read_to_string(&doc).unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("snapshot");
+        for content in [&updated, &snapshot] {
+            assert!(
+                content.contains(&format!("response: {response_id}")),
+                "{content}"
+            );
+            assert!(content.contains("- do [#later]\n"), "{content}");
         }
     }
 

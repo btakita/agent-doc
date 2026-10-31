@@ -29,6 +29,10 @@ use crate::{
 /// wrapper so the original head text stays struck and readable.
 pub const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
 
+/// Searchable backlink from a completed managed-list prompt to the stable
+/// exchange response cell that answered it.
+pub const RESPONSE_ID_NOTE_PREFIX: &str = "response: ";
+
 /// Pure projection of the queue mutation implied by a captured response and an
 /// authoritative markdown frontier.
 ///
@@ -1743,7 +1747,7 @@ pub fn project_answered_free_text_strike_with_dispatch(
         dispatch_owned_heads,
     )?;
     Ok((
-        project_free_text_strike_of_node_keys(content, decision.node_keys)?,
+        project_free_text_strike_of_node_keys(content, Some(response_body), decision.node_keys)?,
         decision.inline_vetoed_heads,
     ))
 }
@@ -1802,7 +1806,9 @@ pub fn project_committed_heading_replay_free_text_strike_with_claims(
         })
         .map(|node| node.node_key)
         .collect();
-    project_free_text_strike_of_node_keys(content, node_keys)
+    // The replay body was never materialized. Its content-derived id therefore
+    // cannot be used as the backlink for the already-committed response.
+    project_free_text_strike_of_node_keys(content, None, node_keys)
 }
 
 /// Normalized topics of every `### Re:` answer heading in `agent:exchange`:
@@ -1856,6 +1862,7 @@ fn normalize_answer_topic(text: &str) -> String {
 /// (GH #327).
 fn project_free_text_strike_of_node_keys(
     content: &str,
+    response_body: Option<&str>,
     node_keys: Vec<String>,
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
     if node_keys.is_empty() {
@@ -1872,6 +1879,12 @@ fn project_free_text_strike_of_node_keys(
         return Ok(None);
     }
     let annotated = annotate_newly_struck_free_text_heads(content, &struck)?;
+    let annotated = match response_body {
+        Some(response_body) => {
+            annotate_newly_struck_queue_items_with_response_id(content, &annotated, response_body)?
+        }
+        None => annotated,
+    };
     // `#queueworkevidence`: the answered-head strike is a terminal closeout
     // boundary just like queue consume. Retire its completion cell in the same
     // derived target so stale evidence cannot attach to a later same-text row.
@@ -1965,7 +1978,13 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
             let (core, newline) = line
                 .strip_suffix('\n')
                 .map_or((line, ""), |core| (core, "\n"));
-            match core.trim_end().strip_suffix(suffix.as_str()) {
+            let response_separator = format!("; {RESPONSE_ID_NOTE_PREFIX}");
+            let core = core
+                .trim_end()
+                .rsplit_once(&response_separator)
+                .filter(|(_, response_id)| !response_id.trim().is_empty())
+                .map_or_else(|| core.trim_end(), |(head, _)| head.trim_end());
+            match core.strip_suffix(suffix.as_str()) {
                 Some(head) => format!("{head}~~{newline}"),
                 None => line.to_string(),
             }
@@ -2470,6 +2489,91 @@ pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyho
     Ok(out)
 }
 
+/// Append this turn's stable response-cell id to every managed-list item newly
+/// struck between `before` and `after`.
+///
+/// Comparing node identity across the lifecycle transition covers every strike
+/// path without relabeling an older, identical prompt. The note remains outside
+/// the strike wrapper so searching the response id finds both the response and
+/// the addressed prompt.
+pub fn annotate_newly_struck_queue_items_with_response_id(
+    before: &str,
+    after: &str,
+    response_body: &str,
+) -> anyhow::Result<String> {
+    let response_policy =
+        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+            response_body,
+        ));
+    let response_id = response_policy.cell_id();
+    if response_id.is_empty() {
+        return Ok(after.to_string());
+    }
+
+    let struck_before: HashSet<String> =
+        agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+            .map(|nodes| {
+                nodes
+                    .into_iter()
+                    .filter(|node| node.item.struck)
+                    .map(|node| node.node_key)
+                    .collect()
+            })
+            .unwrap_or_default();
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") {
+        Ok(nodes) => nodes,
+        Err(_) => return Ok(after.to_string()),
+    };
+
+    let mut edits = Vec::new();
+    for node in nodes {
+        if !node.item.struck
+            || struck_before.contains(&node.node_key)
+            || node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+        {
+            continue;
+        }
+        let raw = &after[node.item.start_byte..node.item.end_byte];
+        if raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}")) {
+            continue;
+        }
+        edits.push((node.item.start_byte, node.item.end_byte));
+    }
+
+    let mut out = after.to_string();
+    for (start, end) in edits.into_iter().rev() {
+        let annotated = annotate_struck_line_with_response_id(&out[start..end], response_id);
+        out.replace_range(start..end, &annotated);
+    }
+    Ok(out)
+}
+
+fn annotate_struck_line_with_response_id(line: &str, response_id: &str) -> String {
+    let (core, newline) = match line.strip_suffix('\n') {
+        Some(rest) => (rest, "\n"),
+        None => (line, ""),
+    };
+    let trimmed_end = core.trim_end();
+    let trailing_ws = &core[trimmed_end.len()..];
+    if core.contains('\n')
+        || trimmed_end.trim_start().starts_with("~~~")
+        || !trimmed_end.contains("~~")
+        || trimmed_end.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"))
+    {
+        return line.to_string();
+    }
+    let separator = agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR;
+    if trimmed_end.contains(separator) {
+        format!("{trimmed_end}; {RESPONSE_ID_NOTE_PREFIX}{response_id}{trailing_ws}{newline}")
+    } else if trimmed_end.ends_with("~~") {
+        format!(
+            "{trimmed_end}{separator}{RESPONSE_ID_NOTE_PREFIX}{response_id}{trailing_ws}{newline}"
+        )
+    } else {
+        line.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2493,6 +2597,72 @@ mod tests {
 
     fn active_queue_doc(body: &str) -> String {
         format!("---\nqueue: go\n---\n\n<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn newly_struck_managed_list_item_links_to_the_stable_response_id() {
+        let before = queue_doc("- do [#fresh]\n- ~~do [#old]~~\n");
+        let after = queue_doc("- ~~do [#fresh]~~\n- ~~do [#old]~~\n");
+        let response = "### Re: fresh — test\n\nCompleted the fresh item.\n";
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .cell_id()
+            .to_string();
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+
+        assert!(
+            annotated.contains(&format!(
+                "- ~~do [#fresh]~~ — auto-struck: response: {response_id}\n"
+            )),
+            "{annotated}"
+        );
+        assert!(annotated.contains("- ~~do [#old]~~\n"), "{annotated}");
+        assert_eq!(
+            annotate_newly_struck_queue_items_with_response_id(&before, &annotated, response)
+                .unwrap(),
+            annotated,
+            "replaying the projection must not duplicate the response id"
+        );
+    }
+
+    #[test]
+    fn answered_free_text_projection_appends_its_response_id() {
+        let document = active_queue_doc(
+            "- explain the searchable response backlink behavior\n- do [#later]\n",
+        );
+        let response = concat!(
+            "### Re: backlinks — test\n\n",
+            "> **Queue prompt:**\n>\n",
+            "> explain the searchable response backlink behavior\n\n",
+            "The completed prompt now links to this response.\n",
+        );
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .cell_id()
+            .to_string();
+
+        let projected = project_answered_free_text_strike(&document, response, Some(&document))
+            .unwrap()
+            .expect("prompt is answered");
+
+        assert!(
+            projected
+                .target_content
+                .contains(&format!("response: {response_id}")),
+            "{}",
+            projected.target_content
+        );
+        assert!(
+            projected.target_content.contains("- do [#later]\n"),
+            "{}",
+            projected.target_content
+        );
     }
 
     fn first_live_node_key(content: &str) -> String {
@@ -4918,10 +5088,14 @@ Old.
             "- #upgrade\n",
             "<!-- /agent:queue -->",
         )));
-        assert!(projected.target_content.contains(concat!(
-            "<!-- agent:queue go id=release -->\n",
-            "- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n",
-            "<!-- /agent:queue -->",
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                &response,
+            ))
+            .cell_id()
+            .to_string();
+        assert!(projected.target_content.contains(&format!(
+            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n<!-- /agent:queue -->"
         )));
     }
 

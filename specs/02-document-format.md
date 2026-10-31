@@ -1174,6 +1174,12 @@ any `#ftstrike` note. The timestamp is derived from the turn cycle start, so
 retrying or recomputing the same cycle is idempotent; a row that already has
 the annotation is never restamped. The annotation is durable evidence, not
 work identity or lifecycle state, and therefore remains in the markdown.
+When the transition is backed by a materialized assistant response, the same
+row also appends `response: <response-cell-id>`. The id is the stable,
+content-derived exchange response-cell identity; searching it finds both the
+answer and every managed-list prompt that answer addressed. Replaying closeout
+does not duplicate the backlink, and an older struck occurrence of identical
+prompt text is never relabeled.
 Editors sort all annotated rows across the document's queue components and
 derive `①`, `②`, and `③` for the newest three, with strongest-to-weakest row
 highlights. Moving the caret onto one of those rows acknowledges only that

@@ -3637,7 +3637,7 @@ Duplicate replay should stay live.
         .target_content;
         assert_eq!(
             struck.len() - committed.len(),
-            53,
+            79,
             "the production failure was the exact annotated #ftstrike delta"
         );
         fs::write(&doc, &struck).unwrap();
@@ -3649,7 +3649,7 @@ Duplicate replay should stay live.
             .expect("committed document");
         assert!(
             landed
-                .contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike)\n")
+                .contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike); response: r:")
                 && landed.contains("- later work\n"),
             "HEAD must carry the exact late strike without losing later queue work:\n{landed}"
         );

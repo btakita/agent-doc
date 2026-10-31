@@ -74,6 +74,10 @@ pub enum SteeringDispatch {
     DrainAfterCurrent,
     /// Dispatch now to a new background subagent (one per item).
     Subagent,
+    /// Subagent intent discovered while a worker report awaits coordinator
+    /// integration. Keep it queued and worker-owned, but do not admit fresh
+    /// dispatch until the reported writeback closes.
+    AwaitReportedCloseout,
     /// The item is already claimed by a worker (`agent-doc queue claim`):
     /// forward the operator's change to that owner, never dispatch a new
     /// subagent (`#claimedsteerwake`). [`SteeringItem::owner`] names it.
@@ -99,6 +103,7 @@ impl SteeringDispatch {
             Self::AddressNow => "address_now",
             Self::DrainAfterCurrent => "drain_after_current",
             Self::Subagent => "subagent",
+            Self::AwaitReportedCloseout => "await_reported_closeout",
             Self::ForwardToOwner => "forward_to_owner",
             Self::CancelClaimed => "cancel_claimed",
             Self::DegradedClaimMismatch => "degraded_claim_mismatch",
@@ -1651,6 +1656,19 @@ pub fn apply_release_receipts(
     }
 }
 
+/// Hold newly discovered subagent work behind first-class Reported writeback.
+///
+/// The queue remains the durable source of the later dispatch. This routing
+/// only prevents a mid-turn steering envelope from contradicting the queue
+/// admission barrier by instructing the coordinator to dispatch it now.
+pub fn hold_subagent_dispatch_for_reported(items: &mut [SteeringItem]) {
+    for item in items.iter_mut() {
+        if item.source == SteeringSource::Queue && item.dispatch == SteeringDispatch::Subagent {
+            item.dispatch = SteeringDispatch::AwaitReportedCloseout;
+        }
+    }
+}
+
 /// The document-specific action for `item`: [`instruction_for`], except a
 /// reported line names its exact closeout (`#reportedrelease`).
 fn action_for(document: &str, item: &SteeringItem) -> String {
@@ -1838,6 +1856,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
                 agent_doc_queue::subagent_tmux_isolation_rule!()
             )
         }
+        (SteeringDispatch::AwaitReportedCloseout, _, _, _) => {
+            "subagent intent recorded behind Reported coordinator writeback. Do NOT dispatch or \
+             drain it inline now; first integrate, verify, and persist every available reported \
+             row. Fresh dispatch resumes from the queue after that closeout."
+        }
         (SteeringDispatch::CancelClaimed, _, _, _) => {
             "the operator removed claimed work. Interrupt its exact worker attempt and retire the \
              generation-fenced claim; do not continue based on sunk cost."
@@ -2003,6 +2026,13 @@ pub fn render_closeout_steering_context(
                     agent_doc_queue::subagent_tmux_isolation_rule!()
                 )
                 .to_string()
+            }
+            (SteeringDispatch::AwaitReportedCloseout, SteeringSource::Queue) => {
+                "HOLD this subagent intent behind Reported coordinator writeback. Do not claim or \
+                 dispatch it and do not drain it inline; integrate, verify, and persist every \
+                 available reported row first. The normal queue dispatch resumes after that \
+                 closeout."
+                    .to_string()
             }
             (SteeringDispatch::AddressNow, SteeringSource::Exchange) => format!(
                 "a new operator prompt: answer it in the next cycle (`agent-doc {document}`); do \

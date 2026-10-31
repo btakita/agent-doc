@@ -697,7 +697,8 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
 }
 
 /// A live projected answer leaf lazily reopens its structural parent. Once the
-/// request Todo is already closed, that leaf remains ordinary queue work.
+/// request Todo is already closed, that leaf remains ordinary queue work, but
+/// fresh dispatch waits for an already-reported sibling's coordinator closeout.
 #[test]
 fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let dir = tempfile::tempdir().unwrap();
@@ -712,7 +713,10 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
     assert!(prompts.iter().any(|item| item == ANSWER), "{prompts:#?}");
-    assert!(dispatch.iter().any(|item| item == ANSWER), "{dispatch:#?}");
+    assert!(
+        dispatch.is_empty(),
+        "reported writeback debt blocks fresh dispatch: {dispatch:#?}"
+    );
     let body = run_body(&doc, "run");
     assert!(
         body.contains(&format!("- [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
@@ -732,5 +736,11 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     assert!(
         body.starts_with(&format!("- ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
         "the exact echo strikes the row once its request is closed:\n{body}"
+    );
+    let state = preflight_json(dir.path(), &doc);
+    let dispatch = string_list(&state, "queue_subagent_dispatch");
+    assert!(
+        dispatch.iter().any(|item| item == ANSWER),
+        "fresh dispatch resumes immediately after reported closeout: {dispatch:#?}"
     );
 }

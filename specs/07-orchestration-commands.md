@@ -456,6 +456,30 @@ queue item, or marks a specific parked item with a per-item enqueue token.
 
 Semantics:
 
+- `agent-doc queue sync <FILE>` is the declarative queue reconciler, not merely
+  a backlog-copy command. In one idempotent pass it projects durable
+  claim/report/blocker lifecycle state across all queue components, retires
+  free-text residue only when the retained captured response proves that exact
+  head was answered, and then applies every configured backlog mirror described
+  below. A document with no mirror directive is already in sync for the final
+  phase; this is not an error.
+- The declarative reconciler is the safe, evidence-backed superset of ordinary
+  consumption. It never treats age or a previous turn boundary as completion,
+  never guesses among duplicate/ambiguous text, and never acknowledges open
+  id-backed work without the explicit proof required by its lifecycle.
+  `agent-doc queue consume` remains the imperative escape hatch for an
+  operator-directed acknowledgement or repair.
+- Sync does not usurp main-agent dispatch ownership. Eligible pending work,
+  concurrency/dependency-held work, live owners, reported integration debt,
+  and abandoned/lost attempts are reported as nonterminal reconciliation debt.
+  The main coordinator processes the complete ready set with
+  `claim -> spawn -> start`, forwards steering to an existing running owner,
+  recovers lost attempts, and integrates reports before terminal success.
+  Background workers never self-claim coordinator queue rows.
+- `agent-doc sync <FILE>` runs document-level synchronizers and currently
+  includes this queue reconciler. The historical `agent-doc sync --col ...`
+  form continues to mean tmux layout synchronization; document paths and tmux
+  layout options cannot be combined.
 - "Active" backlog items are open `[ ]` items with an id. Gated (`[/]`) and done
   (`[x]`) items are excluded — they are not actionable queue targets. An open
   item whose `not-before=YYYY-MM-DD` scheduling precondition is still in the

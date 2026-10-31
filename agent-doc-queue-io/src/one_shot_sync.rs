@@ -37,8 +37,36 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
     write_document: impl FnOnce(&Path, &str, &str) -> Result<()>,
     save_snapshot: impl FnOnce(&Path, &str) -> Result<()>,
 ) -> Result<OneShotQueueSyncResult> {
+    sync_configured_backlog_queue_with_snapshot(file, content, write_document, save_snapshot)?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
+                 Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) or mark an item with `:inbox_tray:` / `/enqueue`.",
+                file.display()
+            )
+        })
+}
+
+/// Sync a configured backlog mirror, or report that this document does not
+/// opt into backlog-to-queue mirroring.
+///
+/// Declarative document reconciliation calls this after its other queue
+/// projections. A document without a `queue` attribute or enqueue marker is
+/// already in sync for this projection; it is not a command error.
+pub fn sync_configured_backlog_queue_with_snapshot(
+    file: &Path,
+    content: &str,
+    write_document: impl FnOnce(&Path, &str, &str) -> Result<()>,
+    save_snapshot: impl FnOnce(&Path, &str) -> Result<()>,
+) -> Result<Option<OneShotQueueSyncResult>> {
     let components = element::parse(content)
         .with_context(|| format!("failed to parse components in {}", file.display()))?;
+
+    let Some(sync_request) =
+        backlog_sync::collect_one_shot_backlog_queue_sync(&components, content)
+    else {
+        return Ok(None);
+    };
 
     let Some(qc) = backlog_sync::mirror_queue_component(&components) else {
         bail!(
@@ -47,15 +75,6 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
         );
     };
 
-    let Some(sync_request) =
-        backlog_sync::collect_one_shot_backlog_queue_sync(&components, content)
-    else {
-        bail!(
-            "{}: no agent:backlog/agent:icebox/agent:pending component carries a `queue` attribute or enqueue marker. \
-             Add `<!-- agent:backlog queue -->` (or `queue=sync`, `queue=prepend`) or mark an item with `:inbox_tray:` / `/enqueue`.",
-            file.display()
-        );
-    };
     let effective_mode = sync_request.mode;
     let ids = sync_request.ids;
 
@@ -81,10 +100,10 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
         effective_mode,
         &sibling_ids,
     ) else {
-        return Ok(OneShotQueueSyncResult::AlreadyInSync {
+        return Ok(Some(OneShotQueueSyncResult::AlreadyInSync {
             requested_count: ids.len(),
             mode: effective_mode,
-        });
+        }));
     };
 
     let new_body = document_queue::render(&synced);
@@ -98,14 +117,14 @@ pub fn sync_one_shot_backlog_queue_with_snapshot(
         .err()
         .map(|err| err.to_string());
 
-    Ok(OneShotQueueSyncResult::Synced(OneShotQueueSyncApplied {
+    Ok(Some(OneShotQueueSyncResult::Synced(OneShotQueueSyncApplied {
         requested_count: ids.len(),
         prompt_count: report.prompt_count,
         mode: effective_mode,
         already_present: report.already_present,
         newly_materialized: report.newly_materialized,
         snapshot_warning,
-    }))
+    })))
 }
 
 pub fn format_queue_ids(ids: &[String]) -> String {
@@ -117,6 +136,30 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    #[test]
+    fn configured_sync_is_a_noop_when_document_has_no_mirror_directive() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- keep this manual prompt\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#alpha] not mirrored\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let result = sync_configured_backlog_queue_with_snapshot(
+            &doc,
+            content,
+            |_path, _current, _target| panic!("unconfigured mirror must not write"),
+            |_path, _content| panic!("unconfigured mirror must not snapshot"),
+        )
+        .expect("an unconfigured mirror is already reconciled");
+
+        assert_eq!(result, None);
+    }
 
     #[test]
     fn sync_accepts_enqueue_marker_without_queue_attr() {

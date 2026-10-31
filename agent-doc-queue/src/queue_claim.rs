@@ -129,6 +129,12 @@ pub struct QueueClaim {
     /// Typed lifecycle for this exact `(identity, owner, generation)` attempt.
     #[serde(default)]
     pub state: QueueClaimState,
+    /// Exact, generation-fenced completion evidence was recovered only after
+    /// this attempt had already entered `Lost`. The attempt is now reportable
+    /// and closeable, while this bit preserves the loss boundary for a
+    /// lossless visible `lost + completed outbox` projection.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub completion_recovered_after_loss: bool,
     /// Explicit local/published state supplied by the worker when reporting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_state: Option<QueueReportState>,
@@ -190,6 +196,10 @@ pub struct QueueClaim {
 
 fn is_zero(value: &u64) -> bool {
     *value == 0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Durable audit tombstone for one exact operator-cancelled claim attempt.
@@ -331,7 +341,7 @@ pub fn diagnose_lifecycle(
     let expected = if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
         agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
     } else {
-        claim.state.projection_marker()
+        claim.projection_marker()
     };
     let worker_liveness = match claim.state {
         QueueClaimState::Running | QueueClaimState::Reported => WorkerLivenessEvidence::Proven,
@@ -414,6 +424,19 @@ impl QueueClaimState {
             Self::Running => QueueLifecycleMarker::Running,
             Self::Reported => QueueLifecycleMarker::Reported,
             Self::Lost => QueueLifecycleMarker::Lost,
+        }
+    }
+}
+
+impl QueueClaim {
+    /// Visible lifecycle projection for this exact attempt. A completion
+    /// recovered after loss remains reported state for closeout, but keeps the
+    /// lost boundary visible instead of silently rewriting history.
+    pub fn projection_marker(&self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
+        if self.state == QueueClaimState::Reported && self.completion_recovered_after_loss {
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
+        } else {
+            self.state.projection_marker()
         }
     }
 }
@@ -1108,6 +1131,7 @@ impl QueueClaimLedger {
             owner: owner.trim().to_string(),
             generation: 1,
             state: QueueClaimState::Claimed,
+            completion_recovered_after_loss: false,
             publication_state: None,
             worker: None,
             dispatch_policy: None,
@@ -3354,6 +3378,7 @@ mod tests {
                     owner: "subagent:a".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    completion_recovered_after_loss: false,
                     publication_state: None,
                     worker: None,
                     dispatch_policy: None,
@@ -3372,6 +3397,7 @@ mod tests {
                     owner: "subagent:b".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    completion_recovered_after_loss: false,
                     publication_state: None,
                     worker: None,
                     dispatch_policy: None,

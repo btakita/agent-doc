@@ -1101,8 +1101,12 @@ pub fn reconcile_completion_evidence(file: &Path, content: &str) -> Result<usize
     let recovered = mutate_ledger(file, |ledger| {
         let mut recovered = 0;
         for claim in &mut ledger.claims {
-            if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Running
-                || claim.worker.is_none()
+            let was_lost = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            if !matches!(
+                claim.state,
+                agent_doc_queue::queue_claim::QueueClaimState::Running
+                    | agent_doc_queue::queue_claim::QueueClaimState::Lost
+            ) || claim.worker.is_none()
             {
                 continue;
             }
@@ -1112,6 +1116,7 @@ pub fn reconcile_completion_evidence(file: &Path, content: &str) -> Result<usize
             // claims never accept that unfenced form.
             if content.contains(&current) {
                 claim.state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+                claim.completion_recovered_after_loss = was_lost;
                 recovered += 1;
             }
         }
@@ -1302,30 +1307,7 @@ pub fn record_released_cancellation(
     file: &Path,
     reported: &agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt,
 ) -> Result<QueueClaimCancellationReceipt> {
-    let worker = reported.worker_id.as_ref().map(|worker_id| {
-        agent_doc_queue::queue_claim::QueueWorkerBinding {
-            worker_id: worker_id.clone(),
-            started_at_secs: reported.claimed_at_secs,
-        }
-    });
-    let claim = QueueClaim {
-        identity: reported.identity.clone(),
-        item_text: reported.item_text.clone(),
-        owner: reported.owner.clone(),
-        generation: reported.generation,
-        state: agent_doc_queue::queue_claim::QueueClaimState::Reported,
-        publication_state: reported.publication_state,
-        worker,
-        dispatch_policy: None,
-        tracked_item_aliases: Vec::new(),
-        claimed_at_secs: reported.claimed_at_secs,
-        expires_at_secs: reported.released_at_secs,
-        owner_session: None,
-        anchor: None,
-        followed_from: Vec::new(),
-        followed_generation: 0,
-        claim_time_row: None,
-    };
+    let claim = reported.as_reported_claim();
     let cancelled_at_secs = now_secs();
     let receipt = mutate_ledger(file, |ledger| {
         Ok(ledger.record_cancellation(claim, cancelled_at_secs, reported.completion_key.clone()))
@@ -1542,8 +1524,9 @@ pub struct LostClaimRecovery {
     /// What to do when the bound worker may have completed after expiry.
     pub recover_completed_worker_result: String,
     /// Exact command that creates the next fenced generation when no usable
-    /// worker result exists.
-    pub reclaim_command: String,
+    /// worker result exists and durable state proves no worker started.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reclaim_command: Option<String>,
 }
 
 /// One live queue-head claim attempt with its owner-session verdict, for
@@ -1644,7 +1627,10 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRe
         recover_completed_worker_result: format!(
             "Check {worker} for a completed result. If it completed, integrate that exact result and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text)."
         ),
-        reclaim_command: format!("agent-doc queue claim {document} --item {item} --owner {owner}"),
+        reclaim_command: crate::queue_lineage::load(file)
+            .ok()
+            .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(&lineage, claim))
+            .then(|| format!("agent-doc queue claim {document} --item {item} --owner {owner}")),
     }
 }
 
@@ -2173,13 +2159,9 @@ mod tests {
             "{}",
             recovery.recover_completed_worker_result
         );
-        assert!(
-            recovery.reclaim_command.contains("--item '#lostdiag'")
-                && recovery
-                    .reclaim_command
-                    .contains("--owner 'subagent:lostdiag'"),
-            "{}",
-            recovery.reclaim_command
+        assert_eq!(
+            recovery.reclaim_command, None,
+            "a bound worker makes retry unsafe even after expiry"
         );
     }
 
@@ -2738,6 +2720,46 @@ mod tests {
         assert_eq!(
             stored.state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert!(stored.blocks_dispatch(u64::MAX));
+    }
+
+    #[test]
+    fn exact_completion_after_loss_preserves_loss_and_outbox_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["finish lost worker task"]);
+        let (_, claimed) =
+            claim(&doc, "finish lost worker task", "subagent:lost-worker", 600).unwrap();
+        let running = start_attempt(
+            &doc,
+            "finish lost worker task",
+            "subagent:lost-worker",
+            "worker:lost-exact",
+            600,
+            claimed.generation,
+        )
+        .unwrap();
+        mutate_ledger(&doc, |ledger| {
+            ledger.claims[0].state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            Ok(())
+        })
+        .unwrap();
+        let exact = agent_doc_document::subagent_completion::cell(
+            &running.owner,
+            &running.item_text,
+            &completion_feedback_key(&running).unwrap(),
+        );
+
+        assert_eq!(reconcile_completion_evidence(&doc, &exact).unwrap(), 1);
+        let stored = load_ledger(&doc).unwrap().claims.remove(0);
+        assert_eq!(
+            stored.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+        assert!(stored.completion_recovered_after_loss);
+        assert_eq!(
+            stored.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
         );
         assert!(stored.blocks_dispatch(u64::MAX));
     }

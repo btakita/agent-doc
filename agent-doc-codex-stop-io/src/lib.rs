@@ -684,6 +684,9 @@ struct ReportedWritebackDebt {
     /// `Some(N)` while the `Reported` claim is still held; `None` once
     /// `queue release` turned it into a release receipt (`#reportedrelease`).
     held_generation: Option<u64>,
+    /// Completion was recovered only after this exact attempt became Lost.
+    /// This is urgent reconciliation debt, never a one-shot reminder.
+    recovered_after_loss: bool,
 }
 
 /// Every live queue row whose worker reported but whose row is still open:
@@ -700,9 +703,15 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
                 item_text: claim.item_text,
                 owner: claim.owner,
                 held_generation: Some(claim.generation),
+                recovered_after_loss: claim.completion_recovered_after_loss,
             });
         }
     }
+    let recovered_receipts = agent_doc_queue_io::claim_release_receipt::load(file)?
+        .receipts
+        .into_iter()
+        .map(|receipt| (receipt.identity, receipt.completion_recovered_after_loss))
+        .collect::<std::collections::HashMap<_, _>>();
     let owners =
         agent_doc_queue_io::claim_release_receipt::reported_owners_for_content(file, content);
     for head in
@@ -719,6 +728,7 @@ fn reported_writeback_debts(file: &Path, content: &str) -> Result<Vec<ReportedWr
                 .unwrap_or_else(|| "the worker".to_string()),
             item_text: head,
             held_generation: None,
+            recovered_after_loss: recovered_receipts.get(&identity).copied().unwrap_or(false),
         });
     }
     Ok(debts)
@@ -733,9 +743,10 @@ fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWriteba
                 agent_doc_queue::claim_release_receipt::queue_line_closeout(file_display, &debt.item_text);
             match debt.held_generation {
                 Some(generation) => format!(
-                    "- `{}` reported for `{}` (claim generation {generation}; its `### Re: Subagent completed` cell sits in `agent:exchange`, uncommitted). Close it: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
+                    "- `{}` reported for `{}` (claim generation {generation}; recovered_after_loss={}; its `### Re: Subagent completed` cell sits in `agent:exchange`, uncommitted). Close it: {closeout}. If integration or verification must finish first, run `agent-doc queue release {file_display} --item {:?} --generation {generation}` and still persist the result with that closeout.",
                     debt.owner,
                     debt.item_text.trim(),
+                    debt.recovered_after_loss,
                     agent_doc_queue::queue_claim::claim_item_handle(&debt.item_text),
                 ),
                 None => format!(
@@ -757,8 +768,9 @@ fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWriteba
          and is served again until a closeout strikes it. Persist it in THIS turn before the final \
          answer (`#reportedwritebackdebt`):\n{rows}\n\
          Do NOT dispatch a new subagent for these rows and do NOT re-claim them. If a concrete \
-         blocker prevents persisting now, name each row and the blocker in your final answer; this \
-         reminder is shown once per stop.",
+         blocker prevents persisting now, keep the row open and surface that blocker. A recovered-after-loss \
+         row (`⚠️☑️`) is urgent, nonterminal reconciliation debt and this gate continues refusing terminal \
+         success until it closes; ordinary reported reminders remain bounded to once per stop.",
         count = debts.len(),
     )
 }
@@ -782,9 +794,6 @@ fn claude_reported_writeback_continuation(
     input: &ClaudeStopInput,
     file: &Path,
 ) -> Option<ClaudeStopContinuation> {
-    if input.stop_hook_active {
-        return None;
-    }
     let debts = match current_document_content(file, "claude_stop_reported_writeback")
         .and_then(|content| reported_writeback_debts(file, &content))
     {
@@ -802,10 +811,14 @@ fn claude_reported_writeback_continuation(
     if debts.is_empty() {
         return None;
     }
+    let urgent_recovered_loss = debts.iter().any(|debt| debt.recovered_after_loss);
+    if input.stop_hook_active && !urgent_recovered_loss {
+        return None;
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "claude_stop_reported_writeback_unpersisted rows={} held={} released={} action=hold_once (#reportedwritebackdebt)",
+            "claude_stop_reported_writeback_unpersisted rows={} held={} released={} recovered_after_loss={} action={} (#reportedwritebackdebt)",
             debts.len(),
             debts
                 .iter()
@@ -815,6 +828,15 @@ fn claude_reported_writeback_continuation(
                 .iter()
                 .filter(|debt| debt.held_generation.is_none())
                 .count(),
+            debts
+                .iter()
+                .filter(|debt| debt.recovered_after_loss)
+                .count(),
+            if urgent_recovered_loss {
+                "hold_until_reconciled"
+            } else {
+                "hold_once"
+            },
         ),
     );
     Some(ClaudeStopContinuation {
@@ -8528,6 +8550,62 @@ Reviewed the gated items.\n\
                 .is_none(),
             "the reminder is shown once per stop"
         );
+    }
+
+    #[test]
+    fn claude_stop_never_allows_terminal_success_for_recovered_loss_debt() {
+        let dir = setup_project();
+        let doc = write_claimed_subagent_queue_doc(&dir, "Recovered-loss fixture.");
+        let (_, claimed) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "do [#held]",
+            "subagent:recovered-loss",
+            3600,
+        )
+        .unwrap();
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "do [#held]",
+            "subagent:recovered-loss",
+            "worker-recovered-loss",
+            3600,
+            claimed.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::abandon_attempt(
+            &doc,
+            "do [#held]",
+            Some(claimed.generation),
+        )
+        .unwrap();
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &running.owner,
+            &running.item_text,
+            &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
+            "Exact recovered response.",
+        )
+        .unwrap();
+        let current = fs::read_to_string(&doc).unwrap();
+        let current = current.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{cell}\n<!-- /agent:exchange -->"),
+        );
+        fs::write(&doc, &current).unwrap();
+        assert_eq!(
+            agent_doc_queue_io::queue_claim::reconcile_completion_evidence(&doc, &current).unwrap(),
+            1
+        );
+
+        let input = ClaudeStopInput {
+            session_id: "codex-session".to_string(),
+            cwd: dir.path().display().to_string(),
+            stop_hook_active: true,
+            transcript_path: None,
+        };
+        let held = claude_reported_writeback_continuation(&input, &doc)
+            .expect("recursive Stop must still refuse unresolved recovered-loss debt");
+        assert!(held.reason.contains("recovered_after_loss=true"));
+        assert!(held.reason.contains("urgent, nonterminal"));
     }
 
     /// `#reportedrelease`: `queue release` after a report keeps the row open

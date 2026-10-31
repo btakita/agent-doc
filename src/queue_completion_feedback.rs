@@ -594,6 +594,7 @@ mod tests {
             owner: "subagent:sdk-feedback".into(),
             generation: 1,
             state: agent_doc_queue::queue_claim::QueueClaimState::Running,
+            completion_recovered_after_loss: false,
             publication_state: None,
             worker: Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
                 worker_id: "worker:sdk-feedback".into(),

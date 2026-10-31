@@ -52,6 +52,14 @@ pub struct ClaimReleaseReceipt {
     /// receipt that predates generation-fenced worker attestation.
     #[serde(default)]
     pub generation: u64,
+    /// The completed attempt was first observed as Lost, then recovered from
+    /// its exact worker completion. Keep both facts after claim release.
+    #[serde(default)]
+    pub completion_recovered_after_loss: bool,
+    /// Coordinator harness session that spawned the exact worker. Retained so
+    /// recovery can address harness-native subagent history after claim release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_session: Option<crate::queue_claim::ClaimOwnerSession>,
     /// Worker-reported local/published state retained through coordinator closeout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication_state: Option<QueueReportState>,
@@ -96,6 +104,36 @@ impl ClaimReleaseReceipt {
                 worker_id,
             )
             .is_ok_and(|expected| expected == completion_key)
+    }
+
+    /// Reconstitute the durable reported attempt represented by this outbox
+    /// receipt. Queue sync uses this when the live claim has already been
+    /// released but coordinator closeout is still pending.
+    pub fn as_reported_claim(&self) -> QueueClaim {
+        QueueClaim {
+            identity: self.identity.clone(),
+            item_text: self.item_text.clone(),
+            owner: self.owner.clone(),
+            generation: self.generation,
+            state: crate::queue_claim::QueueClaimState::Reported,
+            completion_recovered_after_loss: self.completion_recovered_after_loss,
+            publication_state: self.publication_state,
+            worker: self.worker_id.as_ref().map(|worker_id| {
+                crate::queue_claim::QueueWorkerBinding {
+                    worker_id: worker_id.clone(),
+                    started_at_secs: self.claimed_at_secs,
+                }
+            }),
+            dispatch_policy: None,
+            tracked_item_aliases: Vec::new(),
+            claimed_at_secs: self.claimed_at_secs,
+            expires_at_secs: self.released_at_secs,
+            owner_session: self.owner_session.clone(),
+            anchor: None,
+            followed_from: Vec::new(),
+            followed_generation: 0,
+            claim_time_row: None,
+        }
     }
 }
 
@@ -169,6 +207,8 @@ impl ClaimReleaseReceiptLedger {
             item_text: claim.item_text.clone(),
             owner: claim.owner.clone(),
             generation: claim.generation,
+            completion_recovered_after_loss: claim.completion_recovered_after_loss,
+            owner_session: claim.owner_session.clone(),
             publication_state: claim.publication_state,
             claimed_at_secs: claim.claimed_at_secs,
             worker_id: Some(worker.worker_id.clone()),
@@ -325,6 +365,7 @@ mod tests {
             owner: owner.to_string(),
             generation: 1,
             state: crate::queue_claim::QueueClaimState::Reported,
+            completion_recovered_after_loss: false,
             publication_state: None,
             worker: Some(crate::queue_claim::QueueWorkerBinding {
                 worker_id: format!("worker:{owner}"),
@@ -425,6 +466,30 @@ mod tests {
                 .is_some()
         );
         assert!(ledger.governing(20, None, &none, question).is_none());
+    }
+
+    #[test]
+    fn receipt_preserves_recovered_loss_provenance_after_claim_release() {
+        let mut recovered = claim("recovered work", "subagent:recovered");
+        recovered.completion_recovered_after_loss = true;
+        recovered.owner_session = Some(crate::queue_claim::ClaimOwnerSession {
+            harness: Some("claude".to_string()),
+            session_id: Some("session-1".to_string()),
+            pane: None,
+            pid: None,
+        });
+        let mut ledger = ClaimReleaseReceiptLedger::default();
+        record(&mut ledger, &recovered, 10, 50);
+
+        let receipt = &ledger.receipts[0];
+        assert!(receipt.completion_recovered_after_loss);
+        let projected = receipt.as_reported_claim();
+        assert!(projected.completion_recovered_after_loss);
+        assert_eq!(projected.owner_session, recovered.owner_session);
+        assert_eq!(
+            projected.projection_marker(),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
+        );
     }
 
     #[test]
@@ -574,6 +639,8 @@ mod tests {
             item_text: "legacy row".to_string(),
             owner: "subagent:legacy".to_string(),
             generation: 0,
+            completion_recovered_after_loss: false,
+            owner_session: None,
             publication_state: None,
             claimed_at_secs: 1,
             worker_id: None,

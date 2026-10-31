@@ -66,8 +66,12 @@ pub const REPORTED_MARKER: &str = "☑️";
 pub const LEGACY_REPORTED_MARKER: &str = "📫";
 /// Older reported/outbox marker projected before the `📫` default.
 pub const OLDER_REPORTED_MARKER: &str = "📤";
-/// The attempt was lost or expired and is eligible for recovery/re-dispatch.
+/// The attempt was lost or expired. Durable evidence decides whether it may be
+/// retried; the marker alone never authorizes redispatch.
 pub const LOST_MARKER: &str = "⚠️";
+/// The exact completion outbox for a lost attempt was recovered. This remains
+/// one typed lifecycle prefix while visibly retaining both facts.
+pub const LOST_REPORTED_MARKER: &str = "⚠️☑️";
 /// Durable work evidence exists, but it cannot be bound to a current claim
 /// generation. The coordinator must reconcile/close the row; it is not fresh
 /// pending work (`#queueworkevidence`).
@@ -1599,6 +1603,7 @@ mod tests {
             (QueueLifecycleMarker::Running, RUNNING_MARKER),
             (QueueLifecycleMarker::Reported, REPORTED_MARKER),
             (QueueLifecycleMarker::Lost, LOST_MARKER),
+            (QueueLifecycleMarker::LostReported, LOST_REPORTED_MARKER),
             (QueueLifecycleMarker::Reconciling, RECONCILING_MARKER),
         ] {
             let projected = apply_lifecycle_marker(bare, state);

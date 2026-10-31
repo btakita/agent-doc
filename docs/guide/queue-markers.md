@@ -13,7 +13,9 @@ Stable link for other pages: `docs/guide/queue-markers.md#queue-markers`.
 ## Legend
 
 Lifecycle markers are mutually exclusive: an executable head shows exactly
-one. `🙋` combines with a lifecycle marker (`🙋🚧`). The two pins set
+one. `⚠️☑️` is one composite lifecycle retaining both loss and recovered
+outbox evidence; it is urgent integration debt, never safe-to-delete state.
+`🙋` combines with a lifecycle marker (`🙋🚧`). The two pins set
 priority, not lifecycle.
 
 A nesting group label — a row whose only job is to name the heads indented
@@ -32,7 +34,8 @@ stays.
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
-| ⚠️ | `lost` | lost | The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it. |
+| ⚠️ | `lost` | lost | The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it. |
+| ⚠️☑️ | `lost_reported` | lost + worker done | Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked. |
 | 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |
 | ⏭️ | `skipped` | skipped | It was dispatched and came back unconsumed; the queue advanced past it to the next runnable head. |
@@ -66,7 +69,7 @@ surfaces render it:
   keeps one compact legend line as the last paragraph of `agent:status`:
 
   ```text
-  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
+  Queue markers: 📥 pending · ⛔ blocked · 🟡 claimed · 🚧 running · ☑️ keep: worker done · ⚠️ lost · ⚠️☑️ lost + worker done · 🔄 needs reconcile · ❔ unknown · ⏭️ skipped · ⏳ awaiting operator · 🙋 operator action · 📌 pinned · 📍 agent pin · ~~done~~ safe to delete ([legend](…/queue-markers.md#queue-markers))
   ```
 
   New documents from the Claim for Tmux Pane template start with it. An

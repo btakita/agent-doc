@@ -33,7 +33,8 @@ pub const QUEUE_TERMINAL_MEANING: &str = "Integrated, terminal queue history. A 
 
 /// Every visible prefix the binary paints on (or accepts from) a queue row.
 ///
-/// Lifecycle markers are mutually exclusive: a row shows exactly one.
+/// Lifecycle markers are mutually exclusive: a row shows exactly one. The
+/// `lost_reported` lifecycle composes both facts into one typed prefix.
 /// `OperatorAction` composes with a lifecycle marker (`🙋🚧`). The two pins
 /// are operator- or agent-authored priority, not lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,13 +46,14 @@ pub enum QueueMarker {
 }
 
 /// Legend order. Matches [`QueueIconSet::entries`] one-to-one.
-pub const ALL_QUEUE_MARKERS: [QueueMarker; 13] = [
+pub const ALL_QUEUE_MARKERS: [QueueMarker; 14] = [
     QueueMarker::Lifecycle(QueueLifecycleMarker::Pending),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Blocked),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Claimed),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Running),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Reported),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Lost),
+    QueueMarker::Lifecycle(QueueLifecycleMarker::LostReported),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Reconciling),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Unknown),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Skipped),
@@ -72,6 +74,7 @@ impl QueueMarker {
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "reported",
                 QueueLifecycleMarker::Lost => "lost",
+                QueueLifecycleMarker::LostReported => "lost_reported",
                 QueueLifecycleMarker::Reconciling => "reconciling",
                 QueueLifecycleMarker::Unknown => "unknown",
                 QueueLifecycleMarker::Skipped => "skipped",
@@ -103,6 +106,7 @@ impl QueueMarker {
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "keep: worker done",
                 QueueLifecycleMarker::Lost => "lost",
+                QueueLifecycleMarker::LostReported => "lost + worker done",
                 QueueLifecycleMarker::Reconciling => "needs reconcile",
                 QueueLifecycleMarker::Unknown => "unknown",
                 QueueLifecycleMarker::Skipped => "skipped",
@@ -134,7 +138,10 @@ impl QueueMarker {
                     "Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet."
                 }
                 QueueLifecycleMarker::Lost => {
-                    "The claim expired or its worker was lost; reclaim it (a new generation) or `queue release --requeue` it."
+                    "The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it."
+                }
+                QueueLifecycleMarker::LostReported => {
+                    "Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked."
                 }
                 QueueLifecycleMarker::Reconciling => {
                     "A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it."
@@ -314,6 +321,7 @@ mod tests {
             running,
             reported,
             lost,
+            lost_reported,
             reconciling,
             unknown,
             skipped,
@@ -329,6 +337,7 @@ mod tests {
             running,
             reported,
             lost,
+            lost_reported,
             reconciling,
             unknown,
             skipped,
@@ -368,6 +377,7 @@ mod tests {
             QueueLifecycleMarker::Running,
             QueueLifecycleMarker::Reported,
             QueueLifecycleMarker::Lost,
+            QueueLifecycleMarker::LostReported,
             QueueLifecycleMarker::Reconciling,
             QueueLifecycleMarker::Unknown,
             QueueLifecycleMarker::Skipped,
@@ -380,6 +390,7 @@ mod tests {
                 | QueueLifecycleMarker::Running
                 | QueueLifecycleMarker::Reported
                 | QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::LostReported
                 | QueueLifecycleMarker::Reconciling
                 | QueueLifecycleMarker::Unknown
                 | QueueLifecycleMarker::Skipped
@@ -396,7 +407,7 @@ mod tests {
                 state.default_prefix()
             );
         }
-        assert_eq!(ALL_LIFECYCLE_STATES.len(), 10);
+        assert_eq!(ALL_LIFECYCLE_STATES.len(), 11);
     }
 
     #[test]

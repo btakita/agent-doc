@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued; reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. `lost_reported` / `⚠️☑️` is urgent nonterminal coordinator debt: prefer the durable exchange outbox/report receipt and recovered effect receipts, then an exact unambiguous retained agent-history response; materialize any history-recovered response in exchange, integrate effects, close, and strike in this turn. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -76,6 +76,7 @@ pub enum QueueSyncLifecycle {
     Running,
     ReportedCheckmark,
     Lost,
+    LostReported,
     Blocked,
     ReconcileUnknown,
     OperatorGated,
@@ -93,6 +94,47 @@ pub enum QueueSyncOperation {
     RecoverRequeue,
     Reconcile,
     OperatorGate,
+}
+
+/// Durable proof about whether a lost attempt executed. Retry is safe only for
+/// `NeverStarted`; `Unknown` deliberately fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueSyncExecutionEvidence {
+    NeverStarted,
+    Started,
+    CompletedOutbox,
+    Unknown,
+}
+
+/// Where the exact worker response needed for recovered-loss closeout is
+/// currently available. `LostReported` is never terminal merely because a
+/// completion key or receipt exists: coordinator integration needs the body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueSyncResponseEvidence {
+    NotApplicable,
+    ExchangeOutbox,
+    AgentHistory,
+    Missing,
+    AmbiguousHistory,
+    UnsupportedHistory,
+}
+
+/// Durable side-effect receipt recovered from the exact attempt lineage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSyncEffectEvidence {
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pushed_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integration_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_state: Option<String>,
 }
 
 /// One exact live queue row and the coordinator action it still requires.
@@ -118,6 +160,28 @@ pub struct QueueSyncItem {
     pub worker_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<u64>,
+    pub execution_evidence: QueueSyncExecutionEvidence,
+    /// True only when exact fenced completion was recovered after the attempt
+    /// had already become lost. The visible row projects `⚠️☑️` as well.
+    pub completion_outbox_recovered: bool,
+    /// Exact response source for urgent recovered-loss integration.
+    pub response_evidence: QueueSyncResponseEvidence,
+    /// Response recovered from exact retained agent history when the exchange
+    /// outbox was missing. The coordinator must materialize it in exchange and
+    /// integrate it before striking the row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovered_response: Option<String>,
+    /// Explicit nonterminal debt: completion exists but its response body is
+    /// unavailable or ambiguous. Never strike or redispatch this row.
+    pub missing_response_debt: bool,
+    /// A retry is authorized only by durable proof that this exact attempt was
+    /// never started. Absence of readable provenance is not proof.
+    pub retry_safe: bool,
+    /// Exact committed/pushed/integrated/released receipts recovered from the
+    /// attempt lineage. Coordinators process these instead of replaying an
+    /// uncertain effect.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovered_effects: Vec<QueueSyncEffectEvidence>,
 }
 
 /// A session-relevant document could not be inspected.  This is action debt,
@@ -164,6 +228,8 @@ pub struct QueueSyncPayload {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reported_checkmark: Vec<QueueSyncItem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lost_reported: Vec<QueueSyncItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lost: Vec<QueueSyncItem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blocked: Vec<QueueSyncItem>,
@@ -185,6 +251,7 @@ impl QueueSyncPayload {
             + self.claimed_unstarted.len()
             + self.running.len()
             + self.reported_checkmark.len()
+            + self.lost_reported.len()
             + self.lost.len()
             + self.blocked.len()
             + self.reconcile_unknown.len()
@@ -198,6 +265,7 @@ impl QueueSyncPayload {
             .chain(&self.claimed_unstarted)
             .chain(&self.running)
             .chain(&self.reported_checkmark)
+            .chain(&self.lost_reported)
             .chain(&self.lost)
             .chain(&self.blocked)
             .chain(&self.reconcile_unknown)
@@ -211,6 +279,7 @@ impl QueueSyncPayload {
         self.claimed_unstarted.extend(other.claimed_unstarted);
         self.running.extend(other.running);
         self.reported_checkmark.extend(other.reported_checkmark);
+        self.lost_reported.extend(other.lost_reported);
         self.lost.extend(other.lost);
         self.blocked.extend(other.blocked);
         self.reconcile_unknown.extend(other.reconcile_unknown);
@@ -223,6 +292,7 @@ impl QueueSyncPayload {
             QueueSyncLifecycle::ClaimedUnstarted => self.claimed_unstarted.push(item),
             QueueSyncLifecycle::Running => self.running.push(item),
             QueueSyncLifecycle::ReportedCheckmark => self.reported_checkmark.push(item),
+            QueueSyncLifecycle::LostReported => self.lost_reported.push(item),
             QueueSyncLifecycle::Lost => self.lost.push(item),
             QueueSyncLifecycle::Blocked => self.blocked.push(item),
             QueueSyncLifecycle::ReconcileUnknown => self.reconcile_unknown.push(item),
@@ -329,6 +399,21 @@ pub fn project_document_queue_sync(
                             .and_then(|claim| claim.worker.as_ref())
                             .map(|worker| worker.worker_id.clone()),
                         generation: claim.map(|claim| claim.generation),
+                        execution_evidence: execution_evidence(claim),
+                        completion_outbox_recovered: claim
+                            .is_some_and(|claim| claim.completion_recovered_after_loss),
+                        response_evidence: if claim
+                            .is_some_and(|claim| claim.completion_recovered_after_loss)
+                        {
+                            QueueSyncResponseEvidence::Missing
+                        } else {
+                            QueueSyncResponseEvidence::NotApplicable
+                        },
+                        recovered_response: None,
+                        missing_response_debt: claim
+                            .is_some_and(|claim| claim.completion_recovered_after_loss),
+                        retry_safe: false,
+                        recovered_effects: Vec::new(),
                     });
                 }
                 QueueEntry::Freeform(text) if !document_queue::is_noise_freeform_line(text) => {
@@ -356,6 +441,13 @@ pub fn project_document_queue_sync(
                         owner: None,
                         worker_id: None,
                         generation: None,
+                        execution_evidence: QueueSyncExecutionEvidence::Unknown,
+                        completion_outbox_recovered: false,
+                        response_evidence: QueueSyncResponseEvidence::NotApplicable,
+                        recovered_response: None,
+                        missing_response_debt: false,
+                        retry_safe: false,
+                        recovered_effects: Vec::new(),
                     });
                 }
                 _ => {}
@@ -438,6 +530,9 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
         return match claim.state {
             QueueClaimState::Claimed => QueueSyncLifecycle::ClaimedUnstarted,
             QueueClaimState::Running => QueueSyncLifecycle::Running,
+            QueueClaimState::Reported if claim.completion_recovered_after_loss => {
+                QueueSyncLifecycle::LostReported
+            }
             QueueClaimState::Reported => QueueSyncLifecycle::ReportedCheckmark,
             QueueClaimState::Lost => QueueSyncLifecycle::Lost,
         };
@@ -447,7 +542,11 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
         None | Some(QueueLifecycleMarker::Pending) => QueueSyncLifecycle::Pending,
         Some(QueueLifecycleMarker::Blocked) => QueueSyncLifecycle::Blocked,
         Some(QueueLifecycleMarker::Reported) => QueueSyncLifecycle::ReportedCheckmark,
-        Some(QueueLifecycleMarker::Lost) => QueueSyncLifecycle::Lost,
+        // A visible loss without its durable attempt is provenance-unknown. It
+        // must be reconciled, never treated as retry authorization.
+        Some(QueueLifecycleMarker::Lost | QueueLifecycleMarker::LostReported) => {
+            QueueSyncLifecycle::ReconcileUnknown
+        }
         Some(QueueLifecycleMarker::AwaitingOperator) => QueueSyncLifecycle::OperatorGated,
         Some(
             QueueLifecycleMarker::Claimed
@@ -472,12 +571,49 @@ fn operation_for(
         }
         QueueSyncLifecycle::Running | QueueSyncLifecycle::Blocked => QueueSyncOperation::Wait,
         QueueSyncLifecycle::ReportedCheckmark => QueueSyncOperation::IntegrateClose,
-        QueueSyncLifecycle::Lost => match execution_mode {
-            QueueExecutionMode::SubagentDispatch => QueueSyncOperation::RecoverRequeue,
-            QueueExecutionMode::MainInline => QueueSyncOperation::InlineExecuteThenReconcile,
-        },
+        QueueSyncLifecycle::LostReported => QueueSyncOperation::IntegrateClose,
+        QueueSyncLifecycle::Lost => QueueSyncOperation::Reconcile,
         QueueSyncLifecycle::ReconcileUnknown => QueueSyncOperation::Reconcile,
         QueueSyncLifecycle::OperatorGated => QueueSyncOperation::OperatorGate,
+    }
+}
+
+fn execution_evidence(claim: Option<&QueueClaim>) -> QueueSyncExecutionEvidence {
+    let Some(claim) = claim else {
+        return QueueSyncExecutionEvidence::Unknown;
+    };
+    if claim.state == QueueClaimState::Reported && claim.completion_recovered_after_loss {
+        QueueSyncExecutionEvidence::CompletedOutbox
+    } else if claim.worker.is_some() {
+        QueueSyncExecutionEvidence::Started
+    } else if claim.state == QueueClaimState::Lost {
+        QueueSyncExecutionEvidence::Unknown
+    } else {
+        QueueSyncExecutionEvidence::NeverStarted
+    }
+}
+
+/// Merge exact-attempt lineage evidence into one projected item. A lost item
+/// becomes redispatchable only when the caller proved `NeverStarted` from a
+/// durable lineage record; all other outcomes fail closed.
+pub fn apply_attempt_evidence(
+    item: &mut QueueSyncItem,
+    execution: QueueSyncExecutionEvidence,
+    effects: Vec<QueueSyncEffectEvidence>,
+) {
+    item.execution_evidence = execution;
+    item.recovered_effects = effects;
+    item.retry_safe = item.lifecycle == QueueSyncLifecycle::Lost
+        && execution == QueueSyncExecutionEvidence::NeverStarted;
+    if item.lifecycle == QueueSyncLifecycle::Lost {
+        item.operation = if item.retry_safe {
+            match item.execution_mode {
+                QueueExecutionMode::SubagentDispatch => QueueSyncOperation::RecoverRequeue,
+                QueueExecutionMode::MainInline => QueueSyncOperation::InlineExecuteThenReconcile,
+            }
+        } else {
+            QueueSyncOperation::Reconcile
+        };
     }
 }
 
@@ -554,10 +690,14 @@ mod tests {
             payload.reported_checkmark[0].operation,
             QueueSyncOperation::IntegrateClose
         );
-        assert_eq!(
-            payload.lost[0].operation,
-            QueueSyncOperation::RecoverRequeue
-        );
+        assert_eq!(payload.lost.len(), 0);
+        let orphan_lost = payload
+            .reconcile_unknown
+            .iter()
+            .find(|item| item.item.contains("lost work"))
+            .expect("a visible lost marker without durable provenance");
+        assert_eq!(orphan_lost.operation, QueueSyncOperation::Reconcile);
+        assert!(!orphan_lost.retry_safe);
         assert_eq!(
             payload
                 .pending
@@ -607,6 +747,93 @@ mod tests {
     }
 
     #[test]
+    fn lost_attempts_retry_only_when_durable_state_proves_they_never_started() {
+        let content = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- ⚠️ unstarted\n",
+            "- ⚠️ started\n",
+            "- ⚠️☑️ recovered\n",
+            "- ⚠️ orphan\n",
+            "<!-- /agent:run -->\n",
+        );
+        let mut recovered = claim(
+            "recovered",
+            QueueClaimState::Reported,
+            Some("worker-recovered"),
+        );
+        recovered.completion_recovered_after_loss = true;
+        let claims = vec![
+            claim("unstarted", QueueClaimState::Lost, None),
+            claim("started", QueueClaimState::Lost, Some("worker-started")),
+            recovered,
+        ];
+
+        let mut payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        let unstarted = payload
+            .lost
+            .iter_mut()
+            .find(|item| item.item.contains("unstarted"))
+            .unwrap();
+        apply_attempt_evidence(
+            unstarted,
+            QueueSyncExecutionEvidence::NeverStarted,
+            Vec::new(),
+        );
+        assert_eq!(unstarted.operation, QueueSyncOperation::RecoverRequeue);
+        assert_eq!(
+            unstarted.execution_evidence,
+            QueueSyncExecutionEvidence::NeverStarted
+        );
+        assert!(unstarted.retry_safe);
+
+        let started = payload
+            .lost
+            .iter()
+            .find(|item| item.item.contains("started") && !item.item.contains("unstarted"))
+            .unwrap();
+        assert_eq!(started.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(
+            started.execution_evidence,
+            QueueSyncExecutionEvidence::Started
+        );
+        assert!(!started.retry_safe);
+
+        let recovered = &payload.lost_reported[0];
+        assert_eq!(recovered.operation, QueueSyncOperation::IntegrateClose);
+        assert_eq!(
+            recovered.execution_evidence,
+            QueueSyncExecutionEvidence::CompletedOutbox
+        );
+        assert!(recovered.completion_outbox_recovered);
+        assert_eq!(
+            recovered.response_evidence,
+            QueueSyncResponseEvidence::Missing
+        );
+        assert!(recovered.missing_response_debt);
+        assert!(!recovered.retry_safe);
+
+        let orphan = payload
+            .reconcile_unknown
+            .iter()
+            .find(|item| item.item.contains("orphan"))
+            .unwrap();
+        assert_eq!(orphan.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(
+            orphan.execution_evidence,
+            QueueSyncExecutionEvidence::Unknown
+        );
+        assert!(!orphan.retry_safe);
+    }
+
+    #[test]
     fn queue_without_subagents_never_recommends_native_dispatch() {
         let content = "<!-- agent:run id=main -->\n- #subagents fix it\n- ⚠️ retry it\n- 🚧 selected work\n<!-- /agent:run -->\n";
         let payload = project_document_queue_sync(
@@ -621,8 +848,13 @@ mod tests {
         assert!(payload.items().all(|item| {
             item.execution_mode == QueueExecutionMode::MainInline
                 && item.executor_role == QueueExecutorRole::MainAgent
-                && item.operation == QueueSyncOperation::InlineExecuteThenReconcile
         }));
+        assert_eq!(payload.pending.len(), 2);
+        assert_eq!(payload.reconcile_unknown.len(), 1);
+        assert_eq!(
+            payload.reconcile_unknown[0].operation,
+            QueueSyncOperation::Reconcile
+        );
     }
 
     #[test]

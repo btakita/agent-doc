@@ -424,11 +424,19 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
         "the status-attributed baseline must not be rebased to HEAD:\n{log}"
     );
 
-    // 4. The coordinator's next closeout still runs cleanly.
+    // 4. The coordinator's next closeout still runs cleanly and records the
+    // reported worker handoff's tracked-work outcome.
     run(&["preflight", file]);
     agent_doc()
         .current_dir(tmp.path())
-        .args(["write", "--commit", file, "--force-disk"])
+        .args([
+            "write",
+            "--commit",
+            file,
+            "--force-disk",
+            "--done",
+            "work",
+        ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: integrated work — claude\n\nIntegrated.\n<!-- /patch:exchange -->\n",
         )

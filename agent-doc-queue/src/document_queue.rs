@@ -1677,6 +1677,9 @@ pub fn set_prompt_runtime_projections(
                 }
                 let key = projection_key(&next.text);
                 let group_label = entry_is_group_parent(entries, index);
+                let struck_parent_has_live_leaf = matches!(entry, QueueEntry::Completed(_))
+                    && group_label
+                    && group_parent_has_live_executable_descendant(entries, index);
                 let target = targets
                     .iter_mut()
                     .find(|(target_key, target, consumed)| {
@@ -1732,7 +1735,9 @@ pub fn set_prompt_runtime_projections(
                         changed = true;
                     }
                 }
-                if has_target && matches!(entry, QueueEntry::Completed(_)) {
+                if (has_target || struck_parent_has_live_leaf)
+                    && matches!(entry, QueueEntry::Completed(_))
+                {
                     changed = true;
                     QueueEntry::Prompt(next)
                 } else if matches!(entry, QueueEntry::Completed(_)) {
@@ -3283,6 +3288,18 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
         }
     }
     false
+}
+
+fn group_parent_has_live_executable_descendant(entries: &[QueueEntry], parent_idx: usize) -> bool {
+    entries
+        .iter()
+        .enumerate()
+        .skip(parent_idx + 1)
+        .any(|(idx, entry)| {
+            entry_is_ancestor_of(entries, parent_idx, idx)
+                && matches!(entry, QueueEntry::Prompt(_))
+                && !entry_is_group_parent(entries, idx)
+        })
 }
 
 /// Work text of a queue row for nest-vector display and identity compare.
@@ -9646,23 +9663,23 @@ mod tests {
         );
     }
 
-    /// `#struckparentkids`: the whole-block strike shape (struck parent, no
-    /// child struck: a hand strike or a 0.35.558 strike, as in sdk-demo.md)
-    /// stays closed, and the projection pass makes it canonical by striking
-    /// its children. A row written under it afterwards reopens it.
+    /// `#struckparentkids`: a canonical child is independent work. A struck
+    /// parent with a live executable child therefore reopens during runtime
+    /// projection without swallowing or completing that child.
     #[test]
-    fn a_parent_strike_never_canonicalizes_or_swallows_live_leaves() {
+    fn a_parent_strike_reopens_without_swallowing_live_leaves() {
         let legacy = format!("- ~~{STRUCK_PARENT_ID}~~\n  - {ANSWERED_CHILD}\n");
         let entries = parse(&legacy).unwrap();
         assert!(
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
-        assert!(
-            project_prompt_runtime_projections(&legacy, &[])
-                .unwrap()
-                .is_none(),
-            "an unrelated parent strike never mutates a live leaf"
+        let (projected, _) = project_prompt_runtime_projections(&legacy, &[])
+            .unwrap()
+            .expect("a struck parent with a live leaf reopens");
+        assert_eq!(
+            projected,
+            format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n")
         );
         let added = format!("{legacy}  - {NEW_CHILD}\n");
         let entries = parse(&added).unwrap();
@@ -9677,6 +9694,48 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![ANSWERED_CHILD, NEW_CHILD]
         );
+    }
+
+    /// Regression from `tasks/tools.md`: PR 29 was struck while four reported
+    /// children remained visibly nonterminal. Reported children keep their
+    /// lifecycle evidence and force the group parent open.
+    #[test]
+    fn reported_tools_pr_children_keep_the_parent_open() {
+        const PARENT: &str = "https://github.com/haiven-dev/haiven-tools/pull/29";
+        const REPORTED: [&str; 4] = [
+            "[#subagent:pr29_review_threads#1] #address: answer each review item",
+            "[#subagent:pr29_resolve_reviews#1] resolve review items",
+            "[#subagent:pr29_resolve_preset#1] Draft preset",
+            "[#subagent:pr29_fix_ci#1] #fix-ci",
+        ];
+        let body = format!(
+            "- ~~{PARENT}~~\n  - ~~do [#writereviewsuggest]~~\n  - ~~#address~~\n  - ~~#address latest 2~~\n{}",
+            REPORTED
+                .iter()
+                .map(|child| format!("  - ☑️ {child}\n"))
+                .collect::<String>()
+        );
+        let targets = REPORTED
+            .iter()
+            .map(|child| QueueRowProjection {
+                text: (*child).to_string(),
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
+                owner: None,
+                blockers: Vec::new(),
+                reopen_completed: false,
+            })
+            .collect::<Vec<_>>();
+
+        let (projected, _) = project_prompt_runtime_projections(&body, &targets)
+            .unwrap()
+            .expect("the inconsistent parent is reopened");
+
+        assert!(
+            projected.starts_with(&format!("- {PARENT}\n")),
+            "{projected}"
+        );
+        assert_eq!(projected.matches("☑️").count(), REPORTED.len());
+        assert!(!projected.contains(&format!("~~{PARENT}~~")));
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one

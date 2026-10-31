@@ -4917,9 +4917,9 @@ enum QueueAction {
             conflicts_with = "ack_text"
         )]
         ack_id: Option<String>,
-        /// Exact acknowledgement for a free-text head completed through direct
-        /// harness steering while the queue stayed paused. The text must match
-        /// the leading queue row exactly; queue activation is not changed.
+        /// Exact acknowledgement for a completed free-text head. A unique leaf
+        /// may be named directly; repeated nested leaves require the full
+        /// parent-to-leaf nest vector. Queue activation is not changed.
         #[arg(
             long,
             value_name = "TEXT",

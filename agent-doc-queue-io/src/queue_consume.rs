@@ -453,14 +453,120 @@ pub fn consume_queue_prompt_if_head_matches_with_outcome(
     )
 }
 
-/// Explicitly acknowledge exactly one paused free-text queue head.
+#[derive(Debug, Clone)]
+struct AddressableExecutableRow {
+    display: String,
+    lineage: String,
+    node_key: String,
+    auto: bool,
+}
+
+/// Executable queue leaves paired with their durable Markdown node keys.
+///
+/// Dispatch exposes only `(display, lineage)`. Explicit acknowledgements also
+/// need the exact node key so a repeated leaf such as `#rebase` can be struck
+/// under only the parent named by its nest vector.
+fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutableRow>> {
+    let components = element::parse(content)?;
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+        .context("queue consume --ack-text: failed to derive queue nodes")?;
+    let mut used_nodes = vec![false; nodes.len()];
+    let mut rows = Vec::new();
+
+    for block in queue_set.blocks() {
+        let entries =
+            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        let executable: HashSet<usize> =
+            agent_doc_queue::document_queue::executable_prompt_indexes(entries.as_ref())
+                .into_iter()
+                .collect();
+        let auto = agent_doc_queue::document_queue::has_auto_attr(&block.component.attrs);
+
+        for (index, entry) in entries.iter().enumerate() {
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            let display = strip_priority_markers(prompt.text.trim())
+                .trim()
+                .to_string();
+            let node_index = nodes.iter().enumerate().find_map(|(node_index, node)| {
+                if used_nodes.get(node_index).copied().unwrap_or(false) || node.item.struck {
+                    return None;
+                }
+                let node_text = strip_priority_markers(node.item.text.trim());
+                (node_text.trim() == display).then_some(node_index)
+            });
+            let Some(node_index) = node_index else {
+                continue;
+            };
+            used_nodes[node_index] = true;
+            if !executable.contains(&index) {
+                continue;
+            }
+            let Some(lineage) =
+                agent_doc_queue::document_queue::lineage_claim_text(entries.as_ref(), index)
+            else {
+                continue;
+            };
+            rows.push(AddressableExecutableRow {
+                display,
+                lineage,
+                node_key: nodes[node_index].node_key.clone(),
+                auto,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+fn exact_acknowledgement_row<'a>(
+    rows: &'a [AddressableExecutableRow],
+    expected_head: &str,
+) -> Result<Option<&'a AddressableExecutableRow>> {
+    let expected_normalized = strip_priority_markers(expected_head);
+    let expected = expected_normalized.trim();
+    let lineage_matches: Vec<&AddressableExecutableRow> = rows
+        .iter()
+        .filter(|row| strip_priority_markers(&row.lineage).trim() == expected)
+        .collect();
+    match lineage_matches.as_slice() {
+        [only] => return Ok(Some(*only)),
+        [] => {}
+        _ => anyhow::bail!(
+            "--ack-text matches more than one executable queue lineage; no change was applied. expected={expected:?}"
+        ),
+    }
+
+    let display_matches: Vec<&AddressableExecutableRow> = rows
+        .iter()
+        .filter(|row| strip_priority_markers(&row.display).trim() == expected)
+        .collect();
+    match display_matches.as_slice() {
+        [only] => Ok(Some(*only)),
+        [] => Ok(None),
+        many => {
+            let lineages = many
+                .iter()
+                .map(|row| format!("{:?}", row.lineage))
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!(
+                "--ack-text short leaf is ambiguous; pass one exact nest-vector lineage. expected={expected:?} matches=[{lineages}]"
+            );
+        }
+    }
+}
+
+/// Explicitly acknowledge exactly one free-text queue head.
 ///
 /// This is the recovery path for a response completed through direct harness
-/// steering while `queue_active` remained false. The exact head text is the
-/// operator proof: it must match the first unstruck queue row after priority
-/// markers are removed. The mutation preserves the paused frontmatter state,
-/// adds the normal queue-prompt provenance echo to the captured response, and
-/// converges through the editor authority.
+/// steering while `queue_active` remained false, or for completed subagent work
+/// whose durable attempt evidence was lost before integration. The exact text
+/// is operator proof: a unique leaf may be named directly, while repeated
+/// nested leaves require their full nest vector. The mutation preserves queue
+/// activation, adds the normal queue-prompt provenance echo to the captured
+/// response, and converges through the editor authority.
 pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     file: &Path,
     expected_head: &str,
@@ -468,11 +574,94 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
 ) -> Result<Option<QueueConsumptionOutcome>> {
     let content = effects.current_document_content(file, "queue_consume_ack_text")?;
     let (fm, _) = frontmatter::parse(&content)?;
+
+    // `#acktextlineage`: exact operator proof may repair completed subagent
+    // work whose attempt evidence was lost before coordinator writeback. It is
+    // valid while a run queue remains active, but must resolve one executable
+    // leaf across every queue block. Repeated short leaves require the full
+    // nest vector, preserving the automatic `#subagentinlineveto` contract.
+    let addressable = addressable_executable_rows(&content)?;
+    if let Some(row) = exact_acknowledgement_row(&addressable, expected_head)? {
+        if !queue_prompt_text_is_free_text(&content, &row.lineage) {
+            anyhow::bail!(
+                "{}: --ack-text matched a non-free-text queue head. Use --ack-id/--id or \
+                 the normal id-backed closeout path.",
+                file.display()
+            );
+        }
+        let claimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(
+            &crate::queue_claim::claimed_live_head_texts_for_content(file, &content),
+        );
+        if claimed.claims(&row.lineage) {
+            anyhow::bail!(
+                "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
+                 worker attempt before acknowledging {:?}.",
+                file.display(),
+                row.lineage
+            );
+        }
+        if agent_doc_document::queue_projection::operator_action_holds_row(
+            &row.lineage,
+            &agent_doc_element::todo::open_todo_ids(&content),
+        ) {
+            anyhow::bail!(
+                "{}: --ack-text refuses {:?} while its linked operator action is open.",
+                file.display(),
+                row.lineage
+            );
+        }
+        let node_keys = vec![row.node_key.clone()];
+        let mut target = consume_queue_nodes_by_key(&content, &node_keys)?;
+        let remaining = addressable_executable_rows(&target)?.len();
+        let response_first_line = projected_capture_response_body(file)
+            .and_then(|body| first_nonempty_line(&body).map(str::to_string));
+        target = embed_consumed_prompt_in_response(
+            &target,
+            std::slice::from_ref(&row.lineage),
+            response_first_line.as_deref(),
+        );
+        let plan = QueueConsumptionPlan {
+            consumed_text: row.lineage.clone(),
+            consumed_texts: vec![row.lineage.clone()],
+            node_ops: queue_consume_node_ops(&node_keys),
+            remaining,
+            drained: remaining == 0,
+            auto: row.auto,
+            new_document: target.clone(),
+            new_snapshot: target.clone(),
+            save_snapshot: true,
+        };
+        record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
+        effects
+            .converge_document_or_disk(file, &target, &content, "queue_consume_ack_text")
+            .context("queue consume --ack-text: failed to converge document")?;
+        save_snapshot_recovery_only(file, &target, "queue consume --ack-text writeback");
+        record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::AfterMutation)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_exact_text_ack file={} head_hash={} remaining={} \
+                 queue_active_preserved={} proof=operator_exact_lineage",
+                file.display(),
+                agent_doc_hash::content_hash(row.lineage.trim()),
+                remaining,
+                fm.queue_active == Some(true),
+            ),
+        );
+        return Ok(Some(QueueConsumptionOutcome {
+            consumed_text: row.lineage.clone(),
+            consumed_count: 1,
+            node_ops: plan.node_ops,
+            remaining,
+            drained: remaining == 0,
+            auto: plan.auto,
+        }));
+    }
+
     if fm.queue_active == Some(true) {
         anyhow::bail!(
-            "{}: --ack-text is only valid while the queue is paused. Use the normal \
-             response closeout/consume path for an active queue.",
-            file.display()
+            "{}: --ack-text did not exactly match a unique executable queue leaf or nest-vector; \
+             no change was applied. Active queues require that exact proof.", file.display()
         );
     }
 
@@ -3463,6 +3652,85 @@ mod core_tests {
                 "> **Queue prompt:**\n>\n> The pictures are not currently on the mrh website. Please fix. Please diagnose what happened."
             ),
             "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_strikes_one_active_nested_lineage_across_run_queues() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let first = "https://github.com/example/api/pull/717: #rebase";
+        let content = format!(
+            concat!(
+                "---\n",
+                "queue_active: true\n",
+                "---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: completed worker results\n\n",
+                "> **Queue prompt:** {first}\n\n",
+                "PR 717 was rebased and published.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=contracts-prs subagents -->\n",
+                "- https://github.com/example/contracts/pull/184\n",
+                "  - 📥 #review\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:run id=api-prs subagents -->\n",
+                "- https://github.com/example/api/pull/717\n",
+                "  - 📥 #rebase\n",
+                "  - 📥 #review\n",
+                "- https://github.com/example/api/pull/809\n",
+                "  - 📥 #rebase\n",
+                "<!-- /agent:run -->\n",
+            ),
+            first = first,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let ambiguous = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            "#rebase",
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+        assert!(
+            ambiguous.to_string().contains("short leaf is ambiguous"),
+            "{ambiguous}"
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            first,
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("exact active nest vector should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_text, first);
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 3);
+        assert!(updated.contains("queue_active: true"), "{updated}");
+        assert!(
+            updated.contains("https://github.com/example/api/pull/717\n  - ~~#rebase~~"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("https://github.com/example/api/pull/809\n  - 📥 #rebase"),
+            "{updated}"
+        );
+        assert_eq!(
+            updated
+                .matches(&format!("> **Queue prompt:** {first}"))
+                .count(),
+            1
         );
     }
 

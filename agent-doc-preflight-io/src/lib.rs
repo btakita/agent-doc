@@ -954,6 +954,12 @@ pub struct QueueSubagentDispatch {
     /// The command that re-prints [`Self::authorization`]'s preamble later
     /// (`agent-doc queue brief`), e.g. after the claim.
     pub brief_command: String,
+    /// Machine-readable ordering fence for native harness dispatch. A harness
+    /// must finish the claim before it calls its spawn tool, then bind the
+    /// returned worker immediately. This prevents real worker activity from
+    /// remaining projected as an unowned pending row.
+    #[serde(default)]
+    pub lifecycle: QueueSubagentLifecycleContract,
     /// Resolved harness model override. Omitted to inherit harness defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -970,6 +976,36 @@ pub struct QueueSubagentDispatch {
     /// head names, and the queue/item preset bodies. Its
     /// `subagent_prompt_preamble` is pasted verbatim into the subagent prompt.
     pub authorization: agent_doc_queue::subagent_brief::SubagentAuthorization,
+}
+
+/// Required lifecycle ordering around a native background-worker spawn.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSubagentLifecycleContract {
+    pub sequence: Vec<String>,
+    pub claim_must_succeed_before_spawn: bool,
+    pub claimed_state: String,
+    pub running_state: String,
+}
+
+impl QueueSubagentLifecycleContract {
+    fn strict() -> Self {
+        Self {
+            sequence: vec![
+                "claim".to_string(),
+                "spawn".to_string(),
+                "start".to_string(),
+            ],
+            claim_must_succeed_before_spawn: true,
+            claimed_state: "claimed".to_string(),
+            running_state: "running".to_string(),
+        }
+    }
+}
+
+impl Default for QueueSubagentLifecycleContract {
+    fn default() -> Self {
+        Self::strict()
+    }
 }
 
 /// Durable predecessor evidence for a replacement subagent dispatch.
@@ -1045,6 +1081,7 @@ pub fn queue_subagent_dispatch_entries(
                 brief_command: agent_doc_queue_io::subagent_dispatch::brief_command(
                     &document, item,
                 ),
+                lifecycle: QueueSubagentLifecycleContract::strict(),
                 model: authorization.model.clone(),
                 effort: authorization.effort.clone(),
                 recovery,
@@ -1056,10 +1093,14 @@ pub fn queue_subagent_dispatch_entries(
 
 /// Guidance for a non-empty `queue_subagent_dispatch`.
 pub const QUEUE_SUBAGENT_DISPATCH_GUIDANCE: &str = "The operator added these queue items with \
-subagent intent. For EACH: run its `claim_command` (fill in `<label>`), then dispatch it NOW to \
+subagent intent. For EACH: run its `claim_command` (fill in `<label>`) and wait for it to succeed \
+before calling the harness spawn tool. The successful claim must visibly move the row from 📥 \
+pending to 🟡 dispatching before any worker can begin; a failed or skipped claim forbids spawn. \
+Then dispatch it NOW to \
 its own background subagent (its own git worktree outside the IDE-watched project if it touches \
 a repository). Only after the harness returns a worker identity, run its `start_command`, filling \
-in the claim's printed generation and that returned identity; this binary acknowledgement changes \
+in the claim's printed generation and that returned identity as the immediate next action, before \
+any other coordinator work; this binary acknowledgement changes \
 🟡 dispatching to 🚧 running and is mandatory. Paste the entry's \
 `authorization.subagent_prompt_preamble` VERBATIM at the top of \
 the subagent prompt (`#waypostauthorization`): it quotes the operator's authorization (item, \
@@ -11533,6 +11574,28 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
+                .contains("before calling the harness spawn tool")
+        );
+        assert!(
+            QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("failed or skipped claim forbids spawn")
+        );
+        assert_eq!(
+            entries[0].lifecycle.sequence,
+            ["claim", "spawn", "start"]
+        );
+        assert!(entries[0].lifecycle.claim_must_succeed_before_spawn);
+        assert_eq!(entries[0].lifecycle.claimed_state, "claimed");
+        assert_eq!(entries[0].lifecycle.running_state, "running");
+        let mut legacy_json = serde_json::to_value(&entries[0]).unwrap();
+        assert_eq!(
+            legacy_json["lifecycle"]["sequence"],
+            serde_json::json!(["claim", "spawn", "start"])
+        );
+        legacy_json.as_object_mut().unwrap().remove("lifecycle");
+        let legacy: QueueSubagentDispatch = serde_json::from_value(legacy_json).unwrap();
+        assert!(legacy.lifecycle.claim_must_succeed_before_spawn);
         assert!(
             QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("--response '<complete worker response>'")
         );

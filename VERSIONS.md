@@ -4,6 +4,7 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 ## 0.35.564
 
+- **Subagent work reserves its queue row before native launch.** Dispatch contracts now require and expose `claim -> spawn -> start`: the claim must visibly move a row from Pending to Claimed before a worker can begin, and worker binding is the coordinator's immediate post-spawn action, so executing work cannot remain rendered as `📥`.
 - **Idle supervisors now wake coordinators for reported queue work.** `Claimed` and `Running` attempts still suppress double dispatch, while `Reported` attempts remain drainable integration/writeback debt so `☑️` rows do not wait forever for an unrelated document edit.
 - **Managed List work now stays completion-seeking through every lifecycle state.** Selected incomplete items must either reach their authorized delivery boundary or retain explicit evidence, the exact blocker, its owner, and the next action; claims, reports, and gates are no longer mistaken for completion.
 - **Executable leaves keep terminal state while structural parents derive lazily.** Completed or reported leaves are not reopened automatically, parents strike only when every descendant is terminal, and adding or recovering a live child reopens only the structural parent.

@@ -333,6 +333,106 @@ pub(crate) fn repair_stale_completion(
     )
 }
 
+/// Combined, evidence-based audit/repair for visible managed queue state.
+///
+/// The stale-evidence planner proves which completion artifacts no longer
+/// belong to live or claimed work. Runtime projection then derives every
+/// visible lifecycle marker from the remaining durable claim/receipt/cell
+/// evidence. Neither phase treats elapsed time as proof of completion.
+#[derive(Debug)]
+pub(crate) struct ManagedStateRepairReport {
+    pub stale: agent_doc_queue_io::stale_completion_repair::StaleCompletionRepairReport,
+    pub projection_drift: bool,
+    pub projection_applied: bool,
+}
+
+pub(crate) fn repair_managed_state(
+    file: &Path,
+    apply: bool,
+    keys: &std::collections::HashSet<String>,
+) -> Result<ManagedStateRepairReport> {
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        bail!(
+            "timed out after {}ms waiting to audit managed queue state for {}; no document mutation was attempted",
+            COMPLETION_LOCK_WAIT.as_millis(),
+            file.display(),
+        );
+    };
+
+    if apply
+        && let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
+    {
+        bail!(
+            "{} has a retained editor write (intent {}) that has not landed; open it in the active editor/project and run `agent-doc queue repair-projection {:?}`, then rerun; nothing was changed",
+            file.display(),
+            pending.intent_id,
+            file,
+        );
+    }
+
+    let stale = agent_doc_queue_io::stale_completion_repair::repair(
+        file,
+        apply,
+        keys,
+        &crate::CLI_QUEUE_CONSUME_WRITE_EFFECTS,
+    )?;
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "queue_repair_managed_state",
+    )?;
+    let preview_keys = stale
+        .stale_cells
+        .iter()
+        .map(|cell| cell.key.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let projected_from = if apply {
+        current.clone()
+    } else {
+        agent_doc_queue::stale_completion_evidence::retire_cells_by_key(&current, &preview_keys)
+    };
+    let projection = agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(
+        file,
+        &projected_from,
+        None,
+    )?;
+    let projection_drift = projection.changed;
+    let projection_applied = if apply {
+        agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+            &crate::CliQueueCommandEffects,
+            file,
+            None,
+        )?
+    } else {
+        false
+    };
+
+    Ok(ManagedStateRepairReport {
+        stale,
+        projection_drift,
+        projection_applied,
+    })
+}
+
+pub(crate) fn print_managed_state_report(report: &ManagedStateRepairReport) {
+    print_stale_completion_report(&report.stale);
+    match (report.projection_drift, report.projection_applied) {
+        (_, true) => println!(
+            "repaired lifecycle projection from durable evidence in {}",
+            report.stale.file.display()
+        ),
+        (true, false) => println!(
+            "would repair lifecycle projection from durable evidence in {} (dry run; rerun with --apply)",
+            report.stale.file.display()
+        ),
+        (false, false) => eprintln!(
+            "[queue] {}: lifecycle projection already synchronized",
+            report.stale.file.display()
+        ),
+    }
+}
+
 pub(crate) fn print_stale_completion_report(
     report: &agent_doc_queue_io::stale_completion_repair::StaleCompletionRepairReport,
 ) {
@@ -843,6 +943,74 @@ mod tests {
             claims[0].state,
             agent_doc_queue::queue_claim::QueueClaimState::Reported,
         );
+    }
+
+    #[test]
+    fn managed_state_repair_reaps_only_proven_orphans_and_reprojects_other_states() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        let stale = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:old",
+            "already integrated",
+            "old-key",
+            "Done in an earlier cycle.",
+        )
+        .unwrap();
+        let original = format!(
+            concat!(
+                "<!-- agent:exchange patch=append -->\n",
+                "{stale}\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:run subagents -->\n",
+                "- ☑️ [#subagent:live#1] still running\n",
+                "<!-- /agent:run -->\n",
+            ),
+            stale = stale,
+        );
+        fs::write(&doc, &original).unwrap();
+        agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "still running",
+            "subagent:live",
+            600,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "still running",
+            "subagent:live",
+            "worker:live",
+            600,
+            1,
+        )
+        .unwrap();
+
+        let keys = std::collections::HashSet::new();
+        let audit = repair_managed_state(&doc, false, &keys).unwrap();
+        assert_eq!(audit.stale.stale_cells.len(), 1);
+        assert_eq!(audit.stale.stale_cells[0].key, "old-key");
+        assert!(audit.projection_drift);
+        assert!(!audit.projection_applied);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+
+        let repaired = repair_managed_state(&doc, true, &keys).unwrap();
+        assert_eq!(repaired.stale.stale_cells.len(), 1);
+        assert!(repaired.stale.applied);
+        assert!(repaired.projection_applied);
+        let content = fs::read_to_string(&doc).unwrap();
+        assert!(!content.contains("old-key"), "{content}");
+        assert!(
+            content.contains("- 🚧 [#subagent:live#1] still running"),
+            "{content}"
+        );
+
+        let repeated = repair_managed_state(&doc, true, &keys).unwrap();
+        assert!(repeated.stale.stale_cells.is_empty());
+        assert!(!repeated.projection_drift);
+        assert!(!repeated.projection_applied);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]

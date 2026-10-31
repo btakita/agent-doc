@@ -4699,6 +4699,24 @@ enum QueueAction {
         #[arg(long, value_name = "DIR", conflicts_with = "file")]
         project_root: Option<PathBuf>,
     },
+    /// Audit and safely reconcile stuck managed-list lifecycle state.
+    ///
+    /// This composes stale completion-evidence retirement with durable queue
+    /// projection repair. It never decides from age alone: live untracked
+    /// completion cells are reported and kept unless their exact key is named.
+    /// Dry run by default; `--apply` performs only evidence-proven repairs.
+    #[command(name = "repair-managed-state", after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
+    RepairManagedState {
+        /// Path to the session document
+        file: PathBuf,
+        /// Apply the evidence-proven repairs (default: audit only)
+        #[arg(long)]
+        apply: bool,
+        /// Retire this exact untracked live-row completion cell after operator
+        /// confirmation that it belongs to an older attempt. Repeatable.
+        #[arg(long = "key", value_name = "KEY")]
+        keys: Vec<String>,
+    },
     /// Reconcile durable queue-claim state into visible queue markers without
     /// releasing a claim or changing queue work. A retained editor write must
     /// receive a safe delivery/save receipt before this reports success.
@@ -8488,6 +8506,13 @@ fn try_main() -> anyhow::Result<()> {
                     },
                     file.display(),
                 );
+                Ok(())
+            }
+            QueueAction::RepairManagedState { file, apply, keys } => {
+                let keys = keys.into_iter().collect();
+                let report =
+                    queue_completion_feedback::repair_managed_state(&file, apply, &keys)?;
+                queue_completion_feedback::print_managed_state_report(&report);
                 Ok(())
             }
             QueueAction::Brief { file, item, json } => {

@@ -26,6 +26,7 @@ use agent_doc_element_backlog::backlog;
 use agent_doc_queue::document_queue::QueueEntry;
 use agent_doc_queue::queue_heads::active_queue_head_text;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
+use agent_doc_queue::queue_sync_payload::{QUEUE_SYNC_GUIDANCE, QueueSyncPayload};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -40,56 +41,12 @@ pub struct QueueCommandConsumeOutcome {
     pub drained: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct QueueSyncReconciliationDebt {
-    dispatch_ready: usize,
-    capacity_or_dependency_held: usize,
-    claimed: usize,
-    running: usize,
-    reported: usize,
-    lost: usize,
-}
-
-impl QueueSyncReconciliationDebt {
-    fn is_empty(&self) -> bool {
-        self.dispatch_ready == 0
-            && self.capacity_or_dependency_held == 0
-            && self.claimed == 0
-            && self.running == 0
-            && self.reported == 0
-            && self.lost == 0
-    }
-}
-
-fn queue_sync_reconciliation_debt(
+fn queue_sync_reconciliation_payload(
     file: &Path,
     content: &str,
-) -> Result<QueueSyncReconciliationDebt> {
-    let dispatch_ready =
-        crate::subagent_dispatch::pending_subagent_dispatch_for_content(file, content)?.len();
-    let capacity_or_dependency_held =
-        crate::subagent_dispatch::queue_attr_subagent_plan(file, content)
-            .map(|plan| plan.held.len())
-            .unwrap_or_default();
-    let mut debt = QueueSyncReconciliationDebt {
-        dispatch_ready,
-        capacity_or_dependency_held,
-        ..QueueSyncReconciliationDebt::default()
-    };
-    for claim in crate::queue_claim::claim_states_for_content(file, content)? {
-        match claim.state {
-            agent_doc_queue::queue_claim::QueueClaimState::Claimed => debt.claimed += 1,
-            agent_doc_queue::queue_claim::QueueClaimState::Running => debt.running += 1,
-            agent_doc_queue::queue_claim::QueueClaimState::Reported => debt.reported += 1,
-            agent_doc_queue::queue_claim::QueueClaimState::Lost => debt.lost += 1,
-        }
-    }
-    if debt.reported == 0
-        && crate::subagent_dispatch::reported_writeback_pending_for_content(file, content)?
-    {
-        debt.reported = 1;
-    }
-    Ok(debt)
+    previous_content: Option<&str>,
+) -> Result<QueueSyncPayload> {
+    crate::sync_payload::build_project_queue_sync_payload(file, content, previous_content)
 }
 
 pub trait QueueCommandEffects {
@@ -961,6 +918,7 @@ pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()
 }
 
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let content = effects.current_document_content(file, "queue_sync")?;
     let backlog_sync = crate::one_shot_sync::sync_configured_backlog_queue_with_snapshot(
@@ -979,18 +937,31 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     )?;
 
     let lifecycle_changed = project_all_queue_runtime_state_with_effects(effects, file)?;
+    let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
+    let payload =
+        queue_sync_reconciliation_payload(file, &reconciled, previous_content.as_deref())?;
+    let action_debt_remains = !payload.is_empty();
 
     match backlog_sync {
         Some(OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
             mode,
         }) => {
-            println!(
-                "{}: backlog mirror already synchronized ({} active backlog id(s), {:?} mode). No changes.",
-                file.display(),
-                requested_count,
-                mode
-            );
+            if action_debt_remains {
+                println!(
+                    "{}: backlog mirror synchronized ({} active backlog id(s), {:?} mode); unresolved queue action debt remains.",
+                    file.display(),
+                    requested_count,
+                    mode
+                );
+            } else {
+                println!(
+                    "{}: backlog mirror already synchronized ({} active backlog id(s), {:?} mode). No changes.",
+                    file.display(),
+                    requested_count,
+                    mode
+                );
+            }
         }
         Some(OneShotQueueSyncResult::Synced(applied)) => {
             println!(
@@ -1018,12 +989,17 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
                 eprintln!("[queue sync] warning: failed to update snapshot: {warning}");
             }
         }
-        None if lifecycle_changed || answered_count > 0 => {
+        None if lifecycle_changed || answered_count > 0 || action_debt_remains => {
             println!(
-                "{}: reconciled queue state (lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror.",
+                "{}: reconciled queue state (lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
                 file.display(),
                 lifecycle_changed,
-                answered_count
+                answered_count,
+                if action_debt_remains {
+                    "; unresolved queue action debt remains"
+                } else {
+                    ""
+                }
             );
         }
         None => {
@@ -1034,19 +1010,14 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         }
     }
 
-    let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
-    let debt = queue_sync_reconciliation_debt(file, &reconciled)?;
-    if !debt.is_empty() {
+    if action_debt_remains {
         println!(
-            "{}: nonterminal coordinator reconciliation debt remains: dispatch_ready={}, held={}, claimed={}, running={}, reported={}, lost={}. The main coordinator retains ownership: dispatch the complete ready set with claim -> spawn -> start, route steering to a running owner, recover lost attempts, and integrate reported results; workers must not self-claim queue rows.",
+            "{}: nonterminal queue sync payload ({} unresolved item(s) or scan error(s)):",
             file.display(),
-            debt.dispatch_ready,
-            debt.capacity_or_dependency_held,
-            debt.claimed,
-            debt.running,
-            debt.reported,
-            debt.lost,
+            payload.len(),
         );
+        println!("{}", serde_json::to_string(&payload)?);
+        println!("{QUEUE_SYNC_GUIDANCE}");
     }
     Ok(())
 }
@@ -1456,7 +1427,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_debt_keeps_other_ready_dispatches_visible_while_one_worker_runs() {
+    fn sync_payload_keeps_other_ready_dispatches_visible_while_one_worker_runs() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("s.md");
@@ -1480,13 +1451,21 @@ mod tests {
         .unwrap();
         let current = std::fs::read_to_string(&doc).unwrap();
 
-        let debt = queue_sync_reconciliation_debt(&doc, &current).unwrap();
+        let payload = queue_sync_reconciliation_payload(&doc, &current, None).unwrap();
 
-        assert_eq!(debt.running, 1);
-        assert_eq!(debt.dispatch_ready, 1);
-        assert!(
-            !debt.is_empty(),
-            "a running worker never hides another ready dispatch"
+        assert_eq!(payload.running.len(), 1);
+        assert_eq!(payload.pending.len(), 1);
+        assert_eq!(
+            payload.running[0].operation,
+            agent_doc_queue::queue_sync_payload::QueueSyncOperation::Wait
+        );
+        assert_eq!(
+            payload.pending[0].operation,
+            agent_doc_queue::queue_sync_payload::QueueSyncOperation::Dispatch
+        );
+        assert_eq!(
+            payload.pending[0].execution_mode,
+            agent_doc_queue::queue_sync_payload::QueueExecutionMode::SubagentDispatch
         );
     }
 

@@ -2741,9 +2741,14 @@ fn test_document_sync_is_a_superset_entrypoint_for_queue_sync() {
     again
         .assert()
         .success()
+        .stdout(predicate::str::contains("nonterminal queue sync payload"))
         .stdout(predicate::str::contains(
-            "queue projections already synchronized",
-        ));
+            r#""operation":"inline_execute_then_reconcile""#,
+        ))
+        .stdout(predicate::str::contains(
+            r#""execution_mode":"main_inline""#,
+        ))
+        .stdout(predicate::str::contains("already synchronized").not());
     assert_eq!(fs::read_to_string(&doc).unwrap(), synced);
 }
 

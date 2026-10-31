@@ -399,7 +399,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             job_packet_budget_tokens: if has_queue_lifecycle_work { 4000 } else { 0 },
             write_scope: Vec::new(),
             required_proof: if has_queue_lifecycle_work {
-                vec!["queue_worker_binding".to_string()]
+                vec![
+                    "queue_claim_projection_before_spawn".to_string(),
+                    "queue_worker_binding".to_string(),
+                ]
             } else {
                 Vec::new()
             },
@@ -484,7 +487,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         routing.job_packet_budget_tokens = routing.job_packet_budget_tokens.max(4000);
         agent_doc_prompt_contract::push_unique_strings(
             &mut routing.required_proof,
-            ["queue_worker_binding".to_string()],
+            [
+                "queue_claim_projection_before_spawn".to_string(),
+                "queue_worker_binding".to_string(),
+            ],
         );
         if prompt_targets.is_empty() && repo_actions.is_empty() && pending_mutations.is_empty() {
             routing.task_class = "queue_subagent_dispatch".to_string();
@@ -733,13 +739,25 @@ fn queue_lifecycle_required_commands(
 ) -> Vec<String> {
     let mut commands = dispatch
         .iter()
-        .map(|entry| {
-            format!(
-                "Dispatch queue item {:?} now: run `{}`; launch one native background subagent \
-                 with `authorization.subagent_prompt_preamble` verbatim; after spawn returns its \
-                 worker id, run `{}` with that id and the claim's printed generation.",
-                entry.item, entry.claim_command, entry.start_command,
-            )
+        .flat_map(|entry| {
+            [
+                format!(
+                    "Reserve queue item {:?} before spawn: run `{}` and do not call the native \
+                     spawn tool unless it succeeds and projects the row as claimed (🟡).",
+                    entry.item, entry.claim_command,
+                ),
+                format!(
+                    "Only after the successful claim for queue item {:?}, launch one native \
+                     background subagent with `authorization.subagent_prompt_preamble` verbatim.",
+                    entry.item,
+                ),
+                format!(
+                    "Immediately after spawn returns the worker id for queue item {:?}, before \
+                     other coordinator work, run `{}` with that id and the claim's printed \
+                     generation so the row projects running (🚧).",
+                    entry.item, entry.start_command,
+                ),
+            ]
         })
         .collect::<Vec<_>>();
     commands.extend(
@@ -1784,6 +1802,22 @@ Done.
                 .filter(|command| command.contains("launch one native background subagent"))
                 .count(),
             2
+        );
+        assert_eq!(plan.required_commands.len(), 7);
+        for chunk in plan.required_commands[..6].chunks_exact(3) {
+            assert!(chunk[0].contains("before spawn"), "{chunk:?}");
+            assert!(chunk[0].contains("projects the row as claimed (🟡)"), "{chunk:?}");
+            assert!(chunk[1].contains("Only after the successful claim"), "{chunk:?}");
+            assert!(chunk[1].contains("launch one native background subagent"), "{chunk:?}");
+            assert!(chunk[2].contains("Immediately after spawn returns"), "{chunk:?}");
+            assert!(chunk[2].contains("projects running (🚧)"), "{chunk:?}");
+        }
+        assert_eq!(
+            plan.required_proof,
+            [
+                "queue_claim_projection_before_spawn",
+                "queue_worker_binding"
+            ]
         );
     }
 

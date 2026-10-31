@@ -469,13 +469,23 @@ Semantics:
   id-backed work without the explicit proof required by its lifecycle.
   `agent-doc queue consume` remains the imperative escape hatch for an
   operator-directed acknowledgement or repair.
-- Sync does not usurp main-agent dispatch ownership. Eligible pending work,
-  concurrency/dependency-held work, live owners, reported integration debt,
-  and abandoned/lost attempts are reported as nonterminal reconciliation debt.
-  The main coordinator processes the complete ready set with
+- Sync does not usurp main-agent dispatch ownership. After deterministic
+  projection repair it uses the same project-wide typed payload as preflight,
+  covering every incomplete item in the current and related session documents:
+  pending, claimed-unstarted, running, reported/checkmark, lost, blocked,
+  reconcile/unknown, operator-gated, and document scan failures. Each item
+  names its exact document, queue occurrence, row text, lifecycle, execution
+  mode, durable owner/generation when present, and required coordinator
+  operation. A non-empty payload is always nonterminal action debt, even when
+  one worker is running or one active queue has drained.
+- A queue marked `subagents` or `fan-out` has `subagent_dispatch` execution
+  mode. The main coordinator processes its complete ready set with
   `claim -> spawn -> start`, forwards steering to an existing running owner,
   recovers lost attempts, and integrates reports before terminal success.
-  Background workers never self-claim coordinator queue rows.
+  A queue without that mode has `main_inline` execution mode: the main agent
+  performs the work itself and then reconciles the row. Main retains document
+  convergence and integration ownership in both modes; background workers
+  never self-claim or self-close coordinator queue rows.
 - `agent-doc sync <FILE>` runs document-level synchronizers and currently
   includes this queue reconciler. The historical `agent-doc sync --col ...`
   form continues to mean tmux layout synchronization; document paths and tmux

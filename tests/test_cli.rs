@@ -23228,7 +23228,9 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
     for required_snippet in [
         "pub struct OneShotQueueSyncApplied",
         "pub enum OneShotQueueSyncResult",
+        "pub fn sync_explicit_backlog_queue_routes_with_snapshot(",
         "pub fn sync_one_shot_backlog_queue_with_snapshot(",
+        "backlog_sync::project_explicit_backlog_queue_routes",
         "backlog_sync::collect_one_shot_backlog_queue_sync",
         "document_queue::sync_backlog_into_queue",
         "backlog_sync::backlog_queue_sync_report",

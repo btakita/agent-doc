@@ -5,6 +5,7 @@ use std::path::Path;
 
 use agent_doc_element::element;
 use agent_doc_queue::backlog_sync;
+use agent_doc_queue::backlog_sync::BacklogQueuePlacementDebt;
 use agent_doc_queue::document_queue::{self, BacklogQueueSyncMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,45 @@ pub enum OneShotQueueSyncResult {
         mode: BacklogQueueSyncMode,
     },
     Synced(OneShotQueueSyncApplied),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplicitBacklogQueueRoutingSync {
+    pub changed: bool,
+    pub newly_materialized: Vec<String>,
+    pub placement_debt: Vec<BacklogQueuePlacementDebt>,
+    pub snapshot_warning: Option<String>,
+}
+
+/// Apply explicit `queue=<id>` backlog routes before the legacy mirror pass.
+///
+/// This focused I/O boundary owns the structural projection and its write so
+/// queue command orchestration never reimplements backlog-to-queue mutation.
+pub fn sync_explicit_backlog_queue_routes_with_snapshot(
+    file: &Path,
+    content: &str,
+    write_document: impl FnOnce(&Path, &str, &str) -> Result<()>,
+    save_snapshot: impl FnOnce(&Path, &str) -> Result<()>,
+) -> Result<ExplicitBacklogQueueRoutingSync> {
+    let components = element::parse(content)
+        .with_context(|| format!("failed to parse components in {}", file.display()))?;
+    let projection = backlog_sync::project_explicit_backlog_queue_routes(&components, content)?;
+    let changed = projection.content.is_some();
+    let snapshot_warning = if let Some(projected) = projection.content {
+        write_document(file, content, &projected)
+            .with_context(|| format!("failed to write {}", file.display()))?;
+        save_snapshot(file, &projected)
+            .err()
+            .map(|error| error.to_string())
+    } else {
+        None
+    };
+    Ok(ExplicitBacklogQueueRoutingSync {
+        changed,
+        newly_materialized: projection.newly_materialized,
+        placement_debt: projection.placement_debt,
+        snapshot_warning,
+    })
 }
 
 /// Sync explicitly marked backlog/icebox/pending items into `agent:queue`.

@@ -921,33 +921,34 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
-    let components = agent_doc_element::element::parse(&content)?;
     let explicit_routing =
-        agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes(
-            &components,
-            &content,
-        )?;
-    let routed_ids = explicit_routing.newly_materialized;
-    let placement_debt = explicit_routing.placement_debt;
-    let mut routing_snapshot_warning = None;
-    if let Some(projected) = explicit_routing.content {
-        effects.converge_document_or_disk(
+        crate::one_shot_sync::sync_explicit_backlog_queue_routes_with_snapshot(
             file,
-            &projected,
             &content,
-            "queue_sync_explicit_routes",
+            |path, current, target| {
+                effects.converge_document_or_disk(
+                    path,
+                    target,
+                    current,
+                    "queue_sync_explicit_routes",
+                )
+            },
+            |path, content| {
+                agent_doc_snapshot_io::checkpoint_document_baseline(
+                    path,
+                    content,
+                    agent_doc_ops_log_io::log_op,
+                )
+            },
         )?;
+    if explicit_routing.changed {
         // Re-read the accepted authority cut before the legacy mirror pass.
         // The editor convergence boundary may normalize unrelated bytes.
         content = effects.current_document_content(file, "queue_sync_after_explicit_routes")?;
-        routing_snapshot_warning = agent_doc_snapshot_io::checkpoint_document_baseline(
-            file,
-            &content,
-            agent_doc_ops_log_io::log_op,
-        )
-        .err()
-        .map(|error| error.to_string());
     }
+    let routed_ids = explicit_routing.newly_materialized;
+    let placement_debt = explicit_routing.placement_debt;
+    let routing_snapshot_warning = explicit_routing.snapshot_warning;
     let backlog_sync = crate::one_shot_sync::sync_configured_backlog_queue_with_snapshot(
         file,
         &content,

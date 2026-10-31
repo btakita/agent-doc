@@ -4935,11 +4935,12 @@ pub fn converge_queue_via_lifecycle(
     snapshot_entries: &[QueueEntry],
     deleted_directive_ids: &std::collections::HashSet<String>,
 ) -> Option<Vec<QueueEntry>> {
-    converge_queue_via_lifecycle_with_operator_rearmed(
+    converge_queue_via_lifecycle_with_operator_evidence(
         entries,
         snapshot_entries,
         deleted_directive_ids,
         &std::collections::HashSet::new(),
+        &std::collections::HashMap::new(),
     )
 }
 
@@ -5033,6 +5034,80 @@ pub fn operator_retyped_queue_identities(
     retyped
 }
 
+/// Additional live occurrences the operator authored by inserting a whole queue
+/// row whose identity is already live in the committed snapshot
+/// (`#repeatpromptauthorship`).
+///
+/// The inserted runs come from the durable editor-op epoch, so a stale replica
+/// flush cannot create this allowance. Each parsed prompt row contributes one
+/// occurrence: typing the same row twice intentionally permits two repeats, but
+/// an unrelated line, a fragment, or a struck row permits none. The allowance
+/// is consumed only when current live multiplicity actually exceeds the
+/// snapshot in [`converge_queue_via_lifecycle_with_operator_evidence`].
+pub fn operator_repeated_queue_identity_allowances(
+    snapshot_entries: &[QueueEntry],
+    inserted_runs: &[String],
+) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, usize> {
+    let snapshot_live = snapshot_entries
+        .iter()
+        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
+        .filter_map(queue_item_identity)
+        .collect::<std::collections::HashSet<_>>();
+    if snapshot_live.is_empty() {
+        return std::collections::HashMap::new();
+    }
+
+    let mut allowances = std::collections::HashMap::new();
+    for run in inserted_runs {
+        for line in run.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.contains("~~") {
+                continue;
+            }
+            let Ok(entries) = parse(line) else {
+                continue;
+            };
+            for entry in &entries {
+                if let QueueEntry::Prompt(_) = entry
+                    && let Some(identity) = queue_item_identity(entry)
+                    && snapshot_live.contains(&identity)
+                {
+                    *allowances.entry(identity).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    allowances
+}
+
+/// Live identities whose current multiplicity exceeds the committed snapshot
+/// and therefore needs operator authorship evidence before convergence may keep
+/// every copy (`#repeatpromptauthorship`).
+pub fn live_snapshot_multiplicity_excess_identities(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+) -> std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity> {
+    let counts = |source: &[QueueEntry]| {
+        let mut counts = std::collections::HashMap::<ConvergenceKey, usize>::new();
+        for entry in source {
+            if let Some(key) = convergence_identity(entry)
+                && key.2 == QueueItemLifecycle::Live
+            {
+                *counts.entry(key).or_insert(0) += 1;
+            }
+        }
+        counts
+    };
+    let snapshot = counts(snapshot_entries);
+    counts(entries)
+        .into_iter()
+        .filter_map(|(key, current)| {
+            let authored = snapshot.get(&key).copied().unwrap_or(0).max(1);
+            (current > authored).then_some(key.0)
+        })
+        .collect()
+}
+
 /// [`converge_queue_via_lifecycle`] with operator re-arm evidence
 /// (`#unstrikelost`). Snapshot-struck dominance (`#qeditdupguard`) still
 /// rewrites a stale live re-emit back to its struck representative, EXCEPT for
@@ -5045,6 +5120,32 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
     snapshot_entries: &[QueueEntry],
     deleted_directive_ids: &std::collections::HashSet<String>,
     operator_rearmed: &std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>,
+) -> Option<Vec<QueueEntry>> {
+    converge_queue_via_lifecycle_with_operator_evidence(
+        entries,
+        snapshot_entries,
+        deleted_directive_ids,
+        operator_rearmed,
+        &std::collections::HashMap::new(),
+    )
+}
+
+/// Queue lifecycle convergence with durable operator authorship evidence.
+///
+/// `operator_repeat_allowances` adds exactly the number of whole-row repeats
+/// captured from operator editor ops. It never changes struck dominance and it
+/// never grants an identity absent from the snapshot; it only raises the live
+/// snapshot multiplicity ceiling before duplicate-effect annotation assigns
+/// each surviving occurrence its stable identity.
+pub fn converge_queue_via_lifecycle_with_operator_evidence(
+    entries: &[QueueEntry],
+    snapshot_entries: &[QueueEntry],
+    deleted_directive_ids: &std::collections::HashSet<String>,
+    operator_rearmed: &std::collections::HashSet<agent_doc_element_queue::QueueItemIdentity>,
+    operator_repeat_allowances: &std::collections::HashMap<
+        agent_doc_element_queue::QueueItemIdentity,
+        usize,
+    >,
 ) -> Option<Vec<QueueEntry>> {
     use agent_doc_element_queue::{QueueItemEvent, QueueItemMachine, QueueItemState};
 
@@ -5302,7 +5403,17 @@ pub fn converge_queue_via_lifecycle_with_operator_rearmed(
             if deleted_directive {
                 0
             } else {
-                authored.get(&key).copied().unwrap_or(0).max(1)
+                authored
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(0)
+                    .max(1)
+                    .saturating_add(
+                        operator_repeat_allowances
+                            .get(identity)
+                            .copied()
+                            .unwrap_or(0),
+                    )
             }
         };
         let seen = kept_count.entry(key.clone()).or_insert(0);
@@ -9960,6 +10071,79 @@ mod tests {
             converge_queue_via_lifecycle(&converged, &entries, &Default::default()).is_none(),
             "the surrogate effect id is stable on later maintenance passes"
         );
+    }
+
+    /// `#repeatpromptauthorship`: api.md can request `#address` again while the
+    /// previous attempt is still reported. The durable inserted row raises the
+    /// snapshot multiplicity ceiling by exactly one; convergence then assigns
+    /// separate effect identities instead of deleting the repeat or projecting
+    /// the old attempt onto it.
+    #[test]
+    fn operator_typed_repeat_survives_a_reported_nested_prompt() {
+        let owner = "[#subagent:api_address#1]";
+        let parent = p("https://example.test/api/pull/797");
+        let reported = nested(p(&format!("☑️ {owner} #address")));
+        let snapshot = vec![parent.clone(), reported.clone()];
+        let current = vec![parent, reported, nested(p("#address"))];
+
+        assert_eq!(
+            converge(&current, &snapshot),
+            snapshot,
+            "without operator-op evidence the excess copy stays replay residue"
+        );
+
+        let allowances = operator_repeated_queue_identity_allowances(
+            &snapshot,
+            &["\n  - #address\n".to_string()],
+        );
+        assert_eq!(allowances.values().copied().sum::<usize>(), 1);
+        assert_eq!(
+            live_snapshot_multiplicity_excess_identities(&current, &snapshot),
+            allowances.keys().cloned().collect()
+        );
+
+        let converged = converge_queue_via_lifecycle_with_operator_evidence(
+            &current,
+            &snapshot,
+            &Default::default(),
+            &Default::default(),
+            &allowances,
+        )
+        .expect("the proven repeated occurrence receives effect identities");
+        assert_eq!(
+            converged,
+            vec![
+                p("https://example.test/api/pull/797"),
+                nested(p(&format!("☑️ {owner} #address ⟦effect:1⟧"))),
+                nested(p("#address ⟦effect:2⟧")),
+            ]
+        );
+        assert!(
+            converge_queue_via_lifecycle_with_operator_evidence(
+                &converged,
+                &snapshot,
+                &Default::default(),
+                &Default::default(),
+                &allowances,
+            )
+            .is_none(),
+            "the repeat projection reaches a fixpoint"
+        );
+    }
+
+    #[test]
+    fn repeat_allowance_counts_only_whole_live_snapshot_rows() {
+        let snapshot = vec![nested(p("#address"))];
+        let allowances = operator_repeated_queue_identity_allowances(
+            &snapshot,
+            &[
+                "address".to_string(),
+                "- ~~#address~~".to_string(),
+                "\n  - #address\n  - #address\n  - #review\n".to_string(),
+            ],
+        );
+        assert_eq!(allowances.len(), 1);
+        assert_eq!(allowances.values().copied().sum::<usize>(), 2);
     }
 
     #[test]

@@ -4825,6 +4825,83 @@ fn operator_rearm_evidence_for_maintenance(
     }
 }
 
+/// Operator-authored repeated live rows whose current multiplicity exceeds the
+/// committed snapshot (`#repeatpromptauthorship`).
+///
+/// Snapshot multiplicity remains the replay ceiling unless the durable editor-op
+/// epoch proves whole-row insertions of that same identity. Evidence is read only
+/// when it can affect convergence. An unreadable epoch fails closed after the
+/// same bounded controller recovery used for operator unstrike evidence.
+fn operator_repeat_evidence_for_maintenance(
+    file: &Path,
+    snapshot_queue_entries: &[agent_doc_queue::document_queue::QueueEntry],
+    live_entries: &[agent_doc_queue::document_queue::QueueEntry],
+) -> Result<std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, usize>> {
+    let contested = agent_doc_queue::document_queue::live_snapshot_multiplicity_excess_identities(
+        live_entries,
+        snapshot_queue_entries,
+    );
+    if contested.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+
+    let attempts = queue_authority_attempts();
+    let mut attempt = 1;
+    loop {
+        match agent_doc_op_capture_io::active_operator_inserted_runs(file)
+            .context("read the active editor-op epoch's inserted runs")
+        {
+            Ok(inserted_runs) => {
+                let mut allowances =
+                    agent_doc_queue::document_queue::operator_repeated_queue_identity_allowances(
+                        snapshot_queue_entries,
+                        &inserted_runs,
+                    );
+                allowances.retain(|identity, _| contested.contains(identity));
+                if !allowances.is_empty() {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "queue_operator_repeat_preserved file={} identities={} occurrences={} (#repeatpromptauthorship)",
+                            file.display(),
+                            allowances.len(),
+                            allowances.values().sum::<usize>(),
+                        ),
+                    );
+                }
+                return Ok(allowances);
+            }
+            Err(err) => {
+                let admission = if attempt < attempts {
+                    "retrying"
+                } else {
+                    "refused"
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_repeat_evidence_unavailable file={} contested={} attempt={attempt}/{attempts} admission={admission} error={} (#repeatpromptauthorship)",
+                        file.display(),
+                        contested.len(),
+                        compact_error_for_log(&err),
+                    ),
+                );
+                if attempt >= attempts {
+                    return Err(QueueAuthorityUnavailable::new(format!(
+                        "operator authorship evidence for {} repeated live queue identity/identities is unreadable after {attempts} attempt(s); converging without it would discard an operator-authored repeat: {err:#}",
+                        contested.len(),
+                    ))
+                    .into());
+                }
+            }
+        }
+        let _ensured =
+            agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file);
+        std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        attempt += 1;
+    }
+}
+
 fn compact_error_for_log(err: &anyhow::Error) -> String {
     format!("{err:#}").replace(['\n', '\r'], " ")
 }
@@ -5947,12 +6024,18 @@ pub fn run_queue_maintenance_with_coin_gate(
         )?,
         None => std::collections::HashSet::new(),
     };
+    let operator_repeat_allowances = operator_repeat_evidence_for_maintenance(
+        file,
+        &snapshot_queue_entries,
+        &activation.entries_after,
+    )?;
     if let Some(converged_entries) =
-        agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_rearmed(
+        agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_evidence(
             &activation.entries_after,
             &snapshot_queue_entries,
             &agent_doc_queue_io::queue_tombstone::current_tombstones(file),
             &operator_rearmed,
+            &operator_repeat_allowances,
         )
     {
         let dropped = activation

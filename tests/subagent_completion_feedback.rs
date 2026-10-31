@@ -150,6 +150,113 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
 }
 
 #[test]
+fn report_complete_keeps_component_markers_in_worker_response_inert_and_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
+    let doc = dir.path().join("session.md");
+    let item = "diagnose game-sessions component corruption";
+    fs::write(
+        &doc,
+        format!(
+            concat!(
+                "---\nagent_doc_session: completion-feedback-scope\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- {item}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            item = item,
+        ),
+    )
+    .unwrap();
+    let binary = env!("CARGO_BIN_EXE_agent-doc");
+    let owner = "subagent:game-sessions";
+    let run = |args: &[&str]| {
+        Command::new(binary)
+            .env(
+                agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+                CONTROLLER_LAUNCH_REASON,
+            )
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let claim = run(&[
+        "queue",
+        "claim",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+    ]);
+    assert!(
+        claim.status.success(),
+        "claim failed: {}",
+        String::from_utf8_lossy(&claim.stderr)
+    );
+    let start = run(&[
+        "queue",
+        "start",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--owner",
+        owner,
+        "--generation",
+        "1",
+        "--worker-id",
+        "worker:game-sessions",
+    ]);
+    assert!(
+        start.status.success(),
+        "start failed: {}",
+        String::from_utf8_lossy(&start.stderr)
+    );
+
+    let before = fs::read_to_string(&doc).unwrap();
+    let response = concat!(
+        "The live document has this repeated opening marker:\n\n",
+        "<!-- agent:run -->\n",
+        "- queued work\n",
+        "<!-- agent:run -->\n\n",
+        "The second marker must be the closing marker:\n",
+        "<!-- /agent:run -->",
+    );
+    let report = run(&[
+        "queue",
+        "report-complete",
+        doc.to_str().unwrap(),
+        "--item",
+        item,
+        "--generation",
+        "1",
+        "--response",
+        response,
+    ]);
+    assert!(
+        report.status.success(),
+        "report failed: {}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+
+    let after = fs::read_to_string(&doc).unwrap();
+    assert!(after.contains("> <!-- agent:run -->"));
+    assert!(after.contains("> <!-- /agent:run -->"));
+    assert!(after.contains("> The second marker must be the closing marker:"));
+    let scope = agent_doc_element::component_scope::changed_component_scope(&before, &after)
+        .expect("completion feedback must have a provable component scope");
+    assert_eq!(
+        scope.to_pairs(),
+        vec![("exchange".to_string(), 0), ("queue".to_string(), 0)]
+    );
+}
+
+#[test]
 fn repair_completion_feedback_cli_migrates_bodyless_notices_without_replaying_closeout() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();

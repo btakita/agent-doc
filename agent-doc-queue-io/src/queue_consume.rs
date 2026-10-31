@@ -9,7 +9,9 @@ use crate::queue_consumption_proof::{
     QueueConsumptionProofEffects, QueueConsumptionProofStage,
     record_queue_consumption_proofs as record_queue_consumption_proofs_with_effects,
 };
-use agent_doc_document::queue_projection::strip_priority_markers;
+use agent_doc_document::queue_projection::{
+    QueueOwnerProjection, owner_projection, strip_priority_markers,
+};
 use agent_doc_element::element;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
@@ -458,7 +460,19 @@ struct AddressableExecutableRow {
     display: String,
     lineage: String,
     node_key: String,
+    owner: Option<QueueOwnerProjection>,
     auto: bool,
+}
+
+/// An operator-supplied discriminator for duplicate canonical `--ack-text`
+/// lineages. The selector is applied only after the exact lineage/leaf match,
+/// so it cannot broaden the acknowledgement surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AckTextSelector {
+    /// Select the one-based occurrence among exact matches in document order.
+    Occurrence(usize),
+    /// Select the exact durable worker-attempt owner and generation.
+    Owner(QueueOwnerProjection),
 }
 
 /// Executable queue leaves paired with their durable Markdown node keys.
@@ -513,6 +527,7 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
                 display,
                 lineage,
                 node_key: nodes[node_index].node_key.clone(),
+                owner: owner_projection(nodes[node_index].item.text.trim()),
                 auto,
             });
         }
@@ -523,6 +538,7 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
 fn exact_acknowledgement_row<'a>(
     rows: &'a [AddressableExecutableRow],
     expected_head: &str,
+    selector: Option<&AckTextSelector>,
 ) -> Result<Option<&'a AddressableExecutableRow>> {
     let expected_normalized = strip_priority_markers(expected_head);
     let expected = expected_normalized.trim();
@@ -530,22 +546,20 @@ fn exact_acknowledgement_row<'a>(
         .iter()
         .filter(|row| strip_priority_markers(&row.lineage).trim() == expected)
         .collect();
-    match lineage_matches.as_slice() {
-        [only] => return Ok(Some(*only)),
-        [] => {}
-        _ => anyhow::bail!(
-            "--ack-text matches more than one executable queue lineage; no change was applied. expected={expected:?}"
-        ),
+    if !lineage_matches.is_empty() {
+        return select_exact_acknowledgement_row(&lineage_matches, expected, selector).map(Some);
     }
 
     let display_matches: Vec<&AddressableExecutableRow> = rows
         .iter()
         .filter(|row| strip_priority_markers(&row.display).trim() == expected)
         .collect();
+    if display_matches.is_empty() {
+        return Ok(None);
+    }
     match display_matches.as_slice() {
-        [only] => Ok(Some(*only)),
-        [] => Ok(None),
-        many => {
+        [only] => select_exact_acknowledgement_row(&[*only], expected, selector).map(Some),
+        many @ [_, _, ..] => {
             let lineages = many
                 .iter()
                 .map(|row| format!("{:?}", row.lineage))
@@ -554,6 +568,54 @@ fn exact_acknowledgement_row<'a>(
             anyhow::bail!(
                 "--ack-text short leaf is ambiguous; pass one exact nest-vector lineage. expected={expected:?} matches=[{lineages}]"
             );
+        }
+        [] => unreachable!("empty display matches returned above"),
+    }
+}
+
+fn select_exact_acknowledgement_row<'a>(
+    matches: &[&'a AddressableExecutableRow],
+    expected: &str,
+    selector: Option<&AckTextSelector>,
+) -> Result<&'a AddressableExecutableRow> {
+    match selector {
+        None => match matches {
+            [only] => Ok(*only),
+            _ => anyhow::bail!(
+                "--ack-text matches more than one executable queue lineage; no change was applied. expected={expected:?}; pass --ack-occurrence or --ack-owner"
+            ),
+        },
+        Some(AckTextSelector::Occurrence(0)) => {
+            anyhow::bail!("--ack-occurrence is one-based and must be greater than zero")
+        }
+        Some(AckTextSelector::Occurrence(occurrence)) => matches
+            .get(occurrence - 1)
+            .copied()
+            .with_context(|| {
+                format!(
+                    "--ack-occurrence {occurrence} is outside the {} exact --ack-text match(es); no change was applied. expected={expected:?}",
+                    matches.len()
+                )
+            }),
+        Some(AckTextSelector::Owner(expected_owner)) => {
+            let owner_matches = matches
+                .iter()
+                .filter(|row| row.owner.as_ref() == Some(expected_owner))
+                .copied()
+                .collect::<Vec<_>>();
+            match owner_matches.as_slice() {
+                [only] => Ok(*only),
+                [] => anyhow::bail!(
+                    "--ack-owner did not match an exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}",
+                    expected_owner.owner,
+                    expected_owner.generation
+                ),
+                _ => anyhow::bail!(
+                    "--ack-owner still matches more than one exact --ack-text lineage; no change was applied. expected={expected:?} owner={:?} generation={}",
+                    expected_owner.owner,
+                    expected_owner.generation
+                ),
+            }
         }
     }
 }
@@ -572,6 +634,20 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     expected_head: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
+    acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+        file,
+        expected_head,
+        None,
+        effects,
+    )
+}
+
+pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+    file: &Path,
+    expected_head: &str,
+    selector: Option<&AckTextSelector>,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
     let content = effects.current_document_content(file, "queue_consume_ack_text")?;
     let (fm, _) = frontmatter::parse(&content)?;
 
@@ -581,7 +657,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
     // leaf across every queue block. Repeated short leaves require the full
     // nest vector, preserving the automatic `#subagentinlineveto` contract.
     let addressable = addressable_executable_rows(&content)?;
-    if let Some(row) = exact_acknowledgement_row(&addressable, expected_head)? {
+    if let Some(row) = exact_acknowledgement_row(&addressable, expected_head, selector)? {
         if !queue_prompt_text_is_free_text(&content, &row.lineage) {
             anyhow::bail!(
                 "{}: --ack-text matched a non-free-text queue head. Use --ack-id/--id or \
@@ -656,6 +732,13 @@ pub fn acknowledge_paused_free_text_queue_head_with_outcome(
             drained: remaining == 0,
             auto: plan.auto,
         }));
+    }
+
+    if selector.is_some() {
+        anyhow::bail!(
+            "{}: --ack-text selector did not resolve an exact executable queue lineage; no change was applied.",
+            file.display()
+        );
     }
 
     if fm.queue_active == Some(true) {
@@ -3861,6 +3944,170 @@ mod core_tests {
             "{ambiguous}"
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn exact_text_ack_occurrence_selects_one_duplicate_sdk_lineage() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "https://github.com/haiven-dev/haiven-sdk/pull/172: #address";
+        let content = duplicate_sdk_ack_document();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let selector = super::AckTextSelector::Occurrence(2);
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the second exact lineage should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 2);
+        assert!(
+            updated.contains("☑️ [#subagent:pr172-address-current#1] #address"),
+            "{updated}"
+        );
+        assert!(updated.contains("  - ~~#address~~"), "{updated}");
+        assert!(
+            updated.contains("☑️ [#subagent:pr172-address-current#3] https://github.com/haiven-dev/haiven-sdk/pull/172: #address"),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_owner_selects_one_duplicate_sdk_lineage() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "https://github.com/haiven-dev/haiven-sdk/pull/172: #address";
+        let content = duplicate_sdk_ack_document();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let selector = super::AckTextSelector::Owner(
+            agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:pr172-address-current".to_string(),
+                generation: 3,
+            },
+        );
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the exact owner generation should be acknowledged");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 2);
+        assert!(
+            updated.contains("☑️ [#subagent:pr172-address-current#1] #address"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("☑️ [#subagent:pr172-address-current#2] #address"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("- ~~https://github.com/haiven-dev/haiven-sdk/pull/172: #address~~"),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_selector_out_of_range_preserves_duplicate_sdk_lineages() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target = "https://github.com/haiven-dev/haiven-sdk/pull/172: #address";
+        let content = duplicate_sdk_ack_document();
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let selector = super::AckTextSelector::Occurrence(4);
+        let error = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("outside the 3 exact"), "{error}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn exact_text_ack_selector_does_not_bypass_short_leaf_lineage_guard() {
+        let rows = [
+            super::AddressableExecutableRow {
+                display: "#address".to_string(),
+                lineage: "PR 171: #address".to_string(),
+                node_key: "first".to_string(),
+                owner: None,
+                auto: false,
+            },
+            super::AddressableExecutableRow {
+                display: "#address".to_string(),
+                lineage: "PR 172: #address".to_string(),
+                node_key: "second".to_string(),
+                owner: None,
+                auto: false,
+            },
+        ];
+        let selector = super::AckTextSelector::Occurrence(1);
+
+        let error =
+            super::exact_acknowledgement_row(&rows, "#address", Some(&selector)).unwrap_err();
+
+        assert!(
+            error.to_string().contains("short leaf is ambiguous"),
+            "{error}"
+        );
+    }
+
+    fn duplicate_sdk_ack_document() -> String {
+        concat!(
+            "---\n",
+            "agent_doc_format: template\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "### Re: completed SDK PR reviews\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-sdk/pull/172: #address\n\n",
+            "All requested PR feedback was addressed.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=haiven-sdk-prs subagents -->\n",
+            "- https://github.com/haiven-dev/haiven-sdk/pull/172\n",
+            "  - ☑️ [#subagent:pr172-address-current#1] #address\n",
+            "  - ☑️ [#subagent:pr172-address-current#2] #address\n",
+            "- ☑️ [#subagent:pr172-address-current#3] https://github.com/haiven-dev/haiven-sdk/pull/172: #address\n",
+            "<!-- /agent:run -->\n",
+        )
+        .to_string()
     }
 
     #[test]

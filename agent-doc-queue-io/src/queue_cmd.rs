@@ -77,6 +77,17 @@ pub trait QueueCommandEffects {
         file: &Path,
         expected_head: &str,
     ) -> Result<Option<QueueCommandConsumeOutcome>>;
+    fn acknowledge_paused_free_text_queue_head_with_selector(
+        &self,
+        file: &Path,
+        expected_head: &str,
+        selector: Option<&crate::queue_consume::AckTextSelector>,
+    ) -> Result<Option<QueueCommandConsumeOutcome>> {
+        if selector.is_some() {
+            anyhow::bail!("this queue command effect does not support --ack-text selectors");
+        }
+        self.acknowledge_paused_free_text_queue_head(file, expected_head)
+    }
     fn prune_noise_queue_heads(&self, file: &Path) -> Result<usize>;
     fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
         Ok(0)
@@ -866,9 +877,14 @@ pub fn acknowledge_paused_free_text(
     effects: &impl QueueCommandEffects,
     file: &Path,
     expected_head: &str,
+    selector: Option<&crate::queue_consume::AckTextSelector>,
 ) -> Result<()> {
     let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
-    match effects.acknowledge_paused_free_text_queue_head(file, expected_head)? {
+    match effects.acknowledge_paused_free_text_queue_head_with_selector(
+        file,
+        expected_head,
+        selector,
+    )? {
         Some(outcome) => println!(
             "{}: acknowledged exact free-text queue head (remaining: {}); \
              queue activation unchanged (#acktextlineage).",

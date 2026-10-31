@@ -26,7 +26,7 @@ use agent_doc_queue::{
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        strike_all_noise_queue_heads,
+        response_lookup_id_for_document, strike_all_noise_queue_heads,
     },
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
@@ -1361,11 +1361,11 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         return Ok(0);
     }
 
-    let response_id = agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(
-        Some(response_body),
-    )
-    .cell_id()
-    .to_string();
+    let response_policy =
+        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+            response_body,
+        ));
+    let response_id = response_lookup_id_for_document(&target, &response_policy)?;
     let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
     let annotated = target
         .matches(&needle)
@@ -3551,7 +3551,7 @@ mod core_tests {
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 response,
             ))
-            .cell_id()
+            .response_id()
             .to_string();
 
         let count = annotate_newly_completed_queue_prompts_with_response_id(

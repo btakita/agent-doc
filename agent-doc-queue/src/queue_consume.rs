@@ -2001,14 +2001,11 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
 }
 
 fn is_response_id_lookup_comment(line: &str) -> bool {
-    line.trim()
+    let marker = line
+        .trim()
         .strip_prefix("- ")
-        .unwrap_or_else(|| line.trim())
-        .strip_prefix("%% response r:")
-        .and_then(|rest| rest.strip_suffix(" %%"))
-        .is_some_and(|hash| {
-            !hash.is_empty() && hash.chars().all(|character| character.is_ascii_hexdigit())
-        })
+        .unwrap_or_else(|| line.trim());
+    agent_doc_markdown_ast::exchange_tree::is_response_id_lookup_marker(marker)
 }
 
 /// Project completion of every live queue prompt matching `done_ids` into the
@@ -2523,13 +2520,13 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
             response_body,
         ));
-    let response_id = response_policy.cell_id();
+    let response_id = response_lookup_id_for_document(after, &response_policy)?;
     if response_id.is_empty() {
         return Ok(after.to_string());
     }
 
-    let after = annotate_exchange_response_with_lookup_id(after, response_id)?;
-    let lookup_children = response_lookup_children(response_body, response_id);
+    let after = annotate_exchange_response_with_lookup_id(after, &response_policy, &response_id)?;
+    let lookup_children = response_lookup_children(response_body, &response_id);
 
     let struck_before: HashSet<String> =
         agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
@@ -2586,7 +2583,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     let mut out = after;
     for (start, end, indent, needs_inline_id, children) in edits.into_iter().rev() {
         let mut replacement = if needs_inline_id {
-            annotate_struck_line_with_response_id(&out[start..end], response_id)
+            annotate_struck_line_with_response_id(&out[start..end], &response_id)
         } else {
             out[start..end].to_string()
         };
@@ -2606,6 +2603,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
 
 fn annotate_exchange_response_with_lookup_id(
     document: &str,
+    response_policy: &agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy,
     response_id: &str,
 ) -> anyhow::Result<String> {
     let components = element::parse(document)?;
@@ -2617,6 +2615,7 @@ fn annotate_exchange_response_with_lookup_id(
         let inner = &document[component.open_end..component.close_start];
         let annotated = agent_doc_markdown_ast::exchange_tree::annotate_response_with_lookup_id(
             inner,
+            response_policy,
             response_id,
         );
         if annotated != inner {
@@ -2628,6 +2627,28 @@ fn annotate_exchange_response_with_lookup_id(
         out.replace_range(start..end, &annotated);
     }
     Ok(out)
+}
+
+/// Resolve one compact public response id for the exact response cell in a
+/// document. The internal ordered node identity never crosses this boundary.
+pub fn response_lookup_id_for_document(
+    document: &str,
+    response_policy: &agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy,
+) -> anyhow::Result<String> {
+    for component in element::parse(document)? {
+        if component.name != "exchange" {
+            continue;
+        }
+        let inner = &document[component.open_end..component.close_start];
+        if agent_doc_markdown_ast::exchange_tree::response_cell_materialized(inner, response_policy)
+        {
+            return Ok(agent_doc_markdown_ast::exchange_tree::response_lookup_id(
+                inner,
+                response_policy,
+            ));
+        }
+    }
+    Ok(response_policy.response_id().to_string())
 }
 
 fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<String> {
@@ -2646,7 +2667,7 @@ fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<Strin
         let marker = line.trim();
         if marker.starts_with("%% response ")
             && marker.ends_with(" %%")
-            && !marker.starts_with("%% response r:")
+            && !agent_doc_markdown_ast::exchange_tree::is_response_id_lookup_marker(marker)
             && !children.iter().any(|child| child == marker)
         {
             children.push(marker.to_string());
@@ -2752,7 +2773,7 @@ mod tests {
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 response,
             ))
-            .cell_id()
+            .response_id()
             .to_string();
 
         let annotated =
@@ -2768,6 +2789,8 @@ mod tests {
             annotated.contains(&format!("  - %% response {response_id} %%\n")),
             "{annotated}"
         );
+        assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(&response_id));
+        assert!(!annotated.contains("response-cell:r:"), "{annotated}");
         assert!(
             annotated.contains("  - %% /work/tasks/result.md %%\n"),
             "{annotated}"
@@ -2795,7 +2818,7 @@ mod tests {
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 response,
             ))
-            .cell_id()
+            .response_id()
             .to_string();
 
         let annotated =
@@ -2808,6 +2831,45 @@ mod tests {
             "{annotated}"
         );
         assert!(annotated.contains("- later\n"), "{annotated}");
+    }
+
+    #[test]
+    fn multi_section_cell_uses_one_public_id_for_exchange_and_queue_lookup() {
+        let response = concat!(
+            "### Re: nested\n\nCompleted the implementation.\n\n",
+            "### Verification\n\nAll focused tests pass.\n",
+        );
+        let before = doc_with_queue_and_exchange("- do [#nested]\n", "");
+        let after = doc_with_queue_and_exchange("- ~~do [#nested]~~\n", response);
+        let policy = agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(
+            Some(response),
+        );
+        assert!(policy.cell_id().starts_with("response-cell:r:"));
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let response_id = policy.response_id();
+        let components = element::parse(&annotated).unwrap();
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&annotated);
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap()
+            .content(&annotated);
+        let lookup_marker = format!("%% response {response_id} %%");
+
+        assert_eq!(exchange.matches(&lookup_marker).count(), 1, "{exchange}");
+        assert_eq!(queue.matches(&lookup_marker).count(), 1, "{queue}");
+        assert!(
+            queue.contains(&format!("response: {response_id}")),
+            "{queue}"
+        );
+        assert!(exchange.contains(response_id) && queue.contains(response_id));
+        assert!(!annotated.contains(policy.cell_id()), "{annotated}");
     }
 
     #[test]
@@ -2825,7 +2887,7 @@ mod tests {
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 response,
             ))
-            .cell_id()
+            .response_id()
             .to_string();
 
         let projected = project_answered_free_text_strike(&document, response, Some(&document))
@@ -5273,7 +5335,7 @@ Old.
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 &response,
             ))
-            .cell_id()
+            .response_id()
             .to_string();
         assert!(projected.target_content.contains(&format!(
             "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - %% response {response_id} %%\n<!-- /agent:queue -->"

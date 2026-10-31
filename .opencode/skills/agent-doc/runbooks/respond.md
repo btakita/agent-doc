@@ -438,8 +438,9 @@ quote.
 When a queue response contains a terse salient fact the operator should not
 miss in the larger exchange, include it as its own `%% response <snippet> %%`
 line in the response. Keep the snippet short and lookup-oriented. Closeout
-copies that marker beneath the exact completed queue leaf, adds the stable
-response id there and in the exchange response, and adds child comments for
+copies that marker beneath the exact completed queue leaf, adds one compact
+bracketed response id (`[#r-<hash>]`) there and once in the exchange response,
+keeps the composite response-node identity internal, and adds child comments for
 path-like artifacts named in inline code. Do not manually add the response-id
 or artifact children; those are binary-owned (`#queueresponselookups`).
 

@@ -3285,6 +3285,43 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
     false
 }
 
+/// Whether an executable row has a deeper list-comment annotation in its tree.
+///
+/// Comment-only children deliberately do not make the row a context-only group:
+/// the parent remains dispatchable. They do, however, carry operator context
+/// that a heuristic completion matcher cannot prove resolved. Callers that
+/// perform semantic auto-strike use this predicate to fail closed while normal
+/// explicit queue consumption keeps its existing runnable-parent semantics.
+pub fn entry_has_nested_list_comment(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
+        return false;
+    };
+    for later in entries.iter().skip(idx + 1) {
+        match later {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                if prompt.indent <= own_indent {
+                    return false;
+                }
+            }
+            QueueEntry::Freeform(raw) => {
+                for line in raw.lines() {
+                    let Some((indent, _, rest)) = split_list_item(line) else {
+                        continue;
+                    };
+                    if indent <= own_indent {
+                        return false;
+                    }
+                    if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Work text of a queue row for nest-vector display and identity compare.
 ///
 /// Projection (`📥`, pins, owner annotations) and a `~~strike~~` wrapper are
@@ -9926,6 +9963,10 @@ mod tests {
                 "comment-only children must not turn their runnable parent into an inert group"
             );
             assert_eq!(render(&entries), body);
+            assert!(
+                entry_has_nested_list_comment(&entries, 0),
+                "the runnable parent still exposes its unresolved annotation to heuristic consumers"
+            );
         }
     }
 

@@ -294,7 +294,13 @@ fn collect_completion_candidates(file: &Path) -> Result<Vec<CompletionCandidate>
                     source_ref: format!("{session_ref}#queue:{index}"),
                     item_id: None,
                     exclude_from_queue_strike:
-                        agent_doc_queue::queue_continuation::is_recurring_imperative_head(&text),
+                        agent_doc_queue::queue_continuation::is_recurring_imperative_head(&text)
+                            || agent_doc_queue::document_queue::entry_is_group_parent(
+                                &entries, index,
+                            )
+                            || agent_doc_queue::document_queue::entry_has_nested_list_comment(
+                                &entries, index,
+                            ),
                     text,
                     queue_index: Some(index),
                 });
@@ -667,6 +673,37 @@ Shipped cache repair.
             first.score >= QUEUE_STRIKE_THRESHOLD,
             "score {} must clear threshold: {first:?}",
             first.score
+        );
+    }
+
+    #[test]
+    fn queue_strike_preserves_runnable_parent_with_comment_child() {
+        let tmp = tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("tasks.done.md"),
+            "- 2026-10-30 [#api717] https://github.com/haiven-dev/haiven-api/pull/717\n",
+        )
+        .unwrap();
+        let doc = write_doc(
+            tmp.path(),
+            r##"
+<!-- agent:run id=api-prs subagents presets="#push: #auth" priority keep -->
+- https://github.com/haiven-dev/haiven-api/pull/717
+  - %% Waiting for guidance re: an agent api key to run on this. %%
+<!-- /agent:run -->
+
+<!-- agent:done archive=document:../tasks.done.md -->
+<!-- /agent:done -->
+"##,
+        );
+        let db = tmp.path().join(".tsift/memory.db");
+
+        let matches =
+            semantic_queue_strike_matches(&doc, Some(&db), QUEUE_STRIKE_THRESHOLD, 5).unwrap();
+
+        assert!(
+            matches.is_empty(),
+            "an unresolved nested comment must veto heuristic auto-strike: {matches:?}"
         );
     }
 

@@ -720,21 +720,42 @@ fn load_prompt_preset_block(file: &Path, requested_presets: &[String]) -> Result
     let doc = resolve_orchestrate_current_document(file, "orchestrate_prompt_preset_block")?;
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&doc, file)?;
-    let mut block = String::new();
+    let mut resolved = Vec::new();
 
-    for (idx, preset_name) in requested_presets.iter().enumerate() {
+    for preset_name in requested_presets {
         let preset_key = frontmatter::resolve_prompt_preset_key(&prompt_presets, preset_name)
             .ok_or_else(|| anyhow::anyhow!("unknown prompt preset `{}`", preset_name))?;
         let preset_body = prompt_presets
             .get(&preset_key)
             .expect("resolved prompt preset key must exist");
-        if idx > 0 {
-            block.push('\n');
-        }
-        block.push_str(&format!("(preset {})\n", preset_key));
-        block.push_str(preset_body.trim_end());
-        block.push('\n');
+        resolved.push((preset_key, preset_body.as_str()));
     }
+
+    // `#orchestratepresetsymbols`: keep the preset names in the submitted
+    // prompt as symbols. Bodies are definitions in a lookup map, not anonymous
+    // instruction text prepended to the task.
+    let mut block = format!(
+        "Prompt preset symbols: {}\n\nPrompt preset lookup table:\n",
+        resolved
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    for (preset_key, preset_body) in resolved {
+        block.push_str(&format!("  \"{}\": |-\n", preset_key));
+        let body = preset_body.trim_end();
+        if body.is_empty() {
+            block.push_str("    \n");
+        } else {
+            for line in body.lines() {
+                block.push_str("    ");
+                block.push_str(line);
+                block.push('\n');
+            }
+        }
+    }
+    block.push_str("\nTask:\n");
 
     Ok(Some(block))
 }
@@ -1573,7 +1594,9 @@ mod tests {
             load_prompt_preset_block(&doc, &batch.requested_presets)
                 .unwrap()
                 .as_deref(),
-            Some("(preset #spec-test)\nRun checks.\n")
+            Some(
+                "Prompt preset symbols: #spec-test\n\nPrompt preset lookup table:\n  \"#spec-test\": |-\n    Run checks.\n\nTask:\n"
+            )
         );
     }
     #[test]
@@ -1615,7 +1638,9 @@ mod tests {
             load_prompt_preset_block(&doc, &batch.requested_presets)
                 .unwrap()
                 .as_deref(),
-            Some("(preset #spec-test)\nRun project checks.\n")
+            Some(
+                "Prompt preset symbols: #spec-test\n\nPrompt preset lookup table:\n  \"#spec-test\": |-\n    Run project checks.\n\nTask:\n"
+            )
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
     }
@@ -1731,14 +1756,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_prompt_preset_block_prefixes_task_prompt() {
+    fn apply_prompt_preset_block_preserves_symbolic_lookup_before_task() {
         let rendered = apply_prompt_preset_block(
             "do #prep",
-            Some("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\n"),
+            Some(
+                "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Today is 2026-04-25.\n    Keep the work tree clean.\n\nTask:\n",
+            ),
         );
         assert_eq!(
             rendered,
-            "(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean.\ndo #prep"
+            "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Today is 2026-04-25.\n    Keep the work tree clean.\n\nTask:\ndo #prep"
         );
     }
     #[test]

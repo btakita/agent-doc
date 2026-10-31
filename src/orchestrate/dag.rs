@@ -841,7 +841,7 @@ mod tests {
         assert_eq!(*agent.streaming_calls.borrow(), 0);
     }
     #[test]
-    fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
+    fn sequential_orchestration_submits_symbolic_prompt_preset_lookup() {
         let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
@@ -891,8 +891,11 @@ mod tests {
         .unwrap();
 
         let prompt = agent.prompts.borrow()[0].clone();
-        assert!(prompt.contains("(preset #1)\nToday is 2026-04-25.\nKeep the work tree clean."));
-        assert!(prompt.contains("❯ (preset #1)\nToday is 2026-04-25."));
+        assert!(prompt.contains("Prompt preset symbols: #1"));
+        assert!(prompt.contains(
+            "Prompt preset lookup table:\n  \"#1\": |-\n    Today is 2026-04-25.\n    Keep the work tree clean."
+        ));
+        assert!(prompt.contains("❯ Prompt preset symbols: #1"));
     }
     #[test]
     fn sequential_orchestration_stops_when_exchange_task_list_changes() {
@@ -1236,7 +1239,7 @@ exit 2
         assert!(!calls[0].1[0].prompt.contains("<tsift_graph_evidence>"));
     }
     #[test]
-    fn parallel_mode_expands_prompt_presets_into_task_prompt_only() {
+    fn parallel_mode_submits_symbolic_prompt_preset_lookup_only_in_prompt() {
         let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(
@@ -1289,7 +1292,7 @@ exit 2
         assert_eq!(call.1[0].description, "do #prep");
         assert_eq!(
             call.1[0].prompt,
-            "(preset #1)\nKeep the work tree clean.\ndo #prep"
+            "Prompt preset symbols: #1\n\nPrompt preset lookup table:\n  \"#1\": |-\n    Keep the work tree clean.\n\nTask:\ndo #prep"
         );
     }
     #[test]

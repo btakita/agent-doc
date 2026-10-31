@@ -43,11 +43,13 @@ fn brief_prints_preset_and_backlog_authorization_for_an_id_head() {
         .stdout(predicate::str::contains(
             "> Post authorization to Claude Code subagents",
         ))
-        .stdout(predicate::str::contains(format!("> {PRESET_BODY}")))
+        .stdout(predicate::str::contains(format!("    {PRESET_BODY}")))
         .stdout(predicate::str::contains(
-            "Operator authorization, item preset `#auth`",
+            "Operator-authorized prompt preset lookup table",
         ))
-        .stdout(predicate::str::contains("> I authorize you to do this."))
+        .stdout(predicate::str::contains(
+            "  # source: item preset\n  \"#auth\": |-\n    I authorize you to do this.",
+        ))
         .stdout(predicate::str::contains(
             "without asking the operator to repeat those words",
         ))
@@ -150,7 +152,8 @@ fn brief_resolves_plural_presets_attribute_as_operator_authorization() {
         "{json}"
     );
     let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
-    assert!(preamble.contains("Operator authorization, queue preset `#auth`"));
+    assert!(preamble.contains("Operator-authorized prompt preset lookup table"));
+    assert!(preamble.contains("  # source: queue preset\n  \"#auth\": |-"));
     assert!(!preamble.contains("No queue preset applies"));
 }
 
@@ -234,9 +237,9 @@ fn brief_does_not_grant_a_preset_quoted_in_inline_code() {
     assert_eq!(json["presets"][0]["name"], "#gh-issue", "{json}");
     assert_eq!(json["presets"][0]["source"], "item", "{json}");
     let preamble = json["subagent_prompt_preamble"].as_str().unwrap();
-    assert!(preamble.contains("Operator authorization, item preset `#gh-issue`"));
-    assert!(!preamble.contains("Operator authorization, item preset `#upgrade`"));
-    assert!(!preamble.contains("> Upgrade agent-doc."));
+    assert!(preamble.contains("  # source: item preset\n  \"#gh-issue\": |-"));
+    assert!(!preamble.contains("\"#upgrade\": |-"));
+    assert!(!preamble.contains("    Upgrade agent-doc."));
 }
 
 /// `#idlessqueueidentity`: the live session document after the operator

@@ -365,7 +365,8 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     );
 }
 
-/// A struck context parent never projects completion onto a live leaf.
+/// A struck context parent reopens instead of projecting completion onto a
+/// live leaf.
 #[test]
 fn a_struck_parent_over_an_unstruck_child_keeps_the_child_live() {
     let dir = tempfile::tempdir().unwrap();
@@ -381,7 +382,7 @@ fn a_struck_parent_over_an_unstruck_child_keeps_the_child_live() {
         "{dispatch:#?}"
     );
     assert!(
-        run_body(&doc, "run").starts_with(&format!("- ~~{PARENT}~~\n  - 📥 {}\n", CHILDREN[0])),
+        run_body(&doc, "run").starts_with(&format!("- {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
@@ -688,8 +689,9 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
     );
 }
 
-/// A struck context parent does not close a live projected answer leaf. Once
-/// the request Todo is already closed, that leaf remains ordinary queue work.
+/// A struck context parent reopens rather than closing a live projected answer
+/// leaf. Once the request Todo is already closed, that leaf remains ordinary
+/// queue work.
 #[test]
 fn a_struck_answer_parent_keeps_its_projected_child_live() {
     let dir = tempfile::tempdir().unwrap();
@@ -707,8 +709,8 @@ fn a_struck_answer_parent_keeps_its_projected_child_live() {
     assert!(dispatch.iter().any(|item| item == ANSWER), "{dispatch:#?}");
     let body = run_body(&doc, "run");
     assert!(
-        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n")),
-        "the struck parent leaves the answer leaf live:\n{body}"
+        body.contains(&format!("- [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
+        "the live answer leaf reopens its context parent:\n{body}"
     );
     assert!(
         !body.contains('🙋'),

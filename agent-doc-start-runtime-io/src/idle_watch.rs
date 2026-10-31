@@ -7108,6 +7108,26 @@ mod tests {
                 Some(expected),
                 "reported work must wake its coordinator for integration"
             );
+
+            // Exercise the editor-visible shape from the incident as well as
+            // the ledger-only shape above. The report projection decorates the
+            // row with `☑️ [#owner#generation]`; that UI state is not a
+            // terminal queue state and must not hide a later `agent:run` or
+            // turn the whole document into "no supervisor-drainable head".
+            let projected = format!(
+                "## Primary <!-- agent:run id={run_id} subagents priority keep go -->\n\
+- ☑️ [#{owner}#{}] integrate worker result [{item}]\n\
+<!-- /agent:run -->\n\n\
+## Secondary <!-- agent:run id=secondary subagents priority keep go -->\n\
+- later sibling\n\
+<!-- /agent:run -->\n",
+                running.generation,
+            );
+            assert_eq!(
+                supervisor_drainable_head(&doc, &projected),
+                Some(item_id),
+                "a visible reported marker in one of several runs remains coordinator debt"
+            );
         }
     }
 

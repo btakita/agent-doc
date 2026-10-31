@@ -101,6 +101,16 @@ only the compact routing table that survives context compaction.
 - Complete requested implementation, verification, build/install, and local
   inspection before response persistence. Do not keep appending
   "starting/continuing" status prose while requested work remains undone.
+- **Completion-seeking managed work (`#managedlistcompletionintent`).** Every
+  incomplete Managed List Item is a durable completion objective, not permission
+  to let work linger. During its selected cycle, proactively execute every
+  authorized agent-actionable step that can complete the item. If completion is
+  impossible this turn, communicate the concrete blockage: current evidence,
+  the exact missing condition, who or what must satisfy it, and the next action;
+  preserve or reclassify the item so that obligation remains visible. A claim,
+  dispatch, worker report, status update, or gate alone is not completion.
+  Queue order and icebox parking still decide what is selected, and this
+  invariant never expands authorization or bypasses an operator gate.
 
 ## 1. Respond and mutate tracked work
 

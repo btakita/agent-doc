@@ -673,7 +673,11 @@ The pure policy owner is
 Lifecycle convergence strips only the effect suffix when computing the
 free-text multiplicity family, then annotates the lawful live survivors. For a
 nested command family it also reserves occurrence ids for completed rows, but
-never rewrites those rows. Claim and receipt identity retain the suffix.
+never rewrites those rows. Claim and receipt identity retain the suffix,
+including inside the nested lineage key (`parent: ...: leaf ⟦effect:N⟧`);
+only structural multiplicity comparison erases it. Thus claiming a newly-added
+bare nested leaf cannot project its owner/generation or lifecycle marker onto
+already-annotated siblings.
 Therefore convergence remains replay-safe, while `release + publish
 ⟦effect:1⟧` and `release + publish ⟦effect:2⟧` are exactly different targets.
 A bare target against several annotated descendants is an ambiguity error

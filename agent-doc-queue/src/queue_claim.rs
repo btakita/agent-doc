@@ -2868,6 +2868,39 @@ mod tests {
         assert_eq!(resolve_claim_target(contracts, &heads).unwrap(), contracts);
     }
 
+    /// `#queueeffectidentity`: duplicate nested commands retain their effect
+    /// suffix in claim lineage. Otherwise a newly-added bare `#address` claim
+    /// fans out onto every earlier occurrence.
+    #[test]
+    fn nested_duplicate_effects_have_distinct_claim_identities() {
+        let parent = "https://github.com/haiven-dev/haiven-contracts/pull/179";
+        let body =
+            format!("- {parent}\n  - #address ⟦effect:1⟧\n  - #address ⟦effect:3⟧\n  - #address\n");
+        let entries = crate::document_queue::parse(&body).unwrap();
+        let lineages = crate::document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter_map(|index| crate::document_queue::lineage_claim_text(&entries, index))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            lineages,
+            vec![
+                format!("{parent}: #address ⟦effect:1⟧"),
+                format!("{parent}: #address ⟦effect:3⟧"),
+                format!("{parent}: #address"),
+            ]
+        );
+        let identities = lineages
+            .iter()
+            .map(|lineage| claim_identity(lineage))
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            identities.len(),
+            3,
+            "each nested effect is separately claimable"
+        );
+    }
+
     fn session(harness: &str, id: &str, pane: &str, pid: u32) -> ClaimOwnerSession {
         ClaimOwnerSession {
             harness: Some(harness.to_string()),

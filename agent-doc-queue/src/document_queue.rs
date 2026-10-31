@@ -1631,18 +1631,19 @@ pub struct QueueRowProjection {
 
 /// Derive every projected prefix from an exact live occurrence target.
 ///
-/// Reported (`☑️`) and struck rows are terminal document authority. Runtime
-/// evidence never rewrites a reported row or reopens a strike. The operator reopens work
-/// by removing the reported marker or strike in the document.
+/// Executable leaves own durable lifecycle state: reported (`☑️`) and struck
+/// leaves are terminal document authority, and only an operator edit reopens
+/// them. Context parents own no attempt state. Their presentation is derived
+/// lazily from their leaves: all leaves struck closes the parent; any live or
+/// reported leaf keeps/reopens the parent as plain context.
 pub fn set_prompt_runtime_projections(
     entries: &[QueueEntry],
     targets: &[QueueRowProjection],
 ) -> Option<Vec<QueueEntry>> {
     // `#nestedsubprompts`: children never carry their own projection, so a
     // legacy child marker is neither part of the match key nor kept.
-    // `#queuenest`: a group label is not a head. Pending means ready to run,
-    // so a pending target does not repaint one. A claim, report, or other
-    // ledger marker still does.
+    // `#queuenest`: a group label is not a head and never owns a runtime
+    // target. Its state is derived below from its executable leaves.
     let projection_key = |text: &str| {
         let cleaned = agent_doc_element_queue::subprompts::strip_subprompt_projections(text);
         let without_prefix = strip_priority_markers(cleaned.as_deref().unwrap_or(text));
@@ -1659,102 +1660,168 @@ pub fn set_prompt_runtime_projections(
     let out = entries
         .iter()
         .enumerate()
-        .map(|(index, entry)| match entry {
-            QueueEntry::Completed(prompt) => {
-                let mut next = prompt.clone();
-                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
-                    next.text = stripped;
-                    changed = true;
-                }
-                if let Some(cleaned) =
-                    agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
-                {
-                    next.text = cleaned;
-                    changed = true;
-                }
-                QueueEntry::Completed(next)
-            }
-            QueueEntry::Prompt(prompt) => {
-                let reported = matches!(
-                    agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
-                    Some(
-                        agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
-                    )
-                );
-                if reported {
-                    return entry.clone();
-                }
-                let mut next = prompt.clone();
-                if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
-                    next.text = stripped;
-                    changed = true;
-                }
-                if let Some(cleaned) =
-                    agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
-                {
-                    next.text = cleaned;
-                    changed = true;
-                }
-                let key = projection_key(&next.text);
-                let group_label = entry_is_group_parent(entries, index);
-                let target = targets
-                    .iter_mut()
-                    .find(|(target_key, target, consumed)| {
-                        target_key == &key
-                            && !*consumed
-                            && !(
-                                group_label
-                                    && target.marker
-                                        == agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-                            )
+        .map(|(index, entry)| {
+            if let Some(all_leaves_struck) = group_parent_all_leaves_struck(entries, index) {
+                let source = match entry {
+                    QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
+                    _ => unreachable!("a group parent is always a queue item"),
+                };
+                let parent_key = projection_key(&source.text);
+                let later_live_occurrences = entries[index + 1..]
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        QueueEntry::Prompt(prompt) => Some(projection_key(&prompt.text)),
+                        _ => None,
                     })
-                    .map(|(_, target, consumed)| {
-                        *consumed = true;
-                        target
-                    });
-                if let Some(target) = target {
-                    if !crate::queue_command::is_slash_command(&next.text) {
-                        let publication_state = target
-                            .text
-                            .lines()
-                            .next()
-                            .and_then(agent_doc_element_queue::queue_report_state_annotation)
-                            .map(|(_, state)| state);
-                        let marked = agent_doc_document::queue_projection::apply_lifecycle_marker_with_blockers(
-                            &next.text,
-                            target.marker,
-                            &target.blockers,
-                        );
-                        let marked_with_owner =
-                            agent_doc_document::queue_projection::apply_owner_projection(
-                                &marked,
-                                target.owner.as_ref(),
+                    .filter(|key| key == &parent_key)
+                    .count();
+                let remaining_targets = targets
+                    .iter()
+                    .filter(|(target_key, _, consumed)| target_key == &parent_key && !*consumed)
+                    .count();
+                if remaining_targets > later_live_occurrences
+                    && let Some((_, _, consumed)) = targets
+                        .iter_mut()
+                        .find(|(target_key, _, consumed)| {
+                            target_key == &parent_key && !*consumed
+                        })
+                {
+                    // Runtime target builders still enumerate context parents
+                    // for occurrence alignment. Consume that slot without
+                    // painting it so an equal-text child receives its own
+                    // later target rather than the parent's stale state.
+                    *consumed = true;
+                }
+                let mut parent = source.clone();
+                parent.text = render_queue_effect_report_state_annotation(
+                    struck_work_text(&parent.text),
+                    None,
+                );
+                let derived = if all_leaves_struck {
+                    QueueEntry::Completed(parent)
+                } else {
+                    QueueEntry::Prompt(parent)
+                };
+                if &derived != entry {
+                    changed = true;
+                }
+                return derived;
+            }
+
+            match entry {
+                QueueEntry::Completed(prompt) => {
+                    let mut next = prompt.clone();
+                    if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                        next.text = stripped;
+                        changed = true;
+                    }
+                    if let Some(cleaned) =
+                        agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
+                    {
+                        next.text = cleaned;
+                        changed = true;
+                    }
+                    QueueEntry::Completed(next)
+                }
+                QueueEntry::Prompt(prompt) => {
+                    let reported = matches!(
+                        agent_doc_document::queue_projection::lifecycle_marker(&prompt.text),
+                        Some(
+                            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
+                        )
+                    );
+                    if reported {
+                        return entry.clone();
+                    }
+                    let mut next = prompt.clone();
+                    if let Some(stripped) = strip_in_progress_marker_for_display(&next.text) {
+                        next.text = stripped;
+                        changed = true;
+                    }
+                    if let Some(cleaned) =
+                        agent_doc_element_queue::subprompts::strip_subprompt_projections(&next.text)
+                    {
+                        next.text = cleaned;
+                        changed = true;
+                    }
+                    let key = projection_key(&next.text);
+                    let target = targets
+                        .iter_mut()
+                        .find(|(target_key, _, consumed)| target_key == &key && !*consumed)
+                        .map(|(_, target, consumed)| {
+                            *consumed = true;
+                            target
+                        });
+                    if let Some(target) = target {
+                        if !crate::queue_command::is_slash_command(&next.text) {
+                            let publication_state = target
+                                .text
+                                .lines()
+                                .next()
+                                .and_then(agent_doc_element_queue::queue_report_state_annotation)
+                                .map(|(_, state)| state);
+                            let marked = agent_doc_document::queue_projection::apply_lifecycle_marker_with_blockers(
+                                &next.text,
+                                target.marker,
+                                &target.blockers,
                             );
-                        let marked_text = render_queue_effect_report_state_annotation(
-                            &marked_with_owner,
-                            publication_state,
-                        );
-                        if marked_text != next.text {
-                            next.text = marked_text;
+                            let marked_with_owner =
+                                agent_doc_document::queue_projection::apply_owner_projection(
+                                    &marked,
+                                    target.owner.as_ref(),
+                                );
+                            let marked_text = render_queue_effect_report_state_annotation(
+                                &marked_with_owner,
+                                publication_state,
+                            );
+                            if marked_text != next.text {
+                                next.text = marked_text;
+                                changed = true;
+                            }
+                        }
+                    } else {
+                        let without_owner =
+                            agent_doc_document::queue_projection::apply_owner_projection(
+                                &next.text, None,
+                            );
+                        if without_owner != next.text {
+                            next.text = without_owner;
                             changed = true;
                         }
                     }
-                } else {
-                    let without_owner =
-                        agent_doc_document::queue_projection::apply_owner_projection(
-                            &next.text, None,
-                        );
-                    if without_owner != next.text {
-                        next.text = without_owner;
-                        changed = true;
-                    }
+                    QueueEntry::Prompt(next)
                 }
-                QueueEntry::Prompt(next)
+                _ => entry.clone(),
             }
-            _ => entry.clone(),
         })
         .collect::<Vec<_>>();
     (changed && out != entries).then_some(out)
+}
+
+/// Return whether every executable leaf below `index` is struck when `index`
+/// is a structural parent. Parent state is a pure projection of the current
+/// tree; it never becomes another durable lifecycle owner.
+fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Option<bool> {
+    if !entry_is_group_parent(entries, index) {
+        return None;
+    }
+    let own_indent = entry_indent(&entries[index])?;
+    let end = entries[index + 1..]
+        .iter()
+        .position(|entry| entry_indent(entry).is_some_and(|indent| indent <= own_indent))
+        .map_or(entries.len(), |offset| index + 1 + offset);
+    let mut saw_leaf = false;
+    let mut all_struck = true;
+    for descendant in index + 1..end {
+        if entry_indent(&entries[descendant]).is_none()
+            || entry_is_group_parent(entries, descendant)
+        {
+            continue;
+        }
+        saw_leaf = true;
+        all_struck &= matches!(entries[descendant], QueueEntry::Completed(_));
+    }
+    Some(saw_leaf && all_struck)
 }
 
 fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
@@ -9687,28 +9754,33 @@ mod tests {
         );
     }
 
-    /// `#struckparentkids`: a canonical child is independent work. A struck
-    /// parent remains terminal while its live child stays independently
-    /// executable until the operator explicitly removes the parent strike.
+    /// `#struckparentkids`: a canonical child is independent work. Parent
+    /// presentation is derived lazily, so a new live child reopens only the
+    /// structural parent while the leaf becomes independently executable.
     #[test]
-    fn a_parent_strike_stays_terminal_without_swallowing_live_leaves() {
+    fn a_new_live_leaf_lazily_reopens_only_its_structural_parent() {
         let legacy = format!("- ~~{STRUCK_PARENT_ID}~~\n  - {ANSWERED_CHILD}\n");
         let entries = parse(&legacy).unwrap();
         assert!(
             matches!(entries[0], QueueEntry::Completed(_)),
             "{entries:?}"
         );
+        let projected = project_prompt_runtime_projections(&legacy, &[])
+            .unwrap()
+            .expect("the stale structural-parent strike is derived away")
+            .0;
         assert_eq!(
-            project_prompt_runtime_projections(&legacy, &[]).unwrap(),
-            None
+            projected,
+            format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n")
         );
         assert_eq!(prompts(&entries)[0].text, ANSWERED_CHILD);
         let added = format!("{legacy}  - {NEW_CHILD}\n");
-        let entries = parse(&added).unwrap();
-        assert!(
-            matches!(entries[0], QueueEntry::Completed(_)),
-            "{entries:?}"
-        );
+        let projected = project_prompt_runtime_projections(&added, &[])
+            .unwrap()
+            .expect("adding another leaf keeps the structural parent open")
+            .0;
+        let entries = parse(&projected).unwrap();
+        assert!(matches!(entries[0], QueueEntry::Prompt(_)), "{entries:?}");
         assert_eq!(
             prompts(&entries)
                 .iter()
@@ -9719,10 +9791,10 @@ mod tests {
     }
 
     /// Regression from `tasks/tools.md`: PR 29 was struck while four reported
-    /// children remained visibly nonterminal. Both terminal states are stable:
-    /// the parent stays struck and each child stays reported.
+    /// children remained visibly nonterminal. The executable leaves keep their
+    /// reports, while the stale structural-parent strike is derived away.
     #[test]
-    fn reported_tools_pr_children_do_not_reopen_the_parent() {
+    fn reported_tools_pr_children_lazily_reopen_the_structural_parent() {
         const PARENT: &str = "https://github.com/haiven-dev/haiven-tools/pull/29";
         const REPORTED: [&str; 4] = [
             "[#subagent:pr29_review_threads#1] #address: answer each review item",
@@ -9747,12 +9819,90 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(
-            project_prompt_runtime_projections(&body, &targets).unwrap(),
-            None
+        let projected = project_prompt_runtime_projections(&body, &targets)
+            .unwrap()
+            .expect("reported leaves make the parent incomplete")
+            .0;
+        assert!(
+            projected.starts_with(&format!("- {PARENT}\n")),
+            "{projected}"
         );
-        assert!(body.starts_with(&format!("- ~~{PARENT}~~\n")), "{body}");
-        assert_eq!(body.matches("☑️").count(), REPORTED.len());
+        assert_eq!(projected.matches("☑️").count(), REPORTED.len());
+    }
+
+    #[test]
+    fn structural_parents_lazily_close_and_reopen_from_leaf_state() {
+        let all_done = "- parent\n  - child group\n    - ~~one~~\n    - ~~two~~\n";
+        let closed = project_prompt_runtime_projections(all_done, &[])
+            .unwrap()
+            .expect("all struck leaves close every structural ancestor")
+            .0;
+        assert_eq!(
+            closed,
+            "- ~~parent~~\n  - ~~child group~~\n    - ~~one~~\n    - ~~two~~\n"
+        );
+
+        let with_new_leaf = format!("{closed}    - three\n");
+        let reopened = project_prompt_runtime_projections(&with_new_leaf, &[])
+            .unwrap()
+            .expect("a new leaf reopens every structural ancestor lazily")
+            .0;
+        assert_eq!(
+            reopened,
+            "- parent\n  - child group\n    - ~~one~~\n    - ~~two~~\n    - three\n"
+        );
+    }
+
+    #[test]
+    fn erroneous_parent_report_is_removed_without_downgrading_reported_leaf() {
+        let body = concat!(
+            "- ☑️ [#subagent:parent#2] parent ⟦published⟧\n",
+            "  - ~~integrated leaf~~\n",
+            "  - ☑️ [#subagent:leaf#3] reported leaf ⟦published⟧\n",
+        );
+        let projected = project_prompt_runtime_projections(body, &[])
+            .unwrap()
+            .expect("parent lifecycle is derived rather than durable")
+            .0;
+        assert_eq!(
+            projected,
+            concat!(
+                "- parent\n",
+                "  - ~~integrated leaf~~\n",
+                "  - ☑️ [#subagent:leaf#3] reported leaf ⟦published⟧\n",
+            )
+        );
+    }
+
+    #[test]
+    fn discarded_parent_target_never_steals_an_equal_text_leaf_target() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+        let body = "- same\n  - same\n";
+        let targets = [
+            QueueRowProjection {
+                text: "same".to_string(),
+                marker: QueueLifecycleMarker::Pending,
+                owner: None,
+                blockers: Vec::new(),
+            },
+            QueueRowProjection {
+                text: "same".to_string(),
+                marker: QueueLifecycleMarker::Reported,
+                owner: None,
+                blockers: Vec::new(),
+            },
+        ];
+        let projected = project_prompt_runtime_projections(body, &targets)
+            .unwrap()
+            .expect("the equal-text leaf receives its own target")
+            .0;
+        assert_eq!(projected, "- same\n  - ☑️ same\n");
+
+        let leaf_only = project_prompt_runtime_projections(body, &targets[1..])
+            .unwrap()
+            .expect("an absent parent target leaves the equal-text leaf target aligned")
+            .0;
+        assert_eq!(leaf_only, "- same\n  - ☑️ same\n");
     }
 
     /// A subtree that contains tracked work is a `#f1s3` group, not one
@@ -9864,8 +10014,8 @@ mod tests {
         );
     }
 
-    /// `#queuenest`: a group label is not ready to run, so pending does not
-    /// paint it. A ledger marker on that row still does. Its leaves keep
+    /// `#queuenest`: a group label is never a lifecycle owner, so neither
+    /// pending nor a stale claimed/running target paints it. Its leaves keep
     /// their own markers.
     #[test]
     fn a_group_label_is_not_painted_pending() {
@@ -9918,11 +10068,11 @@ mod tests {
         });
         let (projected, _) = project_prompt_runtime_projections(body, &claimed)
             .unwrap()
-            .expect("a real claim on the label still projects");
+            .expect("a stale parent claim is derived away");
         assert_eq!(
             projected,
             concat!(
-                "- 🚧 [#subagent:label#1] https://example.test/pull/717\n",
+                "- https://example.test/pull/717\n",
                 "  - 📥 #rebase\n",
                 "  - ☑️ [#subagent:fix#1] #fix-ci\n",
             )

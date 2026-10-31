@@ -303,8 +303,9 @@ fn a_struck_parent_does_not_retire_its_leaves() {
         assert!(dispatch.iter().any(|item| item == child), "{dispatch:#?}");
     }
 }
-/// A live row added beneath a struck parent is an executable leaf. The struck
-/// parent and answered sibling are context, not a reopened compound head.
+/// A live row added beneath a struck parent is an executable leaf. Preflight
+/// lazily reopens the structural parent, while the answered sibling remains
+/// terminal and only the new leaf dispatches.
 #[test]
 fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     let dir = tempfile::tempdir().unwrap();
@@ -331,6 +332,12 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     assert!(prompts.iter().any(|item| item == added), "{prompts:#?}");
     assert!(dispatch.iter().any(|item| item == added), "{dispatch:#?}");
     assert!(dispatch.iter().all(|item| item != parent), "{dispatch:#?}");
+    assert!(
+        run_body(&doc, "run")
+            .starts_with(&format!("- {parent}\n  - ~~{answered}~~\n  - 📥 {added}\n")),
+        "{}",
+        run_body(&doc, "run")
+    );
 
     let brief = run_agent_doc(
         dir.path(),
@@ -365,10 +372,10 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     );
 }
 
-/// A struck context parent stays terminal without projecting completion onto
-/// its independently live leaf.
+/// A struck context parent is lazily reopened without projecting completion
+/// onto its independently live leaf.
 #[test]
-fn a_struck_parent_over_an_unstruck_child_keeps_the_child_live() {
+fn a_struck_parent_over_an_unstruck_child_is_lazily_reopened() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- ~~{PARENT}~~\n  - {}\n- separate flat head\n",
@@ -382,8 +389,7 @@ fn a_struck_parent_over_an_unstruck_child_keeps_the_child_live() {
         "{dispatch:#?}"
     );
     assert!(
-        run_body(&doc, "run")
-            .starts_with(&format!("- ~~{PARENT}~~\n  - 📥 {}\n", CHILDREN[0])),
+        run_body(&doc, "run").starts_with(&format!("- {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
@@ -690,11 +696,10 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
     );
 }
 
-/// A struck context parent stays terminal without closing a live projected
-/// answer leaf. Once the request Todo is already closed, that leaf remains
-/// ordinary queue work.
+/// A live projected answer leaf lazily reopens its structural parent. Once the
+/// request Todo is already closed, that leaf remains ordinary queue work.
 #[test]
-fn a_struck_answer_parent_keeps_its_projected_child_live() {
+fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let dir = tempfile::tempdir().unwrap();
     let rows = format!(
         "- 🙋 {PAUSED_ROW} [#{REQUEST_ID}]\n- separate flat head\n- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n"
@@ -710,8 +715,8 @@ fn a_struck_answer_parent_keeps_its_projected_child_live() {
     assert!(dispatch.iter().any(|item| item == ANSWER), "{dispatch:#?}");
     let body = run_body(&doc, "run");
     assert!(
-        body.contains(&format!("- ~~[#{REQUEST_ID}]~~\n  - 📥 {ANSWER}\n")),
-        "the live answer leaf leaves its context parent terminal:\n{body}"
+        body.contains(&format!("- [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
+        "the live answer leaf reopens only its context parent:\n{body}"
     );
     assert!(
         !body.contains('🙋'),

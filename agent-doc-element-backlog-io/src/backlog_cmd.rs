@@ -920,6 +920,29 @@ fn validate_attr_value(attr: &str, value: Option<&str>) -> Result<()> {
     )
 }
 
+/// A syntactically valid non-mode `queue=<id>` is useful only when that queue
+/// exists in this document. Manual documents with stale targets are diagnosed
+/// by preflight placement debt, but the mutation command must not create one.
+fn validate_queue_attr_target(content: &str, value: Option<&str>) -> Result<()> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    if agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value).is_some() {
+        return Ok(());
+    }
+    let components = element::parse(content).context("failed to parse queue target components")?;
+    let queues = agent_doc_queue::queue_set::QueueSet::parse(content, &components)
+        .map_err(anyhow::Error::new)
+        .context("failed to resolve queue target topology")?;
+    if queues.block(value).is_some() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "`queue={value}` is not a recognized backlog sync mode and does not match any queue id \
+         in this document (use `sync`, `append`, `prepend`, a declared queue id, or bare `queue`)"
+    )
+}
+
 /// Set an attribute on a tracked-work component's opening marker.
 ///
 /// `#bkqattrcli`: attributes live in the marker span, so no content command could
@@ -938,6 +961,9 @@ pub fn set_attr(
     validate_editable_attr(list, attr)?;
     validate_attr_value(attr, value)?;
     let (full_content, comp) = find_tracked_list_component(file, list)?;
+    if attr == "queue" {
+        validate_queue_attr_target(&full_content, value)?;
+    }
     let marker = &full_content[comp.open_start..comp.open_end];
     let next_marker = element::set_open_marker_attr(marker, attr, value)
         .with_context(|| format!("failed to set `{attr}` on agent:{}", list.label()))?;

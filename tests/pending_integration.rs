@@ -3826,6 +3826,40 @@ fn backlog_set_attr_refuses_an_attribute_that_would_be_ignored() {
     );
 }
 
+#[test]
+fn backlog_set_attr_accepts_a_resolvable_queue_id_target() {
+    let (_tmp, doc) = setup_doc("- [ ] [#a1] item");
+    let content = fs::read_to_string(&doc).unwrap();
+    fs::write(
+        &doc,
+        format!(
+            "{content}\n<!-- agent:run id=sideways -->\n<!-- /agent:run -->\n"
+        ),
+    )
+    .unwrap();
+
+    let output = agent_doc()
+        .args([
+            "backlog",
+            doc.to_str().unwrap(),
+            "set-attr",
+            "queue",
+            "sideways",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "a declared queue id must be accepted: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains("<!-- agent:pending queue=sideways -->")
+    );
+}
+
 /// `#reviewpriority`: `agent-doc review set-attr <FILE> priority` adds the bare
 /// flag to the `agent:review` marker through the CLI, preflight then sorts the
 /// gated review items by their `priority=<1..9>` token without flagging the

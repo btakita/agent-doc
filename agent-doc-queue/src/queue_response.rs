@@ -1409,6 +1409,12 @@ struct QueuePromptEchoBlock {
     plural: bool,
     /// Normalized quoted entries (the prompt text, one per list item for plural).
     entries: Vec<String>,
+    /// This singular prompt carries its own explicit coordinator response.
+    ///
+    /// A sequence of `Queue prompt` / `Queue response` pairs is not the bare
+    /// echo run guarded by `#bareechodrop`: each response label binds the
+    /// answer to the prompt immediately above it.
+    has_queue_response: bool,
     /// The next non-blank line after the block starts another echo block.
     followed_by_echo: bool,
     /// Nothing but blank lines follows the block.
@@ -1464,6 +1470,16 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
             .map(|line| normalize_prompt_echo_presence_line(line))
             .filter(|line| !line.is_empty())
             .collect();
+        let has_queue_response = raw.iter().enumerate().any(|(index, line)| {
+            let Some(rest) = line.trim().strip_prefix("**Queue response:**") else {
+                return false;
+            };
+            !rest.trim().is_empty()
+                || raw
+                    .iter()
+                    .skip(index + 1)
+                    .any(|continuation| !continuation.trim().is_empty())
+        });
         let id_backed = presence.iter().any(|line| {
             let normalized = normalize_queue_prompt_text(line);
             crate::queue_directive::topic_resolves_to_only_id_directives(&normalized)
@@ -1479,6 +1495,7 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
         blocks.push(QueuePromptEchoBlock {
             plural,
             entries,
+            has_queue_response,
             followed_by_echo,
             trailing,
             id_backed,
@@ -1517,6 +1534,9 @@ fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &st
         if block.plural {
             return false;
         }
+        if block.has_queue_response {
+            return false;
+        }
         if block.trailing {
             return true;
         }
@@ -1525,7 +1545,7 @@ fn head_echoed_only_in_bare_singular_blocks(response_body: &str, head_clean: &st
         }
         let mut next = index + 1;
         while let Some(later) = blocks.get(next) {
-            if later.id_backed || later.trailing {
+            if later.has_queue_response || later.id_backed || later.trailing {
                 return true;
             }
             if !later.followed_by_echo {

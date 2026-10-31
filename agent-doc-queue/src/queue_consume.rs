@@ -5502,6 +5502,40 @@ Old.
         );
     }
 
+    /// `#structuredqueueanswer` (live, haiven-dev api.md 2026-10-30): a
+    /// coordinator recorded many explicit prompt/response pairs. A later
+    /// id-backed pair made every earlier free-text pair look like the bare
+    /// listing guarded by `#bareechodrop`, so integrated reported rows stayed
+    /// `☑️` indefinitely.
+    #[test]
+    fn structured_queue_response_before_id_backed_echo_strikes_its_reported_row() {
+        let document = preset_quote_strike_document().replace(
+            "- The Idea Plugin",
+            "- do [#trackedwork]\n- The Idea Plugin",
+        );
+        let response = concat!(
+            "### Re: coordinated closeout — opus-5.5\n\n",
+            "> **Queue prompt:** #gh-fix https://github.com/btakita/agent-doc/issues/80\n",
+            ">\n",
+            "> **Queue response:** Fixed, verified, and published.\n\n",
+            "> **Queue prompt:** do [#trackedwork]\n",
+            ">\n",
+            "> **Queue response:** The tracked item remains open.\n",
+        );
+
+        let projected = project_answered_free_text_strike(&document, response, Some(&document))
+            .unwrap()
+            .expect("the explicitly answered preset row must strike");
+
+        assert_eq!(projected.node_keys.len(), 1, "{}", projected.target_content);
+        assert!(
+            projected
+                .target_content
+                .contains("- ~~#gh-fix https://github.com/btakita/agent-doc/issues/80~~")
+        );
+        assert!(projected.target_content.contains("- do [#trackedwork]\n"));
+    }
+
     /// `#annotateddeferstrike` live shapes (agent-doc-bugs.md 2026-10-11): an
     /// annotated head answered with the canonical three-part shape -- the
     /// `> **Queue prompt:**` echo, the `> **Operator note:**` quote that

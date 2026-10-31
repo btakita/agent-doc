@@ -2711,8 +2711,10 @@ enum Commands {
         #[arg(long)]
         window: Option<String>,
     },
-    /// Sync tmux panes to a 2D columnar layout matching the editor
+    /// Reconcile a document, or sync tmux panes when --col is supplied
     Sync {
+        /// Document whose declarative sync operations should run
+        file: Option<PathBuf>,
         /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
         /// At least one explicit column is required: a bare CLI cannot observe
         /// the current editor projection safely.
@@ -4868,7 +4870,7 @@ enum QueueAction {
         #[arg(long, value_name = "RESTORE_PATCH_PATH")]
         restore_patch: Option<PathBuf>,
     },
-    /// One-shot sync from backlog items with `queue` attribute into agent:queue
+    /// Declaratively reconcile all queue projections in the document
     Sync {
         /// Path to the session document
         file: PathBuf,
@@ -6158,6 +6160,7 @@ fn try_main() -> anyhow::Result<()> {
             layout::run(&paths, split, pane.as_deref(), window.as_deref())
         }
         Commands::Sync {
+            file,
             columns,
             window,
             focus,
@@ -6165,6 +6168,19 @@ fn try_main() -> anyhow::Result<()> {
             no_autostart,
             exact_visible,
         } => {
+            if let Some(file) = file {
+                anyhow::ensure!(
+                    columns.is_empty()
+                        && window.is_none()
+                        && focus.is_none()
+                        && !rename
+                        && !no_autostart
+                        && !exact_visible,
+                    "document sync cannot be combined with tmux layout options"
+                );
+                let queue_effects = CliQueueCommandEffects;
+                return agent_doc_queue_io::queue_cmd::sync_with_effects(&queue_effects, &file);
+            }
             anyhow::ensure!(
                 !columns.is_empty(),
                 "sync requires at least one explicit --col; use the editor Sync Tmux Layout or Resync / Fix Sessions action to publish its exact visible projection"

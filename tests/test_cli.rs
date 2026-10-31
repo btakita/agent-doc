@@ -2717,6 +2717,46 @@ fn test_sync_without_explicit_columns_fails_closed() {
 }
 
 #[test]
+fn test_document_sync_is_a_superset_entrypoint_for_queue_sync() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "<!-- agent:queue -->\n",
+        "- preserve manual work\n",
+        "<!-- /agent:queue -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["sync", doc.to_str().unwrap()]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("reconciled queue state"));
+    let synced = fs::read_to_string(&doc).unwrap();
+    assert!(synced.contains("- 📥 preserve manual work"), "{synced}");
+
+    let mut again = agent_doc_cmd();
+    again.args(["sync", doc.to_str().unwrap()]);
+    again
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "queue projections already synchronized",
+        ));
+    assert_eq!(fs::read_to_string(&doc).unwrap(), synced);
+}
+
+#[test]
+fn test_document_sync_rejects_tmux_layout_options() {
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["sync", "session.md", "--col", "session.md"]);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "document sync cannot be combined with tmux layout options",
+    ));
+}
+
+#[test]
 fn test_backlog_reopen_help_exposes_explicit_queue_reactivation() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["backlog", "reopen", "--help"]);
@@ -2966,14 +3006,14 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     );
 
     let synced = fs::read_to_string(&doc).unwrap();
-    assert!(synced.contains("- advance [#samplefeed-prop]"));
-    assert!(synced.contains("- advance [#gvj5]"));
-    assert!(synced.contains("- do [#2qrx]"));
-    assert!(synced.contains("- do [#rating-emails]"));
-    assert!(synced.contains("- do [#cf-txn-email]"));
-    assert!(synced.contains("- do [#884m]"));
-    assert!(synced.contains("- do [#tk2p]"));
-    assert!(synced.contains("- do [#pdp-video-footage]"));
+    assert!(synced.contains("- 📥 advance [#samplefeed-prop]"));
+    assert!(synced.contains("- 📥 advance [#gvj5]"));
+    assert!(synced.contains("- 📥 do [#2qrx]"));
+    assert!(synced.contains("- 📥 do [#rating-emails]"));
+    assert!(synced.contains("- 📥 do [#cf-txn-email]"));
+    assert!(synced.contains("- 📥 do [#884m]"));
+    assert!(synced.contains("- 📥 do [#tk2p]"));
+    assert!(synced.contains("- 📥 do [#pdp-video-footage]"));
     assert_eq!(
         synced.matches("do [#samplefeed-prop]").count(),
         0,
@@ -23188,7 +23228,7 @@ fn test_agent_doc_queue_owns_backlog_queue_sync_policy() {
         );
     }
     assert!(
-        queue_cmd.contains("crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(")
+        queue_cmd.contains("crate::one_shot_sync::sync_configured_backlog_queue_with_snapshot(")
             && queue_cmd.contains("OneShotQueueSyncResult")
             && queue_cmd.contains("pub trait QueueCommandEffects"),
         "agent-doc-queue-io queue_cmd should own command rendering and inject remaining write effects"

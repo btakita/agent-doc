@@ -2,8 +2,8 @@
 //!
 //! CLI subcommands for managing the `agent:queue` component.
 //!
-//! - `agent-doc queue sync <FILE>` — one-shot sync from backlog items with
-//!   `queue` attribute or per-item enqueue markers into `agent:queue`.
+//! - `agent-doc queue sync <FILE>` — declaratively reconcile queue lifecycle,
+//!   captured answered free-text residue, and configured backlog mirrors.
 //! - `agent-doc queue consume <FILE> [--count N]` — explicitly strike the
 //!   leading N free-text queue head(s) the agent has already answered.
 //! - `agent-doc queue consume <FILE> --id <id>` — escape hatch (#orphanqhead)
@@ -38,6 +38,58 @@ pub struct QueueCommandConsumeOutcome {
     pub consumed_count: usize,
     pub remaining: usize,
     pub drained: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct QueueSyncReconciliationDebt {
+    dispatch_ready: usize,
+    capacity_or_dependency_held: usize,
+    claimed: usize,
+    running: usize,
+    reported: usize,
+    lost: usize,
+}
+
+impl QueueSyncReconciliationDebt {
+    fn is_empty(&self) -> bool {
+        self.dispatch_ready == 0
+            && self.capacity_or_dependency_held == 0
+            && self.claimed == 0
+            && self.running == 0
+            && self.reported == 0
+            && self.lost == 0
+    }
+}
+
+fn queue_sync_reconciliation_debt(
+    file: &Path,
+    content: &str,
+) -> Result<QueueSyncReconciliationDebt> {
+    let dispatch_ready =
+        crate::subagent_dispatch::pending_subagent_dispatch_for_content(file, content)?.len();
+    let capacity_or_dependency_held =
+        crate::subagent_dispatch::queue_attr_subagent_plan(file, content)
+            .map(|plan| plan.held.len())
+            .unwrap_or_default();
+    let mut debt = QueueSyncReconciliationDebt {
+        dispatch_ready,
+        capacity_or_dependency_held,
+        ..QueueSyncReconciliationDebt::default()
+    };
+    for claim in crate::queue_claim::claim_states_for_content(file, content)? {
+        match claim.state {
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed => debt.claimed += 1,
+            agent_doc_queue::queue_claim::QueueClaimState::Running => debt.running += 1,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported => debt.reported += 1,
+            agent_doc_queue::queue_claim::QueueClaimState::Lost => debt.lost += 1,
+        }
+    }
+    if debt.reported == 0
+        && crate::subagent_dispatch::reported_writeback_pending_for_content(file, content)?
+    {
+        debt.reported = 1;
+    }
+    Ok(debt)
 }
 
 pub trait QueueCommandEffects {
@@ -577,6 +629,25 @@ pub fn project_claim_runtime_state_with_effects(
     )
 }
 
+/// Reconcile the complete queue lifecycle projection for an explicit
+/// declarative sync.
+///
+/// Unlike a single claim transition, document sync owns every queue row and
+/// therefore paints pending rows as well as rows carrying durable attempt,
+/// report, completion, or blocker evidence. It also reconciles completion
+/// evidence into the durable ledger before deriving the projection.
+pub fn project_all_queue_runtime_state_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<bool> {
+    project_runtime_state_with_effects(
+        effects,
+        file,
+        None,
+        RuntimeProjectionRows::All,
+    )
+}
+
 /// Repaint only rows that are blocked now or still carry a stale blocked
 /// projection. Tracked-work closeout uses this narrower effect so blocker-list
 /// changes converge immediately without painting unrelated pending rows.
@@ -890,8 +961,9 @@ pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()
 }
 
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let content = effects.current_document_content(file, "queue_sync")?;
-    match crate::one_shot_sync::sync_one_shot_backlog_queue_with_snapshot(
+    let backlog_sync = crate::one_shot_sync::sync_configured_backlog_queue_with_snapshot(
         file,
         &content,
         |path, current, target| {
@@ -904,19 +976,23 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
                 agent_doc_ops_log_io::log_op,
             )
         },
-    )? {
-        OneShotQueueSyncResult::AlreadyInSync {
+    )?;
+
+    let lifecycle_changed = project_all_queue_runtime_state_with_effects(effects, file)?;
+
+    match backlog_sync {
+        Some(OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
             mode,
-        } => {
+        }) => {
             println!(
-                "{}: queue already in sync ({} active backlog id(s), {:?} mode). No changes.",
+                "{}: backlog mirror already synchronized ({} active backlog id(s), {:?} mode). No changes.",
                 file.display(),
                 requested_count,
                 mode
             );
         }
-        OneShotQueueSyncResult::Synced(applied) => {
+        Some(OneShotQueueSyncResult::Synced(applied)) => {
             println!(
                 "{}: synced {} backlog id(s) → {} queue prompt(s) ({:?} mode)",
                 file.display(),
@@ -942,6 +1018,35 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
                 eprintln!("[queue sync] warning: failed to update snapshot: {warning}");
             }
         }
+        None if lifecycle_changed || answered_count > 0 => {
+            println!(
+                "{}: reconciled queue state (lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror.",
+                file.display(),
+                lifecycle_changed,
+                answered_count
+            );
+        }
+        None => {
+            println!(
+                "{}: queue projections already synchronized; no durable lifecycle change, captured answered free-text residue, or configured backlog mirror.",
+                file.display()
+            );
+        }
+    }
+
+    let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
+    let debt = queue_sync_reconciliation_debt(file, &reconciled)?;
+    if !debt.is_empty() {
+        println!(
+            "{}: nonterminal coordinator reconciliation debt remains: dispatch_ready={}, held={}, claimed={}, running={}, reported={}, lost={}. The main coordinator retains ownership: dispatch the complete ready set with claim -> spawn -> start, route steering to a running owner, recover lost attempts, and integrate reported results; workers must not self-claim queue rows.",
+            file.display(),
+            debt.dispatch_ready,
+            debt.capacity_or_dependency_held,
+            debt.claimed,
+            debt.running,
+            debt.reported,
+            debt.lost,
+        );
     }
     Ok(())
 }
@@ -949,7 +1054,7 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier, Mutex};
 
@@ -1116,12 +1221,14 @@ mod tests {
     #[derive(Default)]
     struct FakeEffects {
         current: RefCell<Option<String>>,
+        captured_answered: Cell<usize>,
     }
 
     impl FakeEffects {
         fn with_current(content: impl Into<String>) -> Self {
             Self {
                 current: RefCell::new(Some(content.into())),
+                captured_answered: Cell::new(0),
             }
         }
 
@@ -1236,6 +1343,10 @@ mod tests {
         fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
             Ok(0)
         }
+
+        fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
+            Ok(self.captured_answered.get())
+        }
     }
 
     struct RacingClaimEffects {
@@ -1317,6 +1428,66 @@ mod tests {
         fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
             Ok(0)
         }
+
+    }
+
+    #[test]
+    fn sync_reconciles_captured_answers_without_requiring_a_backlog_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- unanswered manual prompt\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+        effects.captured_answered.set(2);
+
+        sync_with_effects(&effects, &doc)
+            .expect("declarative sync must not require a backlog mirror directive");
+
+        let reconciled = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            reconciled.contains("- 📥 unanswered manual prompt"),
+            "sync should paint the pending lifecycle projection: {reconciled}"
+        );
+    }
+
+    #[test]
+    fn sync_debt_keeps_other_ready_dispatches_visible_while_one_worker_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:run subagents go -->\n",
+            "- do [#a]\n",
+            "- do [#b]\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let (_, claim) = crate::queue_claim::claim(&doc, "do [#a]", "subagent:a", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            "do [#a]",
+            "subagent:a",
+            "/root/a",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        let current = std::fs::read_to_string(&doc).unwrap();
+
+        let debt = queue_sync_reconciliation_debt(&doc, &current).unwrap();
+
+        assert_eq!(debt.running, 1);
+        assert_eq!(debt.dispatch_ready, 1);
+        assert!(
+            !debt.is_empty(),
+            "a running worker never hides another ready dispatch"
+        );
     }
 
     #[test]
@@ -1346,8 +1517,8 @@ mod tests {
         let result = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            result.contains("- do [#alpha]"),
-            "marked item should be queued:\n{result}"
+            result.contains("- 📥 do [#alpha]"),
+            "marked item should be queued with pending lifecycle state:\n{result}"
         );
         assert!(
             !result.contains("- do [#beta]"),

@@ -29,6 +29,23 @@ pub struct OneShotBacklogQueueSyncRequest {
     pub ids: Vec<String>,
 }
 
+/// One backlog item whose `queue` routing cannot be applied deterministically.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BacklogQueuePlacementDebt {
+    pub item_id: String,
+    pub item_text: String,
+    pub requested_queue_id: Option<String>,
+    pub eligible_queue_ids: Vec<String>,
+}
+
+/// Result of applying explicit `agent:backlog queue="<queue-id>"` routes.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BacklogQueueRoutingProjection {
+    pub content: Option<String>,
+    pub newly_materialized: Vec<String>,
+    pub placement_debt: Vec<BacklogQueuePlacementDebt>,
+}
+
 /// Operator-facing report facts for a completed backlog-to-queue sync.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BacklogQueueSyncReport {
@@ -176,6 +193,155 @@ pub fn sibling_run_queue_reference_ids(
     Ok(ids)
 }
 
+fn active_backlog_route_items(
+    component: &element::Component,
+    content: &str,
+) -> Vec<(String, String)> {
+    let body = component.content(content);
+    let active: HashSet<String> = backlog::active_item_ids(body)
+        .into_iter()
+        .map(|id| normalize_id(&id))
+        .collect();
+    let (_, items, _) = backlog::parse_items(body);
+    items
+        .into_iter()
+        .filter(|item| active.contains(&normalize_id(&item.id)))
+        .map(|item| (normalize_id(&item.id), item.text))
+        .collect()
+}
+
+/// Collect bare multi-queue placements and missing explicit targets for the
+/// main agent to reconcile rather than silently choosing a queue.
+pub fn collect_backlog_queue_placement_debt(
+    components: &[element::Component],
+    content: &str,
+) -> anyhow::Result<Vec<BacklogQueuePlacementDebt>> {
+    let queues = crate::queue_set::QueueSet::parse(content, components)?;
+    let eligible_queue_ids = queues
+        .blocks()
+        .iter()
+        .map(|queue| queue.id.clone())
+        .collect::<Vec<_>>();
+    let mut debt = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "backlog" | "pending"))
+    {
+        let Some(value) = component.attrs.get("queue") else {
+            continue;
+        };
+        let value = value.trim();
+        let requested_queue_id = if value.is_empty() {
+            if eligible_queue_ids.len() == 1 {
+                continue;
+            }
+            None
+        } else if BacklogQueueSyncMode::parse(value).is_some() {
+            continue;
+        } else if queues.block(value).is_some() {
+            continue;
+        } else {
+            Some(value.to_string())
+        };
+        debt.extend(
+            active_backlog_route_items(component, content)
+                .into_iter()
+                .map(|(item_id, item_text)| BacklogQueuePlacementDebt {
+                    item_id,
+                    item_text,
+                    requested_queue_id: requested_queue_id.clone(),
+                    eligible_queue_ids: eligible_queue_ids.clone(),
+                }),
+        );
+    }
+    Ok(debt)
+}
+
+/// Apply explicit backlog queue-id routes without consulting scheduler
+/// selection. Legacy mode values remain owned by the ordinary sync path.
+pub fn project_explicit_backlog_queue_routes(
+    components: &[element::Component],
+    content: &str,
+) -> anyhow::Result<BacklogQueueRoutingProjection> {
+    let queues = crate::queue_set::QueueSet::parse(content, components)?;
+    let placement_debt = collect_backlog_queue_placement_debt(components, content)?;
+    let mut ids_by_target: HashMap<String, Vec<String>> = HashMap::new();
+    for component in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "backlog" | "pending"))
+    {
+        let Some(value) = component.attrs.get("queue") else {
+            continue;
+        };
+        let target_id = value.trim();
+        if target_id.is_empty()
+            || BacklogQueueSyncMode::parse(target_id).is_some()
+            || queues.block(target_id).is_none()
+        {
+            continue;
+        }
+        let target_ids = ids_by_target.entry(target_id.to_string()).or_default();
+        for (id, _) in active_backlog_route_items(component, content) {
+            if !target_ids.contains(&id) {
+                target_ids.push(id);
+            }
+        }
+    }
+
+    let mut replacements = Vec::new();
+    let mut newly_materialized = Vec::new();
+    for target in queues.blocks() {
+        let Some(ids) = ids_by_target.remove(&target.id) else {
+            continue;
+        };
+        let sibling_ids =
+            sibling_run_queue_reference_ids(components, content, target.component.open_start)?;
+        let Some(synced) = document_queue::sync_backlog_into_queue_with_external_ids(
+            &target.entries,
+            &ids,
+            BacklogQueueSyncMode::Append,
+            &sibling_ids,
+        ) else {
+            continue;
+        };
+        let before: HashSet<String> = target
+            .entries
+            .iter()
+            .flat_map(document_queue::queue_entry_reference_ids)
+            .collect();
+        let mut seen = HashSet::new();
+        newly_materialized.extend(
+            synced
+                .iter()
+                .flat_map(document_queue::queue_entry_reference_ids)
+                .filter(|id| !before.contains(id) && seen.insert(id.clone())),
+        );
+        replacements.push((
+            target.component.open_end,
+            target.component.close_start,
+            document_queue::render(&synced),
+        ));
+    }
+
+    if replacements.is_empty() {
+        return Ok(BacklogQueueRoutingProjection {
+            content: None,
+            newly_materialized,
+            placement_debt,
+        });
+    }
+    replacements.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+    let mut projected = content.to_string();
+    for (start, end, body) in replacements {
+        projected.replace_range(start..end, &body);
+    }
+    Ok(BacklogQueueRoutingProjection {
+        content: Some(projected),
+        newly_materialized,
+        placement_debt,
+    })
+}
+
 /// Collect queue sync source ids from tracked-work components.
 ///
 /// `backlog` and the legacy `pending` alias can opt into component-level sync
@@ -186,6 +352,10 @@ pub fn collect_backlog_queue_sync(
     components: &[element::Component],
     content: &str,
 ) -> Option<BacklogQueueSyncRequest> {
+    let queue_count = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .count();
     let mut mode: Option<BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
     let mut enqueue_ids: Vec<String> = Vec::new();
@@ -202,6 +372,9 @@ pub fn collect_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
+        if value.trim().is_empty() && queue_count != 1 {
+            continue;
+        }
         let comp_priority = comp.attrs.contains_key("priority");
         priority |= comp_priority;
         let Some(comp_mode) = BacklogQueueSyncMode::parse(value) else {
@@ -248,6 +421,10 @@ pub fn collect_one_shot_backlog_queue_sync(
     components: &[element::Component],
     content: &str,
 ) -> Option<OneShotBacklogQueueSyncRequest> {
+    let queue_count = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .count();
     let mut mode: Option<BacklogQueueSyncMode> = None;
     let mut ids: Vec<String> = Vec::new();
     let mut enqueue_ids: Vec<String> = Vec::new();
@@ -260,6 +437,9 @@ pub fn collect_one_shot_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
+        if value.trim().is_empty() && queue_count != 1 {
+            continue;
+        }
         let Some(comp_mode) = BacklogQueueSyncMode::parse(value) else {
             continue;
         };
@@ -1306,6 +1486,111 @@ mod tests {
         assert_eq!(request.mode, BacklogQueueSyncMode::Sync);
         assert_eq!(request.ids, vec!["a".to_string(), "b".to_string()]);
         assert!(request.enqueue_ids.is_empty());
+    }
+
+    #[test]
+    fn explicit_backlog_queue_id_routes_only_to_named_run() {
+        let content = concat!(
+            "<!-- agent:run id=triage -->\n- keep\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=build -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue=\"build\" -->\n",
+            "- [ ] [#compile] compile release\n<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let projection = project_explicit_backlog_queue_routes(&components, content).unwrap();
+        assert!(projection.placement_debt.is_empty());
+        assert_eq!(projection.newly_materialized, vec!["compile".to_string()]);
+        let projected = projection.content.unwrap();
+        let reparsed = element::parse(&projected).unwrap();
+        let queues = crate::queue_set::QueueSet::parse(&projected, &reparsed).unwrap();
+        assert_eq!(
+            queues
+                .block("triage")
+                .unwrap()
+                .component
+                .content(&projected),
+            "- keep\n"
+        );
+        assert_eq!(
+            queues.block("build").unwrap().component.content(&projected),
+            "- do [#compile]\n"
+        );
+        assert!(collect_backlog_queue_sync(&components, content).is_none());
+    }
+
+    #[test]
+    fn explicit_backlog_queue_id_can_target_a_loop() {
+        let content = concat!(
+            "<!-- agent:run id=run -->\n<!-- /agent:run -->\n",
+            "<!-- agent:loop id=nightly -->\n<!-- /agent:loop -->\n",
+            "<!-- agent:backlog queue=nightly -->\n",
+            "- [ ] [#audit] audit state\n<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let projection = project_explicit_backlog_queue_routes(&components, content).unwrap();
+        let projected = projection.content.unwrap();
+        let reparsed = element::parse(&projected).unwrap();
+        let queues = crate::queue_set::QueueSet::parse(&projected, &reparsed).unwrap();
+        assert!(
+            queues
+                .block("run")
+                .unwrap()
+                .component
+                .content(&projected)
+                .trim()
+                .is_empty()
+        );
+        assert_eq!(
+            queues
+                .block("nightly")
+                .unwrap()
+                .component
+                .content(&projected),
+            "- do [#audit]\n"
+        );
+    }
+
+    #[test]
+    fn bare_queue_in_multi_queue_document_becomes_placement_debt() {
+        let content = concat!(
+            "<!-- agent:run id=triage -->\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=build -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#choose] choose owner\n<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let projection = project_explicit_backlog_queue_routes(&components, content).unwrap();
+        assert!(projection.content.is_none());
+        assert_eq!(
+            projection.placement_debt,
+            vec![BacklogQueuePlacementDebt {
+                item_id: "choose".to_string(),
+                item_text: "choose owner".to_string(),
+                requested_queue_id: None,
+                eligible_queue_ids: vec!["triage".to_string(), "build".to_string()],
+            }]
+        );
+        assert!(collect_backlog_queue_sync(&components, content).is_none());
+    }
+
+    #[test]
+    fn missing_explicit_queue_id_becomes_placement_debt() {
+        let content = concat!(
+            "<!-- agent:run id=build -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue=deploy -->\n",
+            "- [ ] [#ship] ship it\n<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let projection = project_explicit_backlog_queue_routes(&components, content).unwrap();
+        assert!(projection.content.is_none());
+        assert_eq!(
+            projection.placement_debt[0].requested_queue_id.as_deref(),
+            Some("deploy")
+        );
+        assert_eq!(
+            projection.placement_debt[0].eligible_queue_ids,
+            vec!["build".to_string()]
+        );
     }
 
     #[test]

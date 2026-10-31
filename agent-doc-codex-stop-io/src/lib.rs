@@ -945,6 +945,25 @@ fn apply_claude_stop_with_drain_readiness(
     if let Some(continuation) = claude_reported_writeback_continuation(input, &file) {
         return Ok(Some(continuation));
     }
+    // A continuation marker is evidence about auto-loop re-entry, not about
+    // project-wide queue cleanliness. Always apply the shared terminal
+    // predicate before allowing Claude's final answer, including for manually
+    // paused queues and workers that were started without an auto-loop marker.
+    let current_auto_head = active_auto_queue_prompt(&file)?;
+    let continuation_already_requested =
+        agent_doc_queue_io::continuation_request::load_continuation_request(&file)?.is_some_and(
+            |request| {
+                request.run_id.as_deref() == run_id.as_deref()
+                    || current_auto_head.as_deref() == Some(request.head_prompt.as_str())
+            },
+        );
+    if !input.stop_hook_active
+        && !drain_readiness(&file).is_ready()
+        && !continuation_already_requested
+        && let Some(continuation) = claimed_heads_stop_continuation(&file)?
+    {
+        return Ok(Some(continuation));
+    }
     Ok(
         final_status_sync_continuation(&file, input.stop_hook_active)?
             .map(|reason| ClaudeStopContinuation { reason }),
@@ -1221,10 +1240,11 @@ pub fn claude_stop_steering_reason(file_display: &str, verbatim: &str) -> String
     )
 }
 
-/// `#queueclaim`: when no drainable head remains, distinguish worker-bound
-/// claims from an overdue `Claimed` attempt. The latter is a coordinator
-/// obligation and must block Stop with the exact start/requeue commands instead
-/// of being mislabeled as in-flight work (GH #301).
+/// `#queueclaim`, `#queueterminalreconcile`: when no freshly drainable head
+/// remains, apply the same project-wide terminal predicate used by preflight
+/// and Codex closeout. An overdue `Claimed` attempt gets its exact start/requeue
+/// repair; every other unclean row, including a live worker wait, keeps this
+/// turn open until it is closed or reconciled to an explicit terminal state.
 fn claimed_heads_stop_continuation(file: &Path) -> Result<Option<ClaudeStopContinuation>> {
     claimed_heads_stop_continuation_at(
         file,
@@ -1273,16 +1293,59 @@ fn claimed_heads_stop_continuation_at(
             ),
         }));
     }
-    let claimed = agent_doc_queue_io::queue_claim::claimed_items_for_content(file, &content);
-    let claimed_heads = agent_doc_queue::queue_continuation::claimed_head_count(&content, &claimed);
-    if claimed_heads > 0 {
+    let drain = agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
+        file, &content,
+    )?;
+    if drain.phase == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired {
+        // Reported rows have a more specific response-recovery continuation
+        // immediately after this queue branch. Keep them out of the generic
+        // message while retaining every other action and fail-closed scan.
+        let action_items = drain
+            .action_items()
+            .filter(|item| {
+                item.operation
+                    != agent_doc_queue::queue_sync_payload::QueueSyncOperation::IntegrateClose
+            })
+            .map(|item| {
+                format!(
+                    "{}:{}:{:?}:{:?}:owner={:?}:worker={:?}",
+                    item.document_path,
+                    item.queue_id,
+                    item.operation,
+                    item.item,
+                    item.owner,
+                    item.worker_id,
+                )
+            })
+            .collect::<Vec<_>>();
+        if action_items.is_empty()
+            && drain.snapshot.scan_errors.is_empty()
+            && drain.snapshot.placement_reconcile.is_empty()
+        {
+            return Ok(None);
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "claude_stop_queue_continuation_skipped reason=heads_claimed_in_flight \
-                 claimed_heads={claimed_heads} action=allow_final_answer state=waiting_on_claims"
+                "claude_stop_queue_terminal_reconciliation_required action_items={} \
+                 scan_errors={} placement_reconcile={} action=block_and_reconcile state=unclean_queue",
+                action_items.len(),
+                drain.snapshot.scan_errors.len(),
+                drain.snapshot.placement_reconcile.len(),
             ),
         );
+        return Ok(Some(ClaudeStopContinuation {
+            reason: format!(
+                "agent-doc cannot end this turn because the project queue is not clean: \
+                 {action_items:?}. Resolve every row to an explicit terminal state in this turn. \
+                 Reconcile ended or unverifiable owners from exact evidence and never blindly \
+                 rerun them. Before last-resort loss, exhaust claim/lineage, completion cell, \
+                 release receipt, exchange/retained response, snapshot, worker/session, and \
+                 relevant Git history evidence. A struck row and an evidence-exhausted durable \
+                 loss are terminal. {}",
+                agent_doc_queue::queue_sync_payload::QUEUE_SYNC_GUIDANCE,
+            ),
+        }));
     }
     Ok(None)
 }
@@ -3301,6 +3364,7 @@ fn auto_queue_continuation_response(
         let integrate = describe(QueueSyncOperation::IntegrateClose);
         let recover = describe(QueueSyncOperation::RecoverRequeue);
         let reconcile = describe(QueueSyncOperation::Reconcile);
+        let wait = describe(QueueSyncOperation::Wait);
         let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
         for item in &stop_action_items {
             *component_counts.entry(item.queue_id.clone()).or_default() += 1;
@@ -3320,13 +3384,14 @@ fn auto_queue_continuation_response(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "codex_stop_coordinator_drain_blocked dispatch={} inline={} forward={} integrate={} recover={} reconcile={} placement_reconcile={} scan_errors={} running={} components={:?} action=continue (#coordinatordrain)",
+                "codex_stop_coordinator_drain_blocked dispatch={} inline={} forward={} integrate={} recover={} reconcile={} wait={} placement_reconcile={} scan_errors={} running={} components={:?} action=continue (#coordinatordrain)",
                 dispatch.len(),
                 inline.len(),
                 forward.len(),
                 integrate.len(),
                 recover.len(),
                 reconcile.len(),
+                wait.len(),
                 placement_reconcile.len(),
                 snapshot.scan_errors.len(),
                 snapshot.running.len(),
@@ -3336,7 +3401,7 @@ fn auto_queue_continuation_response(
         return Ok(Some(StopResponse::ContinueTurn {
             class: StopContinuationClass::Queue,
             reason: format!(
-                "agent-doc Stop hook refused terminal success for {file}: the FULL project queue sync still has coordinator-owned work by component {components:?}. Delegated dispatch/start debt: {dispatch:?}. Coordinator-inline execute/reconcile debt (do NOT native-spawn): {inline:?}. Steering to forward to existing owners: {forward:?}. Worker results to integrate/close: {integrate:?}. Lost attempts to recover/requeue: {recover:?}. Unknown/projection debt to reconcile: {reconcile:?}. Unresolved queue-placement debt: {placement_reconcile:?}. Fail-closed document scan errors: {scan_errors:?}. For delegated work the coordinator claims BEFORE native spawn and immediately binds the concrete worker with queue start; for queues without `subagents`, the main agent executes inline and also reconciles lifecycle/document state. Workers never self-claim or self-close the session queue. Do not send the final answer while any action or unexplained sync debt remains.",
+                "agent-doc Stop hook refused terminal success for {file}: the FULL project queue sync still has unclean coordinator-owned work by component {components:?}. Delegated dispatch/start debt: {dispatch:?}. Coordinator-inline execute/reconcile debt (do NOT native-spawn): {inline:?}. Steering to forward to existing owners: {forward:?}. Worker results to integrate/close: {integrate:?}. Live worker/blocker rows to wait for and close in this turn: {wait:?}. Lost-attempt recovery debt: {recover:?}. Unknown/projection debt to reconcile: {reconcile:?}. Unresolved queue-placement debt: {placement_reconcile:?}. Fail-closed document scan errors: {scan_errors:?}. Reconcile an ended or unverifiable owner from exact evidence; never blindly rerun it. Before last-resort loss, exhaust claim/lineage, completion cell, release receipt, exchange/retained response, snapshot, worker/session, and relevant Git history evidence. A struck row and an evidence-exhausted durable lost attempt are terminal. For delegated work the coordinator claims BEFORE native spawn and immediately binds the concrete worker with queue start; for queues without `subagents`, the main agent executes inline and also reconciles lifecycle/document state. Workers never self-claim or self-close the session queue. Do not send the final answer while any unclean sync debt remains.",
                 file = file.display(),
                 components = component_counts,
                 scan_errors = snapshot.scan_errors,
@@ -6424,6 +6489,76 @@ queue: go
     }
 
     #[test]
+    fn stop_refuses_success_while_the_only_queue_row_is_running() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=active subagents go -->\n",
+            "- do [#running-only]\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        let (_, claim) = agent_doc_queue_io::queue_claim::claim(
+            &doc,
+            "#running-only",
+            "subagent:running-only",
+            600,
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "#running-only",
+            "subagent:running-only",
+            "worker-running-only",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        let root = project_root_for(dir.path()).unwrap();
+        let state = SessionState {
+            identity_origin: Default::default(),
+            harness: None,
+            session_id: "codex-session".to_string(),
+            doc_path: doc.display().to_string(),
+            last_turn_id: "turn".to_string(),
+            last_prompt: format!("agent-doc {}", doc.display()),
+            last_auto_queue_head: None,
+            last_context_clear_at: None,
+            last_prompt_cycle: None,
+            preflight_admitted: None,
+            updated_at: 20,
+        };
+        let roots = tracking_roots(dir.path(), Some(&doc));
+
+        let response = auto_queue_continuation_response(
+            &doc,
+            &roots,
+            &root,
+            &state,
+            &StopInput {
+                session_id: "codex-session".to_string(),
+                turn_id: "turn".to_string(),
+                cwd: dir.path().display().to_string(),
+                last_assistant_message: "done".to_string(),
+                stop_hook_active: false,
+            },
+        )
+        .unwrap()
+        .expect("a lingering running row is unclean at closeout");
+
+        let StopResponse::ContinueTurn { reason, .. } = response else {
+            panic!("running queue work must continue the turn: {response:?}");
+        };
+        assert!(reason.contains("worker-running-only"), "{reason}");
+        assert!(
+            reason.contains("wait for and close in this turn"),
+            "{reason}"
+        );
+    }
+
+    #[test]
     fn retained_predecessor_quarantines_already_created_empty_queue_child_metadata_only() {
         let dir = setup_project();
         let prompt =
@@ -7950,10 +8085,12 @@ queue: go
     }
 
     #[test]
-    fn stop_passes_through_committed_cycle_with_stopped_queue_head() {
+    fn stopped_queue_head_remains_unclean_without_reopening_capture() {
         // A held queue is `queue: pause` (`#queuestopremove`). A leftover `go`
         // marker beside it is an explicit control that wins on every activation
-        // reader (`#qbindingone`, GH #79), so it is not a held queue.
+        // reader (`#qbindingone`, GH #79), so it is not a held queue. Pausing
+        // prevents execution; it does not turn an unresolved row into clean
+        // terminal history at closeout.
         let dir = setup_project();
         let doc = dir.path().join("task.md");
         let original = "---\nsession: sid\nqueue: pause\n---\n\n\
@@ -7993,7 +8130,11 @@ Reviewed the gated items.\n\
         })
         .unwrap();
 
-        assert_eq!(response, StopResponse::AllowExit);
+        let StopResponse::ContinueTurn { class, reason } = response else {
+            panic!("a paused but unresolved queue row must continue the turn: {response:?}");
+        };
+        assert_eq!(class, StopContinuationClass::Queue);
+        assert!(reason.contains("#advance-review"), "{reason}");
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
 
@@ -8350,14 +8491,14 @@ Reviewed the gated items.\n\
     }
 
     /// `#queueclaim`: a head dispatched to a subagent is claimed. When every
-    /// remaining head is claimed, the Stop hook must let the turn end quietly
-    /// (no continuation) instead of re-entering for work already in flight;
-    /// releasing the claim restores the continuation.
+    /// remaining head is claimed, the shared terminal predicate still keeps
+    /// the turn open: a reservation or worker wait is not clean closeout.
+    /// Releasing a claim restores the ordinary fresh-head continuation.
     #[test]
-    fn claude_stop_does_not_reenter_for_claimed_heads() {
-        // Both claims stay unacknowledged on purpose: "every head claimed" is a
-        // quiet stop only inside the dispatch grace. Pin the claim clock so the
-        // outcome does not depend on run speed (`#finalgrace`).
+    fn claude_stop_keeps_claimed_heads_open_until_terminal() {
+        // Both claims stay unacknowledged on purpose. Pin the claim clock so
+        // the dispatch-grace classification does not depend on run speed
+        // (`#finalgrace`).
         let _claim_clock = agent_doc_queue_io::queue_claim::pin_claim_clock_for_current_thread(
             agent_doc_queue_io::queue_claim::claim_clock_now_secs(),
         );
@@ -8397,7 +8538,7 @@ Reviewed the gated items.\n\
         assert!(next.reason.contains("issues/110"), "{}", next.reason);
         assert!(!next.reason.contains("issues/109"), "{}", next.reason);
 
-        // Every head claimed: quiet stop, no continuation, no block.
+        // Every head claimed: still unclean, so Stop holds this turn open.
         complete_run(&doc);
         agent_doc_queue_io::queue_claim::claim(
             &doc,
@@ -8406,15 +8547,15 @@ Reviewed the gated items.\n\
             3600,
         )
         .unwrap();
-        assert!(
-            apply_claude_stop_with_drain_readiness(&input, no_supervisor)
-                .unwrap()
-                .is_none(),
-            "all heads claimed: the turn must end quietly"
-        );
+        let claimed_wait = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("claimed heads are not terminal queue history");
+        assert!(claimed_wait.reason.contains("project queue is not clean"));
+        assert!(claimed_wait.reason.contains("issues/109"));
+        assert!(claimed_wait.reason.contains("issues/110"));
         let ops =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(ops.contains("state=waiting_on_claims"), "{ops}");
+        assert!(ops.contains("state=unclean_queue"), "{ops}");
 
         // Releasing a claim restores drainability.
         complete_run(&doc);
@@ -8463,12 +8604,11 @@ Reviewed the gated items.\n\
             claim.generation,
         )
         .unwrap();
-        assert!(
-            claimed_heads_stop_continuation_at(&doc, claim.claimed_at_secs + 100, 10)
-                .unwrap()
-                .is_none(),
-            "a worker-bound claim remains a quiet in-flight wait"
-        );
+        let running = claimed_heads_stop_continuation_at(&doc, claim.claimed_at_secs + 100, 10)
+            .unwrap()
+            .expect("a worker-bound claim must close before Stop succeeds");
+        assert!(running.reason.contains("project queue is not clean"));
+        assert!(running.reason.contains("worker:gh301"));
     }
 
     /// `#reportedwritebackdebt`: a worker reported on a queue with no
@@ -8508,13 +8648,12 @@ Reviewed the gated items.\n\
         let no_supervisor =
             |_: &Path| agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor;
 
-        // A running worker is in flight, not debt: the turn ends quietly.
-        assert!(
-            apply_claude_stop_with_drain_readiness(&input, no_supervisor)
-                .unwrap()
-                .is_none(),
-            "a running worker must not hold the coordinator's final answer"
-        );
+        // A running worker is in flight and must close in this turn.
+        let running = apply_claude_stop_with_drain_readiness(&input, no_supervisor)
+            .unwrap()
+            .expect("a running worker is unclean closeout state");
+        assert!(running.reason.contains("project queue is not clean"));
+        assert!(running.reason.contains("worker:held"));
 
         agent_doc_queue_io::queue_claim::report_attempt(&doc, "do [#held]", Some(claim.generation))
             .unwrap();
@@ -10615,16 +10754,13 @@ Reviewed the gated items.\n\
         doc
     }
 
-    /// `#fixlazilycodex` (tasks/software/lazily.md, cycle-1791827706347): the
-    /// only queue head was claimed by a subagent worker, the cycle had
-    /// converged and committed, and Codex's closing status was already in HEAD.
-    /// The Stop hook read the claimed head as session prompt debt, reopened the
-    /// committed cycle, and failed closed ("post-commit Stop payload is already
-    /// materialized in HEAD"); the three Stops before it had each captured a
-    /// fresh status line as a `### Re: recovered response`. Now the claimed head
-    /// is not prompt debt and the Stop is allowed with no capture.
+    /// `#fixlazilycodex` (tasks/software/lazily.md, cycle-1791827706347): a
+    /// claimed/running head must not reopen a committed response cycle or
+    /// recapture the already-materialized closing status. It is nevertheless
+    /// unclean queue work: Stop continues the current turn until its worker is
+    /// reconciled and the row reaches an explicit terminal state.
     #[test]
-    fn committed_stop_with_claimed_head_and_payload_in_head_allows_without_capture() {
+    fn committed_stop_with_running_head_continues_without_recapture() {
         let dir = setup_project();
         let status =
             "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
@@ -10651,9 +10787,16 @@ Reviewed the gated items.\n\
             last_assistant_message: status.to_string(),
             stop_hook_active: false,
         })
-        .expect("a Stop after a committed closeout must never fail closed");
+        .expect("running queue work must continue without reopening capture");
 
-        assert_eq!(response, StopResponse::AllowExit);
+        let StopResponse::ContinueTurn { class, reason } = response else {
+            panic!("running queue work must continue the turn: {response:?}");
+        };
+        assert_eq!(class, StopContinuationClass::Queue);
+        assert!(
+            reason.contains("unclean coordinator-owned work"),
+            "{reason}"
+        );
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             before,

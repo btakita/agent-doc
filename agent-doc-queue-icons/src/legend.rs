@@ -138,7 +138,7 @@ impl QueueMarker {
                     "Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet."
                 }
                 QueueLifecycleMarker::Lost => {
-                    "The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it."
+                    "Last-resort terminal outcome after exact claim/lineage, completion, receipt, response, retained-state, worker/session, and Git evidence has been exhausted. Never implicit rerun authority."
                 }
                 QueueLifecycleMarker::LostReported => {
                     "Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked."

@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. `lost_reported` / `⚠️☑️` is urgent nonterminal coordinator debt: prefer the durable exchange outbox/report receipt and recovered effect receipts, then an exact unambiguous retained agent-history response; materialize any history-recovered response in exchange, integrate effects, close, and strike in this turn. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found unclean work. Resolve every entry before treating the turn as clean: pending rows must execute, live workers must be waited on and closed, reported/checkmark rows must be integrated and struck, and ended-session or otherwise unverifiable claims must be reconciled instead of assumed live or blindly rerun. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Before declaring an attempt lost, exhaust recoverable evidence in this order: durable claim and lineage, generation-fenced completion cells, reported-release receipts, exchange response evidence, snapshots or retained state, exact worker/session evidence, then relevant Git history. Any trustworthy response, effect, or outcome must be recovered, adopted, integrated, and closed; only an evidence-exhausted attempt with no recoverable outcome may remain `lost`, which is an explicit terminal state. A struck row is the other routine terminal state. `lost_reported` / `⚠️☑️` remains urgent nonterminal coordinator debt: materialize a recovered response, integrate effects, close, and strike it in this turn. Never redispatch an uncertain prior attempt. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -94,6 +94,9 @@ pub enum QueueSyncOperation {
     RecoverRequeue,
     Reconcile,
     OperatorGate,
+    /// Evidence recovery was exhausted and the durable lost attempt is an
+    /// explicit terminal outcome. It must never be redispatched implicitly.
+    TerminalLost,
 }
 
 /// Durable proof about whether a lost attempt executed. Retry is safe only for
@@ -240,8 +243,15 @@ pub struct QueueSyncPayload {
 }
 
 impl QueueSyncPayload {
+    /// Whether reconciliation has no unclean work. Evidence-exhausted lost
+    /// attempts remain available in the typed payload as terminal audit
+    /// records, but do not keep preflight/closeout open.
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.scan_errors.is_empty()
+            && self.placement_reconcile.is_empty()
+            && self
+                .items()
+                .all(|item| item.operation == QueueSyncOperation::TerminalLost)
     }
 
     pub fn len(&self) -> usize {
@@ -572,6 +582,9 @@ fn operation_for(
         QueueSyncLifecycle::Running | QueueSyncLifecycle::Blocked => QueueSyncOperation::Wait,
         QueueSyncLifecycle::ReportedCheckmark => QueueSyncOperation::IntegrateClose,
         QueueSyncLifecycle::LostReported => QueueSyncOperation::IntegrateClose,
+        // The I/O reconciliation pass must exhaust every durable evidence
+        // source before it may promote this provisional state to
+        // `TerminalLost`.
         QueueSyncLifecycle::Lost => QueueSyncOperation::Reconcile,
         QueueSyncLifecycle::ReconcileUnknown => QueueSyncOperation::Reconcile,
         QueueSyncLifecycle::OperatorGated => QueueSyncOperation::OperatorGate,
@@ -603,18 +616,32 @@ pub fn apply_attempt_evidence(
 ) {
     item.execution_evidence = execution;
     item.recovered_effects = effects;
-    item.retry_safe = item.lifecycle == QueueSyncLifecycle::Lost
-        && execution == QueueSyncExecutionEvidence::NeverStarted;
+    // `NeverStarted` is useful evidence, but no longer authorizes an implicit
+    // rerun. Loss is a valid terminal outcome after the full evidence audit;
+    // a new attempt requires an explicit new queue request.
+    item.retry_safe = false;
     if item.lifecycle == QueueSyncLifecycle::Lost {
-        item.operation = if item.retry_safe {
-            match item.execution_mode {
-                QueueExecutionMode::SubagentDispatch => QueueSyncOperation::RecoverRequeue,
-                QueueExecutionMode::MainInline => QueueSyncOperation::InlineExecuteThenReconcile,
-            }
-        } else {
-            QueueSyncOperation::Reconcile
-        };
+        item.operation = QueueSyncOperation::Reconcile;
     }
+}
+
+/// Finish a lost-attempt audit after all I/O evidence sources were inspected.
+///
+/// A recovered response or side effect is actionable and therefore cannot be
+/// hidden by a terminal `lost` marker. With no recoverable outcome, loss is the
+/// last-resort terminal state and is never converted into redispatch work.
+pub fn finalize_lost_evidence_audit(item: &mut QueueSyncItem) {
+    if item.lifecycle != QueueSyncLifecycle::Lost {
+        return;
+    }
+    item.retry_safe = false;
+    item.operation = if item.recovered_response.is_some() {
+        QueueSyncOperation::IntegrateClose
+    } else if !item.recovered_effects.is_empty() || item.missing_response_debt {
+        QueueSyncOperation::Reconcile
+    } else {
+        QueueSyncOperation::TerminalLost
+    };
 }
 
 fn roles_for(execution_mode: QueueExecutionMode) -> (QueueCoordinatorRole, QueueExecutorRole) {
@@ -747,7 +774,7 @@ mod tests {
     }
 
     #[test]
-    fn lost_attempts_retry_only_when_durable_state_proves_they_never_started() {
+    fn lost_attempts_terminalize_only_after_recoverable_evidence_is_exhausted() {
         let content = concat!(
             "<!-- agent:run id=main subagents -->\n",
             "- ⚠️ unstarted\n",
@@ -787,12 +814,13 @@ mod tests {
             QueueSyncExecutionEvidence::NeverStarted,
             Vec::new(),
         );
-        assert_eq!(unstarted.operation, QueueSyncOperation::RecoverRequeue);
+        finalize_lost_evidence_audit(unstarted);
+        assert_eq!(unstarted.operation, QueueSyncOperation::TerminalLost);
         assert_eq!(
             unstarted.execution_evidence,
             QueueSyncExecutionEvidence::NeverStarted
         );
-        assert!(unstarted.retry_safe);
+        assert!(!unstarted.retry_safe);
 
         let started = payload
             .lost
@@ -805,6 +833,22 @@ mod tests {
             QueueSyncExecutionEvidence::Started
         );
         assert!(!started.retry_safe);
+
+        let started = payload
+            .lost
+            .iter_mut()
+            .find(|item| item.item.contains("started") && !item.item.contains("unstarted"))
+            .unwrap();
+        started.recovered_effects.push(QueueSyncEffectEvidence {
+            kind: "committed".to_string(),
+            source_sha: Some("abc123".to_string()),
+            pushed_ref: None,
+            integration_sha: None,
+            release_tag: None,
+            release_state: None,
+        });
+        finalize_lost_evidence_audit(started);
+        assert_eq!(started.operation, QueueSyncOperation::Reconcile);
 
         let recovered = &payload.lost_reported[0];
         assert_eq!(recovered.operation, QueueSyncOperation::IntegrateClose);

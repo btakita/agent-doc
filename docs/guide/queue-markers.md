@@ -34,7 +34,7 @@ stays.
 | 🟡 | `claimed` | claimed | Reserved for a worker by `queue claim`; no spawned worker is bound yet. |
 | 🚧 | `running` | running | A spawned worker is bound to this exact claim by `queue start`. |
 | ☑️ | `reported` | keep: worker done | Keep this live row: the worker reported back (`queue report-complete`), but the coordinator still has to integrate, verify, and close it. Do not delete it yet. |
-| ⚠️ | `lost` | lost | The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it. |
+| ⚠️ | `lost` | lost | Last-resort terminal outcome after exact claim/lineage, completion, receipt, response, retained-state, worker/session, and Git evidence has been exhausted. Never implicit rerun authority. |
 | ⚠️☑️ | `lost_reported` | lost + worker done | Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked. |
 | 🔄 | `reconciling` | needs reconcile | A binary completion cell whose recorded item is this row's own work is in the document, but no current claim or report receipt owns it. A longer line that only shares the tracked id is not this row. The row is held out of dispatch until the coordinator closes it (striking retires the cell) or reconciles it. |
 | ❔ | `unknown` | unknown | Durable queue state is unreadable or contradicts the row (for example a struck row with a live claim); diagnose it, do not redispatch. |
@@ -176,8 +176,10 @@ same coordinator cycle rather than left for a later timeout.
 A valid `☑️` does not later become `⚠️` because its claim aged or its worker
 exited. If you see that transition, either `queue release --requeue` explicitly
 abandoned the reported attempt, or durable state needs reconciliation. Do not
-strike the row merely because it is lost: recover the worker result when it
-exists, otherwise requeue the unfinished work. A completion cell without a
+accept loss merely because a timeout elapsed: recover and close the worker
+result or effects when they exist; when the ordered evidence audit finds no
+trustworthy recoverable outcome, retain `⚠️` as the terminal result and do not
+implicitly rerun it. A completion cell without a
 governing attempt projects as `🔄`, not as proof that integration happened.
 The current coordinator-admission path selects valid reported rows even when no
 fresh worker row is drainable, but older orphaned state may still need

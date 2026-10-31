@@ -11951,11 +11951,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     }
 
     /// qsubattr3: under the queue `subagents` attribute, a claim whose TTL
-    /// lapsed (its subagent died or stopped heartbeating) returns the head to
-    /// `queue_subagent_dispatch`, and the head is never selected inline, so the
-    /// in-session loop cannot duplicate work a subagent may still be doing.
+    /// lapsed (its subagent died or stopped heartbeating) remains terminal-loss
+    /// audit state. It is selected neither for replacement dispatch nor inline,
+    /// so neither path can duplicate work the prior attempt may have performed.
     #[test]
-    fn expired_claim_under_subagents_attribute_redispatches_and_never_drains_inline() {
+    fn expired_claim_under_subagents_attribute_never_redispatches_or_drains_inline() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -12008,10 +12008,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             agent_doc_queue_io::queue_claim::refresh(&doc, "#a", "subagent:a", 600).is_err(),
             "a lapsed claim cannot be refreshed back to life"
         );
-        assert_eq!(
-            dispatch(&doc),
-            vec!["do [#a]".to_string()],
-            "an expired claim makes the head eligible for dispatch again"
+        assert!(
+            dispatch(&doc).is_empty(),
+            "an expired claim is not implicit replacement-work authority"
         );
         let inspected = selected(&doc);
         assert!(

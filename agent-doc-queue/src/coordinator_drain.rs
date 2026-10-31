@@ -1,8 +1,10 @@
 //! Document-wide coordinator drain policy (`#coordinatordrain`).
 //!
-//! A coordinator is allowed to yield only when every live queue item is either
-//! waiting on a running/blocked attempt, explicitly operator-gated, or
-//! terminal. The state machine consumes the same project-wide, post-repair
+//! A coordinator is allowed to end a normal work turn only when every queue
+//! item is terminal. A live worker may justify waiting inside the turn, but it
+//! does not make a lingering `🚧` clean at closeout. Explicit operator gates
+//! remain the one yield boundary that requires a new operator turn. The state
+//! machine consumes the same project-wide, post-repair
 //! [`QueueSyncPayload`] preflight emits: selecting one active queue is an
 //! execution concern and must never hide work at a terminal boundary.
 //! Background execution keeps the main agent responsive; it does not transfer
@@ -23,7 +25,8 @@ pub enum CoordinatorDrainPhase {
     /// Dispatch/start, inline execution, steering delivery, recovery, report
     /// integration, or reconciliation is still required. Stop fails closed.
     ActionRequired,
-    /// All remaining non-operator rows are explicitly waiting.
+    /// Legacy typed phase retained for compatibility; `Wait` is now action
+    /// debt at a turn boundary, so new observations do not enter this phase.
     WaitingForWorkers,
     /// Only explicit operator gates remain.
     OperatorBlocked,
@@ -55,14 +58,18 @@ fn operation_requires_action(operation: QueueSyncOperation) -> bool {
             | QueueSyncOperation::IntegrateClose
             | QueueSyncOperation::RecoverRequeue
             | QueueSyncOperation::Reconcile
+            | QueueSyncOperation::Wait
     )
 }
 
 impl CoordinatorDrainDecision {
-    /// A coordinator may yield, but may report project-wide completion only
-    /// for [`CoordinatorDrainPhase::Terminal`].
+    /// A coordinator may yield only for an explicit operator gate or after the
+    /// project queue is terminal. Ordinary worker waiting stays in this turn.
     pub fn may_yield(&self) -> bool {
-        self.phase != CoordinatorDrainPhase::ActionRequired
+        matches!(
+            self.phase,
+            CoordinatorDrainPhase::OperatorBlocked | CoordinatorDrainPhase::Terminal
+        )
     }
 
     pub fn is_terminal(&self) -> bool {
@@ -223,7 +230,7 @@ mod tests {
         });
 
         assert_eq!(decision.phase, CoordinatorDrainPhase::ActionRequired);
-        assert_eq!(decision.required_action_count(), 2);
+        assert_eq!(decision.required_action_count(), 3);
         assert!(!decision.may_yield());
         assert_eq!(
             decision
@@ -332,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn only_wait_or_operator_gated_work_may_yield_without_claiming_completion() {
+    fn worker_wait_is_unclean_at_closeout_but_operator_gate_may_yield() {
         let scope = agent_doc_state_scope::DocumentScope::new();
         let running = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
             running: vec![item(
@@ -344,8 +351,8 @@ mod tests {
             )],
             ..Default::default()
         });
-        assert_eq!(running.phase, CoordinatorDrainPhase::WaitingForWorkers);
-        assert!(running.may_yield());
+        assert_eq!(running.phase, CoordinatorDrainPhase::ActionRequired);
+        assert!(!running.may_yield());
         assert!(!running.is_terminal());
 
         let scope = agent_doc_state_scope::DocumentScope::new();
@@ -362,5 +369,24 @@ mod tests {
         assert_eq!(blocked.phase, CoordinatorDrainPhase::OperatorBlocked);
         assert!(blocked.may_yield());
         assert!(!blocked.is_terminal());
+    }
+
+    #[test]
+    fn evidence_exhausted_lost_is_terminal() {
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let decision = CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+            lost: vec![item(
+                "⚠️ lost",
+                "run",
+                QueueSyncLifecycle::Lost,
+                QueueSyncOperation::TerminalLost,
+                QueueExecutionMode::SubagentDispatch,
+            )],
+            ..Default::default()
+        });
+        assert_eq!(decision.phase, CoordinatorDrainPhase::Terminal);
+        assert!(decision.may_yield());
+        assert!(decision.is_terminal());
+        assert_eq!(decision.required_action_count(), 0);
     }
 }

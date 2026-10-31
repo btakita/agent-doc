@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use agent_doc_queue::queue_sync_payload::{
     QueueSyncDocumentScope, QueueSyncEffectEvidence, QueueSyncExecutionEvidence,
     QueueSyncOperation, QueueSyncPayload, QueueSyncPlacementDebt, QueueSyncResponseEvidence,
-    QueueSyncScanError, apply_attempt_evidence, normalize_claims_for_queue_sync,
-    project_document_queue_sync,
+    QueueSyncScanError, apply_attempt_evidence, finalize_lost_evidence_audit,
+    normalize_claims_for_queue_sync, project_document_queue_sync,
 };
 use anyhow::Result;
 
@@ -120,6 +120,28 @@ pub fn build_project_queue_sync_payload(
                 apply_response_evidence(&mut document_payload, &content, &claims);
                 if let Some(lineage) = lineage.as_ref() {
                     apply_lineage_evidence(&mut document_payload, lineage);
+                    apply_owner_session_evidence(&document, &claims, &mut document_payload);
+                    // Reaching this point proves every deterministic store was
+                    // readable: claim/lineage, completion cells, release
+                    // receipts, exchange/retained history, and owner-session
+                    // evidence. Recovered Git effects from lineage remain
+                    // actionable; only an evidence-empty attempt terminalizes
+                    // as the last-resort `lost` outcome.
+                    for item in &mut document_payload.lost {
+                        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+                        let explicit_requeue = claims.iter().any(|claim| {
+                            claim.identity == identity
+                                && claim.state
+                                    == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                                && !claim.is_expired(now_secs)
+                        }) && item.execution_evidence
+                            == QueueSyncExecutionEvidence::NeverStarted;
+                        if explicit_requeue {
+                            item.operation = QueueSyncOperation::RecoverRequeue;
+                        } else {
+                            finalize_lost_evidence_audit(item);
+                        }
+                    }
                 }
                 payload.extend(document_payload);
                 match collect_placement_debt(&key, scope, &content) {
@@ -188,6 +210,85 @@ fn apply_response_evidence(
                 item.missing_response_debt = true;
                 item.operation = QueueSyncOperation::Reconcile;
             }
+        }
+    }
+
+    // A plain lost attempt can still have an exact retained worker response
+    // even when no completion cell/report receipt survived. Recover it before
+    // loss can become terminal; never infer completion from a worker id alone.
+    for item in &mut payload.lost {
+        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+        let Some(claim) = claims.get(&identity).copied() else {
+            continue;
+        };
+        match recover_agent_history_response(claim) {
+            HistoryResponse::Recovered(response) => {
+                item.response_evidence = QueueSyncResponseEvidence::AgentHistory;
+                item.recovered_response = Some(response);
+                item.missing_response_debt = false;
+                item.operation = QueueSyncOperation::IntegrateClose;
+            }
+            HistoryResponse::Missing => {
+                item.response_evidence = QueueSyncResponseEvidence::Missing;
+            }
+            HistoryResponse::Ambiguous => {
+                item.response_evidence = QueueSyncResponseEvidence::AmbiguousHistory;
+            }
+            HistoryResponse::Unsupported => {
+                item.response_evidence = QueueSyncResponseEvidence::UnsupportedHistory;
+            }
+        }
+    }
+}
+
+fn apply_owner_session_evidence(
+    file: &Path,
+    claims: &[agent_doc_queue::queue_claim::QueueClaim],
+    payload: &mut QueueSyncPayload,
+) {
+    use agent_doc_queue::queue_claim::ClaimOwnerLiveness;
+
+    let liveness = claims
+        .iter()
+        .map(|claim| {
+            (
+                claim.identity.clone(),
+                (
+                    crate::queue_claim::claim_owner_liveness(file, claim),
+                    claim.worker.is_some(),
+                ),
+            )
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    for item in payload
+        .claimed_unstarted
+        .iter_mut()
+        .chain(payload.running.iter_mut())
+    {
+        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+        if liveness.get(&identity).is_some_and(|(state, _)| {
+            matches!(
+                *state,
+                ClaimOwnerLiveness::Ended(_) | ClaimOwnerLiveness::Unrecorded
+            )
+        }) {
+            // An ended coordinator session or an attempt with no recorded
+            // owner session is not verifiably live. Reconcile/recover its exact
+            // attempt before terminalizing it; never dispatch a second worker
+            // merely because the visible row still says claimed/running.
+            item.operation = QueueSyncOperation::Reconcile;
+        }
+    }
+    for item in &mut payload.lost {
+        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+        if liveness.get(&identity).is_some_and(|(state, has_worker)| {
+            *has_worker && matches!(*state, ClaimOwnerLiveness::Live)
+        }) {
+            // A still-live owner bound to a concrete worker is recoverable
+            // state. Keep the attempt open for adoption/response recovery;
+            // last-resort loss is allowed only after that liveness ends.
+            item.missing_response_debt = true;
+            item.operation = QueueSyncOperation::Reconcile;
         }
     }
 }
@@ -720,17 +821,18 @@ mod tests {
     }
 
     #[test]
-    fn lineage_is_the_retry_fence_and_recovers_effect_receipts() {
+    fn lineage_recovers_effects_and_never_turns_loss_into_implicit_retry() {
         let created = crate::queue_lineage::QueueLineageEvent {
             kind: crate::queue_lineage::QueueLineageEventKind::Created,
             ..Default::default()
         };
         let mut unstarted = lost_payload();
         apply_lineage_evidence(&mut unstarted, &lineage_with(vec![created.clone()]));
-        assert!(unstarted.lost[0].retry_safe);
+        finalize_lost_evidence_audit(&mut unstarted.lost[0]);
+        assert!(!unstarted.lost[0].retry_safe);
         assert_eq!(
             unstarted.lost[0].operation,
-            QueueSyncOperation::RecoverRequeue
+            QueueSyncOperation::TerminalLost
         );
 
         let mut started = lost_payload();
@@ -759,6 +861,78 @@ mod tests {
             started.lost[0].recovered_effects[0].source_sha.as_deref(),
             Some("abc123")
         );
+        finalize_lost_evidence_audit(&mut started.lost[0]);
+        assert_eq!(started.lost[0].operation, QueueSyncOperation::Reconcile);
+    }
+
+    #[test]
+    fn ended_owner_session_is_reconcile_debt_not_a_waiting_worker() {
+        let root = tempfile::tempdir().unwrap();
+        let doc = root.path().join("session.md");
+        let content =
+            "<!-- agent:run id=run subagents -->\n- 🚧 stale worker\n<!-- /agent:run -->\n";
+        std::fs::write(&doc, content).unwrap();
+        let mut ended_process = std::process::Command::new("true").spawn().unwrap();
+        let ended_pid = ended_process.id();
+        ended_process.wait().unwrap();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("stale worker", "subagent:stale", 10, u64::MAX / 2);
+        let claim = &mut ledger.claims[0];
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
+        claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+            worker_id: "worker-stale".to_string(),
+            started_at_secs: 11,
+        });
+        claim.owner_session = Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+            harness: Some("claude".to_string()),
+            session_id: Some("ended-session".to_string()),
+            pane: None,
+            pid: Some(ended_pid),
+        });
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            doc.display().to_string(),
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &ledger.claims,
+        )
+        .unwrap();
+        assert_eq!(payload.running[0].operation, QueueSyncOperation::Wait);
+
+        apply_owner_session_evidence(&doc, &ledger.claims, &mut payload);
+
+        assert_eq!(payload.running[0].operation, QueueSyncOperation::Reconcile);
+    }
+
+    #[test]
+    fn unrecorded_owner_session_is_reconcile_debt_not_a_waiting_worker() {
+        let root = tempfile::tempdir().unwrap();
+        let doc = root.path().join("session.md");
+        let content =
+            "<!-- agent:run id=run subagents -->\n- 🚧 unverified worker\n<!-- /agent:run -->\n";
+        std::fs::write(&doc, content).unwrap();
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim("unverified worker", "subagent:unverified", 10, u64::MAX / 2);
+        let claim = &mut ledger.claims[0];
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
+        claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+            worker_id: "worker-unverified".to_string(),
+            started_at_secs: 11,
+        });
+        claim.owner_session = None;
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            doc.display().to_string(),
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &ledger.claims,
+        )
+        .unwrap();
+        assert_eq!(payload.running[0].operation, QueueSyncOperation::Wait);
+
+        apply_owner_session_evidence(&doc, &ledger.claims, &mut payload);
+
+        assert_eq!(payload.running[0].operation, QueueSyncOperation::Reconcile);
     }
 
     #[test]
@@ -1054,6 +1228,34 @@ mod tests {
             QueueSyncResponseEvidence::UnsupportedHistory
         );
         assert!(!item.retry_safe);
+    }
+
+    #[test]
+    fn evidence_exhausted_expired_attempt_is_terminal_and_clean() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".agent-doc")).unwrap();
+        let doc = root.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: terminal-loss-session\n---\n",
+            "<!-- agent:run id=run subagents -->\n",
+            "- terminal loss\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let _claimed_at = crate::queue_claim::pin_claim_clock_for_current_thread(1_000_000);
+        crate::queue_claim::claim(&doc, "terminal loss", "subagent:old", 10).unwrap();
+        let _expired = crate::queue_claim::pin_claim_clock_for_current_thread(1_000_010);
+
+        let payload = build_project_queue_sync_payload(&doc, content, None).unwrap();
+
+        assert!(payload.scan_errors.is_empty(), "{:?}", payload.scan_errors);
+        assert_eq!(payload.lost.len(), 1);
+        assert_eq!(payload.lost[0].operation, QueueSyncOperation::TerminalLost);
+        assert!(!payload.lost[0].retry_safe);
+        assert!(
+            payload.is_empty(),
+            "an audited terminal loss must not keep the turn open"
+        );
     }
 
     #[test]

@@ -1574,7 +1574,7 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
     match claim.state {
         QueueClaimState::Lost => (
             "lost",
-            "The attempt expired or was abandoned; it is recovery-eligible and does not prove current work.".to_string(),
+            "The attempt expired or was abandoned. Exhaust exact recovery evidence first; when no trustworthy outcome is recoverable, lost is terminal and never implicit redispatch authority.".to_string(),
         ),
         QueueClaimState::Reported => (
             "reported_pending_integration",
@@ -1607,12 +1607,7 @@ fn claim_assessment(claim: &QueueClaim, owner_session_state: &str) -> (&'static 
     }
 }
 
-fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRecovery {
-    let document = shell_single_quote(&file.display().to_string());
-    let item = shell_single_quote(&agent_doc_queue::queue_claim::claim_item_handle(
-        &claim.item_text,
-    ));
-    let owner = shell_single_quote(&claim.owner);
+fn lost_claim_recovery(_file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRecovery {
     let worker = claim
         .worker
         .as_ref()
@@ -1625,12 +1620,9 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRe
             "attempt_abandoned_for_requeue"
         },
         recover_completed_worker_result: format!(
-            "Check {worker} for a completed result. If it completed, integrate that exact result and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text)."
+            "Before accepting loss, exhaust the exact claim and lineage, completion cells, release receipts, exchange/retained response state, snapshots, {worker} and its owner session, then relevant Git history. If any trustworthy result or effect exists, recover/adopt it and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text). Otherwise keep the durable lost attempt as the terminal outcome; do not rerun it implicitly."
         ),
-        reclaim_command: crate::queue_lineage::load(file)
-            .ok()
-            .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(&lineage, claim))
-            .then(|| format!("agent-doc queue claim {document} --item {item} --owner {owner}")),
+        reclaim_command: None,
     }
 }
 
@@ -1728,19 +1720,53 @@ pub fn claim_reports_for_content(file: &Path, content: &str) -> Result<Vec<Claim
 /// never a stranded queue.
 pub fn claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
     let _guard = steer_guard(nested_claim_steer_snapshots(file, content));
-    claimed_items_with_non_ledger_holds(
+    let claimed = claimed_items_with_non_ledger_holds(
         file,
         content,
         ledger_claimed_items_for_content(file, content),
-    )
+    );
+    claimed.with_heads(&lost_attempt_hold_texts_for_content(file, content))
+}
+
+/// Lost attempts are held out of every inline or delegated execution selector
+/// unless an explicit non-expired requeue is backed by exact `NeverStarted`
+/// lineage. Expired terminal loss, started work, and provenance-unknown work
+/// remain audit/reconciliation state and never become implicit replacement
+/// work.
+pub fn lost_attempt_hold_texts_for_content(file: &Path, content: &str) -> Vec<String> {
+    match claim_states_for_content(file, content) {
+        Ok(claims) => {
+            let now = claim_clock_now_secs();
+            let lineage = crate::queue_lineage::load(file).ok();
+            claims
+                .into_iter()
+                .filter(|claim| {
+                    claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+                        && (claim.is_expired(now)
+                            || !lineage.as_ref().is_some_and(|lineage| {
+                                crate::queue_lineage::attempt_never_started(lineage, claim)
+                            }))
+                })
+                .map(|claim| claim.item_text)
+                .collect()
+        }
+        Err(err) => {
+            eprintln!(
+                "[queue-claim] WARNING: could not read terminal lost attempts for {}; refusing to infer any lost holds: {err:#}",
+                file.display()
+            );
+            Vec::new()
+        }
+    }
 }
 
 /// The claimed heads an in-session writeback computation must skip.
 ///
 /// A `Reported` claim still fences redispatch, but its worker result is now the
-/// coordinator's writeback debt. Therefore only `Claimed` and `Running`
-/// attempts are excluded here. Durable completion evidence and queue-level
-/// holds remain excluded exactly as they are in [`claimed_items_for_content`].
+/// coordinator's writeback debt. Therefore `Claimed` and `Running` attempts,
+/// plus evidence-exhausted terminal `Lost` audit rows, are excluded here.
+/// Durable completion evidence and queue-level holds remain excluded exactly
+/// as they are in [`claimed_items_for_content`].
 /// An unreadable ledger contributes no attempt claims (the queue head remains
 /// visible instead of becoming stranded).
 pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> ClaimedQueueItems {
@@ -1767,6 +1793,7 @@ pub fn in_flight_claimed_items_for_content(file: &Path, content: &str) -> Claime
             ClaimedQueueItems::none()
         }
     };
+    let in_flight = in_flight.with_heads(&lost_attempt_hold_texts_for_content(file, content));
     claimed_items_with_queue_holds(file, content, in_flight)
 }
 
@@ -2162,6 +2189,25 @@ mod tests {
         assert_eq!(
             recovery.reclaim_command, None,
             "a bound worker makes retry unsafe even after expiry"
+        );
+    }
+
+    #[test]
+    fn lost_attempt_is_held_out_of_every_execution_selector() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["retry-sensitive work"]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let _claimed_at = pin_claim_clock_for_current_thread(1_000_000);
+        claim(&doc, "retry-sensitive work", "subagent:old", 10).unwrap();
+        let _expired = pin_claim_clock_for_current_thread(1_000_010);
+
+        assert!(
+            claimed_items_for_content(&doc, &content).claims("retry-sensitive work"),
+            "terminal loss must fence ordinary continuation and dispatch selection"
+        );
+        assert_eq!(
+            lost_attempt_hold_texts_for_content(&doc, &content),
+            vec!["retry-sensitive work".to_string()]
         );
     }
 

@@ -14,9 +14,10 @@
 //! dispatch-intent window: once claimed it is excluded by the claim, and once
 //! a later cycle has seeded with it present it drains through the normal
 //! queue (a reported release means the subagent finished and the in-session
-//! loop now closes the item). A retained `Lost` attempt is offered again only
-//! when its exact lineage proves it never reached worker attachment. A started
-//! or provenance-unknown loss stays reconciliation debt.
+//! loop now closes the item). A retained `Lost` attempt is terminal after its
+//! evidence audit and is never offered as implicit replacement work. Even
+//! proof that no worker attached only proves the old attempt's outcome; a new
+//! run requires a new explicit queue request.
 //!
 //! The seed record lives in `state.db` `project_runtime_state`; the key format
 //! is shared with `agent-doc-session-check-io::midturn_steering`.
@@ -143,37 +144,52 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
         .collect::<Vec<_>>();
+    let now = crate::queue_claim::claim_clock_now_secs();
     let lost = crate::queue_claim::claim_states_for_content(file, content)?
         .into_iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
-    let lineage = if lost.is_empty() {
-        None
-    } else {
-        Some(crate::queue_lineage::load(file)?)
-    };
-    let lost_identities = lost
-        .into_iter()
+    let lineage = (!lost.is_empty())
+        .then(|| crate::queue_lineage::load(file))
+        .transpose()?;
+    let explicit_requeue_identities = lost
+        .iter()
         .filter(|claim| {
-            lineage
-                .as_ref()
-                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
+            !claim.is_expired(now)
+                && lineage.as_ref().is_some_and(|lineage| {
+                    crate::queue_lineage::attempt_never_started(lineage, claim)
+                })
         })
-        .map(|claim| claim.identity)
+        .map(|claim| claim.identity.clone())
         .collect::<Vec<_>>();
-    if fresh_identities.is_empty() && lost_identities.is_empty() {
+    let non_dispatchable_lost_identities = lost
+        .iter()
+        .filter(|claim| {
+            !explicit_requeue_identities
+                .iter()
+                .any(|requeue| requeue == &claim.identity)
+        })
+        .map(|claim| claim.identity.clone())
+        .collect::<Vec<_>>();
+    if fresh_identities.is_empty() && explicit_requeue_identities.is_empty() {
         return Ok(Vec::new());
     }
-    // Start from the full eligible list so a recovered old row keeps document
-    // order relative to genuinely new rows. Identity comparison also preserves
-    // nested lineage semantics and de-duplicates a row that is both new and
-    // backed by a retained Lost attempt.
+    // Start from the full eligible list so genuinely new rows keep document
+    // order. Every lost identity is filtered unless a non-expired explicit
+    // `release --requeue` is also backed by exact NeverStarted lineage. A
+    // started, expired, or provenance-unknown loss never authorizes a
+    // replacement worker.
     let heads = core::subagent_dispatch_heads_with_presets(content, None, &prompt_presets)
         .into_iter()
         .filter(|head| {
             let identity = agent_doc_queue::queue_claim::claim_identity(head);
-            fresh_identities.iter().any(|fresh| fresh == &identity)
-                || lost_identities.iter().any(|lost| lost == &identity)
+            (fresh_identities.iter().any(|fresh| fresh == &identity)
+                || explicit_requeue_identities
+                    .iter()
+                    .any(|requeue| requeue == &identity))
+                && !non_dispatchable_lost_identities
+                    .iter()
+                    .any(|lost| lost == &identity)
         });
     let claimed = crate::queue_claim::claimed_items_for_content(file, content);
     Ok(heads
@@ -249,6 +265,9 @@ pub fn owner_selection_claims_for_content(
 ) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
     crate::queue_claim::ledger_claimed_items_for_content(file, content)
+        .with_heads(&crate::queue_claim::lost_attempt_hold_texts_for_content(
+            file, content,
+        ))
         .with_heads(&schedule_held)
         .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content))
 }
@@ -266,25 +285,10 @@ fn queue_attr_subagent_plan_with_presets(
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
     let mut claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
-        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content));
-    let lost = crate::queue_claim::claim_states_for_content(file, content)
-        .ok()?
-        .into_iter()
-        .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
-        .collect::<Vec<_>>();
-    let lineage = (!lost.is_empty())
-        .then(|| crate::queue_lineage::load(file).ok())
-        .flatten();
-    let unsafe_lost = lost
-        .into_iter()
-        .filter(|claim| {
-            !lineage
-                .as_ref()
-                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
-        })
-        .map(|claim| claim.item_text)
-        .collect::<Vec<_>>();
-    claimed = claimed.with_heads(&unsafe_lost);
+        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content))
+        .with_heads(&crate::queue_claim::lost_attempt_hold_texts_for_content(
+            file, content,
+        ));
     let evidence_items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -878,9 +882,7 @@ queue: go
     }
 
     #[test]
-    fn abandoned_unstarted_per_line_item_bypasses_new_since_seed_gate() {
-        use crate::claim_release_receipt::{ReleaseKind, release_attempt};
-
+    fn expired_unstarted_item_is_not_implicitly_redispatched() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
@@ -889,12 +891,15 @@ queue: go
         std::fs::write(&file, &content).unwrap();
         seed(&file, "cycle-prev", &content);
 
-        let (_, prior) = crate::queue_claim::claim(&file, item, "subagent:prior", 600).unwrap();
-        release_attempt(&file, item, ReleaseKind::Requeue, Some(prior.generation)).unwrap();
+        let _claimed_at = crate::queue_claim::pin_claim_clock_for_current_thread(1_000_000);
+        crate::queue_claim::claim(&file, item, "subagent:prior", 10).unwrap();
+        let _expired = crate::queue_claim::pin_claim_clock_for_current_thread(1_000_010);
 
-        assert_eq!(
-            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            vec![item.to_string()]
+        assert!(
+            pending_subagent_dispatch_for_content(&file, &content)
+                .unwrap()
+                .is_empty(),
+            "a durable lost attempt is terminal even when no worker attached"
         );
     }
 

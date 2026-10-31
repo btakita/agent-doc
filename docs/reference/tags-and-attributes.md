@@ -234,14 +234,16 @@ are queue-only.
 
 | Form | Behavior |
 |---|---|
-| bare `queue` | Append active id-backed backlog work to the queue. |
+| bare `queue` | Append active id-backed backlog work when the document has one queue. With multiple queues, surface each item to the main agent for an explicit placement decision. |
+| `queue="queue-id"` | Append active id-backed backlog work to the matching `agent:queue`, `agent:run`, or `agent:loop` with `id=queue-id`, independent of scheduler selection. |
 | `queue=append` | Explicit append mode. |
 | `queue=prepend` | Add new mirrored work before existing queue entries. |
 | `queue=sync` | Reconcile the id-backed mirror, including removal of stale mirrored IDs; preserve operator-authored free-text queue entries. |
 
 The synchronization runs at queue activation boundaries. `queue` on
 `agent:icebox` or `agent:review` is ignored with a warning; move work to the
-backlog or enqueue it explicitly.
+backlog or enqueue it explicitly. The sync-mode words `append`, `prepend`, and
+`sync` are reserved and therefore cannot also be queue ids in this attribute.
 
 ## Response patch tags
 

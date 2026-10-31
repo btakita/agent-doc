@@ -3637,7 +3637,7 @@ Duplicate replay should stay live.
         .target_content;
         assert_eq!(
             struck.len() - committed.len(),
-            79,
+            143,
             "the production failure was the exact annotated #ftstrike delta"
         );
         fs::write(&doc, &struck).unwrap();

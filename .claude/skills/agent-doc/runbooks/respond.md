@@ -435,6 +435,14 @@ free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
 
+When a queue response contains a terse salient fact the operator should not
+miss in the larger exchange, include it as its own `%% response <snippet> %%`
+line in the response. Keep the snippet short and lookup-oriented. Closeout
+copies that marker beneath the exact completed queue leaf, adds the stable
+response id there and in the exchange response, and adds child comments for
+path-like artifacts named in inline code. Do not manually add the response-id
+or artifact children; those are binary-owned (`#queueresponselookups`).
+
 **Nested tree leaves (`#nestvector`).** A nested leaf that is its own head —
 indented under group labels, not a `#nestedsubprompts` child folded into its
 parent — is quoted as the whole nest vector, from the root parent down to the

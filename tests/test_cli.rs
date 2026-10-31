@@ -2753,6 +2753,44 @@ fn test_document_sync_is_a_superset_entrypoint_for_queue_sync() {
 }
 
 #[test]
+fn test_document_sync_routes_explicit_backlog_to_named_queue() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = concat!(
+        "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+        "<!-- agent:run id=triage -->\n<!-- /agent:run -->\n",
+        "<!-- agent:run id=build -->\n<!-- /agent:run -->\n",
+        "<!-- agent:backlog queue=build -->\n",
+        "- [ ] [#compile] compile release\n",
+        "<!-- /agent:backlog -->\n",
+    );
+    fs::write(&doc, content).unwrap();
+
+    let mut cmd = agent_doc_cmd();
+    cmd.args(["sync", doc.to_str().unwrap()]);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "routed explicit backlog id(s) into their named queues: #compile",
+        ));
+
+    let synced = fs::read_to_string(&doc).unwrap();
+    let triage_start = synced.find("<!-- agent:run id=triage -->").unwrap();
+    let triage_end = synced[triage_start..]
+        .find("<!-- /agent:run -->")
+        .map(|offset| triage_start + offset)
+        .unwrap();
+    let build_start = synced.find("<!-- agent:run id=build -->").unwrap();
+    let build_end = synced[build_start..]
+        .find("<!-- /agent:run -->")
+        .map(|offset| build_start + offset)
+        .unwrap();
+    assert!(!synced[triage_start..triage_end].contains("do [#compile]"));
+    assert!(synced[build_start..build_end].contains("📥 do [#compile]"));
+}
+
+#[test]
 fn test_document_sync_rejects_tmux_layout_options() {
     let mut cmd = agent_doc_cmd();
     cmd.args(["sync", "session.md", "--col", "session.md"]);

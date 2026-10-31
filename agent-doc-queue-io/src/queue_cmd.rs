@@ -920,7 +920,34 @@ pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
-    let content = effects.current_document_content(file, "queue_sync")?;
+    let mut content = effects.current_document_content(file, "queue_sync")?;
+    let components = agent_doc_element::element::parse(&content)?;
+    let explicit_routing =
+        agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes(
+            &components,
+            &content,
+        )?;
+    let routed_ids = explicit_routing.newly_materialized;
+    let placement_debt = explicit_routing.placement_debt;
+    let mut routing_snapshot_warning = None;
+    if let Some(projected) = explicit_routing.content {
+        effects.converge_document_or_disk(
+            file,
+            &projected,
+            &content,
+            "queue_sync_explicit_routes",
+        )?;
+        // Re-read the accepted authority cut before the legacy mirror pass.
+        // The editor convergence boundary may normalize unrelated bytes.
+        content = effects.current_document_content(file, "queue_sync_after_explicit_routes")?;
+        routing_snapshot_warning = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .err()
+        .map(|error| error.to_string());
+    }
     let backlog_sync = crate::one_shot_sync::sync_configured_backlog_queue_with_snapshot(
         file,
         &content,
@@ -940,7 +967,27 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
     let payload =
         queue_sync_reconciliation_payload(file, &reconciled, previous_content.as_deref())?;
-    let action_debt_remains = !payload.is_empty();
+    let action_debt_remains = !payload.is_empty() || !placement_debt.is_empty();
+
+    if !routed_ids.is_empty() {
+        println!(
+            "{}: routed explicit backlog id(s) into their named queues: {}",
+            file.display(),
+            crate::one_shot_sync::format_queue_ids(&routed_ids),
+        );
+    }
+    if let Some(warning) = routing_snapshot_warning {
+        eprintln!("[queue sync] warning: failed to update explicit-route snapshot: {warning}");
+    }
+    for debt in &placement_debt {
+        println!(
+            "{}: nonterminal queue placement debt: item_id={} requested_queue_id={} eligible_queue_ids={}; operation=reconcile",
+            file.display(),
+            debt.item_id,
+            debt.requested_queue_id.as_deref().unwrap_or("<unspecified>"),
+            debt.eligible_queue_ids.join(","),
+        );
+    }
 
     match backlog_sync {
         Some(OneShotQueueSyncResult::AlreadyInSync {
@@ -1010,7 +1057,7 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         }
     }
 
-    if action_debt_remains {
+    if !payload.is_empty() {
         println!(
             "{}: nonterminal queue sync payload ({} unresolved item(s) or scan error(s)):",
             file.display(),
@@ -1467,6 +1514,42 @@ mod tests {
             payload.pending[0].execution_mode,
             agent_doc_queue::queue_sync_payload::QueueExecutionMode::SubagentDispatch
         );
+    }
+
+    #[test]
+    fn sync_routes_named_backlog_before_applying_legacy_mirror() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:run id=triage -->\n<!-- /agent:run -->\n",
+            "<!-- agent:run id=build -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue=build -->\n",
+            "- [ ] [#compile] compile release\n",
+            "<!-- /agent:backlog -->\n",
+            "<!-- agent:backlog queue=append -->\n",
+            "- [ ] [#classify] classify incident\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        sync_with_effects(&FakeEffects::default(), &doc)
+            .expect("explicit routing and the legacy mirror should compose");
+
+        let synced = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&synced).unwrap();
+        let queues = agent_doc_queue::queue_set::QueueSet::parse(&synced, &components).unwrap();
+        let triage = queues
+            .block("triage")
+            .unwrap()
+            .component
+            .content(&synced);
+        let build = queues.block("build").unwrap().component.content(&synced);
+        assert!(triage.contains("do [#classify]"), "{synced}");
+        assert!(!triage.contains("do [#compile]"), "{synced}");
+        assert!(build.contains("do [#compile]"), "{synced}");
+        assert!(!build.contains("do [#classify]"), "{synced}");
     }
 
     #[test]

@@ -1974,10 +1974,13 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
     let body = queue
         .content(content)
         .split_inclusive('\n')
-        .map(|line| {
+        .filter_map(|line| {
             let (core, newline) = line
                 .strip_suffix('\n')
                 .map_or((line, ""), |core| (core, "\n"));
+            if is_response_id_lookup_comment(core) {
+                return None;
+            }
             let response_separator = format!("; {RESPONSE_ID_NOTE_PREFIX}");
             let core = core
                 .trim_end()
@@ -1985,12 +1988,27 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
                 .filter(|(_, response_id)| !response_id.trim().is_empty())
                 .map_or_else(|| core.trim_end(), |(head, _)| head.trim_end());
             match core.strip_suffix(suffix.as_str()) {
-                Some(head) => format!("{head}~~{newline}"),
-                None => line.to_string(),
+                Some(head) => Some(format!("{head}~~{newline}")),
+                None => Some(line.to_string()),
             }
         })
         .collect::<String>();
-    Ok(queue.replace_content(content, &body))
+    let queue_normalized = queue.replace_content(content, &body);
+    Ok(queue_normalized
+        .split_inclusive('\n')
+        .filter(|line| !is_response_id_lookup_comment(line.trim_end_matches(['\n', '\r'])))
+        .collect())
+}
+
+fn is_response_id_lookup_comment(line: &str) -> bool {
+    line.trim()
+        .strip_prefix("- ")
+        .unwrap_or_else(|| line.trim())
+        .strip_prefix("%% response r:")
+        .and_then(|rest| rest.strip_suffix(" %%"))
+        .is_some_and(|hash| {
+            !hash.is_empty() && hash.chars().all(|character| character.is_ascii_hexdigit())
+        })
 }
 
 /// Project completion of every live queue prompt matching `done_ids` into the
@@ -2510,6 +2528,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         return Ok(after.to_string());
     }
 
+    let after = annotate_exchange_response_with_lookup_id(after, response_id)?;
+    let lookup_children = response_lookup_children(response_body, response_id);
+
     let struck_before: HashSet<String> =
         agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
             .map(|nodes| {
@@ -2520,13 +2541,13 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
                     .collect()
             })
             .unwrap_or_default();
-    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") {
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
         Ok(nodes) => nodes,
-        Err(_) => return Ok(after.to_string()),
+        Err(_) => return Ok(after),
     };
 
     let mut edits = Vec::new();
-    for node in nodes {
+    for node in &nodes {
         if !node.item.struck
             || struck_before.contains(&node.node_key)
             || node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
@@ -2534,18 +2555,137 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             continue;
         }
         let raw = &after[node.item.start_byte..node.item.end_byte];
-        if raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}")) {
-            continue;
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
+        let owned_scope_end = descendant_end.max(node.item.end_byte);
+        let owned_scope = &after[node.item.start_byte..owned_scope_end];
+        let missing_children = lookup_children
+            .iter()
+            .filter(|child| {
+                !owned_scope.lines().any(|line| {
+                    line.trim()
+                        .strip_prefix("- ")
+                        .unwrap_or_else(|| line.trim())
+                        == child.as_str()
+                })
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let needs_inline_id = !raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
+        if needs_inline_id || !missing_children.is_empty() {
+            edits.push((
+                node.item.start_byte,
+                node.item.end_byte,
+                indent,
+                needs_inline_id,
+                missing_children,
+            ));
         }
-        edits.push((node.item.start_byte, node.item.end_byte));
     }
 
-    let mut out = after.to_string();
-    for (start, end) in edits.into_iter().rev() {
-        let annotated = annotate_struck_line_with_response_id(&out[start..end], response_id);
+    let mut out = after;
+    for (start, end, indent, needs_inline_id, children) in edits.into_iter().rev() {
+        let mut replacement = if needs_inline_id {
+            annotate_struck_line_with_response_id(&out[start..end], response_id)
+        } else {
+            out[start..end].to_string()
+        };
+        if !children.is_empty() {
+            if !replacement.ends_with('\n') {
+                replacement.push('\n');
+            }
+            let child_indent = " ".repeat(indent + 2);
+            for child in children {
+                replacement.push_str(&format!("{child_indent}- {child}\n"));
+            }
+        }
+        out.replace_range(start..end, &replacement);
+    }
+    Ok(out)
+}
+
+fn annotate_exchange_response_with_lookup_id(
+    document: &str,
+    response_id: &str,
+) -> anyhow::Result<String> {
+    let components = element::parse(document)?;
+    let mut edits = Vec::new();
+    for component in components {
+        if component.name != "exchange" {
+            continue;
+        }
+        let inner = &document[component.open_end..component.close_start];
+        let annotated = agent_doc_markdown_ast::exchange_tree::annotate_response_with_lookup_id(
+            inner,
+            response_id,
+        );
+        if annotated != inner {
+            edits.push((component.open_end, component.close_start, annotated));
+        }
+    }
+    let mut out = document.to_string();
+    for (start, end, annotated) in edits.into_iter().rev() {
         out.replace_range(start..end, &annotated);
     }
     Ok(out)
+}
+
+fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<String> {
+    let mut children = vec![format!("%% response {response_id} %%")];
+
+    for (index, code) in response_body.split('`').enumerate() {
+        if index % 2 == 1 && artifact_reference(code) {
+            let child = format!("%% {code} %%");
+            if !children.contains(&child) {
+                children.push(child);
+            }
+        }
+    }
+
+    for line in response_body.lines() {
+        let marker = line.trim();
+        if marker.starts_with("%% response ")
+            && marker.ends_with(" %%")
+            && !marker.starts_with("%% response r:")
+            && !children.iter().any(|child| child == marker)
+        {
+            children.push(marker.to_string());
+        }
+    }
+    children
+}
+
+fn artifact_reference(code: &str) -> bool {
+    let code = code.trim();
+    !code.is_empty()
+        && !code.chars().any(char::is_whitespace)
+        && !code.contains("://")
+        && (code.starts_with('/')
+            || code.starts_with("./")
+            || code.starts_with("../")
+            || (code.contains('/')
+                && code
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|name| name.contains('.'))))
+}
+
+fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) -> usize {
+    let mut cursor = item_end;
+    for line in document[item_end..].split_inclusive('\n') {
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        let indent = line.len() - trimmed.len();
+        if (trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("<!-- /agent:"))
+            && indent <= parent_indent
+        {
+            return cursor;
+        }
+        cursor += line.len();
+    }
+    document.len()
 }
 
 fn annotate_struck_line_with_response_id(line: &str, response_id: &str) -> String {
@@ -2603,7 +2743,11 @@ mod tests {
     fn newly_struck_managed_list_item_links_to_the_stable_response_id() {
         let before = queue_doc("- do [#fresh]\n- ~~do [#old]~~\n");
         let after = queue_doc("- ~~do [#fresh]~~\n- ~~do [#old]~~\n");
-        let response = "### Re: fresh — test\n\nCompleted the fresh item.\n";
+        let response = concat!(
+            "### Re: fresh — test\n\n",
+            "Completed `/work/tasks/result.md`.\n",
+            "%% response published locally; coordinator install remains %%\n",
+        );
         let response_id =
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
                 response,
@@ -2620,6 +2764,19 @@ mod tests {
             )),
             "{annotated}"
         );
+        assert!(
+            annotated.contains(&format!("  - %% response {response_id} %%\n")),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("  - %% /work/tasks/result.md %%\n"),
+            "{annotated}"
+        );
+        assert!(
+            annotated
+                .contains("  - %% response published locally; coordinator install remains %%\n"),
+            "{annotated}"
+        );
         assert!(annotated.contains("- ~~do [#old]~~\n"), "{annotated}");
         assert_eq!(
             annotate_newly_struck_queue_items_with_response_id(&before, &annotated, response)
@@ -2627,6 +2784,30 @@ mod tests {
             annotated,
             "replaying the projection must not duplicate the response id"
         );
+    }
+
+    #[test]
+    fn nested_queue_lookup_children_follow_the_completed_item_indent() {
+        let before = queue_doc("- group\n  - do [#nested]\n- later\n");
+        let after = queue_doc("- group\n  - ~~do [#nested]~~\n- later\n");
+        let response = "### Re: nested\n\nCompleted `tasks/nested.md`.\n";
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .cell_id()
+            .to_string();
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+
+        assert!(
+            annotated.contains(&format!(
+                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n"
+            )),
+            "{annotated}"
+        );
+        assert!(annotated.contains("- later\n"), "{annotated}");
     }
 
     #[test]
@@ -5095,7 +5276,7 @@ Old.
             .cell_id()
             .to_string();
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
         )));
     }
 

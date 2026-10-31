@@ -1289,12 +1289,12 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         .count()
         .saturating_sub(current.matches(&needle).count());
 
-    let replace_ops = node_replace_ops_from_diff(&current, &target, "queue").unwrap_or_default();
     if skip_visible_guard {
         effects.atomic_write(file, &target)?;
-    } else if !replace_ops.is_empty() {
-        effects.converge_structural_ops(file, &replace_ops, &current, "queue_response_backlink")?;
     } else {
+        // This projection owns both sides of the lookup: inert queue children
+        // and the identity-neutral marker inside the exchange response. A
+        // queue-only structural batch would silently drop the exchange edit.
         effects.converge_document_or_disk(file, &target, &current, "queue_response_backlink")?;
     }
 
@@ -3437,7 +3437,8 @@ mod core_tests {
         let response = concat!(
             "### Re: searchable backlink — test\n\n",
             "> **Queue prompt:**\n>\n> do [#searchable]\n\n",
-            "Completed.\n",
+            "Completed `/work/tasks/searchable.md`.\n",
+            "%% response published on the worker branch %%\n",
         );
         let before = concat!(
             "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
@@ -3487,6 +3488,18 @@ mod core_tests {
         for content in [&updated, &snapshot] {
             assert!(
                 content.contains(&format!("response: {response_id}")),
+                "{content}"
+            );
+            assert!(
+                content.contains(&format!("%% response {response_id} %%")),
+                "{content}"
+            );
+            assert!(
+                content.contains("  - %% /work/tasks/searchable.md %%"),
+                "{content}"
+            );
+            assert!(
+                content.contains("  - %% response published on the worker branch %%"),
                 "{content}"
             );
             assert!(content.contains("- do [#later]\n"), "{content}");

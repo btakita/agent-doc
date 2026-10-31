@@ -142,6 +142,21 @@ fn is_transient_boundary(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
 }
 
+/// Is `trimmed` the binary-owned lookup marker for a response cell?
+///
+/// The marker contains the cell id derived from the response body, so it must
+/// be identity-neutral to avoid a self-referential hash. Human-authored
+/// `%% response … %%` salient snippets remain identity-bearing; only the
+/// `r:<hash>` lookup form is transient.
+pub fn is_response_id_lookup_marker(trimmed: &str) -> bool {
+    trimmed
+        .strip_prefix("%% response r:")
+        .and_then(|rest| rest.strip_suffix(" %%"))
+        .is_some_and(|hash| {
+            !hash.is_empty() && hash.chars().all(|character| character.is_ascii_hexdigit())
+        })
+}
+
 /// Normalize a response turn's verbatim lines into a transient-invariant identity
 /// digest: heading + body, ignoring the working-tree-only ` (HEAD)` annotation, a
 /// `~~…~~` strike wrapper, per-cycle boundary markers, and trailing whitespace /
@@ -160,7 +175,7 @@ pub fn response_identity_digest(lines: &[String]) -> String {
         let trimmed = raw.trim();
         if is_h3_heading(trimmed) {
             norm.push(normalize_heading_key(trimmed));
-        } else if is_transient_boundary(trimmed) {
+        } else if is_transient_boundary(trimmed) || is_response_id_lookup_marker(trimmed) {
             continue;
         } else {
             norm.push(raw.trim_end().to_string());
@@ -386,6 +401,36 @@ pub fn parse_exchange_nodes(inner: &str) -> Vec<ExchangeNode> {
 /// Render an exchange node list back to a byte-stable source string.
 pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
+}
+
+/// Add the stable response-cell id to the matching response as a terse lookup
+/// marker. The marker is inserted before the node's trailing blank lines and
+/// is identity-neutral, so replay is idempotent and the response keeps the id
+/// that selected it.
+pub fn annotate_response_with_lookup_id(inner: &str, response_id: &str) -> String {
+    if response_id.is_empty() {
+        return inner.to_string();
+    }
+    let marker = format!("%% response {response_id} %%");
+    let mut nodes = parse_exchange_nodes(inner);
+    for node in &mut nodes {
+        if !matches!(node.kind, ExchangeNodeKind::Response { .. }) || node.node_id() != response_id
+        {
+            continue;
+        }
+        if node.lines.iter().any(|line| line.trim() == marker) {
+            break;
+        }
+        let insert_at = node
+            .lines
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .map(|index| index + 1)
+            .unwrap_or(node.lines.len());
+        node.lines.insert(insert_at, format!("{marker}\n"));
+        break;
+    }
+    render_exchange_nodes(&nodes)
 }
 
 // ---------------------------------------------------------------------------
@@ -845,6 +890,42 @@ mod tests {
             .find(|n| n.render().contains("Please continue."))
             .unwrap();
         assert_eq!(added.kind, ExchangeNodeKind::Prompt);
+    }
+
+    #[test]
+    fn response_lookup_marker_is_searchable_but_identity_neutral() {
+        let inner = "### Re: lookup\n\nCompleted the work.\n\n❯ Next prompt.\n";
+        let response_id = parse_exchange_nodes(inner)
+            .into_iter()
+            .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+            .unwrap()
+            .node_id();
+
+        let annotated = annotate_response_with_lookup_id(inner, &response_id);
+
+        assert!(
+            annotated.contains(&format!("%% response {response_id} %%\n\n❯ Next prompt.")),
+            "{annotated}"
+        );
+        let annotated_id = parse_exchange_nodes(&annotated)
+            .into_iter()
+            .find(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+            .unwrap()
+            .node_id();
+        assert_eq!(annotated_id, response_id);
+        assert_eq!(
+            annotate_response_with_lookup_id(&annotated, &response_id),
+            annotated
+        );
+    }
+
+    #[test]
+    fn salient_response_marker_remains_identity_bearing() {
+        let plain = "### Re: lookup\n\nCompleted the work.\n";
+        let salient = "### Re: lookup\n\nCompleted the work.\n%% response published locally %%\n";
+        let plain_id = parse_exchange_nodes(plain)[0].node_id();
+        let salient_id = parse_exchange_nodes(salient)[0].node_id();
+        assert_ne!(plain_id, salient_id);
     }
 
     #[test]

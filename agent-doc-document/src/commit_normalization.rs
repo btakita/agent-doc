@@ -243,7 +243,16 @@ pub fn normalize_committed_exchange_artifacts(content: &str) -> String {
         }
         rebuilt.push_str(&body[last..comp.open_end]);
         if comp.name == "exchange" {
-            let normalized = canonicalize_answered_prompt_prefixes(comp.content(body));
+            let without_lookup_markers = comp
+                .content(body)
+                .split_inclusive('\n')
+                .filter(|line| {
+                    !agent_doc_markdown_ast::exchange_tree::is_response_id_lookup_marker(
+                        line.trim(),
+                    )
+                })
+                .collect::<String>();
+            let normalized = canonicalize_answered_prompt_prefixes(&without_lookup_markers);
             changed |= normalized != comp.content(body);
             rebuilt.push_str(&normalized);
         } else {
@@ -282,6 +291,21 @@ pub fn redact_component_contents_for_absorb(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn committed_exchange_normalization_ignores_response_id_lookup_marker() {
+        let plain = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: lookup\n\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let annotated = plain.replace("Done.\n", "Done.\n%% response r:0123456789ab %%\n");
+
+        assert_eq!(
+            normalize_committed_exchange_artifacts(&annotated),
+            normalize_committed_exchange_artifacts(plain)
+        );
+    }
 
     #[test]
     fn canonicalize_answered_prompt_prefixes_uses_opt_in_prompt_start() {

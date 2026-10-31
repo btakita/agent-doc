@@ -892,7 +892,7 @@ fn validate_editable_attr(list: backlog::TrackedWorkList, attr: &str) -> Result<
     )
 }
 
-/// Validate the `queue` sync mode before it reaches the document.
+/// Validate the `queue` sync mode or explicit queue id before it reaches the document.
 ///
 /// A `queue=<garbage>` marker parses, so preflight only warns about it later while
 /// nothing mirrors in the meantime. Refusing at the command boundary keeps the
@@ -909,14 +909,14 @@ fn validate_attr_value(attr: &str, value: Option<&str>) -> Result<()> {
     let Some(value) = value else {
         return Ok(());
     };
-    // Validate through the module that OWNS the vocabulary, so a new sync mode
-    // never has to be added in two places.
-    if agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value).is_some() {
+    if agent_doc_queue::document_queue::BacklogQueueSyncMode::parse(value).is_some()
+        || agent_doc_queue::queue_set::QueueId::parse(value).is_ok()
+    {
         return Ok(());
     }
     anyhow::bail!(
-        "`queue={value}` is not a recognized backlog sync mode (use `sync`, `append`, \
-         `prepend`, or the bare `queue` flag)"
+        "`queue={value}` is neither a recognized backlog sync mode nor a valid queue id \
+         (use `sync`, `append`, `prepend`, a queue id, or the bare `queue` flag)"
     )
 }
 
@@ -2742,6 +2742,20 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let doc = tmp.path().join("test.md");
         (tmp, doc)
+    }
+
+    #[test]
+    fn backlog_queue_attr_accepts_modes_bare_and_queue_ids() {
+        for value in [
+            None,
+            Some("sync"),
+            Some("append"),
+            Some("prepend"),
+            Some("build-2"),
+        ] {
+            validate_attr_value("queue", value).unwrap();
+        }
+        assert!(validate_attr_value("queue", Some("bad/id")).is_err());
     }
 
     #[test]

@@ -238,9 +238,11 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                     ));
                 }
             } else if key == "queue" && matches!(component.name.as_str(), "backlog" | "pending") {
-                if BacklogQueueSyncMode::parse(value).is_none() {
+                if BacklogQueueSyncMode::parse(value).is_none()
+                    && crate::queue_set::QueueId::parse(value).is_err()
+                {
                     issues.push(format!(
-                        "`queue={value}` on `agent:{}` is not a recognized sync mode (use `sync`, `append`, or `prepend`)",
+                        "`queue={value}` on `agent:{}` is neither a recognized sync mode nor a valid queue id",
                         component.name
                     ));
                 }
@@ -388,6 +390,7 @@ mod tests {
             "<!-- agent:backlog queue -->",
             "<!-- agent:backlog queue=sync -->",
             "<!-- agent:backlog queue=append -->",
+            "<!-- agent:backlog queue=build -->",
         ] {
             let content = format!("{marker}\n- [ ] [#x1] keep this\n<!-- /agent:backlog -->\n");
             assert!(
@@ -457,16 +460,16 @@ mod tests {
     }
 
     #[test]
-    fn component_attr_warning_flags_invalid_queue_mode() {
+    fn component_attr_warning_flags_invalid_queue_mode_or_id() {
         let content = concat!(
-            "<!-- agent:backlog queue=nope -->\n",
+            "<!-- agent:backlog queue=bad/id -->\n",
             "- [ ] [#x1] keep this\n",
             "<!-- /agent:backlog -->\n",
         );
         let warning = component_attr_warning(content).expect("unrecognized queue mode should warn");
         let body = warning.message_body();
-        assert!(body.contains("not a recognized sync mode"));
-        assert!(body.contains("queue=nope"));
+        assert!(body.contains("nor a valid queue id"));
+        assert!(body.contains("queue=bad/id"));
     }
 
     #[test]

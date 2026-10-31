@@ -5151,6 +5151,29 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             return Ok(QueueState::default());
         }
     }
+    // A valued backlog `queue=<id>` is durable ownership, not a hint to the
+    // queue selected today. Route it before selection so the target can run in
+    // this pass. Unlike inferred mirrors, an explicit target may be a loop.
+    let routing = agent_doc_queue::backlog_sync::project_explicit_backlog_queue_routes(
+        &components,
+        &current_content,
+    )?;
+    if !routing.placement_debt.is_empty() {
+        eprintln!(
+            "[preflight] queue: {} backlog item(s) require main-agent queue placement reconciliation",
+            routing.placement_debt.len()
+        );
+    }
+    if let Some(projected) = routing.content {
+        current_content = projected;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: routed {} backlog item(s) to explicitly named queue(s)",
+            routing.newly_materialized.len()
+        );
+    }
     let owner_selection = agent_doc_queue_io::subagent_dispatch::owner_selection_claims_for_content(
         file,
         &current_content,
@@ -10743,6 +10766,49 @@ mod tests {
                 .count(),
             1,
             "{updated}"
+        );
+    }
+
+    #[test]
+    fn run_queue_maintenance_routes_explicit_backlog_target_into_named_loop() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:run id=main -->\n<!-- /agent:run -->\n",
+            "<!-- agent:loop id=issues interval=1h -->\n<!-- /agent:loop -->\n",
+            "<!-- agent:backlog queue=\"issues\" -->\n",
+            "- [ ] [#audit] audit issue state\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&updated).unwrap();
+        let queues = agent_doc_queue::queue_set::QueueSet::parse(&updated, &components).unwrap();
+        assert!(
+            queues
+                .block("main")
+                .unwrap()
+                .component
+                .content(&updated)
+                .trim()
+                .is_empty()
+        );
+        assert!(
+            queues
+                .block("issues")
+                .unwrap()
+                .component
+                .content(&updated)
+                .contains("do [#audit]")
         );
     }
 

@@ -872,14 +872,21 @@ mod tests {
         assert_eq!(auth.presets[0].body.as_deref(), Some("codex authorization"));
         assert!(
             auth.subagent_prompt_preamble
-                .contains("> codex authorization"),
+                .contains("  \"#authorize\": |-\n    codex authorization"),
             "{}",
             auth.subagent_prompt_preamble
         );
         assert!(
             !auth
                 .subagent_prompt_preamble
-                .contains("> shared authorization"),
+                .contains("    shared authorization"),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+        assert!(
+            auth.subagent_prompt_preamble.contains(
+                "Operator-authorized prompt preset lookup table (symbol keys map to effective values; symbols remain unexpanded)"
+            ),
             "{}",
             auth.subagent_prompt_preamble
         );

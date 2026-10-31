@@ -4946,7 +4946,12 @@ mod rearm_evidence_fault {
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
-    run_queue_maintenance_with_coin_gate(file, diff, &FreeTextCoinGate::structural_only())
+    run_queue_maintenance_with_coin_gate_and_snapshot(
+        file,
+        diff,
+        &FreeTextCoinGate::structural_only(),
+        None,
+    )
 }
 
 /// [`run_queue_maintenance`] with the typing-gate evidence preflight's
@@ -4957,6 +4962,22 @@ pub fn run_queue_maintenance_with_coin_gate(
     file: &Path,
     diff: Option<&str>,
     coin_gate: &FreeTextCoinGate,
+) -> Result<QueueState> {
+    run_queue_maintenance_with_coin_gate_and_snapshot(file, diff, coin_gate, None)
+}
+
+/// Queue maintenance using the baseline observed at preflight admission.
+///
+/// Preflight can commit prior-cycle/document drift before it reaches queue
+/// convergence. That checkpoint must not retroactively authorize a queue copy
+/// inserted during the current admission as snapshot-authored multiplicity.
+/// Direct maintenance callers pass no override and retain the ordinary durable
+/// baseline lookup.
+pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
+    file: &Path,
+    diff: Option<&str>,
+    coin_gate: &FreeTextCoinGate,
+    admission_snapshot: Option<&str>,
 ) -> Result<QueueState> {
     // #sqedit-race Phase 2: defer ALL queue maintenance mutation while a different,
     // live process holds a fresh queue-edit lease (a direct `queue prune-noise` /
@@ -6005,9 +6026,11 @@ pub fn run_queue_maintenance_with_coin_gate(
     // (#queue-operator-pin-position-lock) is preserved: convergence never
     // reorders, and its only additive text projection is the stable
     // `⟦effect:N⟧` identity on lawful repeated free-text rows.
-    let snapshot_text = agent_doc_snapshot_io::load_document_baseline(file)
-        .ok()
-        .flatten();
+    let snapshot_text = admission_snapshot.map(str::to_owned).or_else(|| {
+        agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
+    });
     let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> = snapshot_text
         .as_deref()
         .map(|snapshot| queue_entries_for_id(snapshot, &selected_queue_id))

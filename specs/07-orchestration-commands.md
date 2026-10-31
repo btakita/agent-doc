@@ -663,7 +663,8 @@ The pure policy owner is
 | One bare row | Unchanged |
 | Two or more lawful bare rows | Append `⟦effect:1⟧`, `⟦effect:2⟧`, ... in queue order |
 | Completed nested-command occurrence followed by a live bare recurrence | Leave the completed row unchanged; reserve its queue-order id and append the next id to the live row |
-| Live claimed/running/reported occurrence followed by an operator-typed identical row | Durable editor-op evidence raises the snapshot multiplicity ceiling by exactly the number of whole rows inserted; retain each proven recurrence and assign distinct effect ids (`#repeatpromptauthorship`) |
+| Live claimed/running/reported nested command or top-level free-text occurrence followed by an operator-typed identical row | Durable editor-op evidence raises the snapshot multiplicity ceiling by exactly the number of whole eligible rows inserted; retain each proven recurrence and assign distinct effect ids (`#repeatpromptauthorship`) |
+| Uncommitted top-level id-backed duplicate, even with matching editor-op insertion evidence | Collapse the excess as replay residue; a top-level `do [#id]` or `[#id]` repeat is indistinguishable from a mirrored replay until its multiplicity is committed in the snapshot |
 | Live multiplicity beyond the snapshot with no matching operator row-insert evidence | Collapse the excess as replay residue; lifecycle markers or stale editor text alone never authorize another attempt |
 | Existing unique positive effect ids plus bare rows | Preserve existing ids; assign each bare row the lowest unused positive id in queue order |
 | A repeated or zero effect id | Preserve the first valid occurrence; deterministically reassign later/missing occurrences |
@@ -687,11 +688,17 @@ effect.
 An in-flight or reported occurrence is still a live queue row, so its rerun
 cannot rely on the struck-row reservation rule. For this transition the durable
 operator editor-op epoch is the authorship source: each inserted run that parses
-as a whole prompt row matching a live snapshot identity contributes one
-additional live occurrence allowance. Convergence reads that evidence only when
-current multiplicity exceeds the snapshot, fails closed when the epoch is
-unreadable, and consumes no allowance for fragments, struck text, unrelated
-rows, or stale replica flushes. The allowance changes only cardinality; the
+as a whole eligible prompt row matching a live snapshot identity contributes
+one additional live occurrence allowance. Eligible rows are nested commands or
+top-level free text. Top-level id-backed directives and references are excluded:
+their editor insertion is indistinguishable from mirrored replay, so only
+committed snapshot multiplicity present when preflight admission began can
+authorize a repeat; a prior-cycle auto-checkpoint during that same preflight
+must not retroactively promote a replay into authorship. Convergence reads the
+editor-op evidence only when current eligible multiplicity exceeds the snapshot,
+fails closed when the epoch is unreadable, and consumes no allowance for
+fragments, struck text, unrelated rows, stale replica flushes, or top-level
+id-backed rows. The allowance changes only cardinality; the
 normal effect projection remains the identity owner and assigns
 `⟦effect:N⟧` before claim/receipt projection. Therefore a new `  - #address`
 beneath the same parent is fresh dispatchable work even while the earlier

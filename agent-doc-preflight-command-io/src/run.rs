@@ -9,7 +9,7 @@ use agent_doc_preflight_io::{
     check_linked_docs, checkpoint_baseline_content, enforce_no_dropped_backlog,
     explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
     read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
-    run_queue_maintenance_with_coin_gate, shadow_open_backlog_admission,
+    run_queue_maintenance_with_coin_gate_and_snapshot, shadow_open_backlog_admission,
     sweep::{
         current_sweep_budget, current_sweep_owner, load_sweep_cursor,
         log_and_skip_foreign_owned_sweep_if_needed, order_from_cursor, run_bounded_sweep,
@@ -450,6 +450,11 @@ fn run_with_options_to_writer_in_pass(
         let admitted = resolve_admission_preflight_document(file, "initial")?;
         (admitted.content, admitted.replica_hold)
     };
+    // Preserve the baseline that existed when this admission began. Repair and
+    // prior-cycle closeout may checkpoint document drift before queue
+    // maintenance; using that newer baseline would turn a same-cycle replay
+    // copy into apparently committed queue multiplicity.
+    let queue_admission_snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
     // A retained response replay may transiently duplicate only response cells
     // and/or protocol boundary markers. Normalize that evidence-backed shape
     // through Lazily before the generic integrity gate; otherwise the gate
@@ -1268,7 +1273,12 @@ fn run_with_options_to_writer_in_pass(
         if let Err(err) = agent_doc_preflight_io::run_todo_id_maintenance(file, &coin_gate) {
             eprintln!("[preflight] todo: id backfill not applied this pass: {err:#}");
         }
-        match run_queue_maintenance_with_coin_gate(file, diff_result.as_deref(), &coin_gate) {
+        match run_queue_maintenance_with_coin_gate_and_snapshot(
+            file,
+            diff_result.as_deref(),
+            &coin_gate,
+            queue_admission_snapshot.as_deref(),
+        ) {
             Ok(state) => state,
             Err(e) => {
                 if e.downcast_ref::<QueueAuthorityUnavailable>().is_some() {
@@ -6261,7 +6271,7 @@ mod tests {
 
         // Queue maintenance mirrors the backlog `queue`-attr id into the queue and
         // updates the snapshot to that converged shape.
-        let _ = run_queue_maintenance(&doc, None).unwrap();
+        let _ = agent_doc_preflight_io::run_queue_maintenance(&doc, None).unwrap();
         let converged = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
@@ -6361,7 +6371,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        let state = agent_doc_preflight_io::run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
@@ -6402,7 +6412,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        let state = agent_doc_preflight_io::run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert_eq!(state.queue_active, Some(true));
@@ -6465,7 +6475,7 @@ mod tests {
         )
         .unwrap();
 
-        run_queue_maintenance(&doc, None).unwrap();
+        agent_doc_preflight_io::run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             updated.contains(marker),
@@ -6510,7 +6520,7 @@ mod tests {
         )
         .unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        let state = agent_doc_preflight_io::run_queue_maintenance(&doc, None).unwrap();
 
         assert!(
             state

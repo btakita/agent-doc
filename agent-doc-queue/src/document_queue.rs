@@ -4883,6 +4883,24 @@ fn queue_item_identity(entry: &QueueEntry) -> Option<agent_doc_element_queue::Qu
     ))
 }
 
+/// Whether an editor insertion can prove a repeated live occurrence.
+///
+/// Top-level id-backed rows are replay-ambiguous: a CRDT/editor mirror of an
+/// existing `do [#id]` or `[#id]` row is byte-identical to an intentional
+/// repeat. Their multiplicity therefore comes only from the committed
+/// snapshot. Nested commands and top-level free text remain eligible because
+/// their separately-addressable effect projection preserves authored repeats.
+fn operator_repeat_authorship_eligible(entry: &QueueEntry) -> bool {
+    let QueueEntry::Prompt(prompt) = entry else {
+        return false;
+    };
+    prompt.indent > 0
+        || matches!(
+            queue_item_identity(entry),
+            Some(agent_doc_element_queue::QueueItemIdentity::FreeText(_))
+        )
+}
+
 fn snapshot_struck_representatives(
     snapshot_entries: &[QueueEntry],
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, QueueEntry> {
@@ -5122,7 +5140,7 @@ pub fn operator_repeated_queue_identity_allowances(
 ) -> std::collections::HashMap<agent_doc_element_queue::QueueItemIdentity, usize> {
     let snapshot_live = snapshot_entries
         .iter()
-        .filter(|entry| matches!(entry, QueueEntry::Prompt(_)))
+        .filter(|entry| operator_repeat_authorship_eligible(entry))
         .filter_map(queue_item_identity)
         .collect::<std::collections::HashSet<_>>();
     if snapshot_live.is_empty() {
@@ -5132,15 +5150,15 @@ pub fn operator_repeated_queue_identity_allowances(
     let mut allowances = std::collections::HashMap::new();
     for run in inserted_runs {
         for line in run.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.contains("~~") {
+            let line = line.trim_end();
+            if line.trim().is_empty() || line.contains("~~") {
                 continue;
             }
             let Ok(entries) = parse(line) else {
                 continue;
             };
             for entry in &entries {
-                if let QueueEntry::Prompt(_) = entry
+                if operator_repeat_authorship_eligible(entry)
                     && let Some(identity) = queue_item_identity(entry)
                     && snapshot_live.contains(&identity)
                 {
@@ -5162,7 +5180,8 @@ pub fn live_snapshot_multiplicity_excess_identities(
     let counts = |source: &[QueueEntry]| {
         let mut counts = std::collections::HashMap::<ConvergenceKey, usize>::new();
         for entry in source {
-            if let Some(key) = convergence_identity(entry)
+            if operator_repeat_authorship_eligible(entry)
+                && let Some(key) = convergence_identity(entry)
                 && key.2 == QueueItemLifecycle::Live
             {
                 *counts.entry(key).or_insert(0) += 1;
@@ -5480,12 +5499,14 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
                     .copied()
                     .unwrap_or(0)
                     .max(1)
-                    .saturating_add(
+                    .saturating_add(if operator_repeat_authorship_eligible(entry) {
                         operator_repeat_allowances
                             .get(identity)
                             .copied()
-                            .unwrap_or(0),
-                    )
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    })
             }
         };
         let seen = kept_count.entry(key.clone()).or_insert(0);
@@ -10205,17 +10226,40 @@ mod tests {
 
     #[test]
     fn repeat_allowance_counts_only_whole_live_snapshot_rows() {
-        let snapshot = vec![nested(p("#address"))];
+        let snapshot = vec![nested(p("#address")), p("do [#alpha]")];
         let allowances = operator_repeated_queue_identity_allowances(
             &snapshot,
             &[
                 "address".to_string(),
                 "- ~~#address~~".to_string(),
-                "\n  - #address\n  - #address\n  - #review\n".to_string(),
+                "\n  - #address\n  - #address\n  - #review\n- do [#alpha]\n".to_string(),
             ],
         );
         assert_eq!(allowances.len(), 1);
         assert_eq!(allowances.values().copied().sum::<usize>(), 2);
+        assert!(!allowances.contains_key(
+            &agent_doc_element_queue::QueueItemIdentity::from_prompt("do [#alpha]")
+        ));
+    }
+
+    #[test]
+    fn forged_repeat_allowance_cannot_duplicate_a_top_level_id_row() {
+        let snapshot = vec![p("do [#alpha]")];
+        let current = vec![p("do [#alpha]"), p("do [#alpha]")];
+        let identity = agent_doc_element_queue::QueueItemIdentity::from_prompt("do [#alpha]");
+        let allowances = std::collections::HashMap::from([(identity, 1)]);
+
+        assert_eq!(
+            converge_queue_via_lifecycle_with_operator_evidence(
+                &current,
+                &snapshot,
+                &Default::default(),
+                &Default::default(),
+                &allowances,
+            ),
+            Some(snapshot),
+            "top-level id-backed multiplicity requires committed snapshot evidence"
+        );
     }
 
     #[test]

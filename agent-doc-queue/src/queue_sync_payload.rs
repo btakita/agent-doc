@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued; reconcile/unknown and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued; reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -130,6 +130,22 @@ pub struct QueueSyncScanError {
     pub operation: QueueSyncOperation,
 }
 
+/// An active backlog/pending item requested queue placement that cannot be
+/// resolved without a coordinator choice. Bare `queue` is ambiguous when more
+/// than one queue exists; an explicit missing queue id is likewise retained as
+/// typed reconcile debt instead of being treated as a scan failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSyncPlacementDebt {
+    pub document_path: String,
+    pub document_scope: QueueSyncDocumentScope,
+    pub item_id: String,
+    pub item_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_queue_id: Option<String>,
+    pub eligible_queue_ids: Vec<String>,
+    pub operation: QueueSyncOperation,
+}
+
 /// Explicit lifecycle partitions.  Keeping these as separate fields makes it
 /// difficult for a consumer to accidentally inspect only a selected/active
 /// queue and treat every other incomplete state as drained.
@@ -137,6 +153,8 @@ pub struct QueueSyncScanError {
 pub struct QueueSyncPayload {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scan_errors: Vec<QueueSyncScanError>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub placement_reconcile: Vec<QueueSyncPlacementDebt>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending: Vec<QueueSyncItem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -162,6 +180,7 @@ impl QueueSyncPayload {
 
     pub fn len(&self) -> usize {
         self.scan_errors.len()
+            + self.placement_reconcile.len()
             + self.pending.len()
             + self.claimed_unstarted.len()
             + self.running.len()
@@ -187,6 +206,7 @@ impl QueueSyncPayload {
 
     pub fn extend(&mut self, other: Self) {
         self.scan_errors.extend(other.scan_errors);
+        self.placement_reconcile.extend(other.placement_reconcile);
         self.pending.extend(other.pending);
         self.claimed_unstarted.extend(other.claimed_unstarted);
         self.running.extend(other.running);

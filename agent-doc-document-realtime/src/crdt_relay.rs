@@ -957,10 +957,12 @@ fn member_insertions_lost_by(
 /// body, or the framing text between two bodies (the markers themselves plus any
 /// prose that sits outside every component).
 ///
-/// Regions are the unit the component firewall reasons over. Component bodies are
-/// keyed by `component:<name>:<occurrence>` so a body edit elsewhere in the
-/// document cannot shift a region's identity, and each framing run is keyed by the
-/// component it follows (`frame:head` for the leading run) so it is equally stable.
+/// Regions are the unit the component firewall reasons over. A component carrying
+/// an explicit `id=` is keyed by `component:<name>:id=<id>`; otherwise its body is
+/// keyed by `component:<name>:<occurrence>`. The explicit id keeps independently
+/// addressable runnable queues stable when a concurrent projection reorders them.
+/// Each framing run is keyed by the component it follows (`frame:head` for the
+/// leading run) so it follows the same stable identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DocumentRegion {
     key: String,
@@ -991,13 +993,32 @@ fn document_regions(doc: &str) -> Option<Vec<DocumentRegion>> {
     top.sort_by_key(|c| c.open_start);
 
     let mut occurrences: HashMap<&str, usize> = HashMap::new();
+    let mut keyed_occurrences: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<DocumentRegion> = Vec::with_capacity(top.len() * 2 + 1);
     let mut cursor = 0usize;
     let mut previous = "head".to_string();
     for comp in top {
-        let occurrence = occurrences.entry(comp.name.as_str()).or_insert(0);
-        let key = format!("component:{}:{}", comp.name, *occurrence);
-        *occurrence += 1;
+        let explicit_id = comp
+            .attrs
+            .get("id")
+            .map(String::as_str)
+            .filter(|id| !id.is_empty() && *id != "true");
+        let key = if let Some(id) = explicit_id {
+            let base = format!("component:{}:id={id}", comp.name);
+            let occurrence = keyed_occurrences.entry(base.clone()).or_insert(0);
+            let key = if *occurrence == 0 {
+                base
+            } else {
+                format!("{base}:occurrence={occurrence}")
+            };
+            *occurrence += 1;
+            key
+        } else {
+            let occurrence = occurrences.entry(comp.name.as_str()).or_insert(0);
+            let key = format!("component:{}:{}", comp.name, *occurrence);
+            *occurrence += 1;
+            key
+        };
         out.push(DocumentRegion {
             key: format!("frame:{previous}"),
             start: cursor,
@@ -3659,6 +3680,74 @@ mod tests {
             )
             .is_empty(),
             "the member edited queue, so a queue change is not cross-component damage"
+        );
+    }
+
+    #[test]
+    fn keyed_queue_reorder_does_not_hide_a_cross_queue_duplicate_insertion() {
+        const MEMBER_BEFORE: &str = concat!(
+            "<!-- agent:run id=main -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=reviews -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+        );
+        const MEMBER_AFTER: &str = concat!(
+            "<!-- agent:run id=main -->\n",
+            "- do [#sampletask]\n",
+            "  - %% hold %%\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=reviews -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+        );
+        const CANONICAL_BEFORE: &str = concat!(
+            "<!-- agent:run id=reviews -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=main -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+        );
+        const UNION_AFTER: &str = concat!(
+            "<!-- agent:run id=reviews -->\n",
+            "- do [#sampletask]\n",
+            "  - %% hold %%\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=main -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+        );
+        const DESIRED: &str = concat!(
+            "<!-- agent:run id=reviews -->\n",
+            "- do [#sampletask]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=main -->\n",
+            "- do [#sampletask]\n",
+            "  - %% hold %%\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let damaged = cross_component_union_damage(
+            CANONICAL_BEFORE,
+            UNION_AFTER,
+            MEMBER_BEFORE,
+            MEMBER_AFTER,
+        );
+        assert_eq!(
+            damaged,
+            vec!["component:queue:id=reviews".to_string()],
+            "the hold edit belongs to main; the copy materialized in reviews is damage even after the queues reorder",
+        );
+        let edits = component_scoped_region_restore(UNION_AFTER, CANONICAL_BEFORE, &damaged)
+            .expect("keyed regions remain comparable after reordering");
+        let restored = apply_region_restore(UNION_AFTER, &edits);
+        let relocated = relocate_lost_member_insertions(MEMBER_BEFORE, MEMBER_AFTER, &restored)
+            .expect("the operator insertion relocates into its keyed source queue");
+        assert_eq!(
+            relocated, DESIRED,
+            "repair must keep one hold child under main and remove the cross-queue duplicate",
         );
     }
 

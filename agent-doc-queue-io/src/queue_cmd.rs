@@ -991,7 +991,6 @@ pub fn plan_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
-    let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
     // A torn realtime merge can place the binary completion cell underneath
     // the queue row it reports instead of in `agent:exchange`. That corrupts
@@ -1022,6 +1021,15 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     } else {
         false
     };
+    // Captured-answer convergence may strike a response-proven free-text head,
+    // and that write is guarded against conversation scaffolding in queue. Run
+    // it only after the repair above has restored the completion cell to
+    // exchange; otherwise the recovery path itself is blocked by the corruption
+    // it is meant to make recoverable.
+    let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
+    if answered_count > 0 {
+        content = effects.current_document_content(file, "queue_sync_after_captured_answers")?;
+    }
     // Older binaries could project `📥` onto a retained generated Response child
     // whose id differed from the terminal parent's latest response backlink.
     // Repair that binary-owned cosmetic corruption before parsing queue work so
@@ -1374,6 +1382,7 @@ mod tests {
     struct FakeEffects {
         current: RefCell<Option<String>>,
         captured_answered: Cell<usize>,
+        reject_scaffold_during_capture: Cell<bool>,
     }
 
     impl FakeEffects {
@@ -1381,6 +1390,7 @@ mod tests {
             Self {
                 current: RefCell::new(Some(content.into())),
                 captured_answered: Cell::new(0),
+                reject_scaffold_during_capture: Cell::new(false),
             }
         }
 
@@ -1496,7 +1506,17 @@ mod tests {
             Ok(0)
         }
 
-        fn converge_captured_answered_free_text_projection(&self, _file: &Path) -> Result<usize> {
+        fn converge_captured_answered_free_text_projection(&self, file: &Path) -> Result<usize> {
+            if self.reject_scaffold_during_capture.get() {
+                let content = self
+                    .current
+                    .borrow()
+                    .clone()
+                    .map_or_else(|| std::fs::read_to_string(file), Ok)?;
+                agent_doc_template::guard_no_conversation_content_inside_tracked_components(
+                    &content,
+                )?;
+            }
             Ok(self.captured_answered.get())
         }
     }
@@ -1627,6 +1647,7 @@ mod tests {
         );
         std::fs::write(&doc, content).unwrap();
         let effects = FakeEffects::with_current(content);
+        effects.reject_scaffold_during_capture.set(true);
 
         sync_with_effects(&effects, &doc)
             .expect("queue sync should recover the cell before lifecycle parsing");

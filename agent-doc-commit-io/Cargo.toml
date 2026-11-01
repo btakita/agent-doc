@@ -25,6 +25,7 @@ agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.564" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.564" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.564" }
+agent-doc-decision-io = { path = "../agent-doc-decision-io", version = "0.35.564" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.564" }
 agent-doc-element-backlog-io = { path = "../agent-doc-element-backlog-io", version = "0.35.564" }
 agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.564" }

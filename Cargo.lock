@@ -41,6 +41,7 @@ dependencies = [
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-decision-io",
  "agent-doc-diff",
  "agent-doc-diff-io",
  "agent-doc-document",
@@ -409,6 +410,7 @@ dependencies = [
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-debounce",
+ "agent-doc-decision-io",
  "agent-doc-diff",
  "agent-doc-document",
  "agent-doc-document-realtime",
@@ -663,6 +665,20 @@ dependencies = [
 [[package]]
 name = "agent-doc-debounce"
 version = "0.35.564"
+
+[[package]]
+name = "agent-doc-decision-io"
+version = "0.35.564"
+dependencies = [
+ "agent-doc-hash",
+ "agent-doc-log-time",
+ "agent-doc-markdown-ast",
+ "anyhow",
+ "fs2",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "agent-doc-diff"
@@ -5948,7 +5964,7 @@ dependencies = [
 
 [[package]]
 name = "tmux-router"
-version = "0.3.22"
+version = "0.3.21"
 dependencies = [
  "anyhow",
  "clap",

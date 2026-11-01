@@ -32,6 +32,7 @@ that still covers the routed document instead of racing it with republication.
 
 ## Full catalog
 
+- **Mutable salient decisions** — `agent-doc decision read/plan/apply/validate/history` maintains a tracked `decisions.md` current registry and append-only `decisions-archive.md`; stable `DEC-...` links work from queue/TODO/notes/prompts, canonical response evidence pins archive responses, stale plans fail closed, and commits carry sorted decision/response provenance trailers.
 - **Compaction-resistant skill router** — installed Claude/Codex/OpenCode
   `SKILL.md` files are generated from one small table of contents. The router
   survives context compaction and requires `session-cycle.md`; that bundled

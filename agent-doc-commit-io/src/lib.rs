@@ -2269,7 +2269,7 @@ where
         );
     }
     let timestamp = chrono_timestamp();
-    let msg = agent_doc_commit_message_for_file(file, &timestamp);
+    let mut msg = agent_doc_commit_message_for_file(file, &timestamp);
 
     let mut snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let mut file_content = commit_current_document_content(file, "commit_initial_current")
@@ -2281,6 +2281,15 @@ where
         })?;
     guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
+    let decision_trailers = agent_doc_decision_io::trailers_for_diff(
+        head_doc.as_deref().unwrap_or_default(),
+        &file_content,
+    )
+    .render();
+    if !decision_trailers.is_empty() {
+        msg.push_str("\n\n");
+        msg.push_str(&decision_trailers);
+    }
     let rebased_snapshot = match snapshot_content.as_deref() {
         Some(snapshot) => {
             let (rebased, current) =

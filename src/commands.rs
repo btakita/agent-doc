@@ -115,6 +115,11 @@ fn all_commands() -> Vec<CommandInfo> {
         "Git add + commit with timestamp",
     ));
     cmds.push(cmd(
+        "/agent-doc decision",
+        "<read|plan|apply|validate|history>",
+        "Manage the project-level mutable decision registry",
+    ));
+    cmds.push(cmd(
         "/agent-doc focus",
         "<FILE>",
         "Focus tmux pane for a session document",

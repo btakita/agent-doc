@@ -2424,6 +2424,11 @@ enum Commands {
         #[arg(long)]
         restore: Option<String>,
     },
+    /// Read, plan, apply, validate, and inspect the project decision registry
+    Decision {
+        #[command(subcommand)]
+        action: DecisionAction,
+    },
     /// Annotated git log for a session document (shows pre-compact tags)
     Log {
         /// Path to the session document
@@ -4166,6 +4171,160 @@ enum AdminQueueAction {
 }
 
 #[derive(Subcommand)]
+enum DecisionAction {
+    /// Read the current registry or one stable decision id
+    Read {
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+        id: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Produce a compare-and-swap mutation plan without writing
+    Plan {
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        state: Option<String>,
+        #[arg(long)]
+        decision: Option<String>,
+        #[arg(long)]
+        rationale: Option<String>,
+        #[arg(long = "evidence")]
+        evidence: Vec<String>,
+        #[arg(long = "remove-evidence")]
+        remove_evidence: Vec<String>,
+        #[arg(long)]
+        supersedes: Vec<String>,
+        #[arg(long, conflicts_with = "supersedes")]
+        clear_supersedes: bool,
+        #[arg(long)]
+        delete: bool,
+        /// Write the JSON plan to this path instead of stdout
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Apply a previously generated plan; stale plans fail closed
+    Apply {
+        /// JSON plan path, or `-` for stdin
+        plan: PathBuf,
+        /// Commit the registry and append-only archive with provenance trailers
+        #[arg(long)]
+        commit: bool,
+        #[arg(long)]
+        message: Option<String>,
+    },
+    /// Validate decision links and response evidence materialization
+    Validate {
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read immutable revision entries for one stable decision id
+    History {
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
+    match action {
+        DecisionAction::Read { project_root, id, json } => {
+            if let Some(id) = id {
+                let record = agent_doc_decision_io::read_decision(&project_root, &id)?
+                    .with_context(|| format!("decision {id} was not found"))?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&record)?);
+                } else {
+                    println!(
+                        "{} [{}]\nUpdated: {}\nEvidence: {}\nSupersedes: {}\n\n{}\n\nRationale: {}",
+                        record.id,
+                        record.state.as_str(),
+                        record.updated_at,
+                        if record.evidence_response_ids.is_empty() { "(none)".to_string() } else { record.evidence_response_ids.join(", ") },
+                        if record.supersedes.is_empty() { "(none)".to_string() } else { record.supersedes.join(", ") },
+                        record.decision,
+                        record.rationale
+                    );
+                }
+            } else {
+                let registry = agent_doc_decision_io::read_registry(&project_root)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&registry.records.values().collect::<Vec<_>>())?);
+                } else {
+                    print!("{}", agent_doc_decision_io::render_registry(&registry));
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Plan { project_root, id, state, decision, rationale, evidence, remove_evidence, supersedes, clear_supersedes, delete, output } => {
+            let state = state.as_deref().map(agent_doc_decision_io::DecisionState::parse).transpose()?;
+            let supersedes = if clear_supersedes { Some(Vec::new()) } else if supersedes.is_empty() { None } else { Some(supersedes) };
+            let plan = agent_doc_decision_io::plan(&project_root, agent_doc_decision_io::MutationRequest {
+                id, state, decision, rationale, add_evidence: evidence, remove_evidence,
+                supersedes, delete, updated_at: None,
+            })?;
+            let json = serde_json::to_string_pretty(&plan)?;
+            if let Some(output) = output {
+                std::fs::write(&output, format!("{json}\n"))
+                    .with_context(|| format!("failed to write {}", output.display()))?;
+                println!("planned decision mutation in {}", output.display());
+            } else {
+                println!("{json}");
+            }
+            Ok(())
+        }
+        DecisionAction::Apply { plan, commit, message } => {
+            let json = if plan == Path::new("-") {
+                let mut json = String::new();
+                std::io::stdin().read_to_string(&mut json)?;
+                json
+            } else {
+                std::fs::read_to_string(&plan).with_context(|| format!("failed to read {}", plan.display()))?
+            };
+            let plan: agent_doc_decision_io::DecisionPlan = serde_json::from_str(&json)?;
+            agent_doc_decision_io::apply(&plan)?;
+            println!("applied decision mutation to {}", plan.registry_path.display());
+            if commit {
+                let committed = agent_doc_decision_io::commit_plan(&plan, message.as_deref())?;
+                println!("{}", if committed { "committed decision mutation" } else { "decision mutation already matched HEAD" });
+            }
+            Ok(())
+        }
+        DecisionAction::Validate { project_root, json } => {
+            let report = agent_doc_decision_io::validate(&project_root)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else if report.valid {
+                println!("decision registry valid: {} decisions, {} pinned responses", report.decision_count, report.pinned_response_ids.len());
+            } else {
+                for id in &report.dangling_response_ids { eprintln!("dangling response evidence: {id}"); }
+                for id in &report.dangling_decision_references { eprintln!("dangling decision reference: {id}"); }
+            }
+            anyhow::ensure!(report.valid, "decision registry validation failed");
+            Ok(())
+        }
+        DecisionAction::History { project_root, id, json } => {
+            let revisions = agent_doc_decision_io::history(&project_root, &id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&revisions)?);
+            } else if revisions.is_empty() {
+                anyhow::bail!("no decision history found for {id}");
+            } else {
+                println!("{}", revisions.join("\n\n"));
+            }
+            Ok(())
+        }
+    }
+}
+
+#[derive(Subcommand)]
 enum OpsAction {
     /// Summarize high-signal ops.log events by document/session
     Summary {
@@ -5794,6 +5953,7 @@ fn try_main() -> anyhow::Result<()> {
             Some(commit) => history::restore(&file, &commit),
             None => history::list(&file),
         },
+        Commands::Decision { action } => run_decision_action(action),
         Commands::Log { file } => history::log(&file),
         Commands::Ops { action } => match action {
             OpsAction::Summary {

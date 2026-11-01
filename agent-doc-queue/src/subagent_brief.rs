@@ -588,6 +588,21 @@ pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "a harness-native tool permission.\n"
 );
 
+/// The worker's completion response is copied verbatim into the coordinator's
+/// document. Require enough implementation evidence for the operator and
+/// coordinator to understand and assess the result without first opening the
+/// branch or diff. Delivery metadata remains necessary, but is not a useful
+/// completion report by itself.
+pub const SUBAGENT_COMPLETION_REPORT_RULE: &str = concat!(
+    "- Return a decision-useful completion report, not only delivery metadata or a generic ",
+    "statement such as `implemented`. The response is copied verbatim to the operator. Lead with ",
+    "what changed and the observable behavior now. Explain the root cause and how the implementation ",
+    "fixes it; name the important files or symbols changed and why. Give the exact test/build commands ",
+    "and results, including the scenarios or assertions they cover. Include the branch, full commit SHA, ",
+    "worktree state, and any limitations or follow-up work (say `none` when there are none), so the ",
+    "coordinator can assess and integrate the result without opening the diff first.\n"
+);
+
 /// `#nestedoutwardauth`: a live nested sub-prompt that names push or publish
 /// is itself the operator's authorization, even when the preset body is only
 /// "rebase" or "review" and a skill says to wait.
@@ -786,9 +801,9 @@ fn render_preamble(
         "- Commit and push only when the authorization above includes it. Use your own branch and \
          fast-forward by default. An explicitly named target branch or explicit force-push directive \
          in the verbatim authorization overrides only that default: execute the exact authorized \
-         scope, never broaden it, and route any harness-native permission through the request protocol.\n\
-         - Report back: branch, commit SHA, files changed, and exact test results.\n",
+         scope, never broaden it, and route any harness-native permission through the request protocol.\n",
     );
+    out.push_str(SUBAGENT_COMPLETION_REPORT_RULE);
     out.push('\n');
     let queue_item = agent_doc_document::queue_projection::operator_request_origin_item(&auth.item);
     out.push_str(&SUBAGENT_OPERATOR_REQUEST_PROTOCOL.replace("<origin-queue-item>", &queue_item));
@@ -853,6 +868,14 @@ mod tests {
         assert!(p.contains("current operator authorization for the work and actions they name"));
         assert!(p.contains("without asking the operator to repeat those words"));
         assert!(p.contains("does not itself grant a harness-native tool permission"));
+        assert!(p.contains("Return a decision-useful completion report"));
+        assert!(
+            p.contains("not only delivery metadata or a generic statement such as `implemented`")
+        );
+        assert!(p.contains("Lead with what changed and the observable behavior now"));
+        assert!(p.contains("name the important files or symbols changed and why"));
+        assert!(p.contains("including the scenarios or assertions they cover"));
+        assert!(p.contains("worktree state, and any limitations or follow-up work"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
     }
 

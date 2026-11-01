@@ -1844,6 +1844,25 @@ pub fn free_text_head_has_explicit_answer_evidence(response_body: &str, head_tex
     response_explicit_queue_prompt_echoes_head(&response_body, &head_clean)
 }
 
+/// Conservative evidence for the document-wide free-text strike projection.
+///
+/// Catch-up may inspect every live queue row, not just the row selected for the
+/// current turn. A heading, ordinary prose mention, or unlabeled blockquote is
+/// therefore too weak: closeout prose routinely names later work without
+/// running it. Ordinary free text requires the exact labeled queue-prompt
+/// echo. A registered prompt preset may retain its existing resolved-expansion
+/// proof because that proof reproduces the preset body rather than merely
+/// naming the queue row.
+pub fn free_text_head_has_conservative_strike_evidence(
+    content: &str,
+    response_body: &str,
+    head_text: &str,
+) -> bool {
+    free_text_head_has_explicit_answer_evidence(response_body, head_text)
+        || response_explicitly_echoes_nest_vector(content, response_body, head_text)
+        || prompt_preset_head_answered_by_response(content, response_body, head_text)
+}
+
 /// True when the committed `response_body` answers the free-text queue head
 /// `head_text`: the head's normalized **prose prefix** (text before any fenced
 /// code block -- see [`free_text_head_match_prose`]) appears inside the response's
@@ -3652,7 +3671,16 @@ queue_active: true
             agent_doc_prompt_context::lineage::serialize(&packet),
             single.split("\n\n").next().unwrap()
         );
-        assert!(body.contains("**staging**"), "{body}");
+        assert_eq!(
+            packet.response.as_ref().unwrap().response_id.as_deref(),
+            Some("[#r-0123456789ab]")
+        );
+        assert_eq!(
+            packet.selection.as_ref().unwrap().label.as_deref(),
+            Some("staging")
+        );
+        assert!(!body.contains("Deployment is blocked"), "{body}");
+        assert!(!body.contains("**staging**"), "{body}");
         assert!(!body.contains("**production**"), "{body}");
     }
 

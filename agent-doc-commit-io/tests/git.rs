@@ -3714,7 +3714,8 @@ Duplicate replay should stay live.
             .find(|line| line.trim_start().starts_with("- **Response [#r-"))
             .expect("the late projection must retain its visible response summary");
         assert!(
-            response_summary.contains("]:** Finished and verified."),
+            response_summary.ends_with("]**")
+                && struck.contains("- **Summary:** Finished and verified."),
             "the exact late projection must retain its visible response summary:\n{struck}"
         );
         fs::write(&doc, &struck).unwrap();

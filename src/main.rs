@@ -479,13 +479,14 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                 return Ok(());
                             };
                             let Some(snapshot_target) =
-                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch(
+                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                                     &snapshot,
                                     &invocation.response_body,
                                     invocation.baseline_content.as_deref(),
                                     &invocation.claimed_heads,
                                     &invocation.selected_heads,
                                     &invocation.dispatch_owned_heads,
+                                    &invocation.addressed_at,
                                 )?.0
                             else {
                                 return Ok(());

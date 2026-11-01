@@ -225,6 +225,18 @@ fn late_answered_free_text_strike_capture(
     current_content: &str,
 ) -> Result<Option<LateAnsweredFreeTextStrike>> {
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let addressed_at = state
+        .as_ref()
+        .and_then(|state| state.cycle_id.strip_prefix("cycle-"))
+        .and_then(|millis| millis.parse::<u128>().ok())
+        .map(|millis| {
+            agent_doc_turn::turn_status::format_rfc3339_utc_secs(
+                (millis / 1_000).min(u64::MAX as u128) as u64,
+            )
+        })
+        // Legacy/corrupt state must still recover deterministically. Normal
+        // runtime cycles always take the stable cycle-start timestamp above.
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string());
     // `#lateftstrikewriteapplied`: Git can land the response before snapshot
     // convergence advances the durable cycle to `Committed`. The asynchronous
     // answered-free-text projection may then land while the cycle still reads
@@ -294,7 +306,7 @@ fn late_answered_free_text_strike_capture(
         committed_content,
     );
     let Some(projection) =
-        agent_doc_queue::queue_consume::project_answered_free_text_strike_with_claims(
+        agent_doc_queue::queue_consume::project_answered_free_text_strike_with_claims_at(
             committed_content,
             &response_body,
             // Committed HEAD is the historical fence. Reusing the pre-response
@@ -302,6 +314,7 @@ fn late_answered_free_text_strike_capture(
             // hide the exact late strike this recovery is proving.
             None,
             &claimed_heads,
+            &addressed_at,
         )?
     else {
         return Ok(None);

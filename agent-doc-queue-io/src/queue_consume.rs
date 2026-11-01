@@ -18,11 +18,9 @@ use agent_doc_queue::{
     document_queue::{QueueEntry, QueuePrompt},
     queue_consume::{
         ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, RESPONSE_ID_NOTE_PREFIX,
-        annotate_newly_struck_queue_items_with_response_id, approved_queue_head_matches,
-        consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
+        approved_queue_head_matches, consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
-        project_answered_free_text_strike_with_dispatch,
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
@@ -1331,7 +1329,9 @@ fn now_millis() -> u64 {
 }
 
 /// Persist a searchable response-cell backlink on every managed-list prompt
-/// completed by the current response closeout.
+/// completed by the current response closeout, plus every still-live origin of
+/// a blocking operator request in that response. The return value remains the
+/// count of completed prompts; projecting a live choice never reports it done.
 ///
 /// `before` is the authoritative cut captured before queue consumption. The
 /// pure projection compares it with current authority, so repeated prompt text
@@ -1355,8 +1355,14 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &current) {
         return Ok(0);
     }
+    let addressed_at = addressed_at_for_current_cycle(file);
     let target =
-        annotate_newly_struck_queue_items_with_response_id(before, &current, response_body)?;
+        agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+            before,
+            &current,
+            response_body,
+            &addressed_at,
+        )?;
     if target == current {
         return Ok(0);
     }
@@ -1397,7 +1403,12 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     }
 
     if let Some(snapshot) = load_snapshot_recovery_only(file, "queue response backlink snapshot") {
-        match annotate_newly_struck_queue_items_with_response_id(before, &snapshot, response_body) {
+        match agent_doc_queue::queue_consume::annotate_newly_struck_queue_items_with_response_id_at(
+            before,
+            &snapshot,
+            response_body,
+            &addressed_at,
+        ) {
             Ok(updated) if updated != snapshot => {
                 save_snapshot_recovery_only(file, &updated, "queue response backlink snapshot")
             }
@@ -1434,6 +1445,14 @@ fn addressed_at_for_current_cycle(file: &Path) -> String {
             .unwrap_or(0)
     });
     agent_doc_turn::turn_status::format_rfc3339_utc_secs(secs)
+}
+
+/// Stable, non-executable completion receipt for a drained `agent:run` body.
+///
+/// Preflight uses the same renderer when it discovers already-drained residue,
+/// so direct closeout and admission maintenance converge on one document shape.
+pub fn drained_run_receipt_for_current_cycle(file: &Path) -> String {
+    agent_doc_queue::document_queue::drained_run_receipt(&addressed_at_for_current_cycle(file))
 }
 
 fn cycle_started_secs(cycle_id: &str) -> Option<u64> {
@@ -1601,15 +1620,18 @@ fn strike_free_text_queue_heads_with_proof(
         crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(file, &content);
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
+    let addressed_at = addressed_at_for_current_cycle(file);
     let project = |doc: &str| match proof {
-        AnswerPresenceProof::Materialized => project_answered_free_text_strike_with_dispatch(
-            doc,
-            response_body,
-            baseline.as_deref(),
-            &claimed_heads,
-            &selected_heads,
-            &dispatch_owned_heads,
-        ),
+        AnswerPresenceProof::Materialized =>
+            agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
+                doc,
+                response_body,
+                baseline.as_deref(),
+                &claimed_heads,
+                &selected_heads,
+                &dispatch_owned_heads,
+                &addressed_at,
+            ),
         AnswerPresenceProof::CommittedHeadingReplay => {
             project_committed_heading_replay_free_text_strike_with_claims(
                 doc,
@@ -1626,7 +1648,6 @@ fn strike_free_text_queue_heads_with_proof(
         return Ok(0);
     };
     let keys = projected.node_keys;
-    let addressed_at = addressed_at_for_current_cycle(file);
     let new_document =
         annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?;
 
@@ -2939,7 +2960,14 @@ fn plan_queue_prompt_consumption_inner(
             } else {
                 completed_entries
             };
-            let new_body = agent_doc_queue::document_queue::render(&new_entries);
+            let public_run = agent_doc_queue::document_queue::is_public_run_opening_tag(
+                &content[comp.open_start..comp.open_end],
+            );
+            let new_body = if queue_empty && !retain_struck && public_run {
+                drained_run_receipt_for_current_cycle(file)
+            } else {
+                agent_doc_queue::document_queue::render(&new_entries)
+            };
             let mut current = if drained && !retain_struck {
                 comp.replace_content(content, &new_body)
             } else if consumed_node_keys.ast_backed {
@@ -3360,7 +3388,14 @@ fn plan_queue_prompt_consumption_inner(
     } else {
         completed_entries
     };
-    let new_body = agent_doc_queue::document_queue::render(&new_entries);
+    let public_run = agent_doc_queue::document_queue::is_public_run_opening_tag(
+        &content[comp.open_start..comp.open_end],
+    );
+    let new_body = if queue_empty && !retain_struck && public_run {
+        drained_run_receipt_for_current_cycle(file)
+    } else {
+        agent_doc_queue::document_queue::render(&new_entries)
+    };
     let mut current = if drained && !retain_struck {
         comp.replace_content(content, &new_body)
     } else if consumed_node_keys.ast_backed {
@@ -3700,7 +3735,12 @@ mod core_tests {
                 "{content}"
             );
             assert!(
-                content.contains(&format!("**Response {response_id}:**")),
+                content.contains(&format!("**Response {response_id}**")),
+                "{content}"
+            );
+            assert!(content.contains("    - **Timestamp:** "), "{content}");
+            assert!(
+                content.contains("    - **Summary:** Completed `/work/tasks/searchable.md`."),
                 "{content}"
             );
             assert!(
@@ -3717,6 +3757,91 @@ mod core_tests {
             );
             assert!(content.contains("- do [#later]\n"), "{content}");
         }
+    }
+
+    #[test]
+    fn blocking_request_backlink_persists_choices_while_origin_remains_live() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let queue_item = "🚧 [#subagent:publisher#1] publish release [#release]";
+        let request_id = "subagent-operator-request-release-target";
+        let response = format!(
+            "### Re: release target — test\n\n\
+**Current state:** Publication needs an operator choice.\n\n\
+[#{request_id}] subagent operator request\n\
+- *queue_item:*\n  - {queue_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which release target should be used?\n\
+- *choices:*\n  - **staging**: Publish to staging.\n  - **production**: Publish to production.\n"
+        );
+        let before = format!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\
+<!-- agent:queue -->\n- {queue_item}\n<!-- /agent:queue -->\n"
+        );
+        let current = format!(
+            "<!-- agent:exchange -->\n{response}<!-- /agent:exchange -->\n\
+<!-- agent:queue -->\n- 🙋 [#{request_id}] {queue_item}\n<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let count = annotate_newly_completed_queue_prompts_with_response_id(
+            &doc,
+            &before,
+            &response,
+            false,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+
+        assert_eq!(count, 0, "the operator-gated origin is not completed");
+        let updated = fs::read_to_string(&doc).unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("snapshot");
+        for content in [&updated, &snapshot] {
+            assert!(
+                content.contains(&format!("- 🙋 [#{request_id}] {queue_item}")),
+                "{content}"
+            );
+            assert!(
+                content.contains("**Response [#r-"),
+                "the live origin receives a searchable response child: {content}"
+            );
+            assert!(
+                content.contains("Which release target should be used?"),
+                "{content}"
+            );
+            assert!(
+                content.contains("- **production**: Publish to production."),
+                "{content}"
+            );
+            assert!(
+                !content.contains("; response: [#r-"),
+                "a live origin must not receive a terminal annotation: {content}"
+            );
+        }
+
+        annotate_newly_completed_queue_prompts_with_response_id(
+            &doc,
+            &before,
+            &response,
+            false,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            updated,
+            "durable request replay must not duplicate the choice subtree"
+        );
     }
 
     #[test]
@@ -3776,8 +3901,8 @@ mod core_tests {
         assert_ne!(response_ids[0], response_ids[1]);
         for response_id in response_ids {
             assert!(updated.contains(&format!("**Response {response_id}**")));
-            assert!(updated.contains(&format!("**Response {response_id}:**")));
         }
+        assert_eq!(updated.matches("    - **Timestamp:** ").count(), 2, "{updated}");
     }
 
     #[derive(Default)]
@@ -5102,6 +5227,167 @@ mod core_tests {
     }
 
     #[test]
+    fn draining_agent_run_leaves_one_inert_timestamped_receipt() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:run id=main go -->\n",
+            "- finish release\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let first = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            Some(content),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("the final run head is consumed");
+        assert!(first.drained);
+        for (label, text) in [
+            ("document", &first.new_document),
+            ("snapshot", &first.new_snapshot),
+        ] {
+            assert_eq!(
+                text.matches("- %% Queue completed and cleared at ").count(),
+                1,
+                "{label}: {text}"
+            );
+            let components = agent_doc_element::element::parse(text).unwrap();
+            let run = agent_doc_queue::queue_set::component_for_id(text, &components, "main")
+                .unwrap()
+                .expect("run component");
+            let entries = agent_doc_queue::document_queue::parse(run.content(text)).unwrap();
+            assert!(
+                agent_doc_queue::document_queue::prompts(&entries).is_empty(),
+                "{label}: receipt must never become executable: {entries:#?}"
+            );
+        }
+
+        let resumed = first
+            .new_document
+            .replacen("---\n", "---\nqueue: go\n", 1)
+            .replace("<!-- agent:run id=main -->", "<!-- agent:run id=main go -->")
+            .replace(
+                "<!-- /agent:run -->",
+                "- verify publication\n<!-- /agent:run -->",
+            );
+        let second = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            &resumed,
+            Some(&resumed),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("new work after the receipt remains executable");
+        assert_eq!(second.consumed_text, "verify publication");
+        assert_eq!(
+            second
+                .new_document
+                .matches("- %% Queue completed and cleared at ")
+                .count(),
+            1,
+            "the next drain replaces, rather than appends, the receipt: {}",
+            second.new_document
+        );
+    }
+
+    #[test]
+    fn canonical_loop_strikes_each_item_then_resets_the_complete_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:loop id=issues interval=\"1h\" -->\n",
+            "- poll alpha\n",
+            "- poll beta\n",
+            "<!-- /agent:loop -->\n",
+        );
+
+        let first = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            content,
+            Some(content),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("the first loop item is consumed");
+        assert_eq!(first.consumed_text, "poll alpha");
+        assert_eq!(first.remaining, 1);
+        assert!(!first.drained);
+        for (label, text) in [
+            ("document", &first.new_document),
+            ("snapshot", &first.new_snapshot),
+        ] {
+            assert_eq!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
+                    .unwrap(),
+                vec!["poll alpha".to_string()],
+                "{label}: the completed item stays visibly struck for this pass"
+            );
+            assert_eq!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, "issues").unwrap(),
+                vec!["poll beta".to_string()],
+                "{label}: the next item remains live until it completes"
+            );
+        }
+
+        let second = plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            &first.new_document,
+            Some(&first.new_snapshot),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("the final loop item is consumed");
+        assert_eq!(second.consumed_text, "poll beta");
+        assert_eq!(second.remaining, 0);
+        assert!(second.drained);
+        let roster = vec!["poll alpha".to_string(), "poll beta".to_string()];
+        for (label, text) in [
+            ("document", &second.new_document),
+            ("snapshot", &second.new_snapshot),
+        ] {
+            assert_eq!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
+                    .unwrap(),
+                roster,
+                "{label}: the complete pass remains struck until the reset"
+            );
+            assert!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(text, "issues")
+                    .unwrap()
+                    .is_empty(),
+                "{label}: no item resets early"
+            );
+
+            let restored = agent_doc_queue::queue_schedule::plan_loop_restore_for_queue(
+                text, "issues", &roster,
+            )
+            .unwrap()
+            .expect("the complete pass resets atomically");
+            assert_eq!(
+                agent_doc_queue::queue_schedule::live_heads_for_queue(&restored, "issues")
+                    .unwrap(),
+                roster,
+                "{label}: every item is live for the next interval"
+            );
+            assert!(
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(&restored, "issues")
+                    .unwrap()
+                    .is_empty(),
+                "{label}: the reset removes every struck pass row"
+            );
+        }
+    }
+
+    #[test]
     fn keep_queue_retains_a_completed_prompt_tree_without_rerunning_it() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
@@ -5164,7 +5450,7 @@ mod core_tests {
     #[test]
     /// The done-id consume path honors explicit `keep` on both runnable marker
     /// spellings and the retention implied by `agent:loop`; an ordinary run
-    /// still clears its drained body.
+    /// replaces its drained work with the inert completion receipt.
     fn done_id_drain_keeps_struck_rows_for_every_public_keep_queue() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("s.md");
@@ -5198,6 +5484,12 @@ mod core_tests {
                         .is_empty(),
                     "{marker} {attrs}"
                 );
+                if marker == "run" && !keeps {
+                    assert!(
+                        text.contains("- %% Queue completed and cleared at "),
+                        "ordinary run drain must stay visible: {text}"
+                    );
+                }
             }
         }
     }

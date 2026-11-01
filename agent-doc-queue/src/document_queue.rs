@@ -65,6 +65,33 @@ pub enum QueueEntry {
     Freeform(String),
 }
 
+/// Render the inert receipt retained when an ordinary `agent:run` drains.
+///
+/// A whole-item `%% ... %%` list comment is deliberately parsed as `Freeform`,
+/// so it remains visible to the operator without becoming another executable
+/// queue prompt. The next drain replaces the old receipt instead of appending
+/// unbounded history.
+pub fn drained_run_receipt(completed_at: &str) -> String {
+    format!("- %% Queue completed and cleared at {completed_at}. %%\n")
+}
+
+/// Whether an opening component tag uses the public `agent:run` spelling.
+///
+/// The element parser intentionally canonicalizes `agent:run`, `agent:queue`,
+/// and `agent:loop` to the same internal component name. Queue lifecycle code
+/// that preserves their distinct public semantics must therefore inspect the
+/// original opening tag.
+pub fn is_public_run_opening_tag(opening_tag: &str) -> bool {
+    let Some(rest) = opening_tag.trim().strip_prefix("<!-- agent:run") else {
+        return false;
+    };
+    rest.starts_with("-->")
+        || rest
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueuePrompt {
     pub text: String,
@@ -3530,35 +3557,37 @@ fn prompt_of(entry: &QueueEntry) -> Option<&QueuePrompt> {
     }
 }
 
-fn response_context_row(entry: &QueueEntry) -> Option<(usize, Option<String>)> {
+/// Indentation of one binary-owned structured response row.
+///
+/// These rows shape the prompt-context packet, but they are metadata rather
+/// than executable queue ancestry. In particular, their generated summary,
+/// choice, and action prose must not become part of a descendant's claim key or
+/// submitted task text.
+fn response_metadata_row_indent(entry: &QueueEntry) -> Option<usize> {
     let QueueEntry::Freeform(raw) = entry else {
         return None;
     };
     let (indent, _, item_content) = split_list_item(raw)?;
     let content = item_content.trim();
     if matches!(content, "**Choices:**" | "**Next actions:**") {
-        return Some((indent, None));
+        return Some(indent);
     }
     if let Some(body) = content.strip_prefix("**Response ")
         && let Some((response_id, summary)) = body.split_once(":** ")
         && agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
         && !summary.trim().is_empty()
     {
-        return Some((
-            indent,
-            Some(format!("Response {response_id}: {}", summary.trim())),
-        ));
+        return Some(indent);
     }
     if content
         .strip_prefix("**Action:** ")
         .is_some_and(|action| !action.trim().is_empty())
     {
-        return Some((indent, Some(content.to_string())));
+        return Some(indent);
     }
     let choice = content.strip_prefix("**")?;
     let (label, effect) = choice.split_once("**: ")?;
-    (!label.trim().is_empty() && !effect.trim().is_empty())
-        .then(|| (indent, Some(content.to_string())))
+    (!label.trim().is_empty() && !effect.trim().is_empty()).then_some(indent)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3796,14 +3825,11 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
             continue;
         };
         if indent < depth {
-            if let Some((_, label)) = response_context_row(earlier) {
-                if let Some(label) = label {
-                    labels.push(label);
-                }
-                depth = indent;
-                if depth == 0 {
-                    break;
-                }
+            if response_metadata_row_indent(earlier).is_some() {
+                // Generated response rows are transparent to executable
+                // ancestry. Keep searching at the same depth for the nearest
+                // real queue parent; structured context is carried separately
+                // by `prompt_context_packet_at`.
                 continue;
             }
             let Some(prompt) = prompt_of(earlier) else {
@@ -4325,7 +4351,7 @@ pub fn has_nested_or_ordered_list(entries: &[QueueEntry]) -> bool {
 fn entry_indent(entry: &QueueEntry) -> Option<usize> {
     match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
-        _ => response_context_row(entry).map(|(indent, _)| indent),
+        _ => response_metadata_row_indent(entry),
     }
 }
 
@@ -6102,6 +6128,15 @@ mod tests {
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn public_run_tag_detection_preserves_queue_spelling_semantics() {
+        assert!(is_public_run_opening_tag("<!-- agent:run -->"));
+        assert!(is_public_run_opening_tag("<!-- agent:run id=main go -->"));
+        assert!(!is_public_run_opening_tag("<!-- agent:queue id=main -->"));
+        assert!(!is_public_run_opening_tag("<!-- agent:loop id=main -->"));
+        assert!(!is_public_run_opening_tag("<!-- agent:runner -->"));
     }
 
     #[test]
@@ -10451,7 +10486,7 @@ mod tests {
     }
 
     #[test]
-    fn response_summary_and_selected_choice_are_context_for_an_operator_reply() {
+    fn response_summary_and_selected_choice_are_structured_context_not_task_lineage() {
         let body = concat!(
             "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
             "  - **Response [#r-0123456789ab]:** Deployment is blocked. Which target?\n",
@@ -10471,12 +10506,9 @@ mod tests {
             vec!["Use staging and run the smoke test."]
         );
         let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
-        assert!(
-            submitted.contains(
-                "Response [#r-0123456789ab]: Deployment is blocked. Which target?: **staging**: Deploy to staging.: Use staging and run the smoke test."
-            ),
-            "{submitted}"
-        );
+        assert!(submitted.starts_with("#answered: Use staging and run the smoke test."));
+        assert!(!submitted.contains("Deployment is blocked"), "{submitted}");
+        assert!(!submitted.contains("**staging**"), "{submitted}");
         assert!(!submitted.contains("**production**"), "{submitted}");
 
         let packet = prompt_context_packet_at(&entries, executable[0]).unwrap();
@@ -10512,10 +10544,34 @@ mod tests {
         let body = concat!(
             "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
             "  - **Response [#r-0123456789ab]:** Completed and verified.\n",
+            "- next task\n",
         );
         let entries = parse(body).unwrap();
-        assert!(prompts(&entries).is_empty(), "{entries:#?}");
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["next task"],
+            "{entries:#?}"
+        );
+        assert!(matches!(entries[0], QueueEntry::Completed(_)));
         assert!(render(&entries).contains("**Response [#r-0123456789ab]:**"));
+
+        let projected = set_prompt_runtime_projections(
+            &entries,
+            &[QueueRowProjection {
+                text: "next task".to_string(),
+                marker: agent_doc_document::queue_projection::QueueLifecycleMarker::Running,
+                owner: None,
+                blockers: Vec::new(),
+            }],
+        )
+        .expect("the next task receives its running marker");
+        assert!(
+            matches!(projected[0], QueueEntry::Completed(_)),
+            "generated response metadata must not reopen its completed parent: {projected:#?}"
+        );
     }
 
     #[test]
@@ -10531,12 +10587,12 @@ mod tests {
         let executable = executable_prompt_indexes(&entries);
         assert_eq!(executable.len(), 1, "{entries:#?}");
         let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
+        assert!(submitted.starts_with("#answered: I opened it; verify the screenshot now."));
         assert!(
-            submitted.contains(
-                "Response [#r-0123456789ab]: One verification remains.: **Action:** Open the preview.: I opened it; verify the screenshot now."
-            ),
+            !submitted.contains("One verification remains"),
             "{submitted}"
         );
+        assert!(!submitted.contains("**Action:**"), "{submitted}");
         let packet = prompt_context_packet_at(&entries, executable[0]).unwrap();
         assert_eq!(
             packet.selection.unwrap().kind,
@@ -10580,10 +10636,10 @@ mod tests {
         assert_eq!(sequential, subagent);
         assert!(subagent.contains("original queue item"), "{subagent}");
         assert!(
-            subagent.contains("Generation 7 from worker:alpha"),
+            !subagent.contains("Generation 7 from worker:alpha"),
             "{subagent}"
         );
-        assert!(subagent.contains("**staging**"), "{subagent}");
+        assert!(!subagent.contains("**staging**"), "{subagent}");
         assert!(!subagent.contains("**production**"), "{subagent}");
         assert!(!subagent.contains("Unrelated production"), "{subagent}");
     }

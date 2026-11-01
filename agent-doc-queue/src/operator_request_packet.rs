@@ -10,11 +10,122 @@ pub struct BlockingOperatorRequestPacket {
     pub id: String,
     pub kind: String,
     pub request: String,
+    pub context: Option<String>,
     pub queue_item: Option<String>,
     pub choice_labels: Vec<String>,
     /// Canonical choice content without its source list marker, preserving the
     /// exact emphasized label and explanatory text for response projection.
     pub choice_rows: Vec<String>,
+}
+
+/// A final, operator-visible answer to a structured choice prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredChoiceDecision {
+    pub request_id: Option<String>,
+    pub context: Option<String>,
+    pub question: Option<String>,
+    pub choice_labels: Vec<String>,
+    pub selected: String,
+    pub selected_label: Option<String>,
+}
+
+/// Parse final `**Decision record**` blocks emitted after a terminal or
+/// sequential operator choice. Examples inside fenced code are ignored.
+pub fn structured_choice_decisions(response: &str) -> Vec<StructuredChoiceDecision> {
+    let lines = response.lines().collect::<Vec<_>>();
+    let mut decisions = Vec::new();
+    let mut fence = None;
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim();
+        if let Some(open) = fence {
+            if is_closing_fence(trimmed, open) {
+                fence = None;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(open) = opening_fence(trimmed) {
+            fence = Some(open);
+            index += 1;
+            continue;
+        }
+        if !trimmed.starts_with("**Decision record**") {
+            index += 1;
+            continue;
+        }
+
+        let request_id = decision_request_id(trimmed).map(str::to_string);
+        let mut context = None;
+        let mut question = None;
+        let mut choice_labels = Vec::new();
+        let mut selected = None;
+        index += 1;
+        while index < lines.len() {
+            let field = lines[index].trim();
+            if field.is_empty() {
+                index += 1;
+                if selected.is_some() {
+                    break;
+                }
+                continue;
+            }
+            if field.starts_with('#') || field.starts_with("**Decision record**") {
+                break;
+            }
+            let Some((key, value)) = operator_request_field(field) else {
+                index += 1;
+                continue;
+            };
+            match key.to_ascii_lowercase().as_str() {
+                "context" => context = (!value.is_empty()).then(|| value.to_string()),
+                "question" => question = (!value.is_empty()).then(|| value.to_string()),
+                "choices presented" => {
+                    choice_labels = value
+                        .trim_end_matches('.')
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .map(ToString::to_string)
+                        .collect();
+                }
+                "selected" => selected = (!value.is_empty()).then(|| value.to_string()),
+                _ => {}
+            }
+            index += 1;
+        }
+        let Some(selected) = selected else {
+            continue;
+        };
+        let selected_label = selected
+            .strip_prefix("**")
+            .and_then(|value| value.split_once("**"))
+            .map(|(label, _)| label.trim().to_string())
+            .filter(|label| !label.is_empty());
+        decisions.push(StructuredChoiceDecision {
+            request_id,
+            context,
+            question,
+            choice_labels,
+            selected,
+            selected_label,
+        });
+    }
+    decisions
+}
+
+fn decision_request_id(line: &str) -> Option<&str> {
+    let start = line.find("[#subagent-operator-request-")? + 2;
+    let tail = &line[start..];
+    let end = tail.find(']')?;
+    let id = &tail[..end];
+    let suffix = id.strip_prefix("subagent-operator-request-")?;
+    (!suffix.is_empty()
+        && suffix
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-'))
+    .then_some(id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +202,7 @@ fn parsed_blocking_operator_request_packets(
         let mut kind = None;
         let mut blocking = None;
         let mut request: Option<String> = None;
+        let mut context: Option<String> = None;
         let mut queue_item = None;
         let mut choice_labels = Vec::new();
         let mut choice_rows = Vec::new();
@@ -125,6 +237,7 @@ fn parsed_blocking_operator_request_packets(
                         }
                     }
                     "request" => append_nested_value(request.as_mut(), field),
+                    "context" => append_nested_value(context.as_mut(), field),
                     "queue_item" => {
                         append_nested_value(Some(queue_item.get_or_insert_with(String::new)), field)
                     }
@@ -142,6 +255,7 @@ fn parsed_blocking_operator_request_packets(
                 "kind" => kind = Some(value.to_ascii_lowercase()),
                 "blocking" => blocking = Some(value.eq_ignore_ascii_case("true")),
                 "request" => request = Some(value.to_string()),
+                "context" => context = Some(value.to_string()),
                 "queue_item" => queue_item = (!value.is_empty()).then(|| value.to_string()),
                 _ => {}
             }
@@ -163,6 +277,7 @@ fn parsed_blocking_operator_request_packets(
                 id: packet_id.to_string(),
                 kind,
                 request,
+                context: context.filter(|value| !value.is_empty()),
                 queue_item: queue_item.filter(|item| !item.is_empty()),
                 choice_labels,
                 choice_rows,
@@ -266,6 +381,7 @@ mod tests {
         let packets = blocking_operator_request_packets(response);
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].choice_labels, ["staging", "production"]);
+        assert_eq!(packets[0].context.as_deref(), Some("Need a target."));
         assert_eq!(
             packets[0].choice_rows,
             [
@@ -277,5 +393,34 @@ mod tests {
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].starts_with("[#subagent-operator-request-release]"));
         assert!(blocks[0].ends_with("**production**: Release production."));
+    }
+
+    #[test]
+    fn parses_terminal_choice_decision_with_selected_label() {
+        let response = concat!(
+            "**Decision record** for `[#subagent-operator-request-release-target]`:\n",
+            "- **Context:** A release target is required.\n",
+            "- **Question:** where should it be published?\n",
+            "- **Choices presented:** staging (Recommended), production.\n",
+            "- **Selected:** **staging**. Publish the verified build there.\n",
+        );
+
+        let decisions = structured_choice_decisions(response);
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(
+            decisions[0].request_id.as_deref(),
+            Some("subagent-operator-request-release-target")
+        );
+        assert_eq!(decisions[0].selected_label.as_deref(), Some("staging"));
+        assert_eq!(
+            decisions[0].choice_labels,
+            ["staging (Recommended)", "production"]
+        );
+    }
+
+    #[test]
+    fn ignores_decision_record_examples_in_fences() {
+        let response = "```md\n**Decision record**:\n- **Selected:** **staging**.\n```\n";
+        assert!(structured_choice_decisions(response).is_empty());
     }
 }

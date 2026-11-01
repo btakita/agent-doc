@@ -7212,10 +7212,18 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             &selected_queue_id,
         )?
         .context("queue maintenance: selected queue vanished before drain clear")?;
-        if !q.content(&current_content).trim().is_empty() {
-            current_content = q.replace_content(&current_content, "");
+        let public_run = agent_doc_queue::document_queue::is_public_run_opening_tag(
+            &current_content[q.open_start..q.open_end],
+        );
+        let drained_body = if public_run {
+            agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
+        } else {
+            String::new()
+        };
+        if q.content(&current_content) != drained_body {
+            current_content = q.replace_content(&current_content, &drained_body);
             mutated = true;
-            eprintln!("[preflight] queue: cleared drained queue body");
+            eprintln!("[preflight] queue: projected drained queue body");
         }
     }
 
@@ -7987,7 +7995,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 &selected_queue_id,
             )
         {
-            let new_body = if need_clear_drained_body {
+            let new_body = if need_clear_drained_body
+                && agent_doc_queue::document_queue::is_public_run_opening_tag(
+                    &new_snap[snap_q.open_start..snap_q.open_end],
+                )
+            {
+                agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
+            } else if need_clear_drained_body {
                 String::new()
             } else {
                 agent_doc_queue::document_queue::render(&activation.entries_after)
@@ -17192,6 +17206,66 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(!snap.contains("queue: stop") && !snap.contains("queue_active:"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
+    }
+
+    #[test]
+    fn queue_maintenance_retains_an_inert_receipt_when_agent_run_drains() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=main auto -->\n",
+            "- do [#alpha]\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:done -->\n",
+            "- [x] [#alpha] First done.\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let drained = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            drained
+                .matches("- %% Queue completed and cleared at ")
+                .count(),
+            1,
+            "{drained}"
+        );
+        let components = agent_doc_element::element::parse(&drained).unwrap();
+        let run = agent_doc_queue::queue_set::component_for_id(&drained, &components, "main")
+            .unwrap()
+            .expect("run component");
+        let entries = agent_doc_queue::document_queue::parse(run.content(&drained)).unwrap();
+        assert!(
+            agent_doc_queue::document_queue::prompts(&entries).is_empty(),
+            "receipt must not be runnable: {entries:#?}"
+        );
+
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("snapshot");
+        assert_eq!(snapshot, drained);
+        run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            drained,
+            "idle maintenance must preserve the receipt byte-for-byte"
+        );
     }
 
     #[test]

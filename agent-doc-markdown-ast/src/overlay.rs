@@ -471,8 +471,8 @@ fn canonical_response_choice(item_content: &str) -> bool {
 /// A completed parent may retain response children from older attempts; every
 /// canonical generated response remains inert regardless of which response id
 /// the parent's latest backlink names.
-/// A summary row may own one exact `**Choices:**` subtree; a lookup-only row
-/// owns no descendants.
+/// The canonical parent row owns only exact generated metadata descendants;
+/// unrecognized operator-authored descendants remain ordinary promptable rows.
 pub fn response_row_child_end(
     lines: &[&str],
     opener_index: usize,
@@ -480,6 +480,43 @@ pub fn response_row_child_end(
 ) -> Option<usize> {
     canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
     Some(opener_index + 1)
+}
+
+fn response_metadata_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+    prefix: &str,
+) -> Option<usize> {
+    let value = strip_bullet(lines.get(opener_index)?)?
+        .trim()
+        .strip_prefix(prefix)?;
+    if value.trim().is_empty() {
+        return None;
+    }
+    let (response_index, response_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != response_indent + 2 {
+        return None;
+    }
+    canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    Some(opener_index + 1)
+}
+
+fn response_timestamp_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    response_metadata_child_end(lines, opener_index, item_indent, "**Timestamp:** ")
+}
+
+fn response_summary_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    response_metadata_child_end(lines, opener_index, item_indent, "**Summary:** ")
 }
 
 fn nearest_prior_line_with_smaller_indent(
@@ -510,10 +547,7 @@ fn response_choices_label_child_end(
     if item_indent != response_indent + 2 {
         return None;
     }
-    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
-    has_summary
-        .then(|| response_row_child_end(lines, response_index, response_indent))
-        .flatten()?;
+    canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
     Some(opener_index + 1)
 }
 
@@ -530,11 +564,29 @@ fn response_next_actions_label_child_end(
     if item_indent != response_indent + 2 {
         return None;
     }
-    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
-    has_summary
-        .then(|| response_row_child_end(lines, response_index, response_indent))
-        .flatten()?;
+    canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
     Some(opener_index + 1)
+}
+
+fn response_decision_metadata_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let content = strip_bullet(lines.get(opener_index)?)?.trim();
+    let value = ["**Context:** ", "**Question:** ", "**Selected:** "]
+        .into_iter()
+        .find_map(|prefix| content.strip_prefix(prefix))?;
+    if value.trim().is_empty() {
+        return None;
+    }
+    let (response_index, response_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != response_indent + 2 {
+        return None;
+    }
+    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    has_summary.then_some(opener_index + 1)
 }
 
 fn response_choice_child_end(
@@ -606,9 +658,12 @@ pub fn inert_list_child_end(
     multiline_list_comment_end(lines, opener_index, item_indent)
         .or_else(|| response_details_child_end(lines, opener_index, item_indent))
         .or_else(|| response_row_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_timestamp_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_summary_child_end(lines, opener_index, item_indent))
         .or_else(|| response_choices_label_child_end(lines, opener_index, item_indent))
         .or_else(|| response_choice_child_end(lines, opener_index, item_indent))
         .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_decision_metadata_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
 }
@@ -644,9 +699,13 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
         let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
         let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_summary_child_end(&normalized_lines, index, item_indent).is_some()
             || response_choices_label_child_end(&normalized_lines, index, item_indent).is_some()
             || response_choice_child_end(&normalized_lines, index, item_indent).is_some()
             || response_next_actions_label_child_end(&normalized_lines, index, item_indent)
+                .is_some()
+            || response_decision_metadata_child_end(&normalized_lines, index, item_indent)
                 .is_some()
             || response_action_child_end(&normalized_lines, index, item_indent).is_some()
             || related_row_child_end(&normalized_lines, index, item_indent).is_some();
@@ -747,9 +806,12 @@ pub fn response_row_child_ranges(source: &str) -> Vec<(usize, usize)> {
     while index < lines.len() {
         let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
         if let Some(end) = response_row_child_end(&lines, index, item_indent)
+            .or_else(|| response_timestamp_child_end(&lines, index, item_indent))
+            .or_else(|| response_summary_child_end(&lines, index, item_indent))
             .or_else(|| response_choices_label_child_end(&lines, index, item_indent))
             .or_else(|| response_choice_child_end(&lines, index, item_indent))
             .or_else(|| response_next_actions_label_child_end(&lines, index, item_indent))
+            .or_else(|| response_decision_metadata_child_end(&lines, index, item_indent))
             .or_else(|| response_action_child_end(&lines, index, item_indent))
         {
             ranges.push((offsets[index], offsets[end]));
@@ -1864,6 +1926,53 @@ mod tests {
                 .iter()
                 .any(|&(start, end)| source[start..end].contains("**production**"))
         );
+        assert!(
+            ranges
+                .iter()
+                .all(|&(start, end)| !source[start..end].contains("Use staging"))
+        );
+    }
+
+    #[test]
+    fn nested_timestamped_response_metadata_is_inert_but_unknown_child_is_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Timestamp:** 2026-11-01T14:43:00.000Z\n",
+            "    - **Summary:** Deployment is blocked. Which target?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging.\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Deploy the selected target.\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "do [#answered]",
+                "Use staging and run the smoke test.",
+                "next task"
+            ]
+        );
+        let ranges = response_row_child_ranges(source);
+        assert_eq!(ranges.len(), 8, "{ranges:?}");
+        assert!(ranges.iter().any(|&(start, end)| {
+            source[start..end].contains("**Timestamp:** 2026-11-01T14:43:00.000Z")
+        }));
+        assert!(ranges.iter().any(|&(start, end)| {
+            source[start..end].contains("**Summary:** Deployment is blocked")
+        }));
         assert!(
             ranges
                 .iter()

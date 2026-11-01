@@ -33,6 +33,11 @@ pub const STRUCK_FREE_TEXT_NOTE: &str = "answered this cycle (#ftstrike)";
 /// exchange response cell that answered it.
 pub const RESPONSE_ID_NOTE_PREFIX: &str = "response: ";
 
+/// Compatibility timestamp for pure callers that have not yet supplied the
+/// cycle's durable addressed-at fact. Runtime adapters use the explicit `_at`
+/// APIs; this keeps legacy projections deterministic instead of reading time.
+const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
+
 /// Pure projection of the queue mutation implied by a captured response and an
 /// authoritative markdown frontier.
 ///
@@ -1250,6 +1255,23 @@ pub fn answered_free_text_strike_decision(
                     response_body,
                     text,
                 );
+        // `#adresponsechildlive`: this projection scans every queue row. Do
+        // not let a later row close merely because closeout prose, a `### Re:`
+        // heading, or an unlabeled quote names it. Claimed work remains on the
+        // stricter exact-echo contract; unclaimed registered presets may still
+        // use their resolved-expansion proof.
+        let has_conservative_strike_evidence = if claimed.claims(text) {
+            has_explicit_answer_evidence
+        } else {
+            crate::queue_response::free_text_head_has_conservative_strike_evidence(
+                content,
+                response_body,
+                text,
+            )
+        };
+        if !has_conservative_strike_evidence {
+            continue;
+        }
         if !crate::queue_response::queue_head_answered_by_response_with_claim(
             content,
             response_body,
@@ -1694,12 +1716,29 @@ pub fn project_answered_free_text_strike_with_claims(
     baseline: Option<&str>,
     claimed_heads: &[String],
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
-    project_answered_free_text_strike_with_authority(
+    project_answered_free_text_strike_with_claims_at(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        FALLBACK_RESPONSE_TIMESTAMP,
+    )
+}
+
+pub fn project_answered_free_text_strike_with_claims_at(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    addressed_at: &str,
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    project_answered_free_text_strike_with_authority_at(
         content,
         response_body,
         baseline,
         claimed_heads,
         &[],
+        addressed_at,
     )
 }
 
@@ -1712,13 +1751,32 @@ pub fn project_answered_free_text_strike_with_authority(
     claimed_heads: &[String],
     selected_heads: &[String],
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
-    project_answered_free_text_strike_with_dispatch(
+    project_answered_free_text_strike_with_authority_at(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        selected_heads,
+        FALLBACK_RESPONSE_TIMESTAMP,
+    )
+}
+
+pub fn project_answered_free_text_strike_with_authority_at(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+    addressed_at: &str,
+) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
+    project_answered_free_text_strike_with_dispatch_at(
         content,
         response_body,
         baseline,
         claimed_heads,
         selected_heads,
         &[],
+        addressed_at,
     )
     .map(|(projection, _)| projection)
 }
@@ -1734,6 +1792,26 @@ pub fn project_answered_free_text_strike_with_dispatch(
     selected_heads: &[String],
     dispatch_owned_heads: &[String],
 ) -> Result<(Option<AnsweredFreeTextStrikeProjection>, Vec<String>)> {
+    project_answered_free_text_strike_with_dispatch_at(
+        content,
+        response_body,
+        baseline,
+        claimed_heads,
+        selected_heads,
+        dispatch_owned_heads,
+        FALLBACK_RESPONSE_TIMESTAMP,
+    )
+}
+
+pub fn project_answered_free_text_strike_with_dispatch_at(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+    claimed_heads: &[String],
+    selected_heads: &[String],
+    dispatch_owned_heads: &[String],
+    addressed_at: &str,
+) -> Result<(Option<AnsweredFreeTextStrikeProjection>, Vec<String>)> {
     if response_body.trim().is_empty() {
         return Ok((None, Vec::new()));
     }
@@ -1747,7 +1825,12 @@ pub fn project_answered_free_text_strike_with_dispatch(
         dispatch_owned_heads,
     )?;
     Ok((
-        project_free_text_strike_of_node_keys(content, Some(response_body), decision.node_keys)?,
+        project_free_text_strike_of_node_keys(
+            content,
+            Some(response_body),
+            decision.node_keys,
+            addressed_at,
+        )?,
         decision.inline_vetoed_heads,
     ))
 }
@@ -1808,7 +1891,7 @@ pub fn project_committed_heading_replay_free_text_strike_with_claims(
         .collect();
     // The replay body was never materialized. Its content-derived id therefore
     // cannot be used as the backlink for the already-committed response.
-    project_free_text_strike_of_node_keys(content, None, node_keys)
+    project_free_text_strike_of_node_keys(content, None, node_keys, "")
 }
 
 /// Normalized topics of every `### Re:` answer heading in `agent:exchange`:
@@ -1864,6 +1947,7 @@ fn project_free_text_strike_of_node_keys(
     content: &str,
     response_body: Option<&str>,
     node_keys: Vec<String>,
+    addressed_at: &str,
 ) -> Result<Option<AnsweredFreeTextStrikeProjection>> {
     if node_keys.is_empty() {
         return Ok(None);
@@ -1880,9 +1964,12 @@ fn project_free_text_strike_of_node_keys(
     }
     let annotated = annotate_newly_struck_free_text_heads(content, &struck)?;
     let annotated = match response_body {
-        Some(response_body) => {
-            annotate_newly_struck_queue_items_with_response_id(content, &annotated, response_body)?
-        }
+        Some(response_body) => annotate_newly_struck_queue_items_with_response_id_at(
+            content,
+            &annotated,
+            response_body,
+            addressed_at,
+        )?,
         None => annotated,
     };
     // `#queueworkevidence`: the answered-head strike is a terminal closeout
@@ -2574,11 +2661,33 @@ fn queue_addressed_response_cells(response: &str) -> Vec<QueueAddressedResponseC
     cells
 }
 
+/// Attach response lookup children to rows resolved by this closeout and to
+/// live rows carrying a blocking operator request presented by this response.
+/// The latter must remain unstruck while the operator decides, so request
+/// projection is keyed by its durable request id or exact `queue_item` lineage.
 pub fn annotate_newly_struck_queue_items_with_response_id(
     before: &str,
     after: &str,
     response_body: &str,
 ) -> anyhow::Result<String> {
+    annotate_newly_struck_queue_items_with_response_id_at(
+        before,
+        after,
+        response_body,
+        FALLBACK_RESPONSE_TIMESTAMP,
+    )
+}
+
+pub fn annotate_newly_struck_queue_items_with_response_id_at(
+    before: &str,
+    after: &str,
+    response_body: &str,
+    addressed_at: &str,
+) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        !addressed_at.trim().is_empty(),
+        "queue response projection requires a stable addressed-at timestamp"
+    );
     #[derive(Clone)]
     struct ResponseCandidate {
         body: String,
@@ -2672,7 +2781,40 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
                     != agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
         })
         .collect::<Vec<_>>();
-    if newly_struck.is_empty() {
+    // `#operatorrequestresponsesubtree`: a blocking worker handback deliberately
+    // keeps its originating row live while the operator chooses. Waiting for a
+    // strike therefore makes the request summary (and, critically, its choices)
+    // invisible until after it can no longer help. Project the same inert
+    // response child as soon as the durable request packet and its queue action
+    // coexist. The queue-item fallback covers an answer that clears `🙋` in the
+    // same closeout before this backlink pass runs.
+    let operator_request_packets =
+        crate::operator_request_packet::blocking_operator_request_packets(response_body);
+    let operator_request_nodes = nodes
+        .iter()
+        .filter(|node| {
+            if node.item.struck
+                || node.item.surface
+                    == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+            {
+                return false;
+            }
+            let action_ids =
+                agent_doc_document::queue_projection::operator_action_ids(&node.item.text);
+            operator_request_packets.iter().any(|packet| {
+                action_ids
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&packet.id))
+                    || packet.queue_item.as_deref().is_some_and(|queue_item| {
+                        agent_doc_document::queue_projection::operator_request_item_matches_row(
+                            &node.item.text,
+                            queue_item,
+                        )
+                    })
+            })
+        })
+        .collect::<Vec<_>>();
+    if newly_struck.is_empty() && operator_request_nodes.is_empty() {
         return Ok(after.to_string());
     }
 
@@ -2683,7 +2825,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     // decisions indistinguishable. Preserve intentional one-section batch
     // closeouts (for example several explicit `--done` ids), but a closeout
     // that supplies distinct sections must map those sections one-to-one.
-    let mut candidates_by_node_key = Vec::<(String, ResponseCandidate)>::new();
+    let mut candidates_by_node_key = Vec::<(String, ResponseCandidate, bool)>::new();
     let mut claimed_sections = HashSet::<usize>::new();
     for node in &newly_struck {
         // Queue rows can move between parents while an editor cut and a
@@ -2748,18 +2890,69 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
                 node.item.text.trim()
             ),
         };
-        candidates_by_node_key.push((node.node_key.clone(), candidate));
+        candidates_by_node_key.push((node.node_key.clone(), candidate, true));
+    }
+
+    for node in operator_request_nodes {
+        let action_ids = agent_doc_document::queue_projection::operator_action_ids(&node.item.text);
+        let matching_packet_ids = operator_request_packets
+            .iter()
+            .filter(|packet| {
+                action_ids
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&packet.id))
+                    || packet.queue_item.as_deref().is_some_and(|queue_item| {
+                        agent_doc_document::queue_projection::operator_request_item_matches_row(
+                            &node.item.text,
+                            queue_item,
+                        )
+                    })
+            })
+            .map(|packet| packet.id.as_str())
+            .collect::<Vec<_>>();
+        let mut matching = response_candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| {
+                matching_packet_ids
+                    .iter()
+                    .any(|id| candidate.body.contains(&format!("[#{id}]")))
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        matching.sort_unstable();
+        matching.dedup();
+        let candidate = match matching.as_slice() {
+            [index] => response_candidates[*index].clone(),
+            [] if response_candidates.len() <= 1 => composite_candidate.clone(),
+            [] => anyhow::bail!(
+                "blocking operator request has no unique response section: {}",
+                node.item.text.trim()
+            ),
+            _ => anyhow::bail!(
+                "blocking operator request matches multiple response sections: {}",
+                node.item.text.trim()
+            ),
+        };
+        if !candidates_by_node_key
+            .iter()
+            .any(|(node_key, _, _)| node_key == &node.node_key)
+        {
+            // Live request rows get the child subtree only. The inline
+            // `; response: [#r-…]` completion note belongs to terminal rows.
+            candidates_by_node_key.push((node.node_key.clone(), candidate, false));
+        }
     }
 
     let mut after = after.to_string();
-    let mut projection_by_node_key = HashMap::<String, (String, String)>::new();
-    for (node_key, candidate) in candidates_by_node_key {
+    let mut projection_by_node_key = HashMap::<String, (String, String, bool)>::new();
+    for (node_key, candidate, annotate_inline_id) in candidates_by_node_key {
         let response_id = response_lookup_id_for_document(&after, &candidate.policy)?;
         if response_id.is_empty() {
             continue;
         }
         after = annotate_exchange_response_with_lookup_id(&after, &candidate.policy, &response_id)?;
-        projection_by_node_key.insert(node_key, (candidate.body, response_id));
+        projection_by_node_key.insert(node_key, (candidate.body, response_id, annotate_inline_id));
     }
 
     let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
@@ -2779,8 +2972,14 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         .collect::<Vec<_>>();
 
     let mut edits = Vec::new();
+    // A blocking request is one decision even when an aggregate response is
+    // projected below several completed queue rows. Render its full choices
+    // once, then retain an inert request reference below later parents.
+    let mut rendered_choice_packet_ids = HashSet::<String>::new();
     for node in &nodes {
-        let Some((response_body, response_id)) = projection_by_node_key.get(&node.node_key) else {
+        let Some((response_body, response_id, annotate_inline_id)) =
+            projection_by_node_key.get(&node.node_key)
+        else {
             continue;
         };
         let raw = &after[node.item.start_byte..node.item.end_byte];
@@ -2793,7 +2992,15 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             .iter()
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
             .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
-        let lookup_children = response_lookup_children(response_body, response_id, response_mode);
+        let lookup_children = response_lookup_children(
+            before,
+            &node.item.text,
+            response_body,
+            response_id,
+            response_mode,
+            addressed_at,
+            &mut rendered_choice_packet_ids,
+        );
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
@@ -2801,7 +3008,8 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             })
             .cloned()
             .collect::<Vec<_>>();
-        let needs_inline_id = !raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
+        let needs_inline_id = *annotate_inline_id
+            && !raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
         if needs_inline_id || !missing_children.is_empty() {
             edits.push((
                 node.item.start_byte,
@@ -2903,9 +3111,13 @@ impl QueueResponseMode {
 }
 
 fn response_lookup_children(
+    source_document: &str,
+    queue_item: &str,
     response_body: &str,
     response_id: &str,
     mode: QueueResponseMode,
+    addressed_at: &str,
+    rendered_choice_packet_ids: &mut HashSet<String>,
 ) -> Vec<String> {
     // `patch:exchange` is the response transport envelope. The exchange
     // materializer consumes it, but this queue projection receives the original
@@ -2916,25 +3128,49 @@ fn response_lookup_children(
     let mut children = Vec::new();
     match mode {
         QueueResponseMode::Summary => children.push(
-            response_summary_row_child(response_body, response_id)
-                .expect("response lookup ids are canonical response ids"),
+            response_summary_row_child(
+                source_document,
+                queue_item,
+                response_body,
+                response_id,
+                addressed_at,
+                rendered_choice_packet_ids,
+            )
+            .expect("response lookup ids are canonical response ids"),
         ),
         QueueResponseMode::Inline => {
-            children.push(
-                response_details_child(response_body, response_id)
-                    .expect("response lookup ids are canonical response ids"),
-            );
-            children.push(
+            let marker =
                 agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
-                    .expect("response lookup ids are canonical response ids"),
-            );
+                    .expect("response lookup ids are canonical response ids");
+            let details = response_details_child(response_body, response_id)
+                .expect("response lookup ids are canonical response ids");
+            children.push(format!(
+                "{marker}\n- **Timestamp:** {}\n{}",
+                addressed_at.trim(),
+                render_nested_response_content(&details)
+            ));
         }
-        QueueResponseMode::Lookup => children.push(
-            agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
-                .expect("response lookup ids are canonical response ids"),
-        ),
+        QueueResponseMode::Lookup => {
+            let marker =
+                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+                    .expect("response lookup ids are canonical response ids");
+            children.push(format!(
+                "{marker}\n- **Timestamp:** {}",
+                addressed_at.trim()
+            ));
+        }
     }
     children
+}
+
+fn render_nested_response_content(content: &str) -> String {
+    let mut lines = content.lines();
+    let mut rendered = format!("- {}", lines.next().unwrap_or_default());
+    for line in lines {
+        rendered.push_str("\n  ");
+        rendered.push_str(line);
+    }
+    rendered
 }
 
 fn response_body_without_exchange_transport(response: &str) -> &str {
@@ -2988,14 +3224,21 @@ const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
     "**next action:**",
 ];
 
-fn response_summary_row_child(response_body: &str, response_id: &str) -> Option<String> {
+fn response_summary_row_child(
+    source_document: &str,
+    queue_item: &str,
+    response_body: &str,
+    response_id: &str,
+    addressed_at: &str,
+    rendered_choice_packet_ids: &mut HashSet<String>,
+) -> Option<String> {
     if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
         return None;
     }
     let mut summary = response_summary_lead(response_body);
     let next_actions = response_next_actions(response_body);
     let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body);
-    let mut choices = Vec::new();
+    let mut choice_projections = Vec::new();
     for packet in packets {
         if !summary.contains(&packet.request) {
             if !summary.is_empty() {
@@ -3003,14 +3246,60 @@ fn response_summary_row_child(response_body: &str, response_id: &str) -> Option<
             }
             summary.push_str(&packet.request);
         }
-        choices.extend(packet.choice_rows);
+        let canonical = rendered_choice_packet_ids.insert(packet.id.clone());
+        choice_projections.push((packet.id, packet.choice_rows, canonical));
     }
-    let mut child = format!("**Response {response_id}:** {summary}");
-    if !choices.is_empty() {
-        child.push_str("\n- **Choices:**");
-        for choice in choices {
-            child.push_str("\n  - ");
-            child.push_str(&choice);
+    let decision_projection =
+        structured_choice_projection(source_document, queue_item, response_body);
+    let decision_choices = decision_projection
+        .as_ref()
+        .map(|projection| projection.choices.clone());
+    let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)?;
+    let mut child = format!(
+        "{marker}\n- **Timestamp:** {}\n- **Summary:** {summary}",
+        addressed_at.trim()
+    );
+    if let Some(projection) = decision_projection {
+        if let Some(context) = projection.context {
+            child.push_str("\n- **Context:** ");
+            child.push_str(&context);
+        }
+        if let Some(question) = projection.question {
+            child.push_str("\n- **Question:** ");
+            child.push_str(&question);
+        }
+        child.push_str("\n- **Selected:** ");
+        child.push_str(&projection.selected);
+    }
+    if choice_projections.is_empty() {
+        if let Some(choices) = decision_choices
+            && !choices.is_empty()
+        {
+            child.push_str("\n- **Choices:**");
+            for choice in choices {
+                child.push_str("\n  - ");
+                child.push_str(&choice);
+            }
+        }
+    } else {
+        for (index, (packet_id, packet_choices, canonical)) in
+            choice_projections.into_iter().enumerate()
+        {
+            child.push_str("\n- **Choices:**");
+            if canonical {
+                child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
+                let choices = if index == 0 {
+                    decision_choices.clone().unwrap_or(packet_choices)
+                } else {
+                    packet_choices
+                };
+                for choice in choices {
+                    child.push_str("\n  - ");
+                    child.push_str(&choice);
+                }
+            } else {
+                child.push_str(&format!("\n  - **Reference**: [#{packet_id}]"));
+            }
         }
     }
     if !next_actions.is_empty() {
@@ -3021,6 +3310,88 @@ fn response_summary_row_child(response_body: &str, response_id: &str) -> Option<
         }
     }
     Some(child)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StructuredChoiceProjection {
+    context: Option<String>,
+    question: Option<String>,
+    selected: String,
+    choices: Vec<String>,
+}
+
+fn structured_choice_projection(
+    source_document: &str,
+    queue_item: &str,
+    response_body: &str,
+) -> Option<StructuredChoiceProjection> {
+    let decision = crate::operator_request_packet::structured_choice_decisions(response_body)
+        .into_iter()
+        .next()
+        .or_else(|| {
+            crate::operator_request_packet::structured_choice_decisions(source_document)
+                .into_iter()
+                .rev()
+                .find(|decision| {
+                    decision
+                        .request_id
+                        .as_ref()
+                        .is_some_and(|request_id| queue_item.contains(&format!("[#{request_id}]")))
+                })
+        })?;
+    let packet = decision.request_id.as_deref().and_then(|request_id| {
+        crate::operator_request_packet::blocking_operator_request_packets(source_document)
+            .into_iter()
+            .chain(crate::operator_request_packet::blocking_operator_request_packets(response_body))
+            .find(|packet| packet.id == request_id)
+    });
+    let selected_label = decision
+        .selected_label
+        .as_deref()
+        .map(normalized_choice_label);
+    let mut choices = packet
+        .as_ref()
+        .map(|packet| packet.choice_rows.clone())
+        .filter(|rows| !rows.is_empty())
+        .unwrap_or_else(|| {
+            decision
+                .choice_labels
+                .iter()
+                .map(|label| format!("**{label}**: Offered choice."))
+                .collect()
+        });
+    if let Some(selected_label) = selected_label {
+        for choice in &mut choices {
+            let label = choice
+                .strip_prefix("**")
+                .and_then(|choice| choice.split_once("**:"))
+                .map(|(label, _)| normalized_choice_label(label));
+            if label.as_deref() == Some(selected_label.as_str()) {
+                choice.push_str(" — **Selected**");
+            }
+        }
+    }
+    Some(StructuredChoiceProjection {
+        context: decision
+            .context
+            .or_else(|| packet.as_ref().and_then(|packet| packet.context.clone())),
+        question: packet
+            .as_ref()
+            .map(|packet| packet.request.clone())
+            .or(decision.question),
+        selected: decision.selected,
+        choices,
+    })
+}
+
+fn normalized_choice_label(label: &str) -> String {
+    label
+        .trim()
+        .trim_end_matches('.')
+        .trim_end_matches("(recommended)")
+        .trim_end_matches("(Recommended)")
+        .trim()
+        .to_ascii_lowercase()
 }
 
 fn response_next_actions(response_body: &str) -> Vec<String> {
@@ -3343,7 +3714,7 @@ mod tests {
         );
         assert!(
             annotated.contains(&format!(
-                "  - **Response {response_id}:** Completed `/work/tasks/result.md`.\n"
+                "  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Completed `/work/tasks/result.md`.\n"
             )),
             "{annotated}"
         );
@@ -3414,15 +3785,15 @@ mod tests {
         assert_ne!(ids[0], ids[1], "each response section needs its own id");
         assert!(
             annotated.contains(&format!(
-                "- ~~Investigate alpha [#q-alpha]~~ — auto-struck: response: {}\n  - **Response {}:** Alpha is fixed and verified.\n",
-                ids[0], ids[0]
+                "- ~~Investigate alpha [#q-alpha]~~ — auto-struck: response: {}\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Alpha is fixed and verified.\n",
+                ids[0], ids[0],
             )),
             "{annotated}"
         );
         assert!(
             annotated.contains(&format!(
-                "- ~~Investigate beta [#q-beta]~~ — auto-struck: response: {}\n  - **Response {}:** Beta needs the operator to choose a deployment target.",
-                ids[1], ids[1]
+                "- ~~Investigate beta [#q-beta]~~ — auto-struck: response: {}\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Beta needs the operator to choose a deployment target.",
+                ids[1], ids[1],
             )),
             "{annotated}"
         );
@@ -3430,13 +3801,15 @@ mod tests {
             annotated
                 .matches(&format!("**Response {}**", ids[0]))
                 .count(),
-            1
+            2,
+            "the exchange lookup and queue parent share one public id"
         );
         assert_eq!(
             annotated
                 .matches(&format!("**Response {}**", ids[1]))
                 .count(),
-            1
+            2,
+            "the exchange lookup and queue parent share one public id"
         );
         assert!(!annotated.contains(&format!(
             "Investigate alpha [#q-alpha]~~ — auto-struck: response: {}",
@@ -3570,9 +3943,9 @@ mod tests {
         assert!(!annotated.contains(&format!(
             "~~{PER_ITEM}~~ — auto-struck: response: {aggregate}"
         )));
+        assert!(annotated.contains(&format!("**Response {}**", ids[2])));
         assert!(annotated.contains(&format!(
-            "**Response {}:** Per-item response projection is installed and verified.",
-            ids[2]
+            "**Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n      - **Summary:** Per-item response projection is installed and verified."
         )));
         assert!(annotated.contains(&format!("- {decision}\n")));
         assert!(!annotated.contains("📥 **Response [#r-3bb63500aa30]"));
@@ -3634,7 +4007,7 @@ mod tests {
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(
             annotated.contains(&format!(
-                "  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: subagent response exchange gap — test\n    \n    The response body stays readable and lossless.\n    > **Queue prompt:** copied evidence must stay inert.\n    ### Re: copied nested heading\n    - [ ] copied task-like row\n    A literal %% pair remains balanced after child escaping.\n    </details>\n"
+                "  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: subagent response exchange gap — test\n      \n      The response body stays readable and lossless.\n      > **Queue prompt:** copied evidence must stay inert.\n      ### Re: copied nested heading\n      - [ ] copied task-like row\n      A literal %% pair remains balanced after child escaping.\n      </details>\n"
             )),
             "the exact struck-parent child projection must remain balanced and nested:\n{annotated}"
         );
@@ -3751,12 +4124,258 @@ mod tests {
             "{annotated}"
         );
         assert!(
-            annotated.contains("    - **Choices:**\n      - **staging**: Publish to staging."),
+            annotated.contains(concat!(
+                "    - **Choices:**\n",
+                "      - **Request**: [#subagent-operator-request-release-target]\n",
+                "      - **staging**: Publish to staging."
+            )),
             "{annotated}"
         );
         assert!(
             annotated.contains("- **production**: Publish to production."),
             "{annotated}"
+        );
+    }
+
+    #[test]
+    fn blocking_operator_request_projects_choice_subtree_before_queue_row_is_struck() {
+        let queue_item = "🚧 [#subagent:publisher#1] publish release [#release]";
+        let request_id = "subagent-operator-request-release-target";
+        let response = format!(
+            "### Re: release target — test\n\n\
+**Current state:** The build is ready, but publication needs an operator choice.\n\n\
+[#{request_id}] subagent operator request\n\
+- *queue_item:*\n  - {queue_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which release target should be used?\n\
+- *choices:*\n  - **staging**: Publish to staging.\n  - **production**: Publish to production.\n"
+        );
+        let before = queue_doc(&format!("- {queue_item}\n"));
+        let after =
+            doc_with_queue_and_exchange(&format!("- 🙋 [#{request_id}] {queue_item}\n"), &response);
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&annotated);
+
+        assert!(
+            queue_body.contains(&format!("- 🙋 [#{request_id}] {queue_item}")),
+            "the request row must remain live:\n{queue_body}"
+        );
+        assert!(
+            queue_body.contains("Which release target should be used?"),
+            "{queue_body}"
+        );
+        assert!(
+            queue_body.contains(&format!(
+                "    - **Choices:**\n      - **Request**: [#{request_id}]\n      - **staging**: Publish to staging."
+            )),
+            "{queue_body}"
+        );
+        assert!(
+            queue_body.contains("- **production**: Publish to production."),
+            "{queue_body}"
+        );
+        assert!(
+            !queue_body.contains("; response: [#r-"),
+            "live rows must not receive terminal inline annotations:\n{queue_body}"
+        );
+        let entries = document_queue::parse(queue_body).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "the operator-gated origin and generated response subtree must stay inert:\n{queue_body}"
+        );
+        assert_eq!(
+            annotate_newly_struck_queue_items_with_response_id(&before, &annotated, &response)
+                .unwrap(),
+            annotated,
+            "replaying the durable request evidence must not duplicate its subtree"
+        );
+    }
+
+    #[test]
+    fn early_operator_answer_does_not_suppress_choice_subtree_projection() {
+        let queue_item = "🚧 [#subagent:publisher#1] publish release [#release]";
+        let response = format!(
+            "### Re: release target — test\n\n\
+[#subagent-operator-request-release-target] subagent operator request\n\
+- *queue_item:*\n  - {queue_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which release target should be used?\n\
+- *choices:*\n  - **staging**: Publish to staging.\n  - **production**: Publish to production.\n"
+        );
+        let before = queue_doc(&format!("- {queue_item}\n"));
+        // The operator answered quickly enough that todo synchronization already
+        // cleared `🙋 [#subagent-operator-request-…]`. The packet's exact
+        // queue_item remains durable evidence for the same originating row.
+        let after = doc_with_queue_and_exchange(&format!("- {queue_item}\n"), &response);
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&annotated);
+
+        assert!(
+            queue_body.contains("Which release target should be used?"),
+            "{queue_body}"
+        );
+        assert!(
+            queue_body.contains("- **production**: Publish to production."),
+            "{queue_body}"
+        );
+        assert!(
+            !queue_body.contains('🙋'),
+            "projection must not reopen an already answered choice:\n{queue_body}"
+        );
+    }
+
+    #[test]
+    fn terminal_answer_projects_selected_choice_with_timestamped_parent() {
+        let packet = concat!(
+            "[#subagent-operator-request-terminal-design] subagent operator request\n",
+            "- *queue_item:* do [#terminal]\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:* What should happen to the unfinished row?\n",
+            "- *context:* Unexpected hand-backs currently lose the worker's decision context.\n",
+            "- *choices:*\n",
+            "  - **redispatch-same-row (recommended)**: Keep the row and redispatch its claim.\n",
+            "  - **repeat-row-per-preset**: Add a second row for the next attempt.\n",
+            "  - **hold-only**: Keep the row blocked for manual action.\n",
+        );
+        let before =
+            format!("<!-- agent:queue -->\n- do [#terminal]\n<!-- /agent:queue -->\n\n{packet}");
+        let after = before.replace("- do [#terminal]", "- ~~do [#terminal]~~");
+        let response = concat!(
+            "### Re: terminal choice — test\n\n",
+            "**Decision record** for `[#subagent-operator-request-terminal-design]`:\n",
+            "- **Context:** The worker returned without a terminal token.\n",
+            "- **Question:** what should agent-doc do?\n",
+            "- **Choices presented:** redispatch-same-row (Recommended), repeat-row-per-preset, hold-only.\n",
+            "- **Selected:** **redispatch-same-row**. Preserve the exact row and claim evidence.\n",
+        );
+
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            "2026-11-01T12:34:56-04:00",
+        )
+        .unwrap();
+        assert!(
+            annotated.contains("**Timestamp:** 2026-11-01T12:34:56-04:00"),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("**Context:** The worker returned without a terminal token."),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("**Question:** What should happen to the unfinished row?"),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains(
+                "**Selected:** **redispatch-same-row**. Preserve the exact row and claim evidence."
+            ),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains(concat!(
+                "**redispatch-same-row (recommended)**: Keep the row and redispatch its claim. — **Selected**\n",
+                "      - **repeat-row-per-preset**: Add a second row for the next attempt.\n",
+                "      - **hold-only**: Keep the row blocked for manual action."
+            )),
+            "{annotated}"
+        );
+    }
+
+    #[test]
+    fn shared_operator_request_projects_one_choice_tree_and_stable_references() {
+        let response = concat!(
+            "### Re: aggregate repair — test\n\n",
+            "> **Queue prompt:** repair alpha [#q-alpha]\n\n",
+            "Alpha is repaired.\n\n",
+            "> **Queue prompt:** repair beta [#q-beta]\n\n",
+            "Beta is repaired.\n\n",
+            "> **Queue prompt:** repair gamma [#q-gamma]\n\n",
+            "Gamma is repaired.\n\n",
+            "[#subagent-operator-request-shared-release] subagent operator request\n",
+            "- *queue_item:*\n  - publish the aggregate repair\n",
+            "- *kind:* permission\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - Choose whether to publish the aggregate repair.\n",
+            "- *choices:*\n",
+            "  - **publish**: Publish the validated repair.\n",
+            "  - **keep local**: Keep the repair local.\n",
+        );
+        let before = queue_doc(concat!(
+            "- repair alpha [#q-alpha]\n",
+            "- repair beta [#q-beta]\n",
+            "- repair gamma [#q-gamma]\n",
+        ));
+        let after = queue_doc(concat!(
+            "- ~~repair alpha [#q-alpha]~~\n",
+            "- ~~repair beta [#q-beta]~~\n",
+            "- ~~repair gamma [#q-gamma]~~\n",
+        ));
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+
+        assert_eq!(
+            annotated
+                .matches("**Request**: [#subagent-operator-request-shared-release]")
+                .count(),
+            1,
+            "one request id must own the one canonical choice tree:\n{annotated}"
+        );
+        assert_eq!(
+            annotated
+                .matches("**Reference**: [#subagent-operator-request-shared-release]")
+                .count(),
+            1,
+            "the second composite parent must link to the canonical request:\n{annotated}"
+        );
+        assert_eq!(
+            annotated
+                .matches("**publish**: Publish the validated repair.")
+                .count(),
+            1
+        );
+        assert_eq!(
+            annotated
+                .matches("**keep local**: Keep the repair local.")
+                .count(),
+            1
+        );
+
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&annotated)).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "canonical choice metadata and references must remain inert:\n{entries:#?}\n{annotated}"
+        );
+        assert_eq!(
+            annotate_newly_struck_queue_items_with_response_id(&before, &annotated, response)
+                .unwrap(),
+            annotated,
+            "recovery replay must preserve the same canonical owner and references"
         );
     }
 
@@ -3819,6 +4438,58 @@ mod tests {
         assert!(!annotated.contains("data-agent-doc-response-id"));
         assert!(!annotated.contains("%% tasks/result.md %%"));
         assert_eq!(annotated.matches("- **Response [#r-").count(), 1);
+    }
+
+    #[test]
+    fn response_projection_is_timestamped_nested_and_keeps_operator_descendants_promptable() {
+        const ADDRESSED_AT: &str = "2026-11-01T14:43:00.000Z";
+        let response = "### Re: timestamped response — test\n\nCompleted the requested repair.\n";
+        let before = queue_doc("- do [#timestamped]\n");
+        let after = queue_doc("- ~~do [#timestamped]~~\n");
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            response,
+            ADDRESSED_AT,
+        )
+        .unwrap();
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .response_id()
+            .to_string();
+        let generated = format!(
+            "  - **Response {response_id}**\n    - **Timestamp:** {ADDRESSED_AT}\n    - **Summary:** Completed the requested repair.\n"
+        );
+
+        assert!(annotated.contains(&generated), "{annotated}");
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&annotated)).unwrap();
+        assert!(document_queue::prompts(&entries).is_empty(), "{entries:#?}");
+
+        let operator_prompt = "    - Choose whether to publish this response.\n";
+        let with_operator_descendant = annotated.replacen(
+            &format!("    - **Timestamp:** {ADDRESSED_AT}\n"),
+            &format!("    - **Timestamp:** {ADDRESSED_AT}\n{operator_prompt}"),
+            1,
+        );
+        let queue = element::parse(&with_operator_descendant)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&with_operator_descendant)).unwrap();
+        assert!(
+            document_queue::prompts(&entries)
+                .iter()
+                .any(|prompt| prompt.text == "Choose whether to publish this response."),
+            "operator-authored descendants must remain promptable: {entries:#?}\n{with_operator_descendant}"
+        );
     }
 
     #[test]
@@ -3887,7 +4558,7 @@ mod tests {
 
         assert!(
             annotated.contains(&format!(
-                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - <details data-agent-doc-response-id=\"{}\">\n      <summary>Response</summary>\n      \n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      </details>\n    - **Response {response_id}**\n",
+                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - **Response {response_id}**\n      - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n      - <details data-agent-doc-response-id=\"{}\">\n        <summary>Response</summary>\n        \n        ### Re: nested\n        \n        Completed `tasks/nested.md`.\n        </details>\n",
                 response_id.trim_start_matches("[#").trim_end_matches(']'),
             )),
             "{annotated}"
@@ -3927,7 +4598,13 @@ mod tests {
 
         assert_eq!(exchange.matches(&lookup_marker).count(), 1, "{exchange}");
         assert!(
-            queue.contains(&format!("**Response {response_id}:**")),
+            queue.contains(&format!("**Response {response_id}**")),
+            "{queue}"
+        );
+        assert!(
+            queue.contains(&format!(
+                "**Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n"
+            )),
             "{queue}"
         );
         assert!(
@@ -5931,6 +6608,56 @@ Old.
         assert!(target.contains("- do [#between]"));
     }
 
+    #[test]
+    fn answered_free_text_strike_does_not_consume_later_heads_named_by_closeout_prose() {
+        let document = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- Run the selected queue synchronization repair\n",
+            "- Review https://example.com/pull/48/changes#r1\n",
+            "- Audit https://example.com/issues/99 for the follow-up\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "### Re: queue synchronization repair\n\n",
+            "> **Queue prompt:** Run the selected queue synchronization repair\n\n",
+            "Completed the selected repair.\n\n",
+            "### Re: Review https://example.com/pull/48/changes#r1\n\n",
+            "The later review remains queued.\n\n",
+            "### Re: Audit https://example.com/issues/99 for the follow-up\n\n",
+            "The later audit remains queued.\n",
+        );
+
+        let projection = project_answered_free_text_strike(document, response, Some(document))
+            .unwrap()
+            .expect("the explicitly echoed selected head must strike");
+
+        assert_eq!(projection.node_keys.len(), 1, "{:?}", projection.node_keys);
+        assert!(
+            projection
+                .target_content
+                .contains("- ~~Run the selected queue synchronization repair~~"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- Review https://example.com/pull/48/changes#r1\n"),
+            "{}",
+            projection.target_content
+        );
+        assert!(
+            projection
+                .target_content
+                .contains("- Audit https://example.com/issues/99 for the follow-up\n"),
+            "{}",
+            projection.target_content
+        );
+    }
+
     /// `#ftstrike-multiqueue`: the queue graph may select a later queue when an
     /// earlier queue is empty. Answer projection must address the selected
     /// head's component occurrence, not assume the first `agent:queue` block.
@@ -6475,7 +7202,7 @@ Old.
             .to_string();
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    </details>\n  - **Response {response_id}**\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: upgrade — gpt-6.1-sol\n      \n      > **Queue prompt:** #upgrade\n      \n      Upgraded.\n      </details>\n<!-- /agent:queue -->"
         )));
     }
 

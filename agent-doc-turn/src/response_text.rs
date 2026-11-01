@@ -1811,7 +1811,7 @@ mod tests {
 - *kind:* question
 - *blocking:* true
 - *request:* What should happen to the chat messages already stuck in `pending` on STG (including the rows from the 2026-10-20 incident)? And should a reaper be added?
-- *context:* PR #733 stops new stuck rows.
+- *context:* PR #733 stops new stuck rows. The rows from the 2026-10-20 incident are still `pending`.
 - *choices:*
   - **withdraw**: soft-delete the stuck sends.
   - **resubmit**: send each stuck row to FPE again.
@@ -1905,7 +1905,30 @@ mod tests {
                 "  - **withdraw**: soft-delete the stuck sends.\n",
                 "  - **withdraw**: soft-delete the stuck sends.\n    - **detail**: keeps an audit row.\n",
             );
-        assert_eq!(blocking_operator_request_packets(&response), canonical);
+        let nested_field_like_context = blocking_operator_request_packets(&response);
+        assert_eq!(nested_field_like_context.len(), 1);
+        assert_eq!(nested_field_like_context[0].id, canonical[0].id);
+        assert_eq!(nested_field_like_context[0].kind, canonical[0].kind);
+        assert_eq!(nested_field_like_context[0].request, canonical[0].request);
+        assert_eq!(
+            nested_field_like_context[0].queue_item,
+            canonical[0].queue_item
+        );
+        assert_eq!(
+            nested_field_like_context[0].choice_labels,
+            canonical[0].choice_labels
+        );
+        assert_eq!(
+            nested_field_like_context[0].choice_rows,
+            canonical[0].choice_rows
+        );
+        assert_eq!(
+            nested_field_like_context[0].context.as_deref(),
+            Some(
+                "PR #733 stops new stuck rows. kind: permission *request:* not the request \
+                 *queue_item:* not the row The rows from the 2026-10-20 incident are still `pending`."
+            )
+        );
 
         // A nested value split over several bullets joins with spaces.
         let split_request = BLOCKING_PACKET_RESPONSE.replace(
@@ -1953,6 +1976,7 @@ mod tests {
             id: "subagent-operator-request-deploy-stg".to_string(),
             kind: "permission".to_string(),
             request: "Run `make deploy` against STG".to_string(),
+            context: None,
             queue_item: None,
             choice_labels: Vec::new(),
             choice_rows: Vec::new(),
@@ -2018,6 +2042,7 @@ mod tests {
             id: "subagent-operator-request-long".to_string(),
             kind: "question".to_string(),
             request: "word ".repeat(80),
+            context: None,
             queue_item: None,
             choice_labels: vec![
                 "(separate question) reaper for future 504-accepted messages that are never decided"

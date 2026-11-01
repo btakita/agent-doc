@@ -7788,13 +7788,15 @@ impl ControllerDocumentGraphs {
                 ) {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 }
-                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch(
+                let addressed_at = addressed_at_for_cycle_id(&captured.cycle_id);
+                match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                     &observation.content,
                     &captured.response_body,
                     captured.baseline_content.as_deref(),
                     &observation.claimed_heads,
                     &observation.selected_heads,
                     &observation.dispatch_owned_heads,
+                    &addressed_at,
                 ) {
                     Ok((target, inline_vetoed_heads))
                         if !inline_vetoed_heads.is_empty() || target.is_some() =>
@@ -7805,7 +7807,6 @@ impl ControllerDocumentGraphs {
                                 ..AnsweredFreeTextQueueStrikeProjection::default()
                             };
                         };
-                        let addressed_at = addressed_at_for_cycle_id(&captured.cycle_id);
                         let target_content = match agent_doc_queue::queue_recency::annotate_newly_struck_rows(
                             &observation.content,
                             &target.target_content,
@@ -26476,7 +26477,7 @@ revised operator request
     /// evidence for an unclaimed head, but not an exact `> **Queue prompt:**`
     /// echo), so no strike is projected until the owner releases the claim.
     #[test]
-    fn claimed_free_text_head_weak_proof_projects_no_strike_until_released() {
+    fn claimed_free_text_head_weak_proof_never_projects_a_strike() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("claimed-session.md");
@@ -26557,8 +26558,8 @@ revised operator request
             "an unlabeled quote is not an exact echo; a claimed head stays queued: {strike:?}"
         );
 
-        // The owner releases the claim; the same quote is ordinary evidence for
-        // an unclaimed head, so the next observation projects the strike.
+        // Releasing the claim must not upgrade a prose quote into exact Queue
+        // prompt evidence. A later observation still leaves the row queued.
         write_ledger(&agent_doc_queue::queue_claim::QueueClaimLedger::default());
         let _ =
             runtime.document_queue_authority_observe(&document_hash, &canonical, content.clone());
@@ -26566,8 +26567,8 @@ revised operator request
             .document_graphs
             .current_answered_free_text_strike(&document_hash);
         assert!(
-            strike.has_target(),
-            "a released head answered by the response is struck: {strike:?}"
+            !strike.has_target(),
+            "an unlabeled quote stays non-striking after release: {strike:?}"
         );
     }
 

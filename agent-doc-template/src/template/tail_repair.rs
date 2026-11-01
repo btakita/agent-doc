@@ -885,7 +885,7 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
     let code_ranges = element::find_code_ranges(doc);
     let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
     let multiline_comment_ranges = agent_doc_markdown_ast::overlay::inert_list_child_ranges(doc);
-    let ignored = |position: usize| {
+    let base_ignored = |position: usize| {
         code_ranges
             .iter()
             .chain(comment_ranges.iter())
@@ -898,6 +898,17 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
         .filter(|component| component.name != "exchange")
     {
         let body = &doc[component.open_end..component.close_start];
+        let response_detail_ranges = if component.name == "queue" {
+            balanced_response_detail_ranges(body, component.open_end)
+        } else {
+            Vec::new()
+        };
+        let ignored = |position: usize| {
+            base_ignored(position)
+                || response_detail_ranges
+                    .iter()
+                    .any(|&(start, end)| position >= start && position < end)
+        };
         let mut offset = component.open_end;
         let mut multiline_queue_item_indent = None;
         for line in body.split_inclusive('\n') {
@@ -938,6 +949,33 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
         }
     }
     Ok(())
+}
+
+/// Absolute ranges of balanced binary-owned inline response details.
+///
+/// An unclosed range is intentionally omitted so the conversation guard still
+/// fails closed on a truncated inline response projection.
+fn balanced_response_detail_ranges(body: &str, base: usize) -> Vec<(usize, usize)> {
+    let mut stack: Vec<Option<usize>> = Vec::new();
+    let mut ranges = Vec::new();
+    let mut offset = base;
+    for line in body.split_inclusive('\n') {
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        if let Some(open) = trimmed.find("<details") {
+            let tag = &trimmed[open..];
+            stack.push(
+                tag.contains("data-agent-doc-response-id=")
+                    .then_some(offset + line.len().saturating_sub(trimmed.len()) + open),
+            );
+        }
+        if trimmed.contains("</details>")
+            && let Some(start) = stack.pop().flatten()
+        {
+            ranges.push((start, offset + line.len()));
+        }
+        offset += line.len();
+    }
+    ranges
 }
 
 /// Repair the safe malformed-template case where conversation content escaped

@@ -987,6 +987,11 @@ thread or in a detached periodic timer.
   target it uses a deterministic majority and numeric window-id tie-break, so
   repeated repair cannot oscillate or strand sessions according to hash-map
   iteration order.
+- The named target remains canonical when it is empty. A single registered,
+  live-owner-proven pane (or several panes together) in another visible window
+  is still `WrongWindow`; repair parks that outlier in `stash` so the retained
+  editor layout can place it. Canonical-window election must not depend on a
+  registered pane already occupying the target it is meant to recover.
 - In scoped mode, it must limit repair to the target document and fail closed if ownership is still ambiguous.
 - Scoped mode (`resync FILE`, `fix FILE`, and the route's targeted fix) reads and repairs the
   **document's** store, never the process cwd's (`#cwdfallbackrest`): the nearest `.agent-doc`

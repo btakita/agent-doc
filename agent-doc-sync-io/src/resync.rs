@@ -679,8 +679,10 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
             .push(info);
     }
 
-    for panes in by_session.values() {
-        if panes.len() < 2 {
+    for (session, panes) in &by_session {
+        let named_target =
+            agent_doc_tmux_io::target_window_id(tmux, &format!("{session}:agent-doc"));
+        if panes.len() < 2 && named_target.is_none() {
             continue;
         }
         // The named `agent-doc` window is the retained layout's canonical
@@ -688,7 +690,8 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
         // HashMap iteration order, and a 2–1 drift could choose the accidental
         // window over the explicitly named target. Fall back to a stable
         // majority only for legacy layouts that have no named target.
-        let expected_window = preferred_visible_window(panes).unwrap_or_default();
+        let expected_window =
+            preferred_visible_window(panes, named_target.as_deref()).unwrap_or_default();
 
         for p in panes {
             if p.window_id != expected_window {
@@ -706,7 +709,10 @@ fn detect_issues_in_registry_with_main_layout_eligibility(
     issues
 }
 
-fn preferred_visible_window(panes: &[&PaneInfo]) -> Option<String> {
+fn preferred_visible_window(
+    panes: &[&PaneInfo],
+    unoccupied_named_target: Option<&str>,
+) -> Option<String> {
     let mut named_targets: Vec<&str> = panes
         .iter()
         .filter(|pane| pane.window_name == "agent-doc")
@@ -715,6 +721,14 @@ fn preferred_visible_window(panes: &[&PaneInfo]) -> Option<String> {
     named_targets.sort_by(|left, right| compare_tmux_window_ids(left, right));
     if let Some(window) = named_targets.first() {
         return Some((*window).to_string());
+    }
+
+    // The canonical window can legitimately be empty while every registered
+    // pane is stranded in another visible window. The old pane-only election
+    // could not see that target, so resync reported no WrongWindow issue and
+    // preflight convergence had nothing safe to park in stash.
+    if let Some(window) = unoccupied_named_target {
+        return Some(window.to_string());
     }
 
     let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
@@ -2481,7 +2495,7 @@ mod tests {
         let drift_b = pane_info("@4", "operator");
 
         assert_eq!(
-            preferred_visible_window(&[&drift_a, &canonical, &drift_b]).as_deref(),
+            preferred_visible_window(&[&drift_a, &canonical, &drift_b], None).as_deref(),
             Some("@9"),
             "the retained named target must outrank an accidental majority window"
         );
@@ -2493,9 +2507,66 @@ mod tests {
         let earlier = pane_info("@2", "operator");
 
         assert_eq!(
-            preferred_visible_window(&[&later, &earlier]).as_deref(),
+            preferred_visible_window(&[&later, &earlier], None).as_deref(),
             Some("@2"),
             "equal-count legacy windows must converge deterministically"
+        );
+    }
+
+    #[test]
+    fn preferred_visible_window_uses_unoccupied_named_target() {
+        let drift = pane_info("@4", "operator");
+
+        assert_eq!(
+            preferred_visible_window(&[&drift], Some("@9")).as_deref(),
+            Some("@9"),
+            "an empty canonical target must still classify the registered pane as drift"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn detects_single_registered_pane_outside_empty_named_target() {
+        let iso = agent_doc_tmux_io::isolated_test_tmux("resync-single-pane-window-drift");
+        let cwd = test_cwd();
+        let dir = tempfile::tempdir().unwrap();
+        let script = write_mock_agent_doc(dir.path());
+        let doc = dir.path().join("drift.md");
+        std::fs::write(&doc, "# Drift\n").unwrap();
+
+        let canonical_pane = iso.new_session("test", &cwd).unwrap();
+        iso.cmd()
+            .args(["rename-window", "-t", "test:", "agent-doc"])
+            .output()
+            .unwrap();
+        let canonical_window = iso.pane_window(&canonical_pane).unwrap();
+
+        let drift_pane = iso.new_window("test", &cwd).unwrap();
+        launch_mock_agent_doc(&iso, &drift_pane, &script, &doc);
+        let drift_window = iso.pane_window(&drift_pane).unwrap();
+        assert_ne!(canonical_window, drift_window);
+
+        let mut registry = SessionRegistry::new();
+        registry.insert(
+            "drift-session".to_string(),
+            test_entry(&drift_pane, &doc.to_string_lossy()),
+        );
+
+        let issues = detect_issues_in_registry(&iso, &registry);
+        assert!(
+            issues.iter().any(|issue| matches!(
+                issue,
+                Issue::WrongWindow {
+                    pane,
+                    actual_window,
+                    expected_window,
+                    ..
+                } if pane == &drift_pane
+                    && actual_window == &drift_window
+                    && expected_window == &canonical_window
+            )),
+            "the lone registered outlier must target the empty named window: {:?}",
+            issues.iter().map(Issue::to_string).collect::<Vec<_>>()
         );
     }
 

@@ -4,6 +4,8 @@ version = "0.35.564"
 edition = "2024"
 license = "Apache-2.0"
 description = "Mutable Markdown decision registry for agent-doc"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
 
 [dependencies]
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.564" }

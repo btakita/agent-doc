@@ -1804,7 +1804,7 @@ fn is_queue_prompt_echo_block(lines: &[&str]) -> bool {
             continue;
         }
         if !saw_label {
-            if quoted == "**Queue prompt:**" || quoted == "**Queue prompts:**" {
+            if is_queue_prompt_echo_label(quoted) {
                 saw_label = true;
                 continue;
             }
@@ -1812,6 +1812,12 @@ fn is_queue_prompt_echo_block(lines: &[&str]) -> bool {
         }
     }
     saw_label
+}
+
+fn is_queue_prompt_echo_label(quoted: &str) -> bool {
+    ["**Queue prompt:**", "**Queue prompts:**"]
+        .into_iter()
+        .any(|label| quoted.starts_with(label))
 }
 
 fn line_is_managed_state_only(line: &str) -> bool {
@@ -3834,6 +3840,8 @@ mod tests {
         for echo in [
             "> **Queue prompt:**\n>\n> do [#retainedmutdrop]",
             "> **Queue prompts:**\n>\n> do [#a]\n>\n> do [#b]",
+            "> **Queue prompt:** ☑️ [#subagent:worker#2] do [#closeout]",
+            "❯ > **Queue prompt:** ☑️ [#subagent:worker#2] do [#closeout]",
             // Trailing blank lines are part of the block as diffed.
             "> **Queue prompt:**\n>\n> deploy\n\n",
         ] {

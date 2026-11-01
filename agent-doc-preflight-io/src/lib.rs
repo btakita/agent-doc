@@ -5283,6 +5283,27 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     let mut source_queue_priority = false;
     let mut queue_tag_attrs_normalized = false;
 
+    // Queue navigation headings are binary-owned presentation state.  Heal
+    // every top-level list row before the rest of maintenance so a plain
+    // operator-authored `- item`, a lifecycle-marked row, and a struck row all
+    // converge to the same navigable `- ### …` surface even when no backlog
+    // mirror, priority sort, or lifecycle transition otherwise changes the
+    // queue this cycle.
+    if let Some(canonical_queue_body) =
+        agent_doc_queue::document_queue::normalize_top_level_navigation_headings(body)
+    {
+        current_content = comp.replace_content(&current_content, &canonical_queue_body);
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = components
+            .iter()
+            .find(|c| c.name == "queue")
+            .context("queue maintenance: queue component vanished after heading normalization")?
+            .clone();
+        mutated = true;
+        eprintln!("[preflight] queue: prepended navigation headings to top-level queue items");
+    }
+
     let raw_queue_tag = &current_content[comp.open_start..comp.open_end];
     let normalized_queue_tag =
         agent_doc_queue::document_queue::normalize_queue_tag_attrs(raw_queue_tag);
@@ -11208,10 +11229,10 @@ mod tests {
             vec!["alpha".to_string(), "beta".to_string()]
         );
         assert!(
-            updated.contains("- 🚧 do [#alpha]"),
+            updated.contains("- ### 🚧 do [#alpha]"),
             "synced queue:\n{updated}"
         );
-        assert!(updated.contains("- 📥 do [#beta]"));
+        assert!(updated.contains("- ### 📥 do [#beta]"));
         assert!(
             !updated.contains("- do [#gated]"),
             "gated item must not be queued:\n{updated}"
@@ -12394,7 +12415,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         assert!(
             // `#queueblocked`: the dependent waits on its open prerequisite.
-            queue.contains("- 🚧 do [#setup]\n- ⛔ ⟦blocked by setup⟧ do [#ship]"),
+            queue.contains(
+                "- ### 🚧 do [#setup]\n- ### ⛔ ⟦blocked by setup⟧ do [#ship]"
+            ),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -13891,7 +13914,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         .unwrap();
 
         assert!(rebased.contains("operator kept typing\n"));
-        assert!(rebased.contains("- 🚧 I'm seeing \n- do [#issuesneedreopened]\n"));
+        assert!(rebased.contains("- ### 🚧 I'm seeing \n- do [#issuesneedreopened]\n"));
         assert_eq!(rebased.matches("[#issuesneedreopened]").count(), 1);
         let body = queue_component_body(&rebased).unwrap().unwrap();
         assert_eq!(
@@ -14669,11 +14692,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- 🚧 do [#act]"),
+            updated.contains("- ### 🚧 do [#act]"),
             "actionable item mirrored into queue:\n{updated}"
         );
         assert!(
-            updated.contains("- ⏳ do [#opv]"),
+            updated.contains("- ### ⏳ do [#opv]"),
             "operator-verify item must ALSO be mirrored into the queue (#mirrorall), \
              marked awaiting the operator (#queueawaitop):\n{updated}"
         );
@@ -14818,11 +14841,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         assert_eq!(state.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(
-            updated.contains("- 🚧 do [#running]"),
+            updated.contains("- ### 🚧 do [#running]"),
             "running head stays:\n{updated}"
         );
         assert!(
-            updated.contains("- 📥 do [#alpha]"),
+            updated.contains("- ### 📥 do [#alpha]"),
             "marked item should append:\n{updated}"
         );
         assert!(
@@ -14873,7 +14896,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- 🚧 do [#alpha]"),
+            updated.contains("- ### 🚧 do [#alpha]"),
             "the already-running head stays:\n{updated}"
         );
         assert!(
@@ -14924,11 +14947,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- 🚧 do [#alpha]"),
+            updated.contains("- ### 🚧 do [#alpha]"),
             "go-mode must repopulate a drained active queue:\n{updated}"
         );
         assert!(
-            updated.contains("- 📥 do [#beta]"),
+            updated.contains("- ### 📥 do [#beta]"),
             "go-mode must repopulate ALL open backlog ids:\n{updated}"
         );
         assert!(
@@ -15129,11 +15152,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- 🚧 do [#alpha]"),
+            updated.contains("- ### 🚧 do [#alpha]"),
             "the running head stays:\n{updated}"
         );
         assert!(
-            updated.contains("- 📥 do [#beta]"),
+            updated.contains("- ### 📥 do [#beta]"),
             "go-mode must append a fresh backlog `queue`-attr item even when the queue is not drained:\n{updated}"
         );
         assert!(
@@ -15226,7 +15249,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            updated.contains("- 🚧 do [#ready]"),
+            updated.contains("- ### 🚧 do [#ready]"),
             "the ready item must sync into the queue:\n{updated}"
         );
         assert!(
@@ -15815,7 +15838,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_ne!(state.queue_active, Some(true));
         assert!(halted.contains("queue: pause"), "{halted}");
         assert!(!halted.contains("stop"), "{halted}");
-        assert!(halted.contains("- 📥 do the remaining thing"), "{halted}");
+        assert!(
+            halted.contains("- ### 📥 do the remaining thing"),
+            "{halted}"
+        );
     }
     #[test]
     fn run_queue_maintenance_no_warning_when_queue_already_synced() {
@@ -16332,7 +16358,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ~~do [#extdone]~~"),
+            updated.contains("- ### ~~do [#extdone]~~"),
             "externally-archived live queue mirror must be struck:\n{updated}"
         );
         assert!(
@@ -16464,7 +16490,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#fast]\n- 📥 do [#slow]"),
+            updated.contains("- ### 🚧 do [#fast]\n- ### 📥 do [#slow]"),
             // `#pinoperatoronly`: priority sorting reorders; it does not pin.
             // A marker in the queue now means the operator put it there.
             "backlog `queue priority` must sort synced queue prompts by position, \
@@ -16508,7 +16534,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_prompts[0], "do [#alpha]");
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#alpha]\n- 📥 do [#beta]"),
+            updated.contains("- ### 🚧 do [#alpha]\n- ### 📥 do [#beta]"),
             "queue marker must move to active head:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#alpha] active work"));
@@ -16727,7 +16753,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_drainable_head_count, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ⏳ do [#verify]\n- 📥 do [#focused]\n- 🚧 do [#ready]"),
+            updated.contains(
+                "- ### ⏳ do [#verify]\n- ### 📥 do [#focused]\n- ### 🚧 do [#ready]"
+            ),
             "in-progress marker must project the first in-session drainable head \
              (`#queueawaitop`: the operator-verify head shows ⏳, `[focused-cycle]` none):\n{updated}"
         );
@@ -16795,7 +16823,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             std::fs::read_to_string(&doc)
                 .unwrap()
-                .contains("- 🚧 release + publish"),
+                .contains("- ### 🚧 release + publish"),
             "the sole head is projected in progress first"
         );
 
@@ -16816,7 +16844,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             without_admitted_queue_ids(&updated)
-                .contains("- 🚧 do [#a]\n- 📥 do [#b]\n- 📥 release + publish\n"),
+                .contains(
+                    "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### 📥 release + publish\n"
+                ),
             "a stale binary-projected marker must move to the operator's first head:\n{updated}"
         );
     }
@@ -16871,7 +16901,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#setup]\n- 🚧 do [#ship]\n- 📥 do [#ops]"),
+            updated.contains(
+                "- ### 🚧 do [#setup]\n- ### 🚧 do [#ship]\n- ### 📥 do [#ops]"
+            ),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
@@ -16947,7 +16979,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_prompts[0], "do [#alpha]");
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#alpha]\n- ~~do [#done]~~"),
+            updated.contains("- ### 🚧 do [#alpha]\n- ### ~~do [#done]~~"),
             "queue marker must move to the active head and clear struck items:\n{updated}"
         );
         assert!(
@@ -17006,7 +17038,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 📌 do [#slow]\n- 📥 do [#fast]\n- 📥 do [#medium]"),
+            updated.contains(
+                "- ### 🚧 📌 do [#slow]\n- ### 📥 do [#fast]\n- ### 📥 do [#medium]"
+            ),
             "operator-moved queue prompt should become sticky with an operator pin (📌):\n{updated}"
         );
     }
@@ -17047,10 +17081,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             updated.contains(
-                "- 🚧 :pushpin: do [#ops]\n\
-                 - 📥 :round_pushpin: do [#setup]\n\
-                 - ⛔ ⟦blocked by setup⟧ :pushpin: do [#ship]\n\
-                 - ⛔ ⟦blocked by ship⟧ :pushpin: do [#notify]"
+                "- ### 🚧 :pushpin: do [#ops]\n\
+                 - ### 📥 :round_pushpin: do [#setup]\n\
+                 - ### ⛔ ⟦blocked by setup⟧ :pushpin: do [#ship]\n\
+                 - ### ⛔ ⟦blocked by ship⟧ :pushpin: do [#notify]"
             ),
             "auto-dag must let dependency blockers intersperse a pinned batch:\n{updated}"
         );
@@ -17104,7 +17138,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains("queue: start"));
         assert!(updated.contains("<!-- agent:queue auto start -->"));
-        assert!(updated.contains("- 🚧 do [#newhead]"));
+        assert!(updated.contains("- ### 🚧 do [#newhead]"));
         assert!(!updated.contains("- do [#oldhead]"));
 
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
@@ -17131,8 +17165,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(outcome.remaining, 1);
 
         let consumed = std::fs::read_to_string(&doc).unwrap();
-        assert!(consumed.contains("- ~~do [#newhead]~~"));
-        assert!(consumed.contains("- 📥 do [#nexthead]"));
+        assert!(consumed.contains("- ### ~~do [#newhead]~~"));
+        assert!(consumed.contains("- ### 📥 do [#nexthead]"));
     }
     #[test]
     fn queue_maintenance_drains_all_done_queue_without_item_modified_halt() {
@@ -17454,15 +17488,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
+        let headed_operator_line = operator_line.replacen("- ", "- ### ", 1);
         assert!(
-            updated.contains(operator_line),
+            updated.contains(&headed_operator_line),
             "operator queue text must survive a drain clear: {updated}"
         );
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
         assert!(
-            snap.contains(operator_line),
+            snap.contains(&headed_operator_line),
             "the snapshot must keep it too, or the next preflight re-drops it: {snap}"
         );
     }
@@ -17616,10 +17651,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ~~do [#alpha]~~"),
+            updated.contains("- ### ~~do [#alpha]~~"),
             "done head struck to completed: {updated}"
         );
-        assert!(updated.contains("- 🚧 do [#beta]"));
+        assert!(updated.contains("- ### 🚧 do [#beta]"));
         assert!(updated.contains("agent:queue auto"));
         assert!(updated.contains("queue: start"));
     }
@@ -17792,7 +17827,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             updated.contains("queue: start"),
             "active preserved: {updated}"
         );
-        assert!(updated.contains("- 🚧 do [#newhead]"));
+        assert!(updated.contains("- ### 🚧 do [#newhead]"));
 
         // Snapshot absorbed the edited head so a follow-up pass is idempotent
         // (no spurious item_modified on the now-converged head).
@@ -18091,7 +18126,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         // The retained tail is preserved, and maintenance is idempotent.
         let before = std::fs::read_to_string(&doc).unwrap();
-        assert!(before.contains("- 📥 do [#second-live]"));
+        assert!(before.contains("- ### 📥 do [#second-live]"));
         let _ = run_queue_maintenance(&doc, None).unwrap();
         let after = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(before, after, "stable inactive queue must not be mutated");
@@ -22710,7 +22745,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             without_admitted_queue_ids(&body)
                 .trim_end()
-                .ends_with("- 📥 #release"),
+                .ends_with("- ### 📥 #release"),
             "{body}"
         );
     }

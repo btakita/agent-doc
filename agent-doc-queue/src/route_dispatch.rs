@@ -562,7 +562,7 @@ mod tests {
         assert!(
             update
                 .content
-                .contains("<!-- agent:run go -->\n- do [#x]\n<!-- /agent:run -->")
+                .contains("<!-- agent:run go -->\n- ### do [#x]\n<!-- /agent:run -->")
         );
         assert!(
             update.content.find("<!-- agent:run go -->").unwrap()
@@ -592,7 +592,7 @@ mod tests {
         assert!(
             update
                 .content
-                .contains("preset #spec\n- 📌 manual preempt\n- first\n- second")
+                .contains("preset #spec\n- ### 📌 manual preempt\n- ### first\n- ### second")
         );
     }
 
@@ -607,7 +607,7 @@ mod tests {
         let update = prepare_route_dispatch_queue_update(original, "new", false).unwrap();
         assert!(update.superseded);
         assert!(!update.appended);
-        assert!(update.content.contains("- new"));
+        assert!(update.content.contains("- ### new"));
         assert!(!update.content.contains("- old"));
         assert!(update.content.contains("<!-- agent:queue go -->"));
         assert!(!update.content.contains("agent:queue auto"));

@@ -51,7 +51,7 @@ pub const STRUCK_ANNOTATION_SEPARATOR: &str = " — auto-struck: ";
 /// lives outside the wrapper so the line stays readable, but the item is still a
 /// struck node whose text is the inner content. Returns `(false, body)` unchanged
 /// when the body is not strike-wrapped.
-fn split_struck_body(body: &str) -> (bool, &str) {
+pub(crate) fn split_struck_body(body: &str) -> (bool, &str) {
     let inner_with_tail = match body.strip_prefix("~~") {
         Some(rest) => rest,
         None => return (false, body),
@@ -1044,7 +1044,7 @@ fn queue_prompt_content_line(line: &str) -> bool {
 /// its own keeps any bullet-less line below it as separate residue so a
 /// completed item can never be resurrected as live text.
 pub fn queue_item_accepts_continuation(item_content: &str) -> bool {
-    let item = parse_item(item_content, 0, item_content.len());
+    let item = parse_item(item_content, 0, item_content.len(), true);
     !item.struck && queue_item_work_text(&item.text).is_some_and(|work| !work.starts_with("[#"))
 }
 
@@ -1090,7 +1090,7 @@ fn starts_with_operator_request_id(work: &str) -> bool {
 /// so the answer is one row keyed by the request id and is never offered as a
 /// separate free-text head.
 pub fn queue_item_accepts_subprompts(item_content: &str) -> bool {
-    let item = parse_item(item_content, 0, item_content.len());
+    let item = parse_item(item_content, 0, item_content.len(), true);
     queue_item_work_text(&item.text)
         .is_some_and(|work| !work.starts_with("[#") || starts_with_operator_request_id(work))
 }
@@ -1402,7 +1402,16 @@ fn classify(content: &str) -> ItemKind {
     ItemKind::FreeText
 }
 
-fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Item {
+fn strip_queue_heading(body: &str) -> &str {
+    body.trim_start().strip_prefix("### ").unwrap_or(body)
+}
+
+fn parse_item(
+    raw_line_content: &str,
+    start_byte: usize,
+    end_byte: usize,
+    queue_item: bool,
+) -> Item {
     let raw = raw_line_content.trim().to_string();
     // Compatibility for a caller that passes a legacy folded row. Canonical
     // component parsing calls this once per list row, so `subprompt_block` is
@@ -1411,12 +1420,22 @@ fn parse_item(raw_line_content: &str, start_byte: usize, end_byte: usize) -> Ite
         agent_doc_element_queue::subprompts::split_subprompt_block(&raw);
     let mut body = head_raw.trim();
 
+    // Queue navigation headings are presentation state. Canonical rows place
+    // `###` before every lifecycle marker (`### ~~…~~`, `### 🚧 …`), while
+    // older rows may carry it inside the strike wrapper (`~~### …~~`).
+    if queue_item {
+        body = strip_queue_heading(body);
+    }
+
     // Strikethrough wrapper. Tolerates an `#qstrikenote` annotation appended
     // outside the `~~…~~` wrapper (`~~text~~ — auto-struck: …`): the line is still
     // a struck node whose text is the inner content.
     let (mut struck, inner) = split_struck_body(body);
     if struck {
         body = inner;
+    }
+    if queue_item {
+        body = strip_queue_heading(body);
     }
     // `#struckparentkids`: a live child written beside struck children under a
     // struck parent reopens the block as one live node (the same rule
@@ -1777,7 +1796,7 @@ pub fn components(source: &str) -> Vec<Component> {
                 && let Some(last) = comp.items.last_mut()
             {
                 let joined = &source[*raw_start..line_start + content.len()];
-                *last = parse_item(joined, last.start_byte, offset);
+                *last = parse_item(joined, last.start_byte, offset, comp.name == "queue");
                 continue;
             }
             continuable_item = None;
@@ -1831,8 +1850,12 @@ pub fn components(source: &str) -> Vec<Component> {
             if is_ignored_list_comment(item_content) {
                 continue;
             }
-            comp.items
-                .push(parse_item(item_content, line_start, offset));
+            comp.items.push(parse_item(
+                item_content,
+                line_start,
+                offset,
+                comp.name == "queue",
+            ));
             // `item_content` is a suffix slice of `content`, which starts at
             // `line_start`.
             let raw_start = line_start + (content.len() - item_content.len());
@@ -2758,6 +2781,31 @@ trailing residue
     }
 
     #[test]
+    fn queue_navigation_heading_is_presentation_not_identity_or_lifecycle() {
+        let doc = "\
+<!-- agent:queue -->
+- ### do [#active]
+- ### ~~🚧 do [#done]~~
+- ~~### do [#legacy]~~
+<!-- /agent:queue -->
+";
+        let q = components(doc)
+            .into_iter()
+            .find(|c| c.name == "queue")
+            .unwrap();
+
+        assert_eq!(q.items[0].text, "do [#active]");
+        assert_eq!(q.items[0].id, "active");
+        assert!(!q.items[0].struck);
+        assert_eq!(q.items[1].text, "🚧 do [#done]");
+        assert_eq!(q.items[1].id, "done");
+        assert!(q.items[1].struck);
+        assert_eq!(q.items[2].text, "do [#legacy]");
+        assert_eq!(q.items[2].id, "legacy");
+        assert!(q.items[2].struck);
+    }
+
+    #[test]
     fn parses_components_and_attrs() {
         let comps = components(DOC);
         let names: Vec<&str> = comps.iter().map(|c| c.name.as_str()).collect();
@@ -2816,20 +2864,20 @@ trailing residue
             ":pushpin: ☑️ [#subagent:x#1] do [#foo]",
         ];
         for row in id_rows {
-            let item = parse_item(row, 0, row.len());
+            let item = parse_item(row, 0, row.len(), true);
             assert_eq!(item.id, "foo", "{row:?}");
             assert!(item.explicit_id, "{row:?}");
             assert_eq!(item.work_text(), "do [#foo]", "{row:?}");
         }
 
-        let bare = parse_item("fix the parser", 0, 0);
+        let bare = parse_item("fix the parser", 0, 0, true);
         for row in [
             "~~fix the parser~~",
             "☑️ [#subagent:x#1] fix the parser",
             "🔄 [#subagent:x#1] fix the parser",
             "📥 fix the parser",
         ] {
-            let item = parse_item(row, 0, row.len());
+            let item = parse_item(row, 0, row.len(), true);
             assert_eq!(item.id, bare.id, "{row:?}");
             // The owner tag is projection metadata, not a tracked-work id that
             // could be offered as a `--done` target.
@@ -2837,7 +2885,7 @@ trailing residue
         }
 
         // Text and surface flags are untouched: only the identity moved.
-        let claimed = parse_item("☑️ [#subagent:x#1] do [#foo]", 0, 0);
+        let claimed = parse_item("☑️ [#subagent:x#1] do [#foo]", 0, 0, true);
         assert_eq!(claimed.text, "☑️ [#subagent:x#1] do [#foo]");
         assert_eq!(claimed.kind, ItemKind::FreeText);
     }
@@ -2850,7 +2898,7 @@ trailing residue
     #[test]
     fn queuerowworkidentity_unprojected_rows_keep_their_previous_ids() {
         fn previous_id(row: &str) -> String {
-            let item = parse_item(row, 0, row.len());
+            let item = parse_item(row, 0, row.len(), true);
             extract_bracket_id(&item.text)
                 .unwrap_or_else(|| content_item_id(&item.kind, &item.text))
         }
@@ -2868,13 +2916,13 @@ trailing residue
             "🙋 [#legacy-request] old prefix form",
         ] {
             assert_eq!(
-                parse_item(row, 0, row.len()).id,
+                parse_item(row, 0, row.len(), true).id,
                 previous_id(row),
                 "{row:?}"
             );
         }
         assert_eq!(
-            parse_item("🙋 [#subagent-operator-request-abc]: yes", 0, 0).id,
+            parse_item("🙋 [#subagent-operator-request-abc]: yes", 0, 0, true).id,
             "subagent-operator-request-abc"
         );
     }
@@ -2908,8 +2956,8 @@ trailing residue
     fn pin_and_strike_are_node_attributes_not_text() {
         // The whole point of the overlay: identity + flags are structural, so a
         // pinned and an unpinned spelling of the same item share an id.
-        let pinned = parse_item(":pushpin: do [#x]", 0, 0);
-        let bare = parse_item("do [#x]", 0, 0);
+        let pinned = parse_item(":pushpin: do [#x]", 0, 0, true);
+        let bare = parse_item("do [#x]", 0, 0, true);
         assert_eq!(pinned.id, bare.id);
         assert!(pinned.pinned && !bare.pinned);
         assert_eq!(pinned.text, bare.text);

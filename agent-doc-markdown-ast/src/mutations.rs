@@ -213,7 +213,7 @@ fn consume_nodes_from_snapshot(
         let node = find_node(nodes, component, node_key)?;
         if !node.item.struck {
             let (start, end) = raw_range(source, component, node)?;
-            replacements.push((start, end, render_struck_item(&node.item)));
+            replacements.push((start, end, render_struck_item(&node.item, component)));
         }
     }
     let mut out = source.to_string();
@@ -252,8 +252,19 @@ fn render_multiline_item(marker: &str, text: &str) -> String {
     rendered
 }
 
-fn render_struck_item(item: &Item) -> String {
+fn render_struck_item(item: &Item, component: &str) -> String {
     match item.surface {
+        ItemSurface::ListItem if component == "queue" => {
+            let body = item
+                .raw
+                .trim_start()
+                .strip_prefix("### ")
+                .unwrap_or(&item.raw);
+            format!(
+                "### {}",
+                agent_doc_element_queue::render_struck_row_body(body)
+            )
+        }
         ItemSurface::ListItem => agent_doc_element_queue::render_struck_row_body(&item.raw),
         ItemSurface::MultilinePrompt => render_multiline_item("~~~done", &item.text),
     }
@@ -539,6 +550,11 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     // mutation nodes and do not enter this branch as one raw range.
     let (raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&source[start..end]);
+    let raw = if patch.component == "queue" {
+        raw.trim_start().strip_prefix("### ").unwrap_or(raw)
+    } else {
+        raw
+    };
     // Strip both the `~~…~~` wrapper and any `#qstrikenote` annotation appended
     // outside it (`~~text~~ — auto-struck: …`). The annotated shape closes the
     // wrapper before the deterministic separator, so split there first.
@@ -559,7 +575,15 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
             node_key: patch.node_key.clone(),
         });
     };
-    let mut unstruck = unstruck.to_string();
+    let mut unstruck = if patch.component == "queue" {
+        let body = unstruck
+            .trim_start()
+            .strip_prefix("### ")
+            .unwrap_or(unstruck);
+        format!("### {body}")
+    } else {
+        unstruck.to_string()
+    };
     if let Some(block) = subprompt_block {
         unstruck.push('\n');
         unstruck.push_str(block);
@@ -807,7 +831,7 @@ mod tests {
 
         let updated = consume_node(DOC, "queue", &beta_nodes[1].node_key).unwrap();
 
-        assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
+        assert!(updated.contains("- do [#beta]\n- ### ~~do [#beta]~~\n"));
     }
 
     #[test]
@@ -824,6 +848,33 @@ mod tests {
         let twice = consume_node(&once, "queue", &alpha).unwrap();
 
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn queue_consume_and_unstrike_keep_heading_before_lifecycle_markup() {
+        let doc = "\
+<!-- agent:queue -->
+- ### 🚧 do [#alpha]
+<!-- /agent:queue -->
+";
+        let node = item_nodes(doc, "queue").unwrap().remove(0);
+        let struck = consume_node(doc, "queue", &node.node_key).unwrap();
+        assert!(struck.contains("- ### ~~🚧 do [#alpha]~~\n"), "{struck}");
+        assert!(!struck.contains("- ~~###"), "{struck}");
+
+        let struck_node = item_nodes(&struck, "queue").unwrap().remove(0);
+        let reopened = apply_node_patch(
+            &struck,
+            &node_patch(
+                &struck_node.node_key,
+                MutationNodePatchOp::Unstrike,
+                None,
+                None,
+                None,
+            ),
+        )
+        .unwrap();
+        assert!(reopened.contains("- ### 🚧 do [#alpha]\n"), "{reopened}");
     }
 
     #[test]
@@ -912,8 +963,8 @@ mod tests {
         let updated = consume_nodes(DOC, "queue", &[alpha, second_beta]).unwrap();
 
         // A strike wraps only the work text: the pin is projection, not work.
-        assert!(updated.contains("- ~~do [#alpha]~~\n"), "{updated}");
-        assert!(updated.contains("- do [#beta]\n- ~~do [#beta]~~\n"));
+        assert!(updated.contains("- ### ~~do [#alpha]~~\n"), "{updated}");
+        assert!(updated.contains("- do [#beta]\n- ### ~~do [#beta]~~\n"));
     }
 
     #[test]
@@ -1135,7 +1186,7 @@ operator note
 
         assert!(updated.contains("operator note\n"));
         assert!(updated.contains("- live buffer addition\n"));
-        assert!(updated.contains("- ~~do [#beta]~~\n- do [#gamma]\n"));
+        assert!(updated.contains("- ### ~~do [#beta]~~\n- do [#gamma]\n"));
     }
 
     #[test]
@@ -1179,7 +1230,7 @@ operator note
 
         assert_eq!(lines[0], "- :round_pushpin: do [#gamma]");
         assert_eq!(lines[1], "- do [#alpha]");
-        assert_eq!(lines[2], "- do [#beta]");
+        assert_eq!(lines[2], "- ### do [#beta]");
     }
 
     #[test]
@@ -1204,7 +1255,7 @@ operator note
         )];
         let updated = apply_node_patches(doc, &patches).unwrap();
         assert!(
-            updated.contains("- answered free-text head\n"),
+            updated.contains("- ### answered free-text head\n"),
             "unstrike must restore bare text:\n{updated}"
         );
         assert!(
@@ -1368,7 +1419,7 @@ operator note
             updated.contains("- live buffer addition\n"),
             "unrelated document drift must be preserved:\n{updated}"
         );
-        assert!(updated.contains("- ~~do [#beta]~~\n"));
+        assert!(updated.contains("- ### ~~do [#beta]~~\n"));
     }
 
     /// Strike rendering: the exact live row (agent-doc-bugs.md, 2026-10-26) whose

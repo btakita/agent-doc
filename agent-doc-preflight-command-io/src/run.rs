@@ -5996,7 +5996,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#active] after=#blocker\n- 📥 do [#blocker]"),
+            updated.contains("- ### 🚧 do [#active] after=#blocker\n- ### 📥 do [#blocker]"),
             "auto-DAG must preserve the in-progress head and order the new dependency behind it:\n{updated}"
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
@@ -6754,7 +6754,7 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 📥 do [#still-live]"),
+            updated.contains("- ### 📥 do [#still-live]"),
             "queue with live prompts must not be cleared:\n{updated}"
         );
     }

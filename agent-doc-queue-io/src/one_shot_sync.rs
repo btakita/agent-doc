@@ -134,25 +134,33 @@ pub fn sync_configured_backlog_queue_with_snapshot(
         content,
         qc.open_start,
     )?;
-    let Some(synced) = document_queue::sync_backlog_into_queue_with_external_ids(
+    let synced = document_queue::sync_backlog_into_queue_with_external_ids(
         &entries,
         &ids,
         effective_mode,
         &sibling_ids,
-    ) else {
+    );
+    let new_body = synced.as_ref().map_or_else(
+        || {
+            document_queue::normalize_top_level_navigation_headings(body)
+                .unwrap_or_else(|| body.to_string())
+        },
+        |entries| document_queue::render(entries),
+    );
+    if new_body == body {
         return Ok(Some(OneShotQueueSyncResult::AlreadyInSync {
             requested_count: ids.len(),
             mode: effective_mode,
         }));
-    };
+    }
 
-    let new_body = document_queue::render(&synced);
     let new_content = qc.replace_content(content, &new_body);
 
     write_document(file, content, &new_content)
         .with_context(|| format!("failed to write {}", file.display()))?;
 
-    let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, &synced);
+    let report_entries = synced.as_ref().unwrap_or(&entries);
+    let report = backlog_sync::backlog_queue_sync_report(&entries, &ids, report_entries);
     let snapshot_warning = save_snapshot(file, &new_content)
         .err()
         .map(|err| err.to_string());
@@ -228,7 +236,7 @@ mod tests {
             },
             move |_path, new_content| {
                 snapshot_called_for_save.set(true);
-                assert!(new_content.contains("- do [#alpha]"));
+                assert!(new_content.contains("- ### do [#alpha]"));
                 Ok(())
             },
         )
@@ -244,7 +252,7 @@ mod tests {
 
         let written = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            written.contains("- do [#alpha]"),
+            written.contains("- ### do [#alpha]"),
             "marked item should be queued:\n{written}"
         );
         assert!(
@@ -275,19 +283,27 @@ mod tests {
         let result = sync_one_shot_backlog_queue_with_snapshot(
             &doc,
             content,
-            |_path, _current, _target| panic!("already-in-sync should not write document"),
-            |_path, _content| panic!("already-in-sync should not save snapshot"),
+            |path, _current, target| {
+                std::fs::write(path, target)?;
+                Ok(())
+            },
+            |_path, content| {
+                assert!(content.contains("- ### do [#alpha]\n"));
+                Ok(())
+            },
         )
-        .expect("already-synced queue should be accepted");
+        .expect("heading-only queue sync should be applied");
 
-        assert_eq!(
-            result,
-            OneShotQueueSyncResult::AlreadyInSync {
-                requested_count: 1,
-                mode: BacklogQueueSyncMode::Append
-            }
+        let OneShotQueueSyncResult::Synced(applied) = result else {
+            panic!("missing navigation heading must force a sync write");
+        };
+        assert_eq!(applied.requested_count, 1);
+        assert!(applied.newly_materialized.is_empty());
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- ### do [#alpha]\n")
         );
-        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 
     #[test]

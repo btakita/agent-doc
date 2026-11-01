@@ -115,7 +115,10 @@ mod tests {
         let text = unsafe { CStr::from_ptr(result.text) }.to_str().unwrap();
         assert!(text.contains("operator note\n"));
         assert!(text.contains("- live buffer addition\n"));
-        assert!(text.contains("- ~~do [#beta]~~\n- do [#gamma]\n"));
+        assert!(
+            text.contains("- ### ~~do [#beta]~~\n- do [#gamma]\n"),
+            "{text}"
+        );
         unsafe { agent_doc_free_string(result.text) };
     }
 

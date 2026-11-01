@@ -26831,7 +26831,7 @@ revised operator request
         };
         assert!(
             projected
-                .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
+                .contains("- ### ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"),
             "the Effect should apply the Computed target without a caller requesting a strike"
         );
         // `#queuestopremove`: the torn legacy inactive flag is no control, so

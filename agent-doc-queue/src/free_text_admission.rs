@@ -2001,7 +2001,7 @@ mod tests {
             .unwrap();
         let queue_body = queue.content(&admission.content);
 
-        assert_eq!(queue_body, format!("- do [#{id}]\n"));
+        assert_eq!(queue_body, format!("- ### do [#{id}]\n"));
         assert!(admission.content.contains(prompt));
         assert!(
             admission

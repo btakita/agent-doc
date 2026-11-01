@@ -327,6 +327,91 @@ fn split_list_item(line: &str) -> Option<(usize, Option<String>, &str)> {
     Some((indent, Some(dedented[..=marker_end].to_string()), rest))
 }
 
+/// Strip the canonical navigation heading from a top-level queue row.
+///
+/// The heading is presentation state, not prompt identity.  Keep it out of the
+/// parsed prompt so lifecycle markers, routing tags, and work-identity parsing
+/// continue to see the operator's actual text.  Parsing accepts the heading
+/// both outside and inside a legacy strike wrapper; [`render`] always projects
+/// it back at the very front of top-level list-item content.
+fn strip_top_level_queue_heading(text: &str) -> &str {
+    text.trim_start().strip_prefix("### ").unwrap_or(text)
+}
+
+/// Project the binary-owned `### ` navigation heading onto every non-empty
+/// top-level queue list item without reparsing or re-rendering the row.
+///
+/// This text-local form is used by maintenance even when no semantic queue
+/// mutation occurs.  It deliberately preserves every other byte, including an
+/// auto-struck explanation outside the strike wrapper.  Legacy
+/// `~~### text~~` / `~### text~` rows are healed by moving the heading in front
+/// of the strike markup.
+pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
+    let mut changed = false;
+    let mut out = String::with_capacity(body.len());
+    let mut fence_closer: Option<&str> = None;
+
+    for raw in body.split_inclusive('\n') {
+        let (line, newline) = raw
+            .strip_suffix('\n')
+            .map_or((raw, ""), |line| (line, "\n"));
+        let trimmed = line.trim();
+
+        // List-looking evidence inside a multiline queue prompt or Markdown
+        // code fence is payload, not a top-level queue row. Keep it byte-exact.
+        if let Some(closer) = fence_closer {
+            out.push_str(line);
+            out.push_str(newline);
+            if trimmed == closer || (matches!(closer, "```" | "~~~") && trimmed.starts_with(closer))
+            {
+                fence_closer = None;
+            }
+            continue;
+        }
+        if is_prompt_fence_open(trimmed) || is_completed_fence_open(trimmed) {
+            fence_closer = Some("~~~");
+            out.push_str(line);
+            out.push_str(newline);
+            continue;
+        }
+        if is_bare_fence_open(trimmed) {
+            fence_closer = Some("---");
+            out.push_str(line);
+            out.push_str(newline);
+            continue;
+        }
+        if let Some(closer) = markdown_code_fence_marker(trimmed) {
+            fence_closer = Some(closer);
+            out.push_str(line);
+            out.push_str(newline);
+            continue;
+        }
+
+        let normalized = split_list_item(line).and_then(|(indent, marker, content)| {
+            if indent != 0 || content.trim().is_empty() || content.starts_with("### ") {
+                return None;
+            }
+            let marker = marker.as_deref().unwrap_or("-");
+            if let Some(rest) = content.strip_prefix("~~### ") {
+                Some(format!("{marker} ### ~~{rest}"))
+            } else if let Some(rest) = content.strip_prefix("~### ") {
+                Some(format!("{marker} ### ~{rest}"))
+            } else {
+                Some(format!("{marker} ### {content}"))
+            }
+        });
+        if let Some(normalized) = normalized {
+            changed = true;
+            out.push_str(&normalized);
+        } else {
+            out.push_str(line);
+        }
+        out.push_str(newline);
+    }
+
+    changed.then_some(out)
+}
+
 /// Parse a queue body into entries paired with their byte range within `body`.
 ///
 /// Each range spans the entry's full source extent — including fence open/close
@@ -523,23 +608,36 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 i = end_i;
                 continue;
             }
-            let entry = if rest.trim().is_empty() {
+            let item_content = if indent == 0 {
+                strip_top_level_queue_heading(rest)
+            } else {
+                rest
+            };
+            let entry = if item_content.trim().is_empty() {
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
                 QueueEntry::Freeform(line.to_string())
-            } else if agent_doc_markdown_ast::overlay::is_ignored_list_comment(rest) {
+            } else if agent_doc_markdown_ast::overlay::is_ignored_list_comment(item_content) {
                 // Dedicated Markdown/Obsidian list comments are document
                 // annotations, not runnable queue prompts. Freeform retains
                 // every authored byte through parse/render.
                 QueueEntry::Freeform(line.to_string())
-            } else if let Some(completed) = parse_completed_inline(rest) {
+            } else if let Some(completed) = parse_completed_inline(item_content) {
+                // Older documents put the navigation heading inside the strike
+                // wrapper (`~~### text~~`).  Treat it as presentation there too
+                // and let render heal the row to `### ~~text~~`.
+                let completed = if indent == 0 {
+                    strip_top_level_queue_heading(completed)
+                } else {
+                    completed
+                };
                 QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
                     multiline: false,
                     indent,
                     ordered_marker,
                 })
-            } else if is_reference_directive(rest) {
+            } else if is_reference_directive(item_content) {
                 // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
                 // *references* a tracked id without executing it. Preserve it
                 // verbatim as `Freeform` so it is never run, synced, or reaped.
@@ -554,7 +652,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 // `Freeform` residue. The raw lines are kept verbatim after a
                 // `\n` so `render` stays byte-preserving.
                 let mut end_i = i + 1;
-                if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest) {
+                if agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(item_content) {
                     let mut continuation =
                         agent_doc_markdown_ast::overlay::QueueContinuationState::default();
                     while end_i < lines.len() && continuation.accepts_line(lines[end_i]) {
@@ -562,7 +660,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     }
                 }
                 if end_i > i + 1 {
-                    let mut text = rest.to_string();
+                    let mut text = item_content.to_string();
                     for continuation in &lines[i + 1..end_i] {
                         text.push('\n');
                         text.push_str(continuation);
@@ -588,7 +686,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     continue;
                 }
                 QueueEntry::Prompt(QueuePrompt {
-                    text: rest.to_string(),
+                    text: item_content.to_string(),
                     multiline: false,
                     indent,
                     ordered_marker,
@@ -596,7 +694,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             };
             entries.push((entry, span(start_i, start_i + 1)));
             bare_prompt_allowed =
-                agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(rest);
+                agent_doc_markdown_ast::overlay::queue_item_accepts_continuation(item_content);
             i += 1;
             continue;
         }
@@ -993,6 +1091,9 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     }
                     out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
                     out.push(' ');
+                    if p.indent == 0 {
+                        out.push_str("### ");
+                    }
                     out.push_str(&p.text);
                     out.push('\n');
                 }
@@ -1014,6 +1115,9 @@ pub fn render(entries: &[QueueEntry]) -> String {
                         out.push(' ');
                     }
                     out.push_str(p.ordered_marker.as_deref().unwrap_or("-"));
+                    if p.indent == 0 {
+                        out.push_str(" ###");
+                    }
                     out.push(' ');
                     // Compatibility for a legacy folded prompt: strike its
                     // parent and retain the nested block. Canonical nested
@@ -1061,7 +1165,13 @@ pub fn render(entries: &[QueueEntry]) -> String {
                 if line_is_empty_list_placeholder(line) {
                     continue;
                 }
-                out.push_str(line);
+                if !line.contains('\n')
+                    && let Some(normalized) = normalize_top_level_navigation_headings(line)
+                {
+                    out.push_str(&normalized);
+                } else {
+                    out.push_str(line);
+                }
                 out.push('\n');
             }
         }
@@ -1521,9 +1631,12 @@ fn strip_strike_markers(line: &str) -> &str {
 /// `❯`. Those annotations are visible document state, not prompt identity.
 pub fn normalized_queue_line_for_match(line: &str) -> String {
     let no_bullet = strip_queue_bullet(line.trim());
-    let unstruck = strip_strike_markers(no_bullet);
-    let unpinned = strip_priority_markers(unstruck);
-    normalized_prompt_line_for_match(&unpinned)
+    let unheaded = strip_top_level_queue_heading(no_bullet);
+    let unstruck = strip_strike_markers(unheaded);
+    let unheaded = strip_top_level_queue_heading(unstruck);
+    let unpinned = strip_priority_markers(unheaded);
+    let unheaded = strip_top_level_queue_heading(&unpinned);
+    normalized_prompt_line_for_match(unheaded)
 }
 
 /// True when `doc`'s `agent:queue` component contains a line matching `prompt`
@@ -1557,10 +1670,13 @@ pub fn queue_ids_including_struck(doc: &str) -> std::collections::HashSet<String
     };
     for line in queue.content(doc).lines() {
         let no_bullet = strip_queue_bullet(line.trim());
-        let unstruck = strip_strike_markers(no_bullet);
+        let unheaded = strip_top_level_queue_heading(no_bullet);
+        let unstruck = strip_strike_markers(unheaded);
+        let unheaded = strip_top_level_queue_heading(unstruck);
         // The in-progress marker is presentation state, not part of queue identity.
-        let unmarked = strip_in_progress_marker(unstruck);
-        for id in crate::queue_directive::do_directive_target_ids_in_line(&unmarked) {
+        let unmarked = strip_in_progress_marker(unheaded);
+        let unmarked = strip_top_level_queue_heading(&unmarked);
+        for id in crate::queue_directive::do_directive_target_ids_in_line(unmarked) {
             ids.insert(id);
         }
     }
@@ -6277,6 +6393,27 @@ mod tests {
     use super::*;
     use agent_doc_document::queue_projection::has_in_progress_marker;
 
+    /// Most tests below exercise queue ordering, identity, and lifecycle
+    /// semantics rather than presentation. Keep their historical fixtures
+    /// compact by projecting away the binary-owned navigation heading. Tests
+    /// for the real document surface call `super::render` explicitly.
+    fn render(entries: &[QueueEntry]) -> String {
+        let rendered = super::render(entries);
+        let mut semantic = rendered
+            .lines()
+            .map(|line| {
+                line.strip_prefix("- ### ")
+                    .map(|body| format!("- {body}"))
+                    .unwrap_or_else(|| line.to_string())
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if rendered.ends_with('\n') {
+            semantic.push('\n');
+        }
+        semantic
+    }
+
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
     }
@@ -6288,6 +6425,82 @@ mod tests {
         assert!(!is_public_run_opening_tag("<!-- agent:queue id=main -->"));
         assert!(!is_public_run_opening_tag("<!-- agent:loop id=main -->"));
         assert!(!is_public_run_opening_tag("<!-- agent:runner -->"));
+    }
+
+    #[test]
+    fn top_level_queue_rows_render_with_navigation_heading_before_all_markers() {
+        for (input, expected) in [
+            ("- plain work\n", "- ### plain work\n"),
+            ("- 🚧 claimed work\n", "- ### 🚧 claimed work\n"),
+            (
+                "- #subagents do [#tagged]\n",
+                "- ### #subagents do [#tagged]\n",
+            ),
+            ("- ~~completed work~~\n", "- ### ~~completed work~~\n"),
+            ("- ~~### completed work~~\n", "- ### ~~completed work~~\n"),
+            ("- ### plain work\n", "- ### plain work\n"),
+        ] {
+            let entries = parse(input).unwrap();
+            assert_eq!(super::render(&entries), expected, "input={input:?}");
+            assert_eq!(
+                super::render(&parse(expected).unwrap()),
+                expected,
+                "canonical queue heading must be idempotent"
+            );
+        }
+    }
+
+    #[test]
+    fn only_top_level_queue_rows_receive_navigation_headings() {
+        let input = "- parent\n  - child\n    - grandchild\n- sibling\n";
+        assert_eq!(
+            super::render(&parse(input).unwrap()),
+            "- ### parent\n  - child\n    - grandchild\n- ### sibling\n"
+        );
+    }
+
+    #[test]
+    fn heading_sync_preserves_struck_annotation_and_heads_reference_rows() {
+        let body = concat!(
+            "- ~~### answered~~ — auto-struck: answered this cycle (#ftstrike)\n",
+            "- re [#context]\n",
+            "  - nested child\n",
+        );
+        let normalized = normalize_top_level_navigation_headings(body).unwrap();
+        assert_eq!(
+            normalized,
+            concat!(
+                "- ### ~~answered~~ — auto-struck: answered this cycle (#ftstrike)\n",
+                "- ### re [#context]\n",
+                "  - nested child\n",
+            )
+        );
+        assert!(normalize_top_level_navigation_headings(&normalized).is_none());
+    }
+
+    #[test]
+    fn heading_sync_ignores_list_looking_lines_inside_fenced_payloads() {
+        let body = concat!(
+            "~~~prompt\n",
+            "- evidence, not a queue row\n",
+            "~~~\n",
+            "```text\n",
+            "- more evidence\n",
+            "```\n",
+            "- real queue row\n",
+        );
+        assert_eq!(
+            normalize_top_level_navigation_headings(body).unwrap(),
+            concat!(
+                "~~~prompt\n",
+                "- evidence, not a queue row\n",
+                "~~~\n",
+                "```text\n",
+                "- more evidence\n",
+                "```\n",
+                "- ### real queue row\n",
+            )
+        );
     }
 
     #[test]
@@ -6572,7 +6785,7 @@ mod tests {
 
         assert_eq!(
             projected,
-            "- #upgrade\n- 🚧 I'm seeing \n- do [#issuesneedreopened]\n"
+            "- #upgrade\n- ### 🚧 I'm seeing \n- do [#issuesneedreopened]\n"
         );
         assert_eq!(entries.len(), 3);
         assert_eq!(

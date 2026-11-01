@@ -9682,7 +9682,7 @@ Reviewed the gated items.\n\
         }
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #fix1 — gpt-5"));
-        assert!(content.contains("- ~~do #fix1~~"));
+        assert!(content.contains("- ### ~~do #fix1~~"));
         assert!(content.contains("- do #fix2"));
         let root = project_root_for(dir.path()).unwrap();
         let state = load_state(&root, "codex-session").unwrap().unwrap();
@@ -10367,7 +10367,7 @@ Reviewed the gated items.\n\
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: do #fix1 — gpt-5"));
         assert!(content.contains("Verification: Codex stop-hook simulation."));
-        assert!(content.contains("- ~~do #fix1~~"));
+        assert!(content.contains("- ### ~~do #fix1~~"));
         assert!(content.contains("- do #fix2"));
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert_eq!(state.last_auto_queue_head.as_deref(), Some("do #fix2"));

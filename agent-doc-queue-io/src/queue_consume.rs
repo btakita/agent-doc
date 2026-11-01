@@ -4068,7 +4068,7 @@ mod core_tests {
         assert!(updated.contains("queue_active: false"), "{updated}");
         assert!(
             updated.contains(
-                "- ~~The pictures are not currently on the mrh website. Please fix. Please diagnose what happened.~~"
+                "- ### ~~The pictures are not currently on the mrh website. Please fix. Please diagnose what happened.~~"
             ),
             "{updated}"
         );
@@ -4741,7 +4741,7 @@ mod core_tests {
 
         let updated = consume_queue_nodes_by_key(content, &[key]).unwrap();
 
-        assert!(updated.contains("- ~~do [#head]~~\n"), "{updated}");
+        assert!(updated.contains("- ### ~~do [#head]~~\n"), "{updated}");
         assert!(!updated.contains("~~🚧"), "{updated}");
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
     }
@@ -5992,7 +5992,7 @@ mod core_tests {
         assert_eq!(marked, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- can the *.h files be generated from the contract as well?\n"),
+            updated.contains("- ### can the *.h files be generated from the contract as well?\n"),
             "{updated}"
         );
         assert!(updated.contains("~~do [#sdkrestemitnative]"), "{updated}");
@@ -6024,14 +6024,17 @@ mod core_tests {
         assert_eq!(marked, 1);
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- do [#head]\n"), "{updated}");
-        assert!(updated.contains("- ~~do [#opportunistic]~~\n"), "{updated}");
-        assert!(updated.contains("- do [#tail]\n"), "{updated}");
+        assert!(updated.contains("- ### do [#head]\n"), "{updated}");
+        assert!(
+            updated.contains("- ### ~~do [#opportunistic]~~\n"),
+            "{updated}"
+        );
+        assert!(updated.contains("- ### do [#tail]\n"), "{updated}");
         let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
         assert!(
-            snapshot.contains("- ~~do [#opportunistic]~~\n"),
+            snapshot.contains("- ### ~~do [#opportunistic]~~\n"),
             "{snapshot}"
         );
     }
@@ -6073,7 +6076,7 @@ mod core_tests {
             .unwrap()
             .unwrap();
         assert!(
-            updated_snapshot.contains("- ~~do first copy [#duplicate]~~\n"),
+            updated_snapshot.contains("- ### ~~do first copy [#duplicate]~~\n"),
             "the independently matching snapshot item must still be synchronized: {updated_snapshot}"
         );
     }
@@ -6798,7 +6801,7 @@ mod core_tests {
         assert!(outcome.is_some(), "the answered head should be consumed");
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~do the thing~~"),
+            result.contains("- ### ~~do the thing~~"),
             "head must be struck after reconcile:\n{result}"
         );
         assert!(
@@ -6809,7 +6812,7 @@ mod core_tests {
             .unwrap()
             .unwrap();
         assert!(
-            snap_result.contains("- user added later"),
+            snap_result.contains("- ### user added later"),
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
         );
     }
@@ -7137,7 +7140,7 @@ mod core_tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~test~~"),
+            result.contains("- ### ~~test~~"),
             "document head must be consumed in place:\n{result}"
         );
         assert!(
@@ -7148,7 +7151,8 @@ mod core_tests {
             .unwrap()
             .unwrap();
         assert!(
-            snap_result.contains("- handle the old request") && !snap_result.contains("- test"),
+            snap_result.contains("- ### handle the old request")
+                && !snap_result.contains("- ### test"),
             "diverged recovery snapshot must not retarget the hot path:\n{snap_result}"
         );
     }
@@ -7762,7 +7766,7 @@ mod core_tests {
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
             result.contains(
-                "- ~~duplicate prose~~ — auto-struck: addressed this cycle ⟦addressed-at:"
+                "- ### ~~duplicate prose~~ — auto-struck: addressed this cycle ⟦addressed-at:"
             ) && result.contains("Z⟧\n- duplicate prose\n- keep\n"),
             "only the first duplicate prompt should be struck:\n{result}"
         );

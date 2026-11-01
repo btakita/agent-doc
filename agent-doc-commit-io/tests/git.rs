@@ -3840,11 +3840,11 @@ Duplicate replay should stay live.
         let mixed = committed
             .replace(
                 "- #subagents do [#deadline]\n",
-                "- ~~#subagents do [#deadline]~~\n",
+                "- ### ~~#subagents do [#deadline]~~\n",
             )
             .replace(
                 "- pick up steering\n",
-                "- ~~pick up steering~~ — auto-struck: answered this cycle (#ftstrike)\n",
+                "- ### ~~pick up steering~~ — auto-struck: answered this cycle (#ftstrike)\n",
             );
         fs::write(&doc, &mixed).unwrap();
 

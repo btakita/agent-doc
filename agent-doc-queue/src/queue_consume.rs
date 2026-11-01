@@ -2923,6 +2923,10 @@ pub fn annotate_struck_free_text_line(line: &str) -> String {
         return line.to_string();
     }
     let content = strip_list_bullet_prefix(trimmed_end);
+    // Top-level queue rows carry a navigation heading before every lifecycle
+    // marker.  The heading is presentation, so skip it while recognizing the
+    // struck payload that receives the deterministic explanation suffix.
+    let content = content.strip_prefix("### ").unwrap_or(content);
     let Some(inner) = content
         .strip_prefix("~~")
         .and_then(|rest| rest.strip_suffix("~~"))
@@ -6665,11 +6669,11 @@ mod tests {
         let mixed = committed
             .replace(
                 "- #subagents do [#preflightdeadline]\n",
-                "- ~~#subagents do [#preflightdeadline]~~\n",
+                "- ### ~~#subagents do [#preflightdeadline]~~\n",
             )
             .replace(
                 "- pick up steering\n",
-                &format!("- ~~pick up steering~~{note}\n"),
+                &format!("- ### ~~pick up steering~~{note}\n"),
             );
         assert_ne!(mixed, projection.target_content);
         assert!(
@@ -6732,7 +6736,7 @@ mod tests {
                 .unwrap();
 
         assert_eq!(count, 1);
-        assert!(updated.contains("- ~~do [#alpha]~~\n"));
+        assert!(updated.contains("- ### ~~do [#alpha]~~\n"));
         assert!(updated.contains("- do [#beta]\n"));
         assert!(
             done_ids_have_atomic_queue_completion(&content, &updated, &["alpha".to_string()],)
@@ -7608,15 +7612,15 @@ mod tests {
             reconcile_postcommit_queue_strikes_to_head(&working, &head).expect("queue repair");
 
         assert!(
-            reconciled.contains("- ~~:pushpin: do [#pzjy]~~\n"),
+            reconciled.contains("- ### ~~:pushpin: do [#pzjy]~~\n"),
             "pinned completed prompt should stay struck:\n{reconciled}"
         );
         assert!(
-            reconciled.contains("- ~~plain queued report~~\n"),
+            reconciled.contains("- ### ~~plain queued report~~\n"),
             "answered free-text prompt should stay struck:\n{reconciled}"
         );
         assert!(
-            reconciled.contains("- do [#new]\n"),
+            reconciled.contains("- ### do [#new]\n"),
             "unrelated queue additions must remain live:\n{reconciled}"
         );
     }
@@ -7790,10 +7794,10 @@ Old.
         assert_eq!(
             document_queue::render(&updated),
             concat!(
-                "- do [#head]\n",
-                "- ~~do [#opportunistic]~~\n",
-                "- ~~do [#already]~~\n",
-                "- do [#tail]\n",
+                "- ### do [#head]\n",
+                "- ### ~~do [#opportunistic]~~\n",
+                "- ### ~~do [#already]~~\n",
+                "- ### do [#tail]\n",
             )
         );
     }
@@ -7816,9 +7820,9 @@ Old.
         assert_eq!(
             document_queue::render(&updated),
             concat!(
-                "- ~~[#8667]~~\n",
-                "- do [#liveone]\n",
-                "- ~~do [#8667] follow-up~~\n",
+                "- ### ~~[#8667]~~\n",
+                "- ### do [#liveone]\n",
+                "- ### ~~do [#8667] follow-up~~\n",
             )
         );
     }
@@ -7833,7 +7837,7 @@ Old.
         assert_eq!(marked, vec!["do [#gatedphase]".to_string()]);
         assert_eq!(
             document_queue::render(&updated),
-            "- ~~do [#gatedphase]~~\n- do [#stillopen]\n"
+            "- ### ~~do [#gatedphase]~~\n- ### do [#stillopen]\n"
         );
     }
 
@@ -7862,7 +7866,7 @@ Old.
         // The pin matches for identity, but a strike wraps only the work text.
         assert_eq!(
             document_queue::render(&updated),
-            "- ~~deploy~~\n- do [#tail]\n"
+            "- ### ~~deploy~~\n- ### do [#tail]\n"
         );
     }
 
@@ -7886,7 +7890,7 @@ Old.
             let updated = consume_queue_nodes_by_key(&content, &[key]).unwrap();
 
             assert!(
-                updated.contains("- ~~do [#head]~~\n"),
+                updated.contains("- ### ~~do [#head]~~\n"),
                 "{marker}: {updated}"
             );
             assert!(
@@ -7932,7 +7936,7 @@ Old.
                 apply_structural_ops_to_content(&content, &queue_consume_node_ops(&keys)).unwrap();
             assert_eq!(
                 struck,
-                "<!-- agent:queue -->\n- ~~do [#orphan]~~\n- do [#tail]\n<!-- /agent:queue -->\n",
+                "<!-- agent:queue -->\n- ### ~~do [#orphan]~~\n- do [#tail]\n<!-- /agent:queue -->\n",
                 "{prefix:?}"
             );
             let struck_keys = agent_doc_markdown_ast::mutations::item_nodes(&struck, "queue")
@@ -7976,7 +7980,10 @@ Old.
 
             let updated = consume_queue_nodes_by_key(&content, &[key]).unwrap();
 
-            assert!(updated.contains("- ~~finish sdk demo~~\n"), "{updated}");
+            assert!(
+                updated.contains("- ### ~~finish sdk demo~~\n"),
+                "{updated}"
+            );
             assert!(!updated.contains(annotation), "{updated}");
         }
     }
@@ -8008,7 +8015,7 @@ Old.
         assert!(
             consumed.contains(concat!(
                 "## Run <!-- agent:run id=main priority subagents go -->\n",
-                "- ~~answer the operator~~\n",
+                "- ### ~~answer the operator~~\n",
                 "- do [#tail]\n",
             )),
             "{consumed}"
@@ -8050,7 +8057,10 @@ Old.
 
         assert_eq!(keys.len(), 1, "only the exact id directive is targetable");
         let updated = consume_queue_nodes_by_key(content, &keys).unwrap();
-        assert!(updated.contains("- ~~do [#orphangone]~~\n"), "{updated}");
+        assert!(
+            updated.contains("- ### ~~do [#orphangone]~~\n"),
+            "{updated}"
+        );
         assert!(
             updated.contains("- Please keep [#orphangone] visible in the report\n"),
             "{updated}"
@@ -8474,9 +8484,9 @@ Old.
 
         assert_eq!(projected.node_keys.len(), 1);
         assert!(
-            projected
-                .target_content
-                .contains("- ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)")
+            projected.target_content.contains(
+                "- ### ~~staging deploy~~ — auto-struck: answered this cycle (#ftstrike)"
+            )
         );
         assert!(
             projected
@@ -8974,9 +8984,9 @@ Old.
         // the live remaining head re-arms the default `go`.
         assert!(projected.target_content.contains("queue: go"));
         assert!(
-            projected
-                .target_content
-                .contains("- ~~completed work~~ — auto-struck: answered this cycle (#ftstrike)")
+            projected.target_content.contains(
+                "- ### ~~completed work~~ — auto-struck: answered this cycle (#ftstrike)"
+            )
         );
         assert!(projected.target_content.contains("- remaining work"));
     }
@@ -9218,7 +9228,7 @@ Old.
         );
         for issue in [80, 87, 93, 94] {
             let struck = format!(
-                "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/{issue}~~ — auto-struck: {STRUCK_FREE_TEXT_NOTE}"
+                "- ### ~~#gh-fix https://github.com/btakita/agent-doc/issues/{issue}~~ — auto-struck: {STRUCK_FREE_TEXT_NOTE}"
             );
             assert!(
                 projected.target_content.contains(&struck),
@@ -9228,7 +9238,7 @@ Old.
         }
         assert!(projected.target_content.contains("- release + publish\n"));
         assert!(projected.target_content.contains(
-            "- ~~The Idea Plugin formatting is not active. The element content should have a background. It's gone now.~~"
+            "- ### ~~The Idea Plugin formatting is not active. The element content should have a background. It's gone now.~~"
         ));
     }
 

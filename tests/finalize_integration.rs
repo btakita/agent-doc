@@ -3980,12 +3980,12 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
-        content.contains("- ~~do #fix1~~"),
+        content.contains("- ### ~~do #fix1~~"),
         "first prompt should be marked complete"
     );
     assert!(
         content.contains("- do #fix2"),
-        "second prompt should remain"
+        "second prompt should remain:\n{content}"
     );
     assert!(
         content.contains("- run tests"),
@@ -4438,7 +4438,7 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
         "batch dispatch directive should remain while later prompts are still queued"
     );
     assert!(
-        content.contains("- ~~do [#has9]~~"),
+        content.contains("- ### ~~do [#has9]~~"),
         "completed queue item should be struck through"
     );
     assert!(
@@ -4660,10 +4660,10 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
         "queue_active should remain true while the interspersed priority prompt is still live:\n{content}"
     );
     assert!(
-        content.contains("- ~~do [#cspe]~~")
-            && content.contains("- ~~do [#ctes]~~")
-            && content.contains("- ~~do [#crem]~~")
-            && content.contains("- ~~do [#cobs]~~"),
+        content.contains("- ### ~~do [#cspe]~~")
+            && content.contains("- ### ~~do [#ctes]~~")
+            && content.contains("- ### ~~do [#crem]~~")
+            && content.contains("- ### ~~do [#cobs]~~"),
         "all done-backed queue items should be struck:\n{content}"
     );
     assert!(
@@ -4710,7 +4710,7 @@ fn pending_only_done_without_commit_strikes_its_queue_head() {
         "the completed id must not remain a live queue prompt:\n{content}"
     );
     assert!(
-        content.contains("- ~~do [#dqsa]~~"),
+        content.contains("- ### ~~do [#dqsa]~~"),
         "the completed id's queue head must be struck:\n{content}"
     );
     assert!(
@@ -4864,13 +4864,13 @@ fn finalize_queue_consume_updates_document_and_commit_atomically() {
 
     let file_content = fs::read_to_string(&doc).unwrap();
     assert!(
-        file_content.contains("- ~~do #fix1~~"),
+        file_content.contains("- ### ~~do #fix1~~"),
         "first prompt marked complete in file"
     );
 
     let committed = head_blob(tmp.path());
     assert!(
-        committed.contains("- ~~do #fix1~~"),
+        committed.contains("- ### ~~do #fix1~~"),
         "the same commit must contain the queue consumption"
     );
     assert_eq!(

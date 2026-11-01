@@ -12520,7 +12520,7 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         let (_dir, file, _) = temp_doc(base);
-        let full_prompt = "- Does the API return the generic forbidden message?\n";
+        let full_prompt = "- ### Does the API return the generic forbidden message?\n";
         let agent_target = base.replacen(
             "<!-- agent:boundary:abc123 -->",
             "### Re: current\n\nThe generic message is returned.\n<!-- agent:boundary:abc123 -->",
@@ -12725,12 +12725,13 @@ mod tests {
 
     #[test]
     fn post_projection_race_replaces_a_baseline_queue_prefix_with_the_completed_edit() {
-        let partial_prompt = "- Review the proposed change.\n";
-        let complete_prompt = "- Review the proposed change. How is the final revision handled?\n";
+        let partial_prompt = "- ### Review the proposed change.\n";
+        let complete_prompt =
+            "- ### Review the proposed change. How is the final revision handled?\n";
         let base = concat!(
             "---\nqueue: go\n---\n\n",
             "<!-- agent:queue go -->\n",
-            "- Review the proposed change.\n",
+            "- ### Review the proposed change.\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:exchange -->\n",
             "<!-- agent:boundary:abc123 -->\n",

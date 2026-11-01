@@ -3049,14 +3049,14 @@ fn test_queue_sync_materializes_priority_go_backlog_and_session_check_stays_clea
     );
 
     let synced = fs::read_to_string(&doc).unwrap();
-    assert!(synced.contains("- 📥 advance [#samplefeed-prop]"));
-    assert!(synced.contains("- 📥 advance [#gvj5]"));
-    assert!(synced.contains("- 📥 do [#2qrx]"));
-    assert!(synced.contains("- 📥 do [#rating-emails]"));
-    assert!(synced.contains("- 📥 do [#cf-txn-email]"));
-    assert!(synced.contains("- 📥 do [#884m]"));
-    assert!(synced.contains("- 📥 do [#tk2p]"));
-    assert!(synced.contains("- 📥 do [#pdp-video-footage]"));
+    assert!(synced.contains("- ### 📥 advance [#samplefeed-prop]"));
+    assert!(synced.contains("- ### 📥 advance [#gvj5]"));
+    assert!(synced.contains("- ### 📥 do [#2qrx]"));
+    assert!(synced.contains("- ### 📥 do [#rating-emails]"));
+    assert!(synced.contains("- ### 📥 do [#cf-txn-email]"));
+    assert!(synced.contains("- ### 📥 do [#884m]"));
+    assert!(synced.contains("- ### 📥 do [#tk2p]"));
+    assert!(synced.contains("- ### 📥 do [#pdp-video-footage]"));
     assert_eq!(
         synced.matches("do [#samplefeed-prop]").count(),
         0,

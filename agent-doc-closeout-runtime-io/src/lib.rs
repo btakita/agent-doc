@@ -1544,7 +1544,7 @@ mod tests {
         let exact = concat!(
             "# Session\n\n",
             "<!-- agent:queue -->\n",
-            "- ~~do [#done]~~\n",
+            "- ### ~~do [#done]~~\n",
             "<!-- /agent:queue -->\n",
             "<!-- agent:backlog -->\n",
             "- [ ] [#keep] keep this\n",
@@ -1552,7 +1552,7 @@ mod tests {
         );
         assert!(exact_legacy_pending_only_reap(head, exact, &["done".to_string()],).unwrap());
 
-        let deletion_only = exact.replace("- ~~do [#done]~~", "- do [#done]");
+        let deletion_only = exact.replace("- ### ~~do [#done]~~", "- ### do [#done]");
         assert!(
             !exact_legacy_pending_only_reap(head, &deletion_only, &["done".to_string()]).unwrap(),
             "an unstruck queue entry must make a retained backlog deletion ineligible",
@@ -1584,7 +1584,7 @@ mod tests {
         let target = concat!(
             "# Session\n\n",
             "<!-- agent:queue -->\n",
-            "- ~~do [#done]~~\n",
+            "- ### ~~do [#done]~~\n",
             "<!-- /agent:queue -->\n",
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n",
@@ -1604,7 +1604,7 @@ mod tests {
             Some(target_hash),
         );
 
-        let deletion_only = target.replace("- ~~do [#done]~~", "- do [#done]");
+        let deletion_only = target.replace("- ### ~~do [#done]~~", "- ### do [#done]");
         let deletion_only_hash = agent_doc_hash::content_hash(&deletion_only);
         assert_eq!(
             infer_pending_only_commit_target_from_retained_projection(

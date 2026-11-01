@@ -4556,7 +4556,7 @@ mod tests {
         ));
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- ~~/clear~~"), "{updated}");
+        assert!(updated.contains("- ### ~~/clear~~"), "{updated}");
         assert!(updated.contains("- do #next"), "{updated}");
         let output = std::process::Command::new("git")
             .current_dir(dir.path())

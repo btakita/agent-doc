@@ -585,7 +585,7 @@ mod tests {
         // idle-queue classifier still sees it, but it renders as a list item so
         // the bullet-only `item_nodes` enumerator can strike it. The literalness
         // is what this test guards; the missing bullet was the bug.
-        assert!(updated.contains("\n- /clear\n"), "{updated}");
+        assert!(updated.contains("\n- ### /clear\n"), "{updated}");
         assert!(
             !updated.contains(":pushpin: /clear"),
             "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
@@ -659,7 +659,7 @@ mod tests {
         // idle-queue classifier still sees it, but it renders as a list item so
         // the bullet-only `item_nodes` enumerator can strike it. The literalness
         // is what this test guards; the missing bullet was the bug.
-        assert!(updated.contains("\n- /clear\n"), "{updated}");
+        assert!(updated.contains("\n- ### /clear\n"), "{updated}");
         assert_eq!(
             agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("/clear"),
@@ -1068,7 +1068,7 @@ mod tests {
         assert!(updated.contains("queue: go"));
         assert!(updated.contains("<!-- agent:run go -->"));
         assert!(!updated.contains("agent:run auto"));
-        assert!(updated.contains("- do [#qipc]. #spec-test-build-install-commit-push"));
+        assert!(updated.contains("- ### do [#qipc]. #spec-test-build-install-commit-push"));
         let queue_pos = updated.find("<!-- agent:run go -->").unwrap();
         let backlog_pos = updated.find("<!-- agent:backlog -->").unwrap();
         assert!(
@@ -1113,8 +1113,8 @@ mod tests {
             "<!-- agent:exchange -->\n",
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue go -->\n",
-            "- 📌 manual preempt prompt\n",
-            "- existing queued prompt\n",
+            "- ### 📌 manual preempt prompt\n",
+            "- ### existing queued prompt\n",
             "<!-- /agent:queue -->\n\n",
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n"
@@ -1215,7 +1215,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             updated.contains(
-                "- 📌 manual preempt prompt\n- concurrent editor prompt\n- existing queued prompt"
+                "- ### 📌 manual preempt prompt\n- ### concurrent editor prompt\n- ### existing queued prompt"
             ),
             "retry must preserve concurrent editor queue edits while inserting manual dispatch:\n{updated}"
         );
@@ -1291,9 +1291,9 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         // Existing (polluted) content preserved — not silently dropped.
         assert!(updated.contains("JB `Run Agent Doc` error:"));
-        assert!(updated.contains("- do [#existing]"));
+        assert!(updated.contains("- ### do [#existing]"));
         // New dispatch appended below it.
-        assert!(updated.contains("- do [#newitem]"));
+        assert!(updated.contains("- ### do [#newitem]"));
 
         // Re-dispatching the same prompt into the still-polluted queue is idempotent.
         let outcome2 = enqueue_route_dispatch_prompt(
@@ -1307,7 +1307,7 @@ mod tests {
         assert!(outcome2.already_present);
         let updated2 = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            updated2.matches("- do [#newitem]").count(),
+            updated2.matches("- ### do [#newitem]").count(),
             1,
             "repeat dispatch into a polluted queue must not duplicate the entry:\n{updated2}"
         );
@@ -1361,7 +1361,7 @@ mod tests {
         assert!(!updated.contains("agent:queue auto"));
         assert_eq!(
             updated
-                .matches("- do [#qipc]. #spec-test-build-install-commit-push")
+                .matches("- ### do [#qipc]. #spec-test-build-install-commit-push")
                 .count(),
             1,
             "route must not duplicate an already visible queue prompt:\n{updated}"
@@ -1838,7 +1838,9 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
-            updated.matches("- do [#adoc-orch-shim-cleanup]").count(),
+            updated
+                .matches("- ### do [#adoc-orch-shim-cleanup]")
+                .count(),
             1,
             "re-dispatching the live queue head must not duplicate it:\n{updated}\noutcome={outcome:?}"
         );
@@ -1897,7 +1899,7 @@ mod tests {
             "stale route-owned queue prompt should be replaced:\n{updated}"
         );
         assert!(
-            updated.contains("- Run Agent Doc queued the edited prompt."),
+            updated.contains("- ### Run Agent Doc queued the edited prompt."),
             "edited prompt should become the single queued rerun:\n{updated}"
         );
         let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
@@ -1956,7 +1958,7 @@ mod tests {
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated
-                .contains("- first queued prompt\n- second queued prompt\n- third queued prompt")
+                .contains("- ### first queued prompt\n- ### second queued prompt\n- ### third queued prompt")
         );
     }
     #[test]
@@ -2007,7 +2009,7 @@ mod tests {
         assert!(!updated.contains("agent:queue auto"));
         assert!(
             updated.contains(
-                "- 📌 manual preempt prompt\n- first queued prompt\n- second queued prompt"
+                "- ### 📌 manual preempt prompt\n- ### first queued prompt\n- ### second queued prompt"
             ),
             "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
         );
@@ -2062,7 +2064,7 @@ mod tests {
         assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
         assert!(
-            updated.contains("- 📌 manual preempt prompt\n- pending auto-loop item"),
+            updated.contains("- ### 📌 manual preempt prompt\n- ### pending auto-loop item"),
             "priority dispatch must preserve the pending item and run ahead of it with operator pin:\n{updated}"
         );
     }
@@ -2113,10 +2115,10 @@ mod tests {
             .find("preset #spec")
             .expect("preset directive preserved");
         let preempt_pos = updated
-            .find("- 📌 manual preempt prompt")
+            .find("- ### 📌 manual preempt prompt")
             .expect("preempt prompt inserted");
         let first_pos = updated
-            .find("- first queued prompt")
+            .find("- ### first queued prompt")
             .expect("first prompt preserved");
         assert!(
             preset_pos < preempt_pos && preempt_pos < first_pos,

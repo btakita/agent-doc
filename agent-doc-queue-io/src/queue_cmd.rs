@@ -1854,7 +1854,7 @@ mod tests {
         let result = std::fs::read_to_string(&doc).unwrap();
 
         assert!(
-            result.contains("- 📥 do [#alpha]"),
+            result.contains("- ### 📥 do [#alpha]"),
             "marked item should be queued with pending lifecycle state:\n{result}"
         );
         assert!(

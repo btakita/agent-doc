@@ -2261,6 +2261,21 @@ fn run_with_options_inner(
                     );
                     return Ok(());
                 }
+                // `#queueparallelbydefault`: auto-clear may hand one selected
+                // inline head to the supervisor only after the project-wide
+                // coordinator view proves that no independent sibling still
+                // needs dispatch, integration, recovery, or reconciliation.
+                // Otherwise ending this closeout would strand work that the
+                // selected-head continuation cannot see.
+                let coordinator_drain =
+                    agent_doc_queue_io::subagent_dispatch::coordinator_drain_decision_for_content(
+                        file,
+                        &continuation_content,
+                    )?;
+                if coordinator_drain.has_action_beyond_inline_head(&continuation.head_prompt) {
+                    report_coordinator_action_required(file, &coordinator_drain, codex_final_gate)?;
+                    return Ok(());
+                }
                 // #bgclearpolicy: queue auto-clear (the default) hands this item
                 // boundary to the ready supervisor, which resets the agent
                 // context and dispatches the next head to the fresh context. The
@@ -2389,75 +2404,7 @@ fn run_with_options_inner(
                 if coordinator_drain.phase
                     == agent_doc_queue::coordinator_drain::CoordinatorDrainPhase::ActionRequired
                 {
-                    use agent_doc_queue::queue_sync_payload::QueueSyncOperation;
-
-                    let snapshot = &coordinator_drain.snapshot;
-                    let action_items = coordinator_drain.action_items().collect::<Vec<_>>();
-                    let operation_count = |operation| {
-                        action_items
-                            .iter()
-                            .filter(|item| item.operation == operation)
-                            .count()
-                    };
-                    let dispatch = operation_count(QueueSyncOperation::Dispatch);
-                    let inline = operation_count(QueueSyncOperation::InlineExecuteThenReconcile);
-                    let forward = operation_count(QueueSyncOperation::ForwardSteering);
-                    let integrate = operation_count(QueueSyncOperation::IntegrateClose);
-                    let recover = operation_count(QueueSyncOperation::RecoverRequeue);
-                    let reconcile = operation_count(QueueSyncOperation::Reconcile);
-                    let recovered_response_delivery_debt = action_items
-                        .iter()
-                        .filter(|item| {
-                            item.response_evidence
-                                == agent_doc_queue::queue_sync_payload::QueueSyncResponseEvidence::AgentHistory
-                                && item.recovered_response.is_some()
-                        })
-                        .count();
-                    let missing_response_debt = action_items
-                        .iter()
-                        .filter(|item| item.missing_response_debt)
-                        .count();
-                    let placement_reconcile = snapshot.placement_reconcile.len();
-                    let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
-                    for item in &action_items {
-                        *component_counts.entry(item.queue_id.clone()).or_default() += 1;
-                    }
-                    let dispatch_prompt = format!(
-                        "finish the project queue sync obligation: dispatch/start {dispatch} delegated row(s); execute/reconcile {inline} coordinator-inline row(s) without spawning; forward {forward} steering edit(s); integrate/close {integrate} report(s); recover/requeue {recover} lost attempt(s); consolidate {recovered_response_delivery_debt} recovered child response(s); resolve {missing_response_debt} missing_response_debt blocker(s); reconcile {reconcile} unknown state(s); resolve {placement_reconcile} queue-placement debt item(s); resolve {} scan error(s)",
-                        snapshot.scan_errors.len(),
-                    );
-                    println!(
-                        "queue_continuation_required=true queue_subagent_dispatch_required={} queue_subagent_dispatch_count={} queue_inline_action_count={} queue_forward_steering_count={} queue_recover_count={} queue_integrate_count={} recovered_response_delivery_debt_count={} missing_response_debt_count={} queue_reconcile_count={} queue_placement_reconcile_count={} queue_scan_error_count={} queue_running_count={} inactive_pending_components={:?} document_queue_terminal=false next_queue_prompt={:?}",
-                        dispatch > 0,
-                        dispatch,
-                        inline,
-                        forward,
-                        recover,
-                        integrate,
-                        recovered_response_delivery_debt,
-                        missing_response_debt,
-                        reconcile,
-                        placement_reconcile,
-                        snapshot.scan_errors.len(),
-                        snapshot.running.len(),
-                        component_counts,
-                        dispatch_prompt,
-                    );
-                    eprintln!(
-                        "[session-check] project queue sync action is still required for {} across components {:?}: {dispatch} delegated dispatch/start, {inline} coordinator-inline execute/reconcile, {forward} steering forward, {recover} recover/requeue, {integrate} integrate/close, {recovered_response_delivery_debt} recovered child response(s) awaiting exact-once root consolidation, {missing_response_debt} named missing_response_debt blocker(s), {reconcile} unknown reconciliation, {placement_reconcile} unresolved queue placement, and {} scan error(s). Only queues with `subagents` use claim → native spawn → queue start; the main agent executes queues without `subagents` inline and owns their lifecycle/document convergence. Workers never self-claim or self-close. Do not report completion (#coordinatordrain).",
-                        file.display(),
-                        component_counts,
-                        snapshot.scan_errors.len(),
-                    );
-                    if recovered_response_delivery_debt > 0 || missing_response_debt > 0 {
-                        anyhow::bail!(
-                            "subagent response exchange debt blocks clean closeout: recovered_response_delivery_debt={recovered_response_delivery_debt} missing_response_debt={missing_response_debt}; consolidate every available recovered response exactly once, or preserve the named missing_response_debt blocker"
-                        );
-                    }
-                    if codex_final_gate {
-                        crate::profile::report_now(file);
-                        std::process::exit(2);
-                    }
+                    report_coordinator_action_required(file, &coordinator_drain, codex_final_gate)?;
                     return Ok(());
                 }
                 if coordinator_drain.phase
@@ -2757,6 +2704,83 @@ fn warn_unrecorded_chat_prompts(file: &Path) {
     if let Some(warning) = unrecorded_chat_prompt_warning(file) {
         eprintln!("{warning}");
     }
+}
+
+fn report_coordinator_action_required(
+    file: &Path,
+    coordinator_drain: &agent_doc_queue::coordinator_drain::CoordinatorDrainDecision,
+    codex_final_gate: bool,
+) -> Result<()> {
+    use agent_doc_queue::queue_sync_payload::QueueSyncOperation;
+
+    let snapshot = &coordinator_drain.snapshot;
+    let action_items = coordinator_drain.action_items().collect::<Vec<_>>();
+    let operation_count = |operation| {
+        action_items
+            .iter()
+            .filter(|item| item.operation == operation)
+            .count()
+    };
+    let dispatch = operation_count(QueueSyncOperation::Dispatch);
+    let inline = operation_count(QueueSyncOperation::InlineExecuteThenReconcile);
+    let forward = operation_count(QueueSyncOperation::ForwardSteering);
+    let integrate = operation_count(QueueSyncOperation::IntegrateClose);
+    let recover = operation_count(QueueSyncOperation::RecoverRequeue);
+    let reconcile = operation_count(QueueSyncOperation::Reconcile);
+    let recovered_response_delivery_debt = action_items
+        .iter()
+        .filter(|item| {
+            item.response_evidence
+                == agent_doc_queue::queue_sync_payload::QueueSyncResponseEvidence::AgentHistory
+                && item.recovered_response.is_some()
+        })
+        .count();
+    let missing_response_debt = action_items
+        .iter()
+        .filter(|item| item.missing_response_debt)
+        .count();
+    let placement_reconcile = snapshot.placement_reconcile.len();
+    let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
+    for item in &action_items {
+        *component_counts.entry(item.queue_id.clone()).or_default() += 1;
+    }
+    let dispatch_prompt = format!(
+        "finish the project queue sync obligation: dispatch/start {dispatch} delegated row(s); execute/reconcile {inline} coordinator-inline row(s) without spawning; forward {forward} steering edit(s); integrate/close {integrate} report(s); recover/requeue {recover} lost attempt(s); consolidate {recovered_response_delivery_debt} recovered child response(s); resolve {missing_response_debt} missing_response_debt blocker(s); reconcile {reconcile} unknown state(s); resolve {placement_reconcile} queue-placement debt item(s); resolve {} scan error(s)",
+        snapshot.scan_errors.len(),
+    );
+    println!(
+        "queue_continuation_required=true queue_subagent_dispatch_required={} queue_subagent_dispatch_count={} queue_inline_action_count={} queue_forward_steering_count={} queue_recover_count={} queue_integrate_count={} recovered_response_delivery_debt_count={} missing_response_debt_count={} queue_reconcile_count={} queue_placement_reconcile_count={} queue_scan_error_count={} queue_running_count={} inactive_pending_components={:?} document_queue_terminal=false next_queue_prompt={:?}",
+        dispatch > 0,
+        dispatch,
+        inline,
+        forward,
+        recover,
+        integrate,
+        recovered_response_delivery_debt,
+        missing_response_debt,
+        reconcile,
+        placement_reconcile,
+        snapshot.scan_errors.len(),
+        snapshot.running.len(),
+        component_counts,
+        dispatch_prompt,
+    );
+    eprintln!(
+        "[session-check] project queue sync action is still required for {} across components {:?}: {dispatch} delegated dispatch/start, {inline} coordinator-inline execute/reconcile, {forward} steering forward, {recover} recover/requeue, {integrate} integrate/close, {recovered_response_delivery_debt} recovered child response(s) awaiting exact-once root consolidation, {missing_response_debt} named missing_response_debt blocker(s), {reconcile} unknown reconciliation, {placement_reconcile} unresolved queue placement, and {} scan error(s). Only queues with `subagents` use claim → native spawn → queue start; the main agent executes queues without `subagents` inline and owns their lifecycle/document convergence. Workers never self-claim or self-close. Do not report completion (#coordinatordrain).",
+        file.display(),
+        component_counts,
+        snapshot.scan_errors.len(),
+    );
+    if recovered_response_delivery_debt > 0 || missing_response_debt > 0 {
+        anyhow::bail!(
+            "subagent response exchange debt blocks clean closeout: recovered_response_delivery_debt={recovered_response_delivery_debt} missing_response_debt={missing_response_debt}; consolidate every available recovered response exactly once, or preserve the named missing_response_debt blocker"
+        );
+    }
+    if codex_final_gate {
+        crate::profile::report_now(file);
+        std::process::exit(2);
+    }
+    Ok(())
 }
 
 /// `#steerinterruptexit`: print a pending-steering status as a successful

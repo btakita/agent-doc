@@ -8707,6 +8707,59 @@ Old.
         );
     }
 
+    #[test]
+    fn ack_id_is_component_local_while_a_sibling_free_text_worker_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Main <!-- agent:run id=main subagents priority go -->\n",
+            "- do [#reported]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Sibling <!-- agent:run id=sibling subagents priority go -->\n",
+            "- keep the sibling worker running\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo priority -->\n",
+            "- [ ] [#reported] wait for an operator check\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let reported_generation = running_claim(&doc, "#reported", "subagent:reported");
+        crate::queue_claim::report_attempt(&doc, "#reported", Some(reported_generation)).unwrap();
+        let sibling_generation =
+            running_claim(&doc, "keep the sibling worker running", "subagent:sibling");
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "reported").unwrap());
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("- ~~do [#reported]~~"), "{updated}");
+        assert!(
+            updated.contains("- keep the sibling worker running"),
+            "the unrelated free-text row stays live:\n{updated}"
+        );
+        let claims = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(claims.claims.iter().any(|claim| {
+            claim.owner == "subagent:sibling"
+                && claim.generation == sibling_generation
+                && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Running
+        }));
+        assert!(
+            claims
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:reported")
+        );
+    }
+
     /// `#taggedidhead` live shape (haiven-dev sdk-demo.md, 2026-10-28): a
     /// reported `#review [#adr0043-publish]` row whose Todo was already closed.
     /// The claim keys it as `adr0043-publish`; `--id` must find it by the same

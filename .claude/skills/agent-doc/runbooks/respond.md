@@ -271,7 +271,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `~/worktrees/<repo>-<label>`), and never run two subagents in
      one checkout. Heads that `agent-doc plan` gives the same repo
      `write_scope` still get separate worktrees, but they are integrated one at a
-     time. A head marked `parallelizable: false` runs alone.
+     time. Claim, spawn, and start EVERY independent entry from this cycle's
+     dispatch list before waiting for a result or beginning serial integration;
+     sharing a repo or `write_scope` never serializes worker execution. Only an
+     explicit `after=` / ordered dependency or `parallelizable: false` serializes
+     starts. A head marked `parallelizable: false` runs alone.
      After the spawn succeeds and returns its concrete worker identity, run the
      entry's `start_command` (`agent-doc queue start <FILE> --item <...>
      --owner subagent:<label> --generation <N> --worker-id <WORKER>`). This
@@ -437,13 +441,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      only the subagent report is refused (`#consolidatedreport`). For abandoned, failed, or requeued work run
      `agent-doc queue release <FILE> --item <...> --generation <N> --requeue`: no report is
      recorded and the line is dispatchable to a new worker again.
-  Harnesses without an in-session Agent tool (Codex, OpenCode, Cursor) claim
-  the same items and fall back to
+  Harnesses that genuinely lack an in-session subagent tool claim the same
+  items and fall back to
   `agent-doc orchestrate <FILE> --mode parallel --task "<item>" ...` over the
-  dispatch items. If neither path exists, say so in the response and drain the
-  items inline. When every remaining head is claimed or held, end the turn
-  quietly (the Stop hook logs `state=waiting_on_claims`): subagent completion
-  notifications resume the loop, and you do not need to poll or schedule a re-entry.
+  dispatch items. If neither path exists, leave them queued and record
+  `**Deferred:** no subagent available`; never silently change delegated work
+  into inline work. Only after the project-wide sync view shows no eligible
+  pending, claimed-but-unstarted, lost, reported, or unknown row, end the turn
+  quietly. Running or explicitly dependency/cap-held rows may wait (the Stop hook
+  logs `state=waiting_on_claims`), and subagent completion notifications resume
+  the loop without polling or a scheduled re-entry.
 - If session-accretion supplies bounded context, use the included `### Re:`
   blocks as prompt-position anchors, not proof that older turns are absent.
 - Execute from the planning record. If `execution_scope=plan_backlog_only`, stay

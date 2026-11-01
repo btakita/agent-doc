@@ -334,4 +334,51 @@ mod tests {
         assert_eq!(plan.dispatch, remaining);
         assert!(plan.held.is_empty());
     }
+
+    #[test]
+    fn independent_siblings_fan_out_but_review_waits_for_address_sha_mutation() {
+        let heads = strings(&[
+            "do [#lint]",
+            "do [#address]",
+            "do [#review-new-head-sha]",
+            "do [#docs]",
+        ]);
+        let deps = std::collections::HashMap::from([(
+            "review-new-head-sha".to_string(),
+            strings(&["address"]),
+        )]);
+        let none = crate::queue_claim::ClaimedQueueItems::none();
+
+        let first_pass = plan_queue_subagent_dispatch(
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            },
+            &heads,
+            &heads,
+            &none,
+            &deps,
+        );
+        assert_eq!(
+            first_pass.dispatch,
+            strings(&["do [#lint]", "do [#address]", "do [#docs]"])
+        );
+        assert_eq!(
+            first_pass.held,
+            strings(&["do [#review-new-head-sha]"]),
+            "the review must not inspect an older SHA while address work can still push"
+        );
+
+        let after_address = strings(&["do [#review-new-head-sha]"]);
+        let second_pass = plan_queue_subagent_dispatch(
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            },
+            &after_address,
+            &after_address,
+            &none,
+            &deps,
+        );
+        assert_eq!(second_pass.dispatch, after_address);
+        assert!(second_pass.held.is_empty());
+    }
 }

@@ -576,6 +576,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         Ok(())
     }
 
+    fn restore_committed_response_evidence(&self, file: &Path) -> Result<bool> {
+        agent_doc_commit_io::restore_and_commit_historical_response_evidence(file)
+    }
+
     fn closeout_recovery_hint(&self, file: &Path) -> String {
         closeout_recovery_hint(file)
     }

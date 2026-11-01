@@ -9,6 +9,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
 
 - Address the user's changes naturally in the console; that response is the
   document response.
+- **Lead queue closeouts with an actionable summary (`#queueresponsesummary`).**
+  Start the consolidated report for queue work with one substantive paragraph
+  labelled `**Outcome:**`, `**Current state:**`, `**Blocked:**`,
+  `**Blocker:**`, or `**Next action:**`. State the outcome/current state and,
+  when applicable, the blocker or required next action in complete sentences.
+  This lead is the deterministic source for a completed row's default
+  `response="summary"` projection; do not put essential action after it. A
+  blocking operator-request packet remains separate and canonical so the
+  binary can append its complete request and every choice to that summary.
 - **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
   invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
   `request_user_input`, or the active harness's equivalent), materialize the

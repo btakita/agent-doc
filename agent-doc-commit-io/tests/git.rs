@@ -3637,22 +3637,17 @@ Duplicate replay should stay live.
         .unwrap()
         .expect("fixture response must own its free-text queue head")
         .target_content;
-        assert_eq!(
-            struck.len() - committed.len(),
-            281,
-            "the production failure was the exact annotated #ftstrike delta"
+        let response_lookup = struck
+            .lines()
+            .find(|line| line.trim_start().starts_with("- %% response [#r-"))
+            .expect("the late projection must retain its terse response lookup");
+        assert!(
+            response_lookup.trim_end().ends_with("] %%"),
+            "the exact late projection must retain its terse response lookup:\n{struck}"
         );
         assert!(
-            struck.contains(concat!(
-                "  - %%\n",
-                "    ### Re: finish the plan — gpt-5\n",
-                "    \n",
-                "    > **Queue prompt:** finish the plan\n",
-                "    \n",
-                "    Finished and verified.\n",
-                "    %%\n",
-            )),
-            "the exact late projection must retain the full response as an inert child:\n{struck}"
+            struck.contains("<summary>Response</summary>\n    \n    Finished and verified."),
+            "the default projection must retain its actionable response summary:\n{struck}"
         );
         fs::write(&doc, &struck).unwrap();
 

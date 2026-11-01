@@ -2538,7 +2538,17 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     }
 
     let after = annotate_exchange_response_with_lookup_id(after, &response_policy, &response_id)?;
-    let lookup_children = response_lookup_children(response_body, &response_id);
+    let queue_response_ranges = element::parse(&after)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+        .map(|component| {
+            (
+                component.open_end,
+                component.close_start,
+                QueueResponseMode::from_attr(component.attrs.get("response").map(String::as_str)),
+            )
+        })
+        .collect::<Vec<_>>();
 
     let struck_before: HashSet<String> =
         agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
@@ -2569,6 +2579,11 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         let owned_scope_end = descendant_end.max(node.item.end_byte);
         let owned_scope = &after[node.item.start_byte..owned_scope_end];
         let child_indent = " ".repeat(indent + 2);
+        let response_mode = queue_response_ranges
+            .iter()
+            .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
+            .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
+        let lookup_children = response_lookup_children(response_body, &response_id, response_mode);
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
@@ -2659,36 +2674,47 @@ pub fn response_lookup_id_for_document(
     Ok(response_policy.response_id().to_string())
 }
 
-fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueueResponseMode {
+    Summary,
+    Inline,
+    Lookup,
+}
+
+impl QueueResponseMode {
+    fn from_attr(value: Option<&str>) -> Self {
+        match value {
+            Some("inline") => Self::Inline,
+            Some("lookup") => Self::Lookup,
+            Some("summary") | None | Some(_) => Self::Summary,
+        }
+    }
+}
+
+fn response_lookup_children(
+    response_body: &str,
+    response_id: &str,
+    mode: QueueResponseMode,
+) -> Vec<String> {
     // `patch:exchange` is the response transport envelope. The exchange
     // materializer consumes it, but this queue projection receives the original
     // captured payload so it must cross the same visibility boundary explicitly.
     // Strip only one complete outer pair; literal examples inside an ordinary
     // response remain operator-visible.
     let response_body = response_body_without_exchange_transport(response_body);
-    let response_child = response_details_child(response_body, response_id)
-        .expect("response lookup ids are canonical response ids");
-    let mut children = vec![response_child, format!("%% response {response_id} %%")];
-
-    for (index, code) in response_body.split('`').enumerate() {
-        if index % 2 == 1 && artifact_reference(code) {
-            let child = format!("%% {code} %%");
-            if !children.contains(&child) {
-                children.push(child);
-            }
-        }
+    let mut children = Vec::new();
+    match mode {
+        QueueResponseMode::Summary => children.push(
+            response_summary_details_child(response_body, response_id)
+                .expect("response lookup ids are canonical response ids"),
+        ),
+        QueueResponseMode::Inline => children.push(
+            response_details_child(response_body, response_id)
+                .expect("response lookup ids are canonical response ids"),
+        ),
+        QueueResponseMode::Lookup => {}
     }
-
-    for line in response_body.lines() {
-        let marker = line.trim();
-        if marker.starts_with("%% response ")
-            && marker.ends_with(" %%")
-            && !agent_doc_markdown_ast::exchange_tree::is_response_id_lookup_marker(marker)
-            && !children.iter().any(|child| child == marker)
-        {
-            children.push(marker.to_string());
-        }
-    }
+    children.push(format!("%% response {response_id} %%"));
     children
 }
 
@@ -2732,6 +2758,122 @@ fn response_details_child(response_body: &str, response_id: &str) -> Option<Stri
     Some(format!(
         "<details data-agent-doc-response-id=\"{attribute_id}\">\n<summary>Response</summary>\n\n{body}\n</details>"
     ))
+}
+
+const RESPONSE_SUMMARY_SOFT_TARGET_CHARS: usize = 280;
+const ACTIONABLE_RESPONSE_LEAD_LABELS: &[&str] = &[
+    "**outcome:**",
+    "**current state:**",
+    "**blocked:**",
+    "**blocker:**",
+    "**next action:**",
+];
+
+fn response_summary_details_child(response_body: &str, response_id: &str) -> Option<String> {
+    let mut summary = response_summary_lead(response_body);
+    for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
+        if !summary.is_empty() {
+            summary.push_str("\n\n");
+        }
+        summary.push_str(packet);
+    }
+    response_details_child(&summary, response_id)
+}
+
+fn response_summary_lead(response_body: &str) -> String {
+    let mut prose = response_body.to_string();
+    for packet in crate::operator_request_packet::blocking_operator_request_blocks(response_body) {
+        prose = prose.replacen(packet, "", 1);
+    }
+
+    let mut paragraphs = Vec::<String>::new();
+    let mut paragraph = Vec::<&str>::new();
+    let flush = |paragraph: &mut Vec<&str>, paragraphs: &mut Vec<String>| {
+        if !paragraph.is_empty() {
+            paragraphs.push(
+                paragraph
+                    .iter()
+                    .flat_map(|line| line.split_whitespace())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            paragraph.clear();
+        }
+    };
+    for line in prose.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            flush(&mut paragraph, &mut paragraphs);
+            continue;
+        }
+        if response_summary_structural_line(trimmed) {
+            flush(&mut paragraph, &mut paragraphs);
+            continue;
+        }
+        paragraph.push(trimmed);
+    }
+    flush(&mut paragraph, &mut paragraphs);
+
+    let (lead, actionable_contract) = paragraphs
+        .iter()
+        .find(|paragraph| actionable_response_lead(paragraph))
+        .map(|paragraph| (paragraph.as_str(), true))
+        .or_else(|| {
+            paragraphs
+                .first()
+                .map(|paragraph| (paragraph.as_str(), false))
+        })
+        .unwrap_or(("Response.", false));
+    soft_bound_response_summary(lead, actionable_contract)
+}
+
+fn response_summary_structural_line(line: &str) -> bool {
+    line.starts_with('#')
+        || line.starts_with('>')
+        || line.starts_with("<!--")
+        || line.starts_with("```")
+        || line.starts_with("~~~")
+        || line.starts_with("<details")
+        || line == "</details>"
+        || line.starts_with("%%")
+        || line.starts_with("- ")
+        || line.starts_with("* ")
+        || line.starts_with("+ ")
+        || line.split_once(". ").is_some_and(|(number, _)| {
+            !number.is_empty() && number.chars().all(|character| character.is_ascii_digit())
+        })
+}
+
+fn actionable_response_lead(paragraph: &str) -> bool {
+    let lower = paragraph.to_ascii_lowercase();
+    ACTIONABLE_RESPONSE_LEAD_LABELS
+        .iter()
+        .any(|label| lower.starts_with(label))
+}
+
+fn soft_bound_response_summary(lead: &str, actionable_contract: bool) -> String {
+    if actionable_contract || lead.chars().count() <= RESPONSE_SUMMARY_SOFT_TARGET_CHARS {
+        return lead.to_string();
+    }
+    let chars = lead.chars().collect::<Vec<_>>();
+    let Some(sentence_end) = chars
+        .iter()
+        .enumerate()
+        .skip(RESPONSE_SUMMARY_SOFT_TARGET_CHARS.saturating_sub(1))
+        .find_map(|(index, character)| {
+            matches!(character, '.' | '?' | '!')
+                .then_some(index)
+                .filter(|index| chars.get(index + 1).is_none_or(|next| next.is_whitespace()))
+        })
+    else {
+        return lead.to_string();
+    };
+    if sentence_end + 1 == chars.len() {
+        return lead.to_string();
+    }
+    let mut bounded = chars[..=sentence_end].iter().collect::<String>();
+    bounded.push('…');
+    bounded
 }
 
 fn balance_nested_details_for_response(response_body: &str) -> String {
@@ -2824,21 +2966,6 @@ fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
     rendered
 }
 
-fn artifact_reference(code: &str) -> bool {
-    let code = code.trim();
-    !code.is_empty()
-        && !code.chars().any(char::is_whitespace)
-        && !code.contains("://")
-        && (code.starts_with('/')
-            || code.starts_with("./")
-            || code.starts_with("../")
-            || (code.contains('/')
-                && code
-                    .rsplit('/')
-                    .next()
-                    .is_some_and(|name| name.contains('.'))))
-}
-
 fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) -> usize {
     let mut cursor = item_end;
     for line in document[item_end..].split_inclusive('\n') {
@@ -2904,12 +3031,16 @@ mod tests {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
     }
 
+    fn inline_response_queue_doc(body: &str) -> String {
+        format!("<!-- agent:queue response=\"inline\" -->\n{body}<!-- /agent:queue -->\n")
+    }
+
     fn active_queue_doc(body: &str) -> String {
         format!("---\nqueue: go\n---\n\n<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n")
     }
 
     #[test]
-    fn newly_struck_managed_list_item_links_to_the_stable_response_id() {
+    fn newly_struck_managed_list_item_defaults_to_actionable_response_summary() {
         let before = queue_doc("- do [#fresh]\n- ~~do [#old]~~\n");
         let after = queue_doc("- ~~do [#fresh]~~\n- ~~do [#old]~~\n");
         let response = concat!(
@@ -2933,11 +3064,12 @@ mod tests {
             )),
             "{annotated}"
         );
-        let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(
-            annotated.contains(&format!(
-                "  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: fresh — test\n    \n    Completed `/work/tasks/result.md`.\n    %% response published locally; coordinator install remains %%\n    </details>\n"
-            )),
+            annotated.contains("data-agent-doc-response-id"),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("Completed `/work/tasks/result.md`."),
             "{annotated}"
         );
         assert!(
@@ -2946,14 +3078,10 @@ mod tests {
         );
         assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(&response_id));
         assert!(!annotated.contains("response-cell:r:"), "{annotated}");
+        assert!(!annotated.contains("  - %% /work/tasks/result.md %%\n"));
         assert!(
-            annotated.contains("  - %% /work/tasks/result.md %%\n"),
-            "{annotated}"
-        );
-        assert!(
-            annotated
-                .contains("  - %% response published locally; coordinator install remains %%\n"),
-            "{annotated}"
+            !annotated
+                .contains("  - %% response published locally; coordinator install remains %%\n")
         );
         assert!(annotated.contains("- ~~do [#old]~~\n"), "{annotated}");
         assert_eq!(
@@ -2967,8 +3095,8 @@ mod tests {
     #[test]
     fn completed_row_response_child_strips_exchange_transport_wrapper() {
         let head = "do [#subagent-response-exchange-gap]";
-        let before = queue_doc(&format!("- {head}\n"));
-        let after = queue_doc(&format!("- ~~{head}~~\n"));
+        let before = inline_response_queue_doc(&format!("- {head}\n"));
+        let after = inline_response_queue_doc(&format!("- ~~{head}~~\n"));
         let response = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: subagent response exchange gap — test\n\n",
@@ -3022,6 +3150,136 @@ mod tests {
     }
 
     #[test]
+    fn inline_response_mode_is_scoped_to_its_queue_component() {
+        let before = concat!(
+            "<!-- agent:queue id=terse response=\"lookup\" -->\n",
+            "- do [#terse]\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:queue id=expanded response=\"inline\" -->\n",
+            "- do [#expanded]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let after = before
+            .replace("- do [#terse]", "- ~~do [#terse]~~")
+            .replace("- do [#expanded]", "- ~~do [#expanded]~~");
+        let response = "### Re: queues — test\n\nCompleted both rows.\n";
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(before, &after, response).unwrap();
+        let (terse, expanded) = annotated
+            .split_once("<!-- agent:queue id=expanded response=\"inline\" -->")
+            .unwrap();
+        assert!(!terse.contains("data-agent-doc-response-id"), "{annotated}");
+        assert!(
+            expanded.contains("data-agent-doc-response-id"),
+            "{annotated}"
+        );
+        assert_eq!(annotated.matches("data-agent-doc-response-id").count(), 1);
+        assert_eq!(annotated.matches("- %% response [#r-").count(), 2);
+    }
+
+    #[test]
+    fn explicit_summary_matches_the_default_projection() {
+        let response = "### Re: summary — test\n\n**Outcome:** Completed the requested repair.\n";
+        let default = annotate_newly_struck_queue_items_with_response_id(
+            &queue_doc("- do [#summary]\n"),
+            &queue_doc("- ~~do [#summary]~~\n"),
+            response,
+        )
+        .unwrap();
+        let explicit = annotate_newly_struck_queue_items_with_response_id(
+            "<!-- agent:queue response=\"summary\" -->\n- do [#summary]\n<!-- /agent:queue -->\n",
+            "<!-- agent:queue response=\"summary\" -->\n- ~~do [#summary]~~\n<!-- /agent:queue -->\n",
+            response,
+        )
+        .unwrap();
+        let default_child = default
+            .split_once("  - <details")
+            .map(|(_, child)| child)
+            .unwrap();
+        let explicit_child = explicit
+            .split_once("  - <details")
+            .map(|(_, child)| child)
+            .unwrap();
+        assert_eq!(default_child, explicit_child);
+    }
+
+    #[test]
+    fn summary_keeps_actionable_lead_and_all_operator_request_choices_beyond_soft_target() {
+        let long_state = format!(
+            "**Current state:** {} The release remains blocked until the operator selects a target. Next action: choose one option below.",
+            "The implementation and focused verification are complete. ".repeat(8)
+        );
+        let response = format!(
+            "### Re: release target — test\n\n{long_state}\n\n\
+[#subagent-operator-request-release-target] subagent operator request\n\
+- *queue_item:*\n  - publish release\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - Which release target should be used?\n\
+- *context:*\n  - The build is ready.\n\
+- *choices:*\n  - **staging**: Publish to staging.\n  - **production**: Publish to production.\n"
+        );
+        let annotated = annotate_newly_struck_queue_items_with_response_id(
+            &queue_doc("- do [#release]\n"),
+            &queue_doc("- ~~do [#release]~~\n"),
+            &response,
+        )
+        .unwrap();
+
+        assert!(long_state.chars().count() > RESPONSE_SUMMARY_SOFT_TARGET_CHARS);
+        let normalized_long_state = long_state.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(annotated.contains(&normalized_long_state), "{annotated}");
+        assert!(
+            annotated.contains("- *request:*\n      - Which release target should be used?"),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("- **staging**: Publish to staging."),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains("- **production**: Publish to production."),
+            "{annotated}"
+        );
+    }
+
+    #[test]
+    fn fallback_summary_shortens_only_after_a_complete_sentence_beyond_soft_target() {
+        let first_sentence = format!("{}.", "A".repeat(RESPONSE_SUMMARY_SOFT_TARGET_CHARS + 7));
+        let response = format!(
+            "### Re: historical response\n\n{first_sentence} This later sentence is omitted.\n"
+        );
+
+        assert_eq!(
+            response_summary_lead(&response),
+            format!("{first_sentence}…")
+        );
+    }
+
+    #[test]
+    fn fallback_summary_without_a_safe_sentence_boundary_is_retained_whole() {
+        let paragraph = "A".repeat(RESPONSE_SUMMARY_SOFT_TARGET_CHARS + 40);
+        let response = format!("### Re: historical response\n\n{paragraph}\n");
+
+        assert_eq!(response_summary_lead(&response), paragraph);
+    }
+
+    #[test]
+    fn lookup_mode_emits_only_the_response_id_child() {
+        let before =
+            "<!-- agent:queue response=\"lookup\" -->\n- do [#lookup]\n<!-- /agent:queue -->\n";
+        let after =
+            "<!-- agent:queue response=\"lookup\" -->\n- ~~do [#lookup]~~\n<!-- /agent:queue -->\n";
+        let response = "### Re: lookup — test\n\n**Outcome:** Completed `tasks/result.md`.\n";
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(before, after, response).unwrap();
+        assert!(!annotated.contains("data-agent-doc-response-id"));
+        assert!(!annotated.contains("%% tasks/result.md %%"));
+        assert_eq!(annotated.matches("- %% response [#r-").count(), 1);
+    }
+
+    #[test]
     fn response_child_preserves_literal_exchange_wrapper_documentation() {
         let response = concat!(
             "### Re: transport documentation — test\n\n",
@@ -3072,8 +3330,8 @@ mod tests {
 
     #[test]
     fn nested_queue_lookup_children_follow_the_completed_item_indent() {
-        let before = queue_doc("- group\n  - do [#nested]\n- later\n");
-        let after = queue_doc("- group\n  - ~~do [#nested]~~\n- later\n");
+        let before = inline_response_queue_doc("- group\n  - do [#nested]\n- later\n");
+        let after = inline_response_queue_doc("- group\n  - ~~do [#nested]~~\n- later\n");
         let response = "### Re: nested\n\nCompleted `tasks/nested.md`.\n";
         let response_id =
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
@@ -3087,7 +3345,7 @@ mod tests {
 
         assert!(
             annotated.contains(&format!(
-                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - <details data-agent-doc-response-id=\"{}\">\n      <summary>Response</summary>\n      \n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      </details>\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n",
+                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - <details data-agent-doc-response-id=\"{}\">\n      <summary>Response</summary>\n      \n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      </details>\n    - %% response {response_id} %%\n",
                 response_id.trim_start_matches("[#").trim_end_matches(']')
             )),
             "{annotated}"
@@ -5576,7 +5834,7 @@ Old.
                 "<!-- agent:queue loop interval=1h id=hourly -->\n",
                 "- {head}\n",
                 "<!-- /agent:queue -->\n\n",
-                "<!-- agent:queue go id=release -->\n",
+                "<!-- agent:queue go id=release response=\"inline\" -->\n",
                 "- {head}\n",
                 "<!-- /agent:queue -->\n",
             ),
@@ -5601,7 +5859,7 @@ Old.
             .to_string();
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    </details>\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    </details>\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
         )));
     }
 

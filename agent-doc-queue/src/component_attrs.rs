@@ -19,6 +19,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
     "after",
     "model",
     "effort",
+    "response",
     crate::queue_auto_clear::QUEUE_CLEAR_ATTR,
     crate::queue_auto_clear::QUEUE_DISABLE_AUTO_CLEAR_ATTR,
     crate::queue_schedule::QUEUE_TIME_ATTR,
@@ -174,6 +175,13 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
                     .into_iter()
                     .map(|issue| format!("`{}` on `agent:queue`: {}", issue.attr, issue.message)),
             );
+            if let Some(value) = component.attrs.get("response")
+                && !matches!(value.as_str(), "summary" | "inline" | "lookup")
+            {
+                issues.push(format!(
+                    "`response={value}` on `agent:queue`: expected `response=\"summary\"`, `response=\"inline\"`, or `response=\"lookup\"`"
+                ));
+            }
         }
         for (key, value) in &component.attrs {
             if key == crate::queue_schedule::QUEUE_INTERVAL_ATTR {
@@ -341,6 +349,24 @@ mod tests {
         let warning = component_attr_warning(backlog).expect("keep on backlog must warn");
         assert!(warning.message_body().contains("queue-only attribute"));
         assert!(warning.message_body().contains("agent:queue keep"));
+    }
+
+    #[test]
+    fn response_modes_are_valid_queue_only_values() {
+        for mode in ["summary", "inline", "lookup"] {
+            let queue =
+                format!("<!-- agent:queue response=\"{mode}\" -->\n- a\n<!-- /agent:queue -->\n");
+            assert!(component_attr_warning(&queue).is_none(), "{mode}");
+        }
+
+        let bad = "<!-- agent:queue response=full -->\n- a\n<!-- /agent:queue -->\n";
+        let warning = component_attr_warning(bad).expect("unsupported response mode must warn");
+        assert!(warning.message_body().contains("response=\"summary\""));
+
+        let backlog =
+            "<!-- agent:backlog response=\"inline\" -->\n- [ ] item\n<!-- /agent:backlog -->\n";
+        let warning = component_attr_warning(backlog).expect("response is queue-only");
+        assert!(warning.message_body().contains("queue-only attribute"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub mod free_text_admission;
 pub mod idle_drain;
 pub mod nested_claim_steer;
 pub mod no_changes_explanation;
+pub mod operator_request_packet;
 pub mod prompt_component_attrs;
 pub mod queue;
 pub mod queue_auto_clear;

@@ -3272,6 +3272,31 @@ mod tests {
     }
 
     #[test]
+    fn installed_harness_runbooks_require_proactive_todo_synchronization() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for env in [
+            Environment::ClaudeCode,
+            Environment::OpenCode,
+            Environment::Codex,
+        ] {
+            super::install_runbooks_for(env, Some(dir.path())).unwrap();
+            let runbooks = dir.path().join(super::runbooks_rel_path(&env));
+            let session = std::fs::read_to_string(runbooks.join("session-cycle.md")).unwrap();
+            let respond = std::fs::read_to_string(runbooks.join("respond.md")).unwrap();
+            let pending = std::fs::read_to_string(runbooks.join("pending-ops.md")).unwrap();
+
+            for content in [&session, &respond, &pending] {
+                let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(content.contains("#todosyncaudit"), "{env}: {content}");
+                assert!(content.contains("todo_sync_required"), "{env}: {content}");
+                assert!(normalized.contains("finished or moot"), "{env}: {content}");
+                assert!(content.contains("--todo-done"), "{env}: {content}");
+            }
+        }
+    }
+
+    #[test]
     fn installed_harness_runbooks_share_manual_repair_rule() {
         let dir = tempfile::tempdir().unwrap();
 

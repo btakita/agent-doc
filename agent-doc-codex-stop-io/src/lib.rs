@@ -1532,6 +1532,18 @@ pub fn load_bound_session_for_stop(
     load_state_any_with_timeout(&roots, session_id, STOP_HOOK_STATE_DB_BUSY_TIMEOUT)
 }
 
+/// Whether this Stop event may act on the turn stored in the session binding.
+///
+/// Current Codex payloads and hook bindings both carry a turn id. When both are
+/// present, exact equality is required: a dispatched subagent can share the
+/// coordinator's session id, but its Stop event must not inherit or consume the
+/// coordinator's agent-doc continuation (`#codexsubagentstop`). Empty ids come
+/// from legacy or incomplete state/payloads and cannot prove ownership, so they
+/// fail open without touching the binding.
+fn stop_may_own_bound_turn(stop_turn_id: &str, bound_turn_id: &str) -> bool {
+    !stop_turn_id.is_empty() && !bound_turn_id.is_empty() && stop_turn_id == bound_turn_id
+}
+
 fn apply_stop(input: &StopInput) -> Result<StopResponse> {
     stop_phase("load_bound_session");
     let cwd = PathBuf::from(&input.cwd);
@@ -1543,6 +1555,13 @@ fn apply_stop(input: &StopInput) -> Result<StopResponse> {
         // unrelated pure Codex session inherit agent-doc work.
         return Ok(StopResponse::AllowExit);
     };
+
+    // Fence before deriving cleanup roots, logging, or performing any document
+    // I/O. A foreign/subagent Stop is ambient to this binding and must leave the
+    // coordinator's exact-turn state byte-for-byte available for its own Stop.
+    if !stop_may_own_bound_turn(&input.turn_id, &state.last_turn_id) {
+        return Ok(StopResponse::AllowExit);
+    }
 
     let file = PathBuf::from(&state.doc_path);
     let cleanup_roots = tracking_roots(&cwd, Some(&file));
@@ -4827,6 +4846,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stop_turn_ownership_requires_two_equal_nonempty_ids() {
+        assert!(stop_may_own_bound_turn("turn-1", "turn-1"));
+        assert!(!stop_may_own_bound_turn("subagent-turn", "turn-1"));
+
+        // Legacy/incomplete identity cannot prove that the Stop event owns the
+        // binding, so it must pass through without coordinator side effects.
+        assert!(!stop_may_own_bound_turn("", "turn-1"));
+        assert!(!stop_may_own_bound_turn("turn-1", ""));
+        assert!(!stop_may_own_bound_turn("", ""));
+    }
+
     /// The continuation feedback is a harness record inside the turn, so it
     /// must not end the search for an armed re-entry (`#stoploopalreadyarmed`).
     #[test]
@@ -4943,7 +4974,7 @@ mod tests {
         assert_eq!(refused.preflight_admitted, Some(false));
 
         let before = fs::read_to_string(&doc).unwrap();
-        let result = apply_stop(&StopInput {
+        let foreign = apply_stop(&StopInput {
             session_id: newer.session_id.clone(),
             turn_id: newer.turn_id.clone(),
             cwd: newer.cwd.clone(),
@@ -4951,9 +4982,27 @@ mod tests {
             stop_hook_active: false,
         })
         .unwrap();
-        assert!(matches!(result, StopResponse::AllowExit));
+        assert!(matches!(foreign, StopResponse::AllowExit));
         assert_eq!(fs::read_to_string(&doc).unwrap(), before);
         assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        assert_eq!(
+            load_bound_session_for_stop(dir.path(), "codex-session")
+                .unwrap()
+                .unwrap()
+                .1,
+            refused,
+            "a later/foreign Stop must preserve the exact refused-turn binding"
+        );
+
+        let exact = apply_stop(&StopInput {
+            session_id: input.session_id.clone(),
+            turn_id: input.turn_id.clone(),
+            cwd: input.cwd.clone(),
+            last_assistant_message: "Preflight refused; pending content is retained.".into(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert!(matches!(exact, StopResponse::AllowExit));
         assert!(
             load_bound_session_for_stop(dir.path(), "codex-session")
                 .unwrap()
@@ -5553,6 +5602,87 @@ Done.\n\
         let state = load_state(&root, "codex-session").unwrap().unwrap();
         assert!(state.last_turn_id.is_empty());
         assert!(state.last_prompt.is_empty());
+    }
+
+    /// `#codexsubagentstop`: a subagent can share the coordinator's Codex
+    /// session id while running under a different turn id. Its Stop event is
+    /// ambient to the coordinator binding and must not capture its response,
+    /// close the cycle, clear the binding, or inherit the coordinator's block.
+    #[test]
+    fn foreign_turn_stop_preserves_binding_for_the_exact_coordinator_turn() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        init_git_repo(dir.path(), &doc);
+        let original = fs::read_to_string(&doc).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&original), Some(&original)).unwrap();
+        track_doc(&dir, &doc, "coordinator-turn");
+
+        let root = project_root_for(dir.path()).unwrap();
+        let state_before = load_state(&root, "codex-session").unwrap().unwrap();
+        let incomplete = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: String::new(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "An unidentified Stop must stay outside the session doc."
+                .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert_eq!(incomplete, StopResponse::AllowExit);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+        assert_eq!(
+            load_state(&root, "codex-session").unwrap().unwrap(),
+            state_before,
+            "an incomplete Stop identity must not consume the coordinator binding"
+        );
+
+        let foreign = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "subagent-turn".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message:
+                "### Re: Hello — gpt-5\n\nThis subagent response must stay outside the session doc."
+                    .to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        assert_eq!(foreign, StopResponse::AllowExit);
+        assert_eq!(fs::read_to_string(&doc).unwrap(), original);
+        assert_eq!(
+            load_state(&root, "codex-session").unwrap().unwrap(),
+            state_before,
+            "foreign Stop must not consume or rewrite the coordinator binding"
+        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+
+        let coordinator = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "coordinator-turn".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message:
+                "### Re: Hello — gpt-5\n\nThe coordinator response owns this cycle.".to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+
+        let content = fs::read_to_string(&doc).unwrap();
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap();
+        assert!(
+            content.contains("The coordinator response owns this cycle.")
+                || capture.as_ref().is_some_and(|active| {
+                    active
+                        .response_body
+                        .contains("The coordinator response owns this cycle.")
+                }),
+            "the exact coordinator Stop must enter normal closeout or durable capture: {coordinator:?}"
+        );
+        assert!(!content.contains("This subagent response"));
+        assert!(
+            capture
+                .as_ref()
+                .is_none_or(|active| { !active.response_body.contains("This subagent response") })
+        );
     }
 
     /// `#stoprecapturesupersede`: the 2026-09-28 `src/haiven-dev/tasks/api.md`
@@ -7937,7 +8067,7 @@ The completed response is already committed.\n\
     }
 
     #[test]
-    fn stop_auto_closes_open_cycle_across_nested_roots_and_turn_drift() {
+    fn stop_auto_closes_open_cycle_across_nested_roots() {
         let dir = setup_project();
         let doc = write_nested_template_doc(&dir);
         init_git_repo(dir.path(), &doc);
@@ -7964,7 +8094,7 @@ The completed response is already committed.\n\
         let response =
             apply_stop(&StopInput {
                 session_id: "codex-session".to_string(),
-                turn_id: "turn-2".to_string(),
+                turn_id: "turn-1".to_string(),
                 cwd: doc.parent().unwrap().display().to_string(),
                 last_assistant_message:
                     "### Re: nested root drift — gpt-5\n\nRecovered from nested root drift."

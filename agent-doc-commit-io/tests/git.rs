@@ -3259,6 +3259,13 @@ Duplicate replay should stay live.
             claim.generation,
         )
         .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            "#reported",
+            claim.generation,
+            "Integrated and verified.",
+        )
+        .unwrap();
         agent_doc_queue_io::queue_claim::report_attempt(&doc, "#reported", Some(claim.generation))
             .unwrap();
         agent_doc_queue_io::claim_release_receipt::release_attempt(

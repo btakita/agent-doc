@@ -121,6 +121,10 @@ pub fn exchange_archive_shard_path(doc: &Path, utc_timestamp: &str, current_len:
 }
 
 fn sibling_path(doc: &Path, suffix: &str) -> PathBuf {
+    // Commit and lookup operate in the document's real repository. Resolve an
+    // existing document before deriving a sibling so a path reached through a
+    // workspace symlink cannot place the archive/index outside its submodule.
+    let doc = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let stem = doc
         .file_stem()
         .and_then(|value| value.to_str())

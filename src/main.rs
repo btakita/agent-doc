@@ -4843,7 +4843,8 @@ enum QueueAction {
     Claim {
         /// Path to the session document
         file: PathBuf,
-        /// The queue item: `#id` / `do [#id]`, or the queue line's text
+        /// The queue item: `#id` / `do [#id]`, the queue line's text, or a
+        /// printed nest-vector key spelled `PARENT: ...: LEAF`
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
         /// Who holds the claim, e.g. `subagent:<label>`
@@ -4872,7 +4873,8 @@ enum QueueAction {
     Start {
         /// Path to the session document
         file: PathBuf,
-        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        /// The claimed queue item: `#id` / `do [#id]`, the queue line's text,
+        /// or the exact `PARENT: ...: LEAF` key printed by `queue claim`
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
         /// The owner printed by `queue claim`, e.g. `subagent:<label>`
@@ -4895,7 +4897,8 @@ enum QueueAction {
     ReportComplete {
         /// Path to the session document
         file: PathBuf,
-        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        /// The claimed queue item: `#id` / `do [#id]`, the queue line's text,
+        /// or the exact `PARENT: ...: LEAF` key printed by `queue claim`
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
         /// Exact generation printed by `queue claim`. Required for generated
@@ -4992,7 +4995,8 @@ enum QueueAction {
     Release {
         /// Path to the session document
         file: PathBuf,
-        /// The claimed queue item: `#id` / `do [#id]`, or the queue line's text
+        /// The claimed queue item: `#id` / `do [#id]`, the queue line's text,
+        /// or the exact `PARENT: ...: LEAF` key printed by `queue claim`
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
         /// The work was abandoned or failed: record no report, so the line is
@@ -5013,7 +5017,8 @@ enum QueueAction {
     Brief {
         /// Path to the session document
         file: PathBuf,
-        /// The queue item: `#id` / `do [#id]`, or the queue line's text
+        /// The queue item: `#id` / `do [#id]`, the queue line's text, or the
+        /// exact `PARENT: ...: LEAF` key printed by `queue claim`
         #[arg(long, value_name = "ID_OR_TEXT")]
         item: String,
         /// Print the whole authorization object as JSON instead of the preamble
@@ -5179,7 +5184,8 @@ enum QueueAction {
         ack_id: Option<String>,
         /// Exact acknowledgement for a completed free-text head. A unique leaf
         /// may be named directly; repeated nested leaves require the full
-        /// parent-to-leaf nest vector. Queue activation is not changed.
+        /// parent-to-leaf nest vector, spelled `PARENT: ...: LEAF`. Queue
+        /// activation is not changed.
         #[arg(
             long,
             value_name = "TEXT",

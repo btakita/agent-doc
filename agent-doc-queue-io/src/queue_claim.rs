@@ -1583,6 +1583,9 @@ pub struct LostClaimRecovery {
     pub reason: &'static str,
     /// What to do when the bound worker may have completed after expiry.
     pub recover_completed_worker_result: String,
+    /// Exact closeout command to run after the recovered result has been
+    /// integrated into the current agent-doc response.
+    pub closeout_command: String,
     /// Exact command that creates the next fenced generation when no usable
     /// worker result exists and durable state proves no worker started.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1673,6 +1676,15 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRe
         &claim.item_text,
     ));
     let owner = shell_single_quote(&claim.owner);
+    let closeout_command = match &claim.identity {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => format!(
+            "agent-doc finalize {document} --done {}",
+            shell_single_quote(id)
+        ),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
+            format!("agent-doc finalize {document}")
+        }
+    };
     let worker = claim
         .worker
         .as_ref()
@@ -1685,8 +1697,10 @@ fn lost_claim_recovery(file: &Path, claim: &QueueClaim, now: u64) -> LostClaimRe
             "attempt_abandoned_for_requeue"
         },
         recover_completed_worker_result: format!(
-            "Check {worker} for a completed result. If it completed, integrate that exact result and close the queue head through the normal agent-doc response (`--done <id>` for an id-backed head or the exact `> **Queue prompt:**` echo for free text)."
+            "Check {worker} for a completed result. If it completed, integrate that exact result into the current agent-doc response. For free text, include the exact `> **Queue prompt:** {}` echo. Then run `{closeout_command}`.",
+            claim.item_text.trim(),
         ),
+        closeout_command,
         reclaim_command: crate::queue_lineage::load(file)
             .ok()
             .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(&lineage, claim))
@@ -2220,9 +2234,104 @@ mod tests {
             recovery.recover_completed_worker_result
         );
         assert_eq!(
+            recovery.closeout_command,
+            format!("agent-doc finalize '{}' --done 'lostdiag'", doc.display())
+        );
+        assert!(
+            recovery
+                .recover_completed_worker_result
+                .contains(&format!("Then run `{}`", recovery.closeout_command)),
+            "{}",
+            recovery.recover_completed_worker_result
+        );
+        assert_eq!(
             recovery.reclaim_command, None,
             "a bound worker makes retry unsafe even after expiry"
         );
+    }
+
+    #[test]
+    fn free_text_lost_recovery_names_exact_echo_and_executable_closeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let item = "release + publish ⟦effect:2⟧";
+        let doc = write_doc(dir.path(), &[item]);
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let pinned = 1_000_000;
+        let _outer = pin_claim_clock_for_current_thread(pinned);
+        let (_, claim) = claim(&doc, item, "subagent:publish", 10).unwrap();
+        start_attempt(
+            &doc,
+            item,
+            "subagent:publish",
+            "/root/publish",
+            10,
+            claim.generation,
+        )
+        .unwrap();
+
+        let _expired = pin_claim_clock_for_current_thread(pinned + 10);
+        let reports = claim_reports_for_content(&doc, &content).unwrap();
+        let recovery = reports[0].lost_recovery.as_ref().unwrap();
+
+        assert_eq!(
+            recovery.closeout_command,
+            format!("agent-doc finalize '{}'", doc.display())
+        );
+        assert!(
+            recovery
+                .recover_completed_worker_result
+                .contains(&format!("> **Queue prompt:** {item}")),
+            "{}",
+            recovery.recover_completed_worker_result
+        );
+    }
+
+    /// A coordinator keeps using the exact key printed by `queue claim`, even
+    /// when a later queue projection renumbers that row's effect suffix. Every
+    /// lifecycle command resolves the anchored successor instead of requiring
+    /// the coordinator to rediscover a mutable display spelling.
+    #[test]
+    fn lifecycle_commands_accept_printed_claim_key_after_effect_renumber() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = "https://example.test/pull/17";
+        let original = format!("{parent}: #address ⟦effect:2⟧");
+        let renumbered = format!("{parent}: #address ⟦effect:4⟧");
+        let doc = write_doc(
+            dir.path(),
+            &[parent, "  - #address ⟦effect:2⟧"],
+        );
+        // `write_doc` adds the list marker; replace the deliberately nested
+        // fixture's doubled marker before parsing it.
+        let content = std::fs::read_to_string(&doc)
+            .unwrap()
+            .replace("-   - #address", "  - #address");
+        std::fs::write(&doc, content).unwrap();
+
+        let owner = "subagent:address";
+        let (_, claim) = claim(&doc, &original, owner, 600).unwrap();
+        assert_eq!(claim.item_text, original);
+
+        let renumbered_content = std::fs::read_to_string(&doc)
+            .unwrap()
+            .replace("#address ⟦effect:2⟧", "#address ⟦effect:4⟧");
+        std::fs::write(&doc, renumbered_content).unwrap();
+
+        let started = start_attempt(
+            &doc,
+            &claim.item_text,
+            owner,
+            "/root/address",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        assert_eq!(started.item_text, renumbered);
+        let reported = report_attempt(&doc, &claim.item_text, Some(claim.generation)).unwrap();
+        assert_eq!(reported.item_text, renumbered);
+        let released = release_attempt(&doc, &claim.item_text, Some(claim.generation))
+            .unwrap()
+            .expect("the printed claim key releases its renumbered successor");
+        assert_eq!(released.item_text, renumbered);
     }
 
     #[test]

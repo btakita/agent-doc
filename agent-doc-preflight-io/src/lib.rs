@@ -21583,8 +21583,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             vec![head],
             "a reported attempt is coordinator writeback debt, not in-flight worker work: {queue_state:#?}"
         );
-        assert_eq!(queue_state.queue_drainable_head_count, 1);
-        assert!(queue_state.queue_continuation_required);
+        assert_eq!(
+            queue_state.queue_drainable_head_count, 0,
+            "reported writeback debt is selected but not fresh drain work"
+        );
+        assert!(!queue_state.queue_continuation_required);
     }
 
     #[test]

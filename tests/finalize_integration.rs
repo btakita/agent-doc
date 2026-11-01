@@ -416,8 +416,7 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
         .current_dir(tmp.path())
         .args(["session-check", file])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("missing_response_debt=1"));
+        .success();
 
     let log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
@@ -5838,6 +5837,23 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         )),
         "start advances only its own generation to worker-bound:\n{claimed_projection}"
     );
+    let worker_response =
+        "Yes: `current`, `draft`, `archived`, `historical`, `trashed`, `deleted`, `any`.";
+    agent_doc_at_claim_clock(claim_clock)
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "report-complete",
+            doc.to_str().unwrap(),
+            "--item",
+            question,
+            "--generation",
+            "1",
+            "--response",
+            worker_response,
+        ])
+        .assert()
+        .success();
     let released = agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args([
@@ -5897,7 +5913,7 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
         .write_stdin(format!(
-            "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\nYes: `current`, `draft`, `archived`, `historical`, `trashed`, `deleted`, `any`.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: page status enum — gpt-5\n\n> **Queue prompt:** {question}\n\n{worker_response}\n<!-- /patch:exchange -->\n"
         ))
         .assert()
         .success();
@@ -5914,11 +5930,19 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
         )),
         "the unrelated claimed head stays queued:\n{head}"
     );
-    assert!(
-        agent_doc_queue_io::claim_release_receipt::load(&doc)
-            .unwrap()
-            .receipts
-            .is_empty(),
-        "the strike's closeout reconciliation ends the receipt"
+    let receipts = agent_doc_queue_io::claim_release_receipt::load(&doc)
+        .unwrap()
+        .receipts;
+    assert_eq!(
+        receipts.len(),
+        1,
+        "the strike retains the full response until commit/archive GC proof exists"
+    );
+    assert_eq!(
+        receipts[0]
+            .response
+            .as_ref()
+            .map(|response| response.body.as_str()),
+        Some(worker_response)
     );
 }

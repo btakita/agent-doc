@@ -2930,6 +2930,12 @@ impl ClaimedQueueItems {
         self
     }
 
+    /// These claims plus every identity in `other`.
+    pub fn with_claimed(mut self, other: &ClaimedQueueItems) -> Self {
+        self.0.extend(other.0.iter().cloned());
+        self
+    }
+
     /// Whether the queue head `prompt_text` is claimed.
     pub fn claims(&self, prompt_text: &str) -> bool {
         !self.0.is_empty() && self.0.contains(&claim_identity(prompt_text))

@@ -455,7 +455,10 @@ pub fn out_of_loop_items_for_content(
         .into_iter()
         .filter(|head| !reported.claims(head))
         .collect::<Vec<_>>();
-    claimed.with_heads(&dispatch_holds).with_heads(&held)
+    claimed
+        .with_claimed(&reported)
+        .with_heads(&dispatch_holds)
+        .with_heads(&held)
 }
 
 /// Live heads a queue-level `subagents` / `fan-out` attribute (or subagent

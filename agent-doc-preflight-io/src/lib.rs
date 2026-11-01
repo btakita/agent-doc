@@ -3922,11 +3922,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         content.clone()
     };
-    // `#queueclaim`: heads whose workers are still claimed/dispatching or
-    // running outside the in-session loop are in flight, so they are neither
-    // counted nor selected for this cycle. Reported attempts are deliberately
-    // not excluded: their workers are finished and coordinator
-    // integration/writeback is now the drainable work (`#reportedwritebackdebt`).
+    // `#queueclaim`: heads whose workers are still claimed/dispatching are not
+    // selected in this cycle. Reported attempts are no longer in flight, so
+    // they remain eligible for coordinator integration/writeback selection.
     let in_flight_queue_items = if activation.active {
         agent_doc_queue_io::queue_claim::in_flight_claimed_items_for_content(file, &content)
     } else {
@@ -3942,6 +3940,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         agent_doc_queue::queue_claim::ClaimedQueueItems::none()
     };
+    // Reported attempts are coordinator writeback debt, not fresh drain work.
+    // `out_of_loop_queue_items` therefore suppresses them from the count while
+    // the narrower `in_flight_queue_items` above leaves them selectable.
     // GH #381: a head naming a `.agent-doc/project.md` preset is a preset
     // invocation, not a mirror of a missing backlog item.
     let drain_presets =

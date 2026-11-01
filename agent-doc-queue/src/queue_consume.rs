@@ -2524,6 +2524,56 @@ pub fn annotate_newly_struck_free_text_heads(before: &str, after: &str) -> anyho
 /// path without relabeling an older, identical prompt. The note remains outside
 /// the strike wrapper so searching the response id finds both the response and
 /// the addressed prompt.
+struct QueueAddressedResponseCell {
+    body: String,
+    heading_count: usize,
+}
+
+fn queue_addressed_response_cells(response: &str) -> Vec<QueueAddressedResponseCell> {
+    #[derive(Default)]
+    struct Cell {
+        text: String,
+        heading_count: usize,
+        has_prompt_echo: bool,
+    }
+
+    let mut cells = Vec::new();
+    let mut current = Cell::default();
+    for line in response.split_inclusive('\n') {
+        let trimmed = line.trim();
+        let quoted = line.trim_start().strip_prefix('>').map(str::trim_start);
+        let starts_prompt_echo = quoted.is_some_and(|quoted| {
+            quoted.starts_with("**Queue prompt:**") || quoted.starts_with("**Queue prompts:**")
+        });
+        let starts_heading = trimmed.starts_with("### ");
+        // Support both canonical heading→echo responses and retained payloads
+        // that carry echo→heading pairs. Once a cell has both anchors, either
+        // the next echo or the next H3 starts a new independently addressable
+        // response. Extra H3 sections without another echo remain part of the
+        // same intentional multi-section cell.
+        if ((starts_prompt_echo && current.heading_count > 0 && current.has_prompt_echo)
+            || (starts_heading && current.heading_count > 0 && current.has_prompt_echo))
+            && !current.text.trim().is_empty()
+        {
+            let completed = std::mem::take(&mut current);
+            cells.push(QueueAddressedResponseCell {
+                body: completed.text,
+                heading_count: completed.heading_count,
+            });
+        }
+        current.text.push_str(line);
+        current.heading_count += usize::from(starts_heading);
+        current.has_prompt_echo |= starts_prompt_echo;
+    }
+    if !current.text.trim().is_empty() {
+        cells.push(QueueAddressedResponseCell {
+            body: current.text,
+            heading_count: current.heading_count,
+        });
+    }
+    cells
+}
+
 pub fn annotate_newly_struck_queue_items_with_response_id(
     before: &str,
     after: &str,
@@ -2535,6 +2585,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy,
     }
 
+    let normalized_after =
+        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(after);
+    let after = normalized_after.as_str();
     let response_body = response_body_without_exchange_transport(response_body);
     let response_nodes = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(response_body)
         .into_iter()
@@ -2545,16 +2598,40 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             )
         })
         .collect::<Vec<_>>();
-    let response_candidates = response_nodes
-        .iter()
-        .map(|node| ResponseCandidate {
-            body: node.render(),
-            policy:
+    let mut response_node_cursor = 0usize;
+    let response_candidates = queue_addressed_response_cells(response_body)
+        .into_iter()
+        .filter_map(|cell| {
+            if cell.heading_count == 0
+                || response_node_cursor + cell.heading_count > response_nodes.len()
+            {
+                return None;
+            }
+            let nodes =
+                &response_nodes[response_node_cursor..response_node_cursor + cell.heading_count];
+            response_node_cursor += cell.heading_count;
+            let policy =
                 agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
-                    std::slice::from_ref(node),
-                ),
+                    nodes,
+                );
+            (!policy.response_id().is_empty()).then_some(ResponseCandidate {
+                body: cell.body,
+                policy,
+            })
         })
         .collect::<Vec<_>>();
+    let explicitly_addressed_sections = response_candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.body.lines().any(|line| {
+                let quoted = line.trim_start().strip_prefix('>').map(str::trim_start);
+                quoted.is_some_and(|quoted| {
+                    quoted.starts_with("**Queue prompt:**")
+                        || quoted.starts_with("**Queue prompts:**")
+                })
+            })
+        })
+        .count();
     let composite_candidate = ResponseCandidate {
         body: response_body.to_string(),
         policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
@@ -2564,6 +2641,12 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     if composite_candidate.policy.response_id().is_empty() {
         return Ok(after.to_string());
     }
+
+    let before_nodes = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|node| !node.item.struck)
+        .collect::<Vec<_>>();
 
     let struck_before: HashSet<String> =
         agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
@@ -2603,6 +2686,23 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     let mut candidates_by_node_key = Vec::<(String, ResponseCandidate)>::new();
     let mut claimed_sections = HashSet::<usize>::new();
     for node in &newly_struck {
+        // Queue rows can move between parents while an editor cut and a
+        // retained closeout converge. The response echo then names the row's
+        // admitted ancestry while `after` exposes its new ancestry. Correlate
+        // the two cuts by the durable q-id when present, otherwise by the
+        // normalized work-text identity. If duplicate text existed in the old
+        // cut, the candidate set below still has to collapse to exactly one
+        // response section; ambiguity remains a refusal.
+        let stable_identity =
+            agent_doc_element_queue::queue_prompt_stable_identity(node.item.work_text());
+        let prior_spellings = before_nodes
+            .iter()
+            .filter(|prior| {
+                agent_doc_element_queue::queue_prompt_stable_identity(prior.item.work_text())
+                    == stable_identity
+            })
+            .map(|prior| prior.item.text.as_str())
+            .collect::<Vec<_>>();
         let matching = response_candidates
             .iter()
             .enumerate()
@@ -2614,7 +2714,16 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
                 ) || crate::queue_response::response_explicitly_targets_queue_head(
                     &candidate.body,
                     &node.item.text,
-                )
+                ) || prior_spellings.iter().any(|prior| {
+                    crate::queue_response::queue_head_answered_by_response(
+                        before,
+                        &candidate.body,
+                        prior,
+                    ) || crate::queue_response::response_explicitly_targets_queue_head(
+                        &candidate.body,
+                        prior,
+                    )
+                })
             })
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
@@ -2623,8 +2732,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             [index] if response_candidates.len() <= 1 || claimed_sections.insert(*index) => {
                 response_candidates[*index].clone()
             }
-            [] if response_candidates.len() <= 1 => composite_candidate.clone(),
-            [] if newly_struck.len() == 1 => composite_candidate.clone(),
+            [] if response_candidates.len() <= 1 || explicitly_addressed_sections <= 1 => {
+                composite_candidate.clone()
+            }
             [] => anyhow::bail!(
                 "newly completed queue prompt has no unique response section: {}",
                 node.item.text.trim()
@@ -3342,6 +3452,152 @@ mod tests {
         assert!(
             document_queue::prompts(&entries).is_empty(),
             "generated response and choice descendants must stay inert:\n{entries:#?}\n{annotated}"
+        );
+    }
+
+    #[test]
+    fn reparented_prompt_uses_its_prior_stable_identity_and_never_the_aggregate_response() {
+        const PER_ITEM: &str = "The same response was duplicated for several queue items, meaning the same decisions were requested. I don't know which one to answer. Does an answer in one apply to all? The response and prompts should be unique to the queue item it is responding to. Not an aggregate turn response spanning multiple subagents.";
+        let todo = "agent-doc should proactively maintain the agent:todo items and keep them in sync. Complete any agent:todo items that are done or moot. [#q-6ec397004779]";
+        let decision = "When I Compact Exchange, I lose the context for decisions re: a todo item. [#q-cc23f2613f0b]";
+        let legacy = "This item is complete in the installed implementation.";
+        let before = doc_with_queue_and_exchange(
+            &format!(
+                concat!(
+                    "- agent:todo items out of sync\n",
+                    "  - {todo}\n",
+                    "- {decision}\n",
+                    "- agent-doc issues in sdk-dev.md\n",
+                    "  - {per_item}\n",
+                    "- legacy one\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy two\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy three\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy four\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                ),
+                todo = todo,
+                decision = decision,
+                per_item = PER_ITEM,
+                legacy = legacy,
+            ),
+            "",
+        );
+        let response = format!(
+            concat!(
+                "> **Queue prompt:** agent:todo items out of sync: {todo}\n\n",
+                "### Re: proactive TODO synchronization\n\n",
+                "TODO synchronization is installed and verified.\n\n",
+                "> **Queue prompt:** {decision}\n\n",
+                "### Re: durable decision links\n\n",
+                "Decision links remain actionable.\n\n",
+                "> **Queue prompt:** agent-doc issues in sdk-dev.md: {per_item}\n\n",
+                "### Re: unique per-item response projection\n\n",
+                "Per-item response projection is installed and verified.\n",
+            ),
+            todo = todo,
+            decision = decision,
+            per_item = PER_ITEM,
+        );
+        let after = doc_with_queue_and_exchange(
+            &format!(
+                concat!(
+                    "- agent:todo items out of sync\n",
+                    "  - ~~{todo}~~\n",
+                    "  - ~~{per_item}~~\n",
+                    "- {decision}\n",
+                    "- legacy one\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy two\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy three\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                    "- legacy four\n",
+                    "  - 📥 **Response [#r-3bb63500aa30]:** {legacy}\n",
+                ),
+                todo = todo,
+                decision = decision,
+                per_item = PER_ITEM,
+                legacy = legacy,
+            ),
+            &response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let sections = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(&response)
+            .into_iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        let ids = sections
+            .iter()
+            .map(|node| {
+                response_lookup_id_for_document(
+                    &annotated,
+                    &agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
+                        std::slice::from_ref(node),
+                    ),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let aggregate =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                &response,
+            ))
+            .response_id()
+            .to_string();
+
+        assert_ne!(ids[0], ids[2]);
+        assert!(
+            annotated.contains(&format!("~~{todo}~~ — auto-struck: response: {}", ids[0])),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains(&format!(
+                "~~{PER_ITEM}~~ — auto-struck: response: {}",
+                ids[2]
+            )),
+            "the old sdk-dev lineage must bind the reparented row to its own section: {annotated}"
+        );
+        assert!(!annotated.contains(&format!(
+            "~~{PER_ITEM}~~ — auto-struck: response: {aggregate}"
+        )));
+        assert!(annotated.contains(&format!(
+            "**Response {}:** Per-item response projection is installed and verified.",
+            ids[2]
+        )));
+        assert!(annotated.contains(&format!("- {decision}\n")));
+        assert!(!annotated.contains("📥 **Response [#r-3bb63500aa30]"));
+        assert_eq!(
+            annotated.matches("**Response [#r-3bb63500aa30]:**").count(),
+            4,
+            "legacy generated summaries remain visible but lose executable lifecycle state"
+        );
+    }
+
+    #[test]
+    fn one_newly_struck_prompt_never_falls_back_to_a_multi_section_aggregate() {
+        let before = queue_doc("- unmatched prompt\n");
+        let after = queue_doc("- ~~unmatched prompt~~\n");
+        let response = concat!(
+            "### Re: alpha\n\n> **Queue prompt:** alpha prompt\n\nAlpha done.\n\n",
+            "### Re: beta\n\n> **Queue prompt:** beta prompt\n\nBeta done.\n",
+        );
+        let error = annotate_newly_struck_queue_items_with_response_id(&before, &after, response)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("has no unique response section: unmatched prompt"),
+            "{error:#}"
         );
     }
 

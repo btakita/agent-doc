@@ -440,10 +440,10 @@ fn completed_parent_response_id<'a>(
 
 /// Return the exclusive line index of a reserved GFM response-details child.
 ///
-/// Recognition is deliberately narrow: a canonical generated response id, an
-/// immediate completed prompt-tree parent, the fixed summary, and a balanced
-/// details element are all required. Ordinary `<details>` blocks remain typed
-/// document content.
+/// Recognition is deliberately narrow: a canonical generated response id, the
+/// fixed summary, and a balanced details element are all required. When an
+/// immediate completed prompt-tree parent carries a response id, it must match.
+/// Ordinary `<details>` blocks remain typed document content.
 pub fn response_details_child_end(
     lines: &[&str],
     opener_index: usize,
@@ -451,11 +451,11 @@ pub fn response_details_child_end(
 ) -> Option<usize> {
     let opener = lines.get(opener_index)?;
     let details_id = canonical_response_details_id(strip_bullet(opener)?)?;
-    let parent_response_id = completed_parent_response_id(lines, opener_index, item_indent)?;
-    if parent_response_id
-        .strip_prefix("[#r-")
-        .and_then(|value| value.strip_suffix(']'))
-        != Some(details_id)
+    if let Some(parent_response_id) = completed_parent_response_id(lines, opener_index, item_indent)
+        && parent_response_id
+            .strip_prefix("[#r-")
+            .and_then(|value| value.strip_suffix(']'))
+            != Some(details_id)
     {
         return None;
     }
@@ -510,16 +510,19 @@ fn canonical_response_choice(item_content: &str) -> bool {
 
 /// Return the exclusive line index of a reserved visible response row.
 ///
-/// The row is inert only as an immediate child of a completed prompt whose
-/// response annotation carries the same canonical id. A summary row may own
-/// one exact `**Choices:**` subtree; a lookup-only row owns no descendants.
+/// The canonical response-id spelling reserves the row as response metadata.
+/// When an immediate completed prompt carries a response id, it must match.
+/// A summary row may own one exact `**Choices:**` subtree; a lookup-only row
+/// owns no descendants.
 pub fn response_row_child_end(
     lines: &[&str],
     opener_index: usize,
     item_indent: usize,
 ) -> Option<usize> {
     let (response_id, _) = canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
-    if completed_parent_response_id(lines, opener_index, item_indent)? != response_id {
+    if let Some(parent_response_id) = completed_parent_response_id(lines, opener_index, item_indent)
+        && parent_response_id != response_id
+    {
         return None;
     }
     Some(opener_index + 1)
@@ -654,6 +657,52 @@ pub fn inert_list_child_end(
         .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
+}
+
+/// Remove queue-attempt lifecycle prefixes accidentally projected onto
+/// reserved response-tree rows.
+///
+/// Response ids and the `data-agent-doc-response-id` attribute reserve these
+/// rows as binary-authored metadata. Choices, actions, and relations are
+/// recognized only through their response-tree structure. An ordinary child
+/// beneath any of those rows is therefore left byte-for-byte promptable.
+pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let normalized = lines
+        .iter()
+        .map(|line| {
+            let Some(body) = strip_bullet(line) else {
+                return (*line).to_string();
+            };
+            let work = agent_doc_element_queue::strip_attempt_projection_prefix(body);
+            if work.len() == body.len() {
+                return (*line).to_string();
+            }
+            let body_offset = body.as_ptr() as usize - line.as_ptr() as usize;
+            format!("{}{}", &line[..body_offset], work)
+        })
+        .collect::<Vec<_>>();
+    let normalized_lines = normalized.iter().map(String::as_str).collect::<Vec<_>>();
+
+    let mut out = String::with_capacity(source.len());
+    for (index, original) in lines.iter().enumerate() {
+        let line = normalized_lines[index];
+        let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_row_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_choices_label_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_choice_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_next_actions_label_child_end(&normalized_lines, index, item_indent)
+                .is_some()
+            || response_action_child_end(&normalized_lines, index, item_indent).is_some()
+            || related_row_child_end(&normalized_lines, index, item_indent).is_some();
+        if generated {
+            out.push_str(line);
+        } else {
+            out.push_str(original);
+        }
+    }
+    out
 }
 
 /// Byte ranges occupied by balanced indented Obsidian comments represented as
@@ -1869,12 +1918,13 @@ mod tests {
     }
 
     #[test]
-    fn response_row_inertness_requires_matching_completed_parent_id() {
+    fn response_row_reserves_canonical_id_and_rejects_mismatched_completed_parent() {
+        let live = concat!(
+            "- live parent\n",
+            "  - **Response [#r-0123456789ab]:** Summary.\n",
+        );
+        assert_eq!(response_row_child_ranges(live).len(), 1, "{live}");
         for source in [
-            concat!(
-                "- live parent\n",
-                "  - **Response [#r-0123456789ab]:** Summary.\n",
-            ),
             concat!(
                 "- ~~done~~ — auto-struck: response: [#r-fedcba987654]\n",
                 "  - **Response [#r-0123456789ab]:** Summary.\n",
@@ -1956,18 +2006,88 @@ mod tests {
     }
 
     #[test]
-    fn response_details_inertness_requires_reserved_id_completed_parent_and_balance() {
+    fn legacy_generated_response_markers_normalize_without_touching_operator_descendants() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- parent one\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** First summary.\n",
+            "    - 📥 **Choices:**\n",
+            "      - 📥 **staging**: Publish to staging.\n",
+            "        - 📥 I choose staging; continue.\n",
+            "    - 📥 **Next actions:**\n",
+            "      - 📥 **Action:** Publish the selected target.\n",
+            "        - 📥 Verify the published artifact for me.\n",
+            "    - 📥 **Related:** [#q-sibling]\n",
+            "      - 📥 Compare the sibling result.\n",
+            "- parent two\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Second summary.\n",
+            "- parent three\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Third summary.\n",
+            "- parent four\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Fourth summary.\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let normalized = normalize_generated_response_lifecycle_markers(source);
+        assert_eq!(
+            normalized.matches("📥 **Response").count(),
+            0,
+            "{normalized}"
+        );
+        assert!(!normalized.contains("📥 **Choices:**"), "{normalized}");
+        assert!(!normalized.contains("📥 **Action:**"), "{normalized}");
+        assert!(!normalized.contains("📥 **Related:**"), "{normalized}");
+        assert!(
+            normalized.contains("- 📥 I choose staging; continue."),
+            "a genuine operator descendant remains promptable: {normalized}"
+        );
+        assert!(
+            normalized.contains("- 📥 Verify the published artifact for me."),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("- 📥 Compare the sibling result."),
+            "{normalized}"
+        );
+        assert_eq!(
+            normalize_generated_response_lifecycle_markers(&normalized),
+            normalized
+        );
+
+        let parsed = components(&normalized);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "parent one",
+                "📥 I choose staging; continue.",
+                "📥 Verify the published artifact for me.",
+                "📥 Compare the sibling result.",
+                "parent two",
+                "parent three",
+                "parent four",
+            ]
+        );
+    }
+
+    #[test]
+    fn response_details_inertness_requires_reserved_id_matching_parent_when_present_and_balance() {
+        let live = concat!(
+            "- live prompt\n",
+            "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "    <summary>Response</summary>\n",
+            "    body\n",
+            "    </details>\n",
+        );
+        assert_eq!(response_details_child_ranges(live).len(), 1, "{live}");
         for source in [
             concat!(
                 "- ~~done~~\n",
                 "  - <details>\n",
-                "    <summary>Response</summary>\n",
-                "    body\n",
-                "    </details>\n",
-            ),
-            concat!(
-                "- live prompt\n",
-                "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
                 "    <summary>Response</summary>\n",
                 "    body\n",
                 "    </details>\n",

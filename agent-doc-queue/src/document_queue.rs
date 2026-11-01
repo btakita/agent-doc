@@ -1688,7 +1688,10 @@ pub fn set_prompt_runtime_projections(
             if let Some(all_leaves_struck) = group_parent_all_leaves_struck(entries, index) {
                 let source = match entry {
                     QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => prompt,
-                    _ => unreachable!("a group parent is always a queue item"),
+                    // Reserved response metadata is a structural parent for
+                    // bounded operator-choice context, but owns no queue
+                    // lifecycle projection of its own.
+                    _ => return entry.clone(),
                 };
                 let parent_key = projection_key(&source.text);
                 let later_live_occurrences = entries[index + 1..]
@@ -4024,11 +4027,9 @@ fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
     let bounded_response_branch = entries.iter().enumerate().any(|(idx, entry)| {
         idx < leaf_idx
             && entry_is_ancestor_of(entries, idx, leaf_idx)
-            && matches!(
-                entry,
-                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)
-                    if prompt.text.trim_start().starts_with("**Response [#r-")
-            )
+            && structured_response_context(entry).is_some_and(|(_, context)| {
+                matches!(context, StructuredResponseContext::Response { .. })
+            })
     });
     for (idx, entry) in entries.iter().enumerate() {
         if bounded_response_branch
@@ -10561,9 +10562,7 @@ mod tests {
         let entries = parse(body).unwrap();
         let leaf = executable_prompt_indexes(&entries)[0];
         let sequential = submitted_prompt_at(&entries, leaf).unwrap();
-        let document = format!(
-            "<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n"
-        );
+        let document = format!("<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n");
         let subagent = crate::queue_response::submitted_prompts_for_heads(
             &document,
             &["Use staging and run the smoke test.".to_string()],
@@ -10573,7 +10572,10 @@ mod tests {
 
         assert_eq!(sequential, subagent);
         assert!(subagent.contains("original queue item"), "{subagent}");
-        assert!(subagent.contains("Generation 7 from worker:alpha"), "{subagent}");
+        assert!(
+            subagent.contains("Generation 7 from worker:alpha"),
+            "{subagent}"
+        );
         assert!(subagent.contains("**staging**"), "{subagent}");
         assert!(!subagent.contains("**production**"), "{subagent}");
         assert!(!subagent.contains("Unrelated production"), "{subagent}");

@@ -134,6 +134,37 @@ fn string_list(state: &serde_json::Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Compare authored queue work independently of binary-owned correlation ids.
+/// Stable-id spelling is covered by the identity suites; these tests pin the
+/// executable prompt tree, lifecycle projection, and parent/leaf lineage.
+fn without_admitted_queue_ids(text: &str) -> String {
+    let mut normalized = text.to_string();
+    while let Some(start) = normalized.rfind(" [#q-") {
+        let id_start = start + 3;
+        let Some(relative_end) = normalized[id_start..].find(']') else {
+            break;
+        };
+        let end = id_start + relative_end;
+        let id = &normalized[id_start..end];
+        if !id.starts_with("q-")
+            || !id
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+        {
+            break;
+        }
+        normalized.replace_range(start..=end, "");
+    }
+    normalized
+}
+
+fn work_texts(items: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| without_admitted_queue_ids(item))
+        .collect()
+}
+
 /// The body of the runnable list component, as written on disk.
 fn run_body(doc: &std::path::Path, kind: &str) -> String {
     let content = fs::read_to_string(doc).unwrap();
@@ -168,34 +199,38 @@ fn only_nested_leaves_run_in_every_runnable_list_spelling() {
         let state = preflight_json(dir.path(), &doc);
 
         let prompts = string_list(&state, "queue_prompts");
+        let prompt_work = work_texts(&prompts);
         assert!(
-            prompts.iter().all(|item| item != PARENT),
+            prompt_work.iter().all(|item| item != PARENT),
             "{kind}: the parent is context-only: {prompts:#?}"
         );
         for child in CHILDREN {
             assert!(
-                prompts.iter().any(|item| item == child),
+                prompt_work.iter().any(|item| item == child),
                 "{kind}: leaf {child:?} is executable: {prompts:#?}"
             );
         }
         assert!(
-            prompts.iter().any(|item| item == "separate flat head"),
+            prompt_work.iter().any(|item| item == "separate flat head"),
             "{kind}: the flat sibling stays executable: {prompts:#?}"
         );
 
         let dispatch = string_list(&state, "queue_subagent_dispatch");
+        let dispatch_work = work_texts(&dispatch);
         assert!(
-            dispatch.iter().all(|item| item != PARENT),
+            dispatch_work.iter().all(|item| item != PARENT),
             "{kind}: the parent is never dispatched: {dispatch:#?}"
         );
         for child in CHILDREN {
             assert!(
-                dispatch.iter().any(|item| item == child),
+                dispatch_work.iter().any(|item| item == child),
                 "{kind}: every leaf is independently dispatchable: {dispatch:#?}"
             );
         }
         assert_eq!(
-            dispatch.iter().any(|item| item == "separate flat head"),
+            dispatch_work
+                .iter()
+                .any(|item| item == "separate flat head"),
             kind != "loop",
             "{kind}: the flat sibling follows the component policy: {dispatch:#?}"
         );
@@ -294,13 +329,22 @@ fn a_struck_parent_does_not_retire_its_leaves() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
+    let prompt_work = work_texts(&prompts);
+    let dispatch_work = work_texts(&dispatch);
     assert!(
-        prompts.iter().all(|item| item != PARENT) && dispatch.iter().all(|item| item != PARENT),
+        prompt_work.iter().all(|item| item != PARENT)
+            && dispatch_work.iter().all(|item| item != PARENT),
         "the struck parent is context-only: {prompts:#?} {dispatch:#?}"
     );
     for child in [CHILDREN[0], CHILDREN[1]] {
-        assert!(prompts.iter().any(|item| item == child), "{prompts:#?}");
-        assert!(dispatch.iter().any(|item| item == child), "{dispatch:#?}");
+        assert!(
+            prompt_work.iter().any(|item| item == child),
+            "{prompts:#?}"
+        );
+        assert!(
+            dispatch_work.iter().any(|item| item == child),
+            "{dispatch:#?}"
+        );
     }
 }
 /// A live row added beneath a struck parent is an executable leaf. Preflight
@@ -329,11 +373,17 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    assert!(prompts.iter().any(|item| item == added), "{prompts:#?}");
-    assert!(dispatch.iter().any(|item| item == added), "{dispatch:#?}");
+    assert!(
+        work_texts(&prompts).iter().any(|item| item == added),
+        "{prompts:#?}"
+    );
+    assert!(
+        work_texts(&dispatch).iter().any(|item| item == added),
+        "{dispatch:#?}"
+    );
     assert!(dispatch.iter().all(|item| item != parent), "{dispatch:#?}");
     assert!(
-        run_body(&doc, "run")
+        without_admitted_queue_ids(&run_body(&doc, "run"))
             .starts_with(&format!("- {parent}\n  - ~~{answered}~~\n  - 📥 {added}\n")),
         "{}",
         run_body(&doc, "run")
@@ -345,7 +395,10 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     );
     assert_ok(&brief, "queue brief on the added leaf");
     let brief: serde_json::Value = serde_json::from_slice(&brief.stdout).unwrap();
-    assert_eq!(brief["item"], format!("{parent}: {added}"));
+    assert_eq!(
+        without_admitted_queue_ids(brief["item"].as_str().unwrap()),
+        format!("{parent}: {added}")
+    );
     let preamble = brief["subagent_prompt_preamble"].as_str().unwrap();
     assert!(preamble.contains(parent), "{preamble}");
     assert!(preamble.contains(answered), "{preamble}");
@@ -366,7 +419,8 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
         "queue claim on the added leaf",
     );
     assert!(
-        run_body(&doc, "run").contains(&format!("  - 🟡 [#subagent:reopen#1] {added}\n")),
+        without_admitted_queue_ids(&run_body(&doc, "run"))
+            .contains(&format!("  - 🟡 [#subagent:reopen#1] {added}\n")),
         "{}",
         run_body(&doc, "run")
     );
@@ -385,11 +439,12 @@ fn a_struck_parent_over_an_unstruck_child_is_lazily_reopened() {
     let state = preflight_json(dir.path(), &doc);
     let dispatch = string_list(&state, "queue_subagent_dispatch");
     assert!(
-        dispatch.iter().any(|item| item == CHILDREN[0]),
+        work_texts(&dispatch).iter().any(|item| item == CHILDREN[0]),
         "{dispatch:#?}"
     );
     assert!(
-        run_body(&doc, "run").starts_with(&format!("- {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
+        without_admitted_queue_ids(&run_body(&doc, "run"))
+            .starts_with(&format!("- {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
@@ -405,12 +460,13 @@ fn tracked_children_keep_the_group_shape() {
     );
     let state = preflight_json(dir.path(), &doc);
     let dispatch = string_list(&state, "queue_subagent_dispatch");
+    let dispatch_work = work_texts(&dispatch);
     assert!(
-        dispatch.iter().any(|item| item == "do [#alpha]"),
+        dispatch_work.iter().any(|item| item == "do [#alpha]"),
         "a tracked child stays its own head (`#f1s3` group): {dispatch:#?}"
     );
     assert!(
-        dispatch.iter().any(|item| item == "remember the logs"),
+        dispatch_work.iter().any(|item| item == "remember the logs"),
         "a unique nested leaf is dispatched as that leaf; its lineage stays on the submitted prompt: {dispatch:#?}"
     );
     assert!(
@@ -599,7 +655,7 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
     assert_ok(&output, "respond");
 
-    let body = run_body(&doc, "run");
+    let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(!body.contains(&format!("- ~~{PARENT}~~")), "{body}");
     assert!(
         body.contains(&format!("  - ~~{}~~", CHILDREN[0])),
@@ -677,19 +733,23 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
+    let prompt_work = work_texts(&prompts);
+    let dispatch_work = work_texts(&dispatch);
     assert!(
-        prompts.iter().any(|item| item == ANSWER),
+        prompt_work.iter().any(|item| item == ANSWER),
         "the answer is an executable leaf: {prompts:#?}"
     );
     assert!(
-        dispatch.iter().any(|item| item == ANSWER),
+        dispatch_work.iter().any(|item| item == ANSWER),
         "the answer leaf remains executable: {dispatch:#?}"
     );
     assert!(
-        dispatch.iter().any(|item| item == "separate flat head"),
+        dispatch_work
+            .iter()
+            .any(|item| item == "separate flat head"),
         "{dispatch:#?}"
     );
-    let body = run_body(&doc, "run");
+    let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(
         body.contains(&format!("[#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
         "the answer stays nested beneath its context parent:\n{body}"
@@ -712,12 +772,15 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let state = preflight_json(dir.path(), &doc);
     let prompts = string_list(&state, "queue_prompts");
     let dispatch = string_list(&state, "queue_subagent_dispatch");
-    assert!(prompts.iter().any(|item| item == ANSWER), "{prompts:#?}");
+    assert!(
+        work_texts(&prompts).iter().any(|item| item == ANSWER),
+        "{prompts:#?}"
+    );
     assert!(
         dispatch.is_empty(),
         "reported writeback debt blocks fresh dispatch: {dispatch:#?}"
     );
-    let body = run_body(&doc, "run");
+    let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(
         body.contains(&format!("- [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
         "the live answer leaf reopens only its context parent:\n{body}"
@@ -740,7 +803,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let state = preflight_json(dir.path(), &doc);
     let dispatch = string_list(&state, "queue_subagent_dispatch");
     assert!(
-        dispatch.iter().any(|item| item == ANSWER),
+        work_texts(&dispatch).iter().any(|item| item == ANSWER),
         "fresh dispatch resumes immediately after reported closeout: {dispatch:#?}"
     );
 }

@@ -856,6 +856,30 @@ pub fn queue_prompt_stable_id(text: &str) -> Option<String> {
     }
 }
 
+/// Remove the binary-owned trailing q-id annotation from a prompt while
+/// preserving its authored work text, continuation lines, and report-state
+/// annotation. Authored semantic ids are never removed.
+pub fn strip_queue_prompt_stable_id_annotation(text: &str) -> String {
+    if queue_head_identity(text).is_id_backed() {
+        return text.to_string();
+    }
+    let first_end = text.find('\n').unwrap_or(text.len());
+    let first = &text[..first_end];
+    let work = strip_queue_report_state_annotation(first);
+    let Some(id) = trailing_generated_prompt_id(first) else {
+        return text.to_string();
+    };
+    let annotation = format!(" [#{id}]");
+    let Some(annotation_start) = work.strip_suffix(&annotation).map(str::len) else {
+        return text.to_string();
+    };
+    let mut stripped = String::with_capacity(text.len() - annotation.len());
+    stripped.push_str(&first[..annotation_start]);
+    stripped.push_str(&first[work.len()..]);
+    stripped.push_str(&text[first_end..]);
+    stripped
+}
+
 /// `text` with leading markers and leading `#tag` / `#tag:` intent tokens
 /// removed (see [`queue_head_identity`]). Never strips the last token, so a
 /// bare `#id` survives.
@@ -1248,6 +1272,28 @@ mod tests {
         assert_eq!(
             render_queue_report_state_annotation("parent\n  - child", Some(QueueReportState::Local)),
             "parent ⟦local⟧\n  - child"
+        );
+    }
+
+    #[test]
+    fn stable_prompt_id_stripping_preserves_authored_text_and_other_annotations() {
+        assert_eq!(
+            strip_queue_prompt_stable_id_annotation("ship it [#q-abc123]"),
+            "ship it"
+        );
+        assert_eq!(
+            strip_queue_prompt_stable_id_annotation(
+                "ship it [#q-abc123] ⟦published⟧\n  - context"
+            ),
+            "ship it ⟦published⟧\n  - context"
+        );
+        assert_eq!(
+            strip_queue_prompt_stable_id_annotation("do [#authored]"),
+            "do [#authored]"
+        );
+        assert_eq!(
+            strip_queue_prompt_stable_id_annotation("do [#q-authored]"),
+            "do [#q-authored]"
         );
     }
 }

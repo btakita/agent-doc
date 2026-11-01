@@ -1347,7 +1347,12 @@ pub fn embed_consumed_prompt_in_response(
 /// prompt path: a one-word head like `deploy` is proof only when it appears in
 /// the labeled queue-prompt echo, not just anywhere in assistant prose.
 fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &str) -> bool {
-    let head_clean = strip_priority_markers(head_text);
+    // A response may predate stable-id admission, or intentionally quote only
+    // authored work text. The binary-owned q-id is correlation metadata, not
+    // part of the verbatim echo contract (`#nestedechostrike`).
+    let head_clean = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
+        &strip_priority_markers(head_text),
+    );
     let head_norm = normalize_for_answer_match(&explicit_queue_prompt_head_match_text(&head_clean));
     if head_norm.is_empty() {
         return false;
@@ -1370,7 +1375,10 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
             // answer can leave the full queue row live and dispatch it again.
             if in_queue_prompt_echo && let Some(candidate) = unquoted_prompt_echo_continuation(line)
             {
-                let candidate = normalize_prompt_echo_presence_line(candidate);
+                let candidate =
+                    agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
+                        &normalize_prompt_echo_presence_line(candidate),
+                    );
                 if !candidate.is_empty() {
                     run.push(normalize_for_answer_match(&candidate));
                     if echo_run_ends_with_head(&run, &head_norm, head_lines) {
@@ -1400,7 +1408,9 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
             continue;
         };
 
-        let candidate = normalize_prompt_echo_presence_line(candidate);
+        let candidate = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
+            &normalize_prompt_echo_presence_line(candidate),
+        );
         if candidate.is_empty() {
             continue;
         }
@@ -3055,6 +3065,10 @@ mod tests {
         assert!(
             free_text_head_answered_by_response(one_line, ":pushpin: deploy"),
             "same-line queue-prompt echo should also prove a pinned short head"
+        );
+        assert!(
+            free_text_head_answered_by_response(one_line, "deploy [#q-stable-deploy]"),
+            "a legacy work-text echo must still prove its q-id-admitted head"
         );
 
         let unlabeled = "### Re: deploy\n\n> deploy\n\nDone.\n";

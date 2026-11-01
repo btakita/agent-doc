@@ -106,7 +106,8 @@
 use std::collections::{HashMap, HashSet};
 
 use agent_doc_element_queue::{
-    QueueItemIdentity, QueueReportState, queue_prompt_stable_identity,
+    QueueItemIdentity, QueueReportState, queue_prompt_stable_id, queue_prompt_stable_identity,
+    strip_queue_prompt_stable_id_annotation,
 };
 use serde::{Deserialize, Serialize};
 
@@ -2727,11 +2728,18 @@ pub fn nest_leaf_matches(item: &str, live_heads: &[String]) -> Vec<String> {
     {
         return Vec::new();
     }
+    let accepts_legacy_text = queue_prompt_stable_id(item)
+        .is_none_or(|id| !id.starts_with("q-"));
     live_heads
         .iter()
         .filter(|head| {
             head.rsplit_once(": ").is_some_and(|(ancestors, leaf)| {
-                !ancestors.is_empty() && !leaf.is_empty() && claim_identity(leaf) == identity
+                !ancestors.is_empty()
+                    && !leaf.is_empty()
+                    && (claim_identity(leaf) == identity
+                        || (accepts_legacy_text
+                            && claim_identity(&strip_queue_prompt_stable_id_annotation(leaf))
+                                == identity))
             })
         })
         .cloned()
@@ -2751,6 +2759,30 @@ pub fn resolve_claim_target(item: &str, live_heads: &[String]) -> Result<String,
         .find(|head| claim_identity(head) == identity)
     {
         return Ok(head.clone());
+    }
+    // Stable-id admission must not invalidate an already-authored command or
+    // copied `--item` value. Resolve the legacy work text only when it names a
+    // single q-id-admitted head; an explicit q-id never falls back, and
+    // same-text siblings remain ambiguous rather than silently reassigning.
+    if queue_prompt_stable_id(item).is_none_or(|id| !id.starts_with("q-")) {
+        let legacy: Vec<String> = live_heads
+            .iter()
+            .filter(|head| {
+                claim_identity(&strip_queue_prompt_stable_id_annotation(head)) == identity
+            })
+            .cloned()
+            .collect();
+        match legacy.len() {
+            1 => return Ok(legacy[0].clone()),
+            0 => {}
+            _ => {
+                return Err(QueueClaimMiss {
+                    item: item.trim().to_string(),
+                    live_heads: live_heads.to_vec(),
+                    ambiguous: legacy,
+                });
+            }
+        }
     }
     // `#nestlistlineage`: `--item '#rebase'` names the nest vector. One parent
     // is that row. Several parents name the first in queue order here; `queue
@@ -4580,6 +4612,33 @@ mod tests {
             resolve_claim_target("#gh-fix https://x.test/issues/126", &heads).unwrap(),
             heads[0]
         );
+    }
+
+    #[test]
+    fn claim_target_resolves_legacy_text_after_stable_id_admission() {
+        let top = "ship the release [#q-release]".to_string();
+        assert_eq!(
+            resolve_claim_target("ship the release", std::slice::from_ref(&top)).unwrap(),
+            top
+        );
+
+        let nested = "release group: verify the changelog [#q-changelog]".to_string();
+        assert_eq!(
+            resolve_claim_target("verify the changelog", std::slice::from_ref(&nested)).unwrap(),
+            nested
+        );
+
+        let twins = vec![
+            "ship the release [#q-release-a]".to_string(),
+            "ship the release [#q-release-b]".to_string(),
+        ];
+        assert_eq!(
+            resolve_claim_target("ship the release", &twins)
+                .unwrap_err()
+                .ambiguous,
+            twins
+        );
+        assert!(resolve_claim_target("ship the release [#q-stale]", &twins).is_err());
     }
 
     /// `#queueeffectidentity`: a bare family name cannot silently select the

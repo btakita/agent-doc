@@ -2236,10 +2236,10 @@ Closes #lostid.
 
     #[test]
     fn direct_response_patchback_heading_policy_ignores_reserved_response_details() {
-        let before = "<!-- agent:queue -->\n- ~~do [#done]~~\n<!-- /agent:queue -->\n";
+        let before = "<!-- agent:queue -->\n- ~~do [#done]~~ — auto-struck: response: [#r-0123456789ab]\n<!-- /agent:queue -->\n";
         let after = concat!(
             "<!-- agent:queue -->\n",
-            "- ~~do [#done]~~\n",
+            "- ~~do [#done]~~ — auto-struck: response: [#r-0123456789ab]\n",
             "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
             "    <summary>Response</summary>\n",
             "    \n",

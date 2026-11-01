@@ -27,7 +27,8 @@ pub const FREE_TEXT_HEAD_ENTRY_HISTORY_LIMIT: usize = 128;
 /// whitespace collapsed, lowercase. The same identity the preflight catch-up's
 /// in-flight-edit gate uses.
 pub fn free_text_head_entry_identity(text: &str) -> String {
-    strip_priority_markers(text)
+    let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
+    strip_priority_markers(&text)
         .to_lowercase()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -505,6 +506,14 @@ mod tests {
         assert_eq!(
             free_text_head_entry_identity(":pushpin: The  Session list\nflickers"),
             free_text_head_entry_identity("the session list flickers"),
+        );
+    }
+
+    #[test]
+    fn entry_identity_ignores_generated_stable_id_metadata() {
+        assert_eq!(
+            free_text_head_entry_identity("release + publish [#q-430c53dd8e8d]"),
+            free_text_head_entry_identity("release + publish"),
         );
     }
 

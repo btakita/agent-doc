@@ -14,6 +14,7 @@ name = "agent_doc_archive_io"
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.564" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.564" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.564" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.564" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.564" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.564" }
 anyhow = "1"

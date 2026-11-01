@@ -7,8 +7,8 @@
 //! as exact blobs in one Git commit.
 
 use agent_doc_markdown_ast::exchange_tree::{
-    ExchangeNodeKind, ResponseTurnCellPolicy, is_compact_response_id, parse_exchange_nodes,
-    response_lookup_id,
+    ExchangeNode, ExchangeNodeKind, ResponseTurnCellPolicy, is_compact_response_id,
+    parse_exchange_nodes, response_lookup_id,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,9 @@ pub enum RecoverySource {
     ResponseIndex,
     SqliteCache,
     GitTrailerCandidate,
+    /// Compatibility recovery for response ids created before affected-id
+    /// trailers and per-section index entries were available.
+    GitHistoryCompatibility,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,14 +146,56 @@ fn anchor_for(response_id: &str) -> Result<String> {
         .to_string())
 }
 
-fn response_nodes(content: &str) -> Vec<(String, String)> {
-    let nodes = parse_exchange_nodes(content);
-    nodes
-        .iter()
+fn document_response_nodes(content: &str) -> Vec<ExchangeNode> {
+    let exchange_bodies = agent_doc_element::element::parse(content)
+        .ok()
+        .map(|components| {
+            components
+                .into_iter()
+                .filter(|component| component.name == "exchange")
+                .map(|component| component.content(content))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let scopes = if exchange_bodies.is_empty() {
+        vec![content]
+    } else {
+        exchange_bodies
+    };
+    scopes
+        .into_iter()
+        .flat_map(parse_exchange_nodes)
         .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
-        .map(|node| {
-            let policy = ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(node));
-            (response_lookup_id(content, &policy), node.render())
+        .collect()
+}
+
+fn response_nodes(content: &str) -> Vec<(String, String)> {
+    let exchange_bodies = agent_doc_element::element::parse(content)
+        .ok()
+        .map(|components| {
+            components
+                .into_iter()
+                .filter(|component| component.name == "exchange")
+                .map(|component| component.content(content))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let scopes = if exchange_bodies.is_empty() {
+        vec![content]
+    } else {
+        exchange_bodies
+    };
+    scopes
+        .into_iter()
+        .flat_map(|inner| {
+            parse_exchange_nodes(inner)
+                .into_iter()
+                .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+                .map(move |node| {
+                    let policy =
+                        ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(&node));
+                    (response_lookup_id(inner, &policy), node.render())
+                })
         })
         .filter(|(response_id, body)| !response_id.is_empty() && !body.trim().is_empty())
         .collect()
@@ -404,12 +449,17 @@ pub fn dangling_response_references_with_pins(
         .into_iter()
         .map(|(id, _)| id)
         .collect::<BTreeSet<_>>();
-    let mut refs = extract_response_ids(content);
+    let mut refs = extract_response_reference_ids(content);
     refs.extend(pinned);
-    Ok(refs
-        .difference(&live.union(&indexed).cloned().collect())
-        .cloned()
-        .collect())
+    let resolved = live.union(&indexed).cloned().collect::<BTreeSet<_>>();
+    let mut dangling = refs.difference(&resolved).cloned().collect::<Vec<_>>();
+    dangling.retain(|response_id| {
+        compatibility_git_history_response(doc, response_id)
+            .ok()
+            .flatten()
+            .is_none()
+    });
+    Ok(dangling)
 }
 
 /// Render only response bodies not pinned by authoritative decision evidence.
@@ -446,6 +496,82 @@ pub fn extract_response_ids(content: &str) -> BTreeSet<String> {
         rest = &rest[end + 1..];
     }
     out
+}
+
+/// Response ids that carry durable evidence semantics in a session document.
+///
+/// Canonical ids shown in prose, fenced examples, or inline code are ordinary
+/// documentation and must not become archive obligations. Evidence references
+/// use one of the binary-owned projection shapes (response annotation, visible
+/// response row/details, or the legacy `%% response … %%` child). Decision pins
+/// are supplied separately by the decision registry.
+pub fn extract_response_reference_ids(content: &str) -> BTreeSet<String> {
+    let mut refs = BTreeSet::new();
+    let mut fence: Option<String> = None;
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim_start();
+        let fence_marker = trimmed
+            .strip_prefix("```")
+            .map(|_| "```")
+            .or_else(|| trimmed.strip_prefix("~~~").map(|_| "~~~"));
+        if let Some(marker) = fence_marker {
+            if fence.as_deref() == Some(marker) {
+                fence = None;
+            } else if fence.is_none() {
+                fence = Some(marker.to_string());
+            }
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
+
+        let visible = strip_inline_code(raw_line);
+        let evidence_line = visible.contains("response: [#r-")
+            || visible.contains("**Response [#r-")
+            || visible.contains("%% response [#r-")
+            || visible.trim_start().starts_with("### Re:") && visible.contains("[#r-");
+        if evidence_line {
+            refs.extend(extract_response_ids(&visible));
+        }
+        let mut attributes = visible.as_str();
+        const RESPONSE_ATTRIBUTE: &str = "data-agent-doc-response-id=\"";
+        while let Some(start) = attributes.find(RESPONSE_ATTRIBUTE) {
+            let value = &attributes[start + RESPONSE_ATTRIBUTE.len()..];
+            let Some(end) = value.find('"') else { break };
+            let candidate = format!("[#{}]", &value[..end]);
+            if is_compact_response_id(&candidate) {
+                refs.insert(candidate);
+            }
+            attributes = &value[end + 1..];
+        }
+    }
+    refs
+}
+
+fn strip_inline_code(line: &str) -> String {
+    let mut visible = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut delimiter_width = 0usize;
+    while let Some(character) = chars.next() {
+        if character != '`' {
+            if delimiter_width == 0 {
+                visible.push(character);
+            }
+            continue;
+        }
+        let mut width = 1usize;
+        while chars.peek() == Some(&'`') {
+            chars.next();
+            width += 1;
+        }
+        if delimiter_width == 0 {
+            delimiter_width = width;
+        } else if delimiter_width == width {
+            delimiter_width = 0;
+        }
+    }
+    visible
 }
 
 /// Generic trailer API. Decision ids are supplied by the decision-registry
@@ -650,9 +776,90 @@ pub fn read_current_exchange_archive(doc: &Path) -> Result<Option<String>> {
     )?))
 }
 
-/// Recovery order is retained state, response index/archive, then Git trailer
-/// candidates with mandatory checksum verification. Ambiguous or checksum-bad
-/// evidence returns choices and never writes over editor authority.
+fn compatibility_git_history_response(
+    doc: &Path,
+    response_id: &str,
+) -> Result<Option<(String, String, usize)>> {
+    let root = project_root(doc)?;
+    let doc_rel = relative_slash(&root, doc)?;
+    let candidates = git_stdout(
+        &root,
+        &[
+            "log",
+            "--all",
+            "--format=%H",
+            "-n",
+            "64",
+            &format!("-S{response_id}"),
+            "--",
+            &doc_rel,
+        ],
+    )?;
+    let mut checked = 0usize;
+    for commit in candidates.lines().filter(|line| !line.trim().is_empty()) {
+        checked += 1;
+        let Ok(current) = head_blob(&root, commit, &doc_rel) else {
+            continue;
+        };
+        if let Some(content) = response_content_by_id(&current, response_id, None) {
+            return Ok(Some((content, commit.to_string(), checked)));
+        }
+
+        let parent = head_blob(&root, &format!("{commit}^"), &doc_rel).unwrap_or_default();
+        let mut parent_counts = BTreeMap::<String, usize>::new();
+        for node in document_response_nodes(&parent) {
+            *parent_counts.entry(node.node_id()).or_default() += 1;
+        }
+        let added = document_response_nodes(&current)
+            .into_iter()
+            .filter(|node| {
+                let count = parent_counts.entry(node.node_id()).or_default();
+                if *count == 0 {
+                    true
+                } else {
+                    *count -= 1;
+                    false
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(content) = historical_response_window(&added, response_id) {
+            return Ok(Some((content, commit.to_string(), checked)));
+        }
+    }
+    Ok(None)
+}
+
+fn historical_response_window(nodes: &[ExchangeNode], response_id: &str) -> Option<String> {
+    // Compatibility lookup is reached only for an unresolved durable evidence
+    // reference. Bound the quadratic legacy-cell search so corrupted history
+    // cannot turn session-check into an unbounded repository scan.
+    let nodes = nodes
+        .get(nodes.len().saturating_sub(128)..)
+        .unwrap_or(nodes);
+    for width in (1..=nodes.len()).rev() {
+        for window in nodes.windows(width) {
+            let policy = ResponseTurnCellPolicy::from_response_nodes(window);
+            let legacy_transport_policy = {
+                let mut legacy = window.to_vec();
+                if let Some(last) = legacy.last_mut() {
+                    last.lines.push("<!-- /patch:exchange -->\n".to_string());
+                }
+                ResponseTurnCellPolicy::from_response_nodes(&legacy)
+            };
+            if policy.response_id() == response_id
+                || legacy_transport_policy.response_id() == response_id
+            {
+                return Some(window.iter().map(ExchangeNode::render).collect());
+            }
+        }
+    }
+    None
+}
+
+/// Recovery order is retained state, response index/archive, Git trailer
+/// candidates with mandatory checksum verification, then bounded compatibility
+/// reconstruction for legacy composite ids. Ambiguous or checksum-bad evidence
+/// returns choices and never writes over editor authority.
 pub fn recover_response(
     doc: &Path,
     response_id: &str,
@@ -759,9 +966,23 @@ pub fn recover_response_with_metrics(
             ));
         }
     }
+    if let Some((content, commit, compatibility_checked)) =
+        compatibility_git_history_response(doc, response_id)?
+    {
+        checked += compatibility_checked;
+        return Ok((
+            ResponseRecovery::Found(RecoveredResponse {
+                source: RecoverySource::GitHistoryCompatibility,
+                response_id: response_id.to_string(),
+                content,
+                commit: Some(commit),
+            }),
+            lookup_metrics("git-history-compatibility", started, checked),
+        ));
+    }
     Ok((ResponseRecovery::NeedsEditorDecision {
         response_id: response_id.to_string(),
-        reason: "retained state, the response index/archive, and checksum-verified Git trailer candidates did not prove one authoritative response".to_string(),
+        reason: "retained state, the response index/archive, checksum-verified Git trailer candidates, and the bounded legacy-history compatibility scan did not prove one authoritative response".to_string(),
         choices: vec![RecoveryChoice::Restore, RecoveryChoice::DetachReference, RecoveryChoice::ReplaceEvidence],
     }, lookup_metrics("missing", started, checked)))
 }
@@ -1170,6 +1391,102 @@ mod tests {
     }
 
     #[test]
+    fn response_reference_scan_ignores_examples_but_keeps_legacy_and_visible_evidence() {
+        let exact_mix = concat!(
+            "```md\n",
+            "- **Response [#r-0123456789ab]:** example only\n",
+            "```\n",
+            "- Durable response IDs such as `[#r-0123456789ab]`.\n",
+            "- We don't need `; response: [#r-07f614245f75]` in this example.\n",
+            "- ~~historical item~~\n",
+            "  - %% response [#r-0f15203ed8b8] %%\n",
+            "- ~~old aggregate item~~ — auto-struck: response: [#r-3bb63500aa30]\n",
+            "  - **Response [#r-3bb63500aa30]:** Historical summary.\n",
+        );
+
+        assert_eq!(
+            extract_response_reference_ids(exact_mix),
+            BTreeSet::from([
+                "[#r-0f15203ed8b8]".to_string(),
+                "[#r-3bb63500aa30]".to_string(),
+            ])
+        );
+        assert_eq!(
+            extract_response_ids(exact_mix),
+            BTreeSet::from([
+                "[#r-0123456789ab]".to_string(),
+                "[#r-07f614245f75]".to_string(),
+                "[#r-0f15203ed8b8]".to_string(),
+                "[#r-3bb63500aa30]".to_string(),
+            ]),
+            "the raw lookup helper remains lossless for diagnostics"
+        );
+        assert_eq!(
+            extract_response_reference_ids(
+                "<details data-agent-doc-response-id=\"r-0f15203ed8b8\">\n"
+            ),
+            BTreeSet::from(["[#r-0f15203ed8b8]".to_string()])
+        );
+    }
+
+    #[test]
+    fn old_composite_response_id_recovers_from_the_commit_that_introduced_it() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        let initial = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: older\n\nOlder response.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- older item\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, initial).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "initial"]);
+
+        let captured = concat!(
+            "### Re: alpha\n\nAlpha result.\n\n",
+            "### Re: beta\n\nBeta result.\n",
+        );
+        let legacy_transport =
+            format!("<!-- patch:exchange -->\n{captured}<!-- /patch:exchange -->\n");
+        let response_id = ResponseTurnCellPolicy::from_response(Some(&legacy_transport))
+            .response_id()
+            .to_string();
+        let historical = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "### Re: older\n\nOlder response.\n",
+                "{}",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- ~~alpha~~ — auto-struck: response: {}\n",
+                "  - **Response {}:** Alpha result.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            captured, response_id, response_id
+        );
+        std::fs::write(&doc, &historical).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "legacy aggregate response"],
+        );
+
+        let recovered = recover_response(&doc, &response_id, None).unwrap();
+        let ResponseRecovery::Found(recovered) = recovered else {
+            panic!("legacy composite response should be recoverable")
+        };
+        assert_eq!(recovered.source, RecoverySource::GitHistoryCompatibility);
+        assert_eq!(recovered.content, captured);
+        assert!(
+            dangling_response_references(&doc, &historical)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn decision_pins_are_dangling_without_verified_live_or_archive_evidence() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
@@ -1291,7 +1608,7 @@ mod tests {
             outcome,
             ResponseRecovery::NeedsEditorDecision {
                 response_id: missing.to_string(),
-                reason: "retained state, the response index/archive, and checksum-verified Git trailer candidates did not prove one authoritative response".to_string(),
+                reason: "retained state, the response index/archive, checksum-verified Git trailer candidates, and the bounded legacy-history compatibility scan did not prove one authoritative response".to_string(),
                 choices: vec![RecoveryChoice::Restore, RecoveryChoice::DetachReference, RecoveryChoice::ReplaceEvidence],
             }
         );

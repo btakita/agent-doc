@@ -1879,6 +1879,13 @@ pub fn head_leads_with_preset(text: &str, preset_only_ids: &HashSet<String>) -> 
 }
 
 fn tracked_head_id(text: &str, preset_only_ids: &HashSet<String>) -> Option<String> {
+    // A binary-admitted `[#q-...]` is the durable identity of the invocation,
+    // not evidence that the preset became tracked backlog work. Classify the
+    // authored leading token before the stable-id extractor lets the trailing
+    // q-id dominate identity.
+    if head_leads_with_preset(text, preset_only_ids) {
+        return None;
+    }
     extract_head_id(text).filter(|id| !preset_only_ids.contains(&id.to_ascii_lowercase()))
 }
 
@@ -3180,6 +3187,13 @@ mod tests {
         assert_eq!(
             drainable_head_count_excluding_claimed_with_presets(content, &none, &presets),
             1
+        );
+
+        let admitted = content.replace("- #review\n", "- #review [#q-project-review]\n");
+        assert_eq!(
+            drainable_head_count_excluding_claimed_with_presets(&admitted, &none, &presets),
+            1,
+            "the binary-owned stable id must not reclassify a preset invocation as missing backlog work"
         );
         for scope in [DrainScope::InSessionLoop, DrainScope::Supervisor] {
             assert_eq!(

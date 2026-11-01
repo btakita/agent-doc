@@ -5145,6 +5145,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
     let authority_baseline = content.clone();
+    let normalized_generated_responses =
+        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
+    let generated_response_markers_normalized = normalized_generated_responses != content;
+    if generated_response_markers_normalized {
+        content = normalized_generated_responses;
+        eprintln!(
+            "[preflight] queue: removed lifecycle projection from reserved response-tree metadata"
+        );
+    }
     let _nested_claim_steer =
         agent_doc_queue_io::queue_claim::nested_claim_steer_for(file, &content);
     let mut current_content = content.clone();
@@ -5153,7 +5162,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             &current_content,
             file,
         )?;
-    let mut mutated = false;
+    let mut mutated = generated_response_markers_normalized;
     let mut components = match agent_doc_element::element::parse(&current_content) {
         Ok(cs) => cs,
         Err(_) => return Ok(QueueState::default()),
@@ -7917,6 +7926,9 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             &struck_heads_this_pass,
         )
         .0;
+        new_snap = agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(
+            &new_snap,
+        );
 
         if in_progress_markers_changed {
             new_snap = sync_in_progress_marker_regions(&new_snap, &current_content);
@@ -20014,6 +20026,56 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             agent_doc_turn::CyclePhase::Abandoned,
             "the unrecoverable backlog-capture cycle must be abandoned (terminal)"
         );
+    }
+
+    #[test]
+    fn run_queue_maintenance_normalizes_legacy_generated_response_lifecycle_markers() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: pause\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- parent one\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** First summary.\n",
+            "    - 📥 **Choices:**\n",
+            "      - 📥 **staging**: Publish to staging.\n",
+            "        - 📥 I choose staging; continue.\n",
+            "- parent two\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Second summary.\n",
+            "- parent three\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Third summary.\n",
+            "- parent four\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Fourth summary.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let _ = run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(!updated.contains("📥 **Response"), "{updated}");
+        assert!(!updated.contains("📥 **Choices:**"), "{updated}");
+        assert!(!updated.contains("📥 **staging**"), "{updated}");
+        assert!(
+            updated.contains("📥 I choose staging; continue."),
+            "operator-authored descendants must keep their lifecycle and remain promptable: {updated}"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(!snapshot.contains("📥 **Response"), "{snapshot}");
+        assert!(snapshot.contains("📥 I choose staging; continue."));
     }
 
     #[test]

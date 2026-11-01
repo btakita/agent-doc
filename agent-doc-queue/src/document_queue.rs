@@ -5076,8 +5076,13 @@ fn split_queue_effect_projection(
     String,
     Option<usize>,
     Option<agent_doc_element_queue::QueueReportState>,
+    Option<String>,
 ) {
-    let trimmed = text.trim_end();
+    let without_prompt_id = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
+    let prompt_id = (without_prompt_id != text)
+        .then(|| agent_doc_element_queue::queue_prompt_stable_id(text))
+        .flatten();
+    let trimmed = without_prompt_id.trim_end();
     let (before_state, trailing_state) =
         match agent_doc_element_queue::queue_report_state_annotation(trimmed) {
             Some((range, state)) => (trimmed[..range.start].trim_end(), Some(state)),
@@ -5085,22 +5090,22 @@ fn split_queue_effect_projection(
         };
     let without_trailing_state = || {
         trailing_state.map_or_else(
-            || text.to_string(),
+            || without_prompt_id.clone(),
             |_| agent_doc_element_queue::strip_queue_report_state_annotation(trimmed).to_string(),
         )
     };
     let Some(before_close) = before_state.strip_suffix('⟧') else {
-        return (without_trailing_state(), None, trailing_state);
+        return (without_trailing_state(), None, trailing_state, prompt_id);
     };
     let Some((base, raw)) = before_close.rsplit_once(" ⟦effect:") else {
-        return (without_trailing_state(), None, trailing_state);
+        return (without_trailing_state(), None, trailing_state, prompt_id);
     };
     let Ok(effect) = raw.parse::<usize>() else {
-        return (without_trailing_state(), None, trailing_state);
+        return (without_trailing_state(), None, trailing_state, prompt_id);
     };
     let base = base.trim_end();
     if base.trim().is_empty() {
-        return (text.to_string(), None, trailing_state);
+        return (without_prompt_id, None, trailing_state, prompt_id);
     }
     // Preflight used to append `⟦effect:N⟧` after an already-rendered report
     // state. Runtime projection then appended the state again because it was no
@@ -5115,12 +5120,22 @@ fn split_queue_effect_projection(
         (Some((base, state)), None) => (base, Some(state)),
         (None, state) => (base, state),
     };
-    (base.to_string(), Some(effect), state)
+    (base.to_string(), Some(effect), state, prompt_id)
 }
 
 fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
-    let (base, effect, _) = split_queue_effect_projection(text);
+    let (base, effect, _, prompt_id) = split_queue_effect_projection(text);
+    let base = prompt_id.map_or(base.clone(), |id| {
+        render_queue_prompt_id_annotation(&base, &id)
+    });
     (base, effect)
+}
+
+fn render_queue_prompt_id_annotation(text: &str, id: &str) -> String {
+    match text.split_once('\n') {
+        Some((head, tail)) => format!("{} [#{id}]\n{tail}", head.trim_end()),
+        None => format!("{} [#{id}]", text.trim_end()),
+    }
 }
 
 /// Render the effect id before the canonical trailing report-state annotation.
@@ -5130,7 +5145,7 @@ pub fn render_queue_effect_report_state_annotation(
     text: &str,
     state: Option<agent_doc_element_queue::QueueReportState>,
 ) -> String {
-    let (base, effect, _) = split_queue_effect_projection(text);
+    let (base, effect, _, prompt_id) = split_queue_effect_projection(text);
     let with_effect = effect.map_or_else(
         || base.clone(),
         |effect| {
@@ -5140,7 +5155,10 @@ pub fn render_queue_effect_report_state_annotation(
             )
         },
     );
-    agent_doc_element_queue::render_queue_report_state_annotation(&with_effect, state)
+    let with_prompt_id = prompt_id.map_or(with_effect.clone(), |id| {
+        render_queue_prompt_id_annotation(&with_effect, &id)
+    });
+    agent_doc_element_queue::render_queue_report_state_annotation(&with_prompt_id, state)
 }
 
 /// The operator-authored work text of `text` with a trailing binary-owned
@@ -5159,7 +5177,9 @@ fn queue_effect_family_identity(
     prompt: &QueuePrompt,
 ) -> agent_doc_element_queue::QueueItemIdentity {
     let (base, _) = split_queue_effect_annotation(&prompt.text);
-    agent_doc_element_queue::QueueItemIdentity::from_prompt(&base)
+    agent_doc_element_queue::QueueItemIdentity::from_prompt(
+        &agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&base),
+    )
 }
 
 /// Give every lawful repeated free-text or nested command effect a stable
@@ -5237,13 +5257,18 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
             let QueueEntry::Prompt(prompt) = &entries[index] else {
                 unreachable!("live effect-family index must name a live prompt");
             };
-            let (base, _, publication_state) = split_queue_effect_projection(&prompt.text);
+            let (base, _, publication_state, prompt_id) =
+                split_queue_effect_projection(&prompt.text);
             let effect = effect.expect("every duplicate effect receives an id");
-            let text = render_queue_effect_report_state_annotation(
-                &format!(
-                    "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
-                    base.trim_end()
-                ),
+            let with_effect = format!(
+                "{} {QUEUE_EFFECT_ANNOTATION_PREFIX}{effect}⟧",
+                base.trim_end()
+            );
+            let with_prompt_id = prompt_id.map_or(with_effect.clone(), |id| {
+                render_queue_prompt_id_annotation(&with_effect, &id)
+            });
+            let text = agent_doc_element_queue::render_queue_report_state_annotation(
+                &with_prompt_id,
                 publication_state,
             );
             if text != prompt.text {
@@ -10875,6 +10900,25 @@ mod tests {
             converge(&survivor, &once),
             survivor,
             "removing effect 1 never renumbers effect 2"
+        );
+    }
+
+    #[test]
+    fn effect_annotation_preserves_an_admitted_prompt_id() {
+        let entries = vec![p("release + publish [#q-first]"), p("release + publish")];
+
+        assert_eq!(
+            annotate_duplicate_queue_effects(&entries).unwrap(),
+            vec![
+                p("release + publish ⟦effect:1⟧ [#q-first]"),
+                p("release + publish ⟦effect:2⟧"),
+            ]
+        );
+        let multiline = "investigate this [#q-multiline]\n```\nevidence\n```";
+        assert_eq!(
+            render_queue_effect_report_state_annotation(multiline, None),
+            multiline,
+            "q-id canonicalization keeps a multiline prompt id on its first work line"
         );
     }
 

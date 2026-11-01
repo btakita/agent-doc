@@ -86,23 +86,7 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
             node.node_key,
             agent_doc_element_queue::normalize_multiline_dedup_text(work)
         );
-        let id = format!(
-            "{GENERATED_ID_PREFIX}{}",
-            agent_doc_hash::short_content_hash(&seed)
-        );
-        if let Some(owner) = owned_ids.get(&id) {
-            // A digest collision is deliberately fail-closed. Re-probing a new
-            // spelling would silently reassign identity on another machine.
-            if owner != &node.node_key {
-                identity_diagnostics.push(diag(
-                    "queue_prompt_identity_collision",
-                    format!(
-                        "generated queue prompt id [#{id}] is already owned; the new row was left unchanged"
-                    ),
-                ));
-                continue;
-            }
-        }
+        let id = available_generated_id(&seed, &node.node_key, &owned_ids);
         let Some(offset) = prompt_id_insertion_offset(content, &node) else {
             identity_diagnostics.push(diag(
                 "queue_prompt_identity_unresolved",
@@ -134,6 +118,36 @@ pub fn project(content: &str, document_id: &str) -> QueuePromptIdentityProjectio
         content: projected,
         assignments,
         relations,
+    }
+}
+
+fn available_generated_id(
+    seed: &str,
+    node_key: &str,
+    owned_ids: &HashMap<String, String>,
+) -> String {
+    // Once an earlier occurrence is admitted, its mutation node key changes
+    // from the legacy text-derived key to the q-id-derived key. A later
+    // identical occurrence can therefore reproduce the earlier seed even
+    // though it is distinct work. Probe deterministically against the ids in
+    // this immutable document cut: persisted owners never move, and every
+    // authority replay of the same cut chooses the same first free candidate.
+    let mut probe = 0usize;
+    loop {
+        let candidate_seed = if probe == 0 {
+            seed.to_string()
+        } else {
+            format!("{seed}\nidentity-probe:{probe}")
+        };
+        let id = format!(
+            "{GENERATED_ID_PREFIX}{}",
+            agent_doc_hash::short_content_hash(&candidate_seed)
+        );
+        match owned_ids.get(&id) {
+            None => return id,
+            Some(owner) if owner == node_key => return id,
+            Some(_) => probe += 1,
+        }
     }
 }
 
@@ -452,6 +466,43 @@ mod tests {
         let second = project(&first.content, "doc-a");
         assert!(second.assignments.is_empty());
         assert_eq!(second.content, first.content);
+    }
+
+    #[test]
+    fn later_identical_prompt_gets_a_distinct_stable_id() {
+        let original = concat!(
+            "<!-- agent:run -->\n",
+            "- first parent\n",
+            "  - repeated work\n",
+            "<!-- /agent:run -->\n",
+        );
+        let admitted = project(original, "doc-a");
+        assert_eq!(admitted.assignments.len(), 1);
+
+        let edited = admitted.content.replace(
+            "<!-- /agent:run -->",
+            "- second parent\n  - repeated work\n<!-- /agent:run -->",
+        );
+        let reprojection = project(&edited, "doc-a");
+
+        assert_eq!(reprojection.assignments.len(), 1);
+        assert!(
+            reprojection
+                .relations
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "queue_prompt_identity_collision")
+        );
+        let ids = identified_queue_nodes(&reprojection.content)
+            .iter()
+            .filter_map(node_id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), 2);
+        assert!(
+            project(&reprojection.content, "doc-a")
+                .assignments
+                .is_empty()
+        );
     }
 
     #[test]

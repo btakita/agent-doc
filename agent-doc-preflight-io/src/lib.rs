@@ -17970,6 +17970,76 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "the rerun surrogate id must be stable across preflight"
         );
     }
+
+    #[test]
+    fn preflight_preserves_ids_when_an_identical_preset_leaf_is_added_later() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- https://example.test/pull/196\n",
+            "  - #adversarial-pr\n",
+            "<!-- /agent:queue -->\n"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let admitted = std::fs::read_to_string(&doc).unwrap();
+        let first_id = agent_doc_markdown_ast::mutations::all_item_nodes(&admitted)
+            .into_iter()
+            .find(|node| node.item.work_text().contains("#adversarial-pr"))
+            .and_then(|node| {
+                agent_doc_element_queue::queue_prompt_stable_id(node.item.work_text())
+            })
+            .expect("the first leaf receives an admitted prompt id");
+
+        let mut updated = admitted;
+        for pull in 197..=199 {
+            updated = updated.replace(
+                "<!-- /agent:queue -->",
+                &format!(
+                    "- https://example.test/pull/{pull}\n  - #adversarial-pr\n<!-- /agent:queue -->"
+                ),
+            );
+            std::fs::write(&doc, &updated).unwrap();
+            run_queue_maintenance(&doc, None).unwrap();
+            updated = std::fs::read_to_string(&doc).unwrap();
+        }
+
+        let leaves = agent_doc_markdown_ast::mutations::all_item_nodes(&updated)
+            .into_iter()
+            .filter(|node| node.item.work_text().contains("#adversarial-pr"))
+            .collect::<Vec<_>>();
+        let ids = leaves
+            .iter()
+            .filter_map(|node| {
+                agent_doc_element_queue::queue_prompt_stable_id(node.item.work_text())
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(leaves.len(), 4, "all requested effects stay live:\n{updated}");
+        assert_eq!(ids.len(), 4, "each repeated leaf has a unique q-id:\n{updated}");
+        assert!(ids.contains(&first_id), "the first q-id must not drift:\n{updated}");
+        assert_eq!(
+            agent_doc_queue::prompt_identity::project(&updated, &doc.to_string_lossy()).content,
+            updated,
+            "the converged document must not try to re-admit either leaf:\n{updated}"
+        );
+    }
     #[test]
     fn preflight_does_not_reflag_stable_inactive_queue_as_residue() {
         // #adoc-queue-ipc-drift root cause #1: after an `item_modified` halt the

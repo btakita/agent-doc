@@ -391,18 +391,36 @@ fn extract_head_id(prompt: &str) -> Option<String> {
 }
 
 /// A binary-admitted queue prompt id is a trailing annotation on the first
-/// work line. Keeping it at the tail preserves the row's free-text grammar:
-/// response matching, prompt admission, and wrapped continuation lines still
-/// see prose rather than an artificial leading `do` directive.
-fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
+/// work line (after any effect id, before report state). Keeping it at the tail
+/// preserves the row's free-text grammar. The parser also accepts the historic
+/// `q-id effect` order so maintenance can repair it without losing identity.
+fn generated_prompt_id_annotation(text: &str) -> Option<(&str, Range<usize>)> {
     let first = text.lines().next()?.trim_end();
     let without_report = strip_queue_report_state_annotation(first).trim_end();
-    let (work, annotation) = without_report.rsplit_once(" [#")?;
+    // `effect` predates stable prompt ids. A historical duplicate-effect pass
+    // could append its annotation after an admitted q-id, making that id
+    // temporarily non-trailing. Recognize and repair that ordering too; the
+    // canonical renderer keeps `effect` before q-id going forward.
+    let before_id = without_report
+        .strip_suffix('⟧')
+        .and_then(|prefix| prefix.rsplit_once(" ⟦effect:"))
+        .filter(|(_, raw)| raw.parse::<usize>().is_ok())
+        .map(|(work, _)| work.trim_end())
+        .unwrap_or(without_report);
+    let (work, annotation) = before_id.rsplit_once(" [#")?;
     if work.trim().is_empty() {
         return None;
     }
     let id = annotation.strip_suffix(']')?;
-    id.starts_with("q-").then_some(id)
+    if !id.starts_with("q-") {
+        return None;
+    }
+    let annotation_start = work.len();
+    Some((id, annotation_start..annotation_start + id.len() + 4))
+}
+
+fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
+    generated_prompt_id_annotation(text).map(|(id, _)| id)
 }
 
 fn id_prefix(text: &str) -> &str {
@@ -892,26 +910,22 @@ pub fn queue_prompt_stable_id(text: &str) -> Option<String> {
     }
 }
 
-/// Remove the binary-owned trailing q-id annotation from a prompt while
+/// Remove the binary-owned q-id annotation from a prompt while
 /// preserving its authored work text, continuation lines, and report-state
-/// annotation. Authored semantic ids are never removed.
+/// annotation. Authored semantic ids are never removed; the historic
+/// `q-id effect` order is accepted for repair as well.
 pub fn strip_queue_prompt_stable_id_annotation(text: &str) -> String {
     if queue_head_identity(text).is_id_backed() {
         return text.to_string();
     }
     let first_end = text.find('\n').unwrap_or(text.len());
     let first = &text[..first_end];
-    let work = strip_queue_report_state_annotation(first);
-    let Some(id) = trailing_generated_prompt_id(first) else {
-        return text.to_string();
-    };
-    let annotation = format!(" [#{id}]");
-    let Some(annotation_start) = work.strip_suffix(&annotation).map(str::len) else {
+    let Some((_, annotation)) = generated_prompt_id_annotation(first) else {
         return text.to_string();
     };
     let mut stripped = String::with_capacity(text.len() - annotation.len());
-    stripped.push_str(&first[..annotation_start]);
-    stripped.push_str(&first[work.len()..]);
+    stripped.push_str(&first[..annotation.start]);
+    stripped.push_str(&first[annotation.end..]);
     stripped.push_str(&text[first_end..]);
     stripped
 }
@@ -1368,6 +1382,14 @@ mod tests {
         assert_eq!(
             strip_queue_prompt_stable_id_annotation("do [#q-authored]"),
             "do [#q-authored]"
+        );
+        assert_eq!(
+            queue_prompt_stable_id("ship it [#q-abc123] ⟦effect:2⟧ ⟦published⟧"),
+            Some("q-abc123".to_string())
+        );
+        assert_eq!(
+            strip_queue_prompt_stable_id_annotation("ship it [#q-abc123] ⟦effect:2⟧ ⟦published⟧"),
+            "ship it ⟦effect:2⟧ ⟦published⟧"
         );
     }
 }

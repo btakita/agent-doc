@@ -1714,6 +1714,12 @@ fn head_is_drainable(
     preset_supplies_directive: bool,
     scope: DrainScope,
 ) -> bool {
+    // Stable `[#q-…]` prompt ids identify free-text queue nodes; they are not
+    // tracked-work ids and must not change the prompt's execution semantics.
+    // Authored id-backed directives (`do [#item]`) are preserved by the
+    // stripping helper.
+    let text = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(text);
+    let text = text.as_str();
     // `🙋 [#id]` is an orthogonal local projection of an open operator todo.
     // The row remains visible in place, but no agent drain scope may dispatch
     // it until completing that same-id todo clears the annotation.

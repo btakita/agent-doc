@@ -80,6 +80,31 @@ impl CoordinatorDrainDecision {
             + self.snapshot.placement_reconcile.len()
             + self.action_items().count()
     }
+
+    /// Whether project-wide action debt exists beyond the one inline head the
+    /// attended drain is about to hand to the auto-clear supervisor.
+    ///
+    /// Auto-clear is an execution boundary for one selected inline head, not a
+    /// terminal projection for the whole queue graph. It may therefore yield
+    /// only when that head is the *only* required action. A dispatch, report
+    /// integration, recovery, reconciliation, scan error, placement debt, or
+    /// second inline head remains coordinator work in the current turn.
+    pub fn has_action_beyond_inline_head(&self, head_prompt: &str) -> bool {
+        if !self.snapshot.scan_errors.is_empty() || !self.snapshot.placement_reconcile.is_empty() {
+            return true;
+        }
+        let mut actions = self.action_items();
+        let Some(action) = actions.next() else {
+            return false;
+        };
+        if actions.next().is_some()
+            || action.operation != QueueSyncOperation::InlineExecuteThenReconcile
+        {
+            return true;
+        }
+        crate::queue_claim::claim_identity(&action.item)
+            != crate::queue_claim::claim_identity(head_prompt)
+    }
 }
 
 pub fn observe_coordinator_drain(
@@ -233,6 +258,54 @@ mod tests {
                 .map(|item| item.queue_id.as_str())
                 .collect::<Vec<_>>(),
             vec!["other", "inactive"]
+        );
+        assert!(decision.has_action_beyond_inline_head("do [#b]"));
+    }
+
+    #[test]
+    fn auto_clear_may_yield_only_for_the_single_selected_inline_head() {
+        let inline = item(
+            "do [#selected]",
+            "main",
+            QueueSyncLifecycle::Pending,
+            QueueSyncOperation::InlineExecuteThenReconcile,
+            QueueExecutionMode::MainInline,
+        );
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let selected_only =
+            CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+                pending: vec![inline.clone()],
+                ..Default::default()
+            });
+        assert!(!selected_only.has_action_beyond_inline_head("do [#selected]"));
+        assert!(selected_only.has_action_beyond_inline_head("do [#other]"));
+
+        let mut address = item(
+            "do [#address]",
+            "prs",
+            QueueSyncLifecycle::Running,
+            QueueSyncOperation::Wait,
+            QueueExecutionMode::SubagentDispatch,
+        );
+        address.owner = Some("subagent:address".into());
+        address.worker_id = Some("worker-address".into());
+        let review = item(
+            "do [#review-new-head-sha]",
+            "prs",
+            QueueSyncLifecycle::Pending,
+            QueueSyncOperation::Dispatch,
+            QueueExecutionMode::SubagentDispatch,
+        );
+        let scope = agent_doc_state_scope::DocumentScope::new();
+        let concurrent_sha_mutation =
+            CoordinatorDrainMachine::new_in(&scope).observe(CoordinatorDrainSnapshot {
+                pending: vec![inline, review],
+                running: vec![address],
+                ..Default::default()
+            });
+        assert!(
+            concurrent_sha_mutation.has_action_beyond_inline_head("do [#selected]"),
+            "a pending review cannot be hidden behind auto-clear while address work may mutate the PR head SHA"
         );
     }
 

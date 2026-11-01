@@ -232,6 +232,24 @@ mod tests {
     }
 
     #[test]
+    fn queue_prompt_echo_and_explanation_before_response_heading_are_not_redispatched() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:committed -->\n",
+            "> **Queue prompt:** fix the first independent sibling\n\n",
+            "The coordinator dispatched every ready sibling in the same pass.\n\n",
+            "> **Queue prompt:** review the resulting head SHA\n\n",
+            "### Re: queue batch closeout — gpt-5\n\n",
+            "Both results were reconciled.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(unresolved_exchange_prompt_in_content(content), None);
+        assert_eq!(prompt_only_exchange_tail(content), None);
+    }
+
+    #[test]
     fn unresolved_exchange_prompt_ignores_separated_ipc_proof_diagnostic_line() {
         let content = concat!(
             "---\nagent_doc_session: test\n---\n\n",

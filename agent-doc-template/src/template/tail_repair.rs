@@ -610,6 +610,10 @@ pub fn repair_response_welded_inside_backlog_item(doc: &str) -> Result<Option<St
         exchange.replace_content(&without_weld, &new_content)
     };
     element::parse(&repaired).context("backlog weld repair broke component structure")?;
+    let repaired = match repair_subagent_completion_cells_inside_queue(&repaired)? {
+        Some(next) => next,
+        None => repaired,
+    };
     guard_no_conversation_content_inside_tracked_components(&repaired)?;
     Ok(Some(repaired))
 }
@@ -872,6 +876,172 @@ pub fn repair_duplicate_queue_prompt_scaffold_inside_queue(doc: &str) -> Result<
     }
 }
 
+/// Relocate a binary subagent-completion cell that a torn editor/controller
+/// projection nested under a live queue row instead of appending to exchange.
+///
+/// This repair is deliberately structural and lossless. It accepts only the
+/// binary completion heading plus keyed marker grammar. Current digest-attested
+/// cells are moved byte-for-byte after indentation normalization. The one
+/// rolling-upgrade form that predates the digest marker (a quoted
+/// `**Subagent response:**` body followed by the keyed marker) is upgraded by
+/// hashing that exact quoted body before it is appended to exchange. Arbitrary
+/// prose between a lookalike heading and marker remains untouched and the
+/// integrity guard continues to fail closed.
+pub fn repair_subagent_completion_cells_inside_queue(doc: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(queue) = components.iter().find(|component| {
+        matches!(component.name.as_str(), "queue" | "run")
+            && component.content(doc).lines().any(|line| {
+                agent_doc_document::subagent_completion::is_completion_heading(line.trim_start())
+            })
+    }) else {
+        return Ok(None);
+    };
+    if !components
+        .iter()
+        .any(|component| component.name == "exchange")
+    {
+        return Ok(None);
+    }
+
+    let queue_body = queue.content(doc);
+    let segments = queue_body.split_inclusive('\n').collect::<Vec<_>>();
+    let lines = segments
+        .iter()
+        .map(|segment| segment.trim_end_matches(['\r', '\n']))
+        .collect::<Vec<_>>();
+    let mut cells = Vec::<(std::ops::Range<usize>, String, String)>::new();
+    let mut index = 0usize;
+
+    while index < lines.len() {
+        let heading = lines[index].trim_start();
+        if !agent_doc_document::subagent_completion::is_completion_heading(heading) {
+            index += 1;
+            continue;
+        }
+        let heading_indent = lines[index].len().saturating_sub(heading.len());
+        let mut marker_index = None;
+        for (candidate, line) in lines
+            .iter()
+            .enumerate()
+            .take(lines.len().min(index + 256))
+            .skip(index + 1)
+        {
+            let trimmed = line.trim_start();
+            let indent = line.len().saturating_sub(trimmed.len());
+            if trimmed.starts_with("- ") && indent <= heading_indent {
+                break;
+            }
+            if candidate > index + 1
+                && agent_doc_document::subagent_completion::is_completion_heading(trimmed)
+            {
+                break;
+            }
+            if agent_doc_document::subagent_completion::is_marker_line(trimmed) {
+                marker_index = Some(candidate);
+                break;
+            }
+        }
+        let Some(marker_index) = marker_index else {
+            index += 1;
+            continue;
+        };
+
+        let canonical_lines = lines[index..=marker_index]
+            .iter()
+            .map(|line| line.trim_start())
+            .collect::<Vec<_>>();
+        let marker = canonical_lines.last().copied().unwrap_or_default();
+        let Some(key) = marker
+            .strip_prefix(agent_doc_document::subagent_completion::MARKER_PREFIX)
+            .and_then(|rest| rest.strip_suffix(" -->"))
+            .filter(|key| !key.is_empty() && !key.chars().any(char::is_whitespace))
+        else {
+            index += 1;
+            continue;
+        };
+
+        let strict = canonical_lines.join("\n");
+        let strict_range =
+            agent_doc_document::subagent_completion::completion_cell_line_ranges(&strict);
+        let canonical = if strict_range.len() == 1 && strict_range[0] == (0..canonical_lines.len())
+        {
+            strict
+        } else {
+            let body = &canonical_lines[1..canonical_lines.len().saturating_sub(1)];
+            if body.first().copied() != Some("> **Subagent response:**")
+                || body.len() < 2
+                || body
+                    .iter()
+                    .any(|line| !line.is_empty() && !line.starts_with('>'))
+            {
+                index += 1;
+                continue;
+            }
+            let body = body.join("\n");
+            let digest = agent_doc_hash::content_hash(&body);
+            format!(
+                "{}\n{}{digest} -->\n{body}\n{marker}",
+                canonical_lines[0],
+                agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX,
+            )
+        };
+
+        cells.push((index..marker_index + 1, key.to_string(), canonical));
+        index = marker_index + 1;
+    }
+
+    if cells.is_empty() {
+        return Ok(None);
+    }
+
+    let mut rebuilt_queue = String::with_capacity(queue_body.len());
+    for (line_index, segment) in segments.iter().enumerate() {
+        if cells
+            .iter()
+            .any(|(range, _, _)| range.contains(&line_index))
+        {
+            continue;
+        }
+        rebuilt_queue.push_str(segment);
+    }
+    let queue_repaired = queue.replace_content(doc, &rebuilt_queue);
+    let repaired_components = element::parse(&queue_repaired)
+        .context("completion-cell queue repair broke component structure")?;
+    let exchange = repaired_components
+        .iter()
+        .find(|component| component.name == "exchange")
+        .context("exchange disappeared during completion-cell queue repair")?;
+    let exchange_content = exchange.content(&queue_repaired);
+    let additions = cells
+        .into_iter()
+        .filter_map(|(_, key, cell)| {
+            let marker = agent_doc_document::subagent_completion::marker(&key);
+            (!exchange_content.lines().any(|line| line.trim() == marker)).then_some(cell)
+        })
+        .collect::<Vec<_>>();
+    if additions.is_empty() {
+        return Ok(Some(queue_repaired));
+    }
+    let additions = additions.join("\n\n");
+    let repaired = if let Some(boundary_id) = find_boundary_in_component(&queue_repaired, exchange)
+    {
+        exchange.append_with_boundary(&queue_repaired, &additions, &boundary_id)
+    } else {
+        let content = exchange.content(&queue_repaired).trim_end();
+        let replacement = if content.is_empty() {
+            format!("{additions}\n")
+        } else {
+            format!("{content}\n\n{additions}\n")
+        };
+        exchange.replace_content(&queue_repaired, &replacement)
+    };
+    guard_no_conversation_content_inside_tracked_components(&repaired)?;
+    Ok(Some(repaired))
+}
+
 /// Reject binary-authored conversation scaffolding embedded inside a tracked
 /// non-exchange component.
 ///
@@ -924,8 +1094,7 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
                                 && suffix.ends_with(']')
                                 && !suffix.contains(char::is_whitespace)
                         });
-                    multiline_queue_item_indent =
-                        has_folded_evidence_marker.then_some(indent);
+                    multiline_queue_item_indent = has_folded_evidence_marker.then_some(indent);
                 }
                 multiline_queue_item_indent.is_some_and(|item_indent| indent > item_indent)
             } else {
@@ -2192,6 +2361,65 @@ mod tests {
         assert_eq!(
             repair_duplicate_queue_prompt_scaffold_inside_queue(document).unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn repair_moves_legacy_completion_response_from_queue_to_exchange() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue id=prelude -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:run id=main subagents -->\n",
+            "- ☑️ [#subagent:recover#2] recover the result\n",
+            "\t### Re: Subagent completed: `subagent:old` returned work for queue item “old task” — agent-doc\n",
+            "  > **Subagent response:**\n",
+            "  >\n",
+            "  > Implemented the old task.\n",
+            "  > **Queue prompt:** old task\n",
+            "  <!-- agent-doc-subagent-completion key=legacy-key -->\n",
+            "- next task\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let repaired = repair_subagent_completion_cells_inside_queue(document)
+            .unwrap()
+            .expect("a keyed legacy response cell must relocate losslessly");
+        let components = element::parse(&repaired).unwrap();
+        let run = components
+            .iter()
+            .find(|component| component.content(&repaired).contains("- next task"))
+            .unwrap()
+            .content(&repaired);
+        assert!(!run.contains("### Re: Subagent completed"), "{repaired}");
+        assert!(!run.contains("> **Queue prompt:** old task"), "{repaired}");
+        assert!(run.contains("- next task"), "{repaired}");
+
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&repaired);
+        assert!(
+            exchange.contains("### Re: Subagent completed"),
+            "{repaired}"
+        );
+        assert!(
+            exchange.contains(agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX),
+            "legacy quoted body must be upgraded to digest-attested evidence: {repaired}"
+        );
+        assert_eq!(
+            agent_doc_document::subagent_completion::completion_response(exchange, "legacy-key")
+                .as_deref(),
+            Some("Implemented the old task.\n**Queue prompt:** old task")
+        );
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+        assert_eq!(
+            repair_subagent_completion_cells_inside_queue(&repaired).unwrap(),
+            None,
+            "repair must be idempotent"
         );
     }
 

@@ -71,6 +71,12 @@ pub fn display_queue_prompt_text(text: &str) -> String {
     text.lines()
         .map(|line| {
             let line = line.trim().trim_start_matches('❯').trim();
+            // A report-state suffix is binary-owned lifecycle projection, not
+            // part of the operator's work identity. `queue report-complete`
+            // may add it after the coordinator has already composed an exact
+            // `> **Queue prompt:**` echo. Strip it on both sides of every
+            // response/claim identity comparison so a lawful transition from
+            // `do [#x]` to `☑️ ... do [#x] ⟦local⟧` cannot strand the row.
             strip_priority_markers(line)
                 .replace("[#", "#")
                 .replace(']', "")
@@ -3130,6 +3136,27 @@ mod tests {
             !free_text_head_answered_by_response(unlabeled, "deploy"),
             "an unlabeled blockquote is not enough proof for a short head"
         );
+    }
+
+    #[test]
+    fn exact_queue_prompt_echo_ignores_report_state_projection() {
+        let response = concat!(
+            "### Re: recovered worker result\n\n",
+            "> **Queue prompt:** recover worker result\n\n",
+            "Integrated and verified.\n",
+        );
+        let projected = concat!(
+            "☑️ [#subagent:queue-transition#3] ",
+            "recover worker result ⟦local⟧",
+        );
+        assert!(
+            free_text_head_answered_by_response(response, projected),
+            "owner/lifecycle and publication projection must not change response identity"
+        );
+        assert!(queue_prompt_text_matches(
+            "do [#queue-transition]",
+            "☑️ [#subagent:queue-transition#3] do [#queue-transition] ⟦published+local⟧",
+        ));
     }
 
     #[test]

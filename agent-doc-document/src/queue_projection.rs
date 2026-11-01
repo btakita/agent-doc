@@ -1260,8 +1260,9 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
     updated
 }
 
-/// Strip priority and lifecycle (`🚧`/`⏭️`/`⏳`) markers from the visible prompt
-/// identity, so a marker- or pin-decorated head compares equal to its bare form.
+/// Strip priority, lifecycle (`🚧`/`⏭️`/`⏳`), owner, and worker report-state
+/// projection from the visible prompt identity, so a decorated head compares
+/// equal to its bare form.
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     let mut canonical_operator_action = false;
@@ -1313,7 +1314,14 @@ pub fn strip_priority_markers(text: &str) -> String {
             bare[..start].trim_end()
         };
     }
-    bare.to_string()
+    let (head, tail) = bare
+        .split_once('\n')
+        .map_or((bare, None), |(head, tail)| (head, Some(tail)));
+    let head = agent_doc_element_queue::strip_queue_report_state_annotation(head);
+    match tail {
+        Some(tail) => format!("{head}\n{tail}"),
+        None => head.to_string(),
+    }
 }
 
 /// The dispatch brief's `<origin-queue-item>`: projection prefixes stripped,
@@ -1979,11 +1987,20 @@ mod tests {
             QueueLifecycleMarker::Blocked,
             &blockers,
         );
-        assert_eq!(blocked, "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]");
-        assert_eq!(lifecycle_marker(&blocked), Some(QueueLifecycleMarker::Blocked));
+        assert_eq!(
+            blocked,
+            "⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg]"
+        );
+        assert_eq!(
+            lifecycle_marker(&blocked),
+            Some(QueueLifecycleMarker::Blocked)
+        );
         assert_eq!(blocked_marker_ids(&blocked), vec!["sbx", "deploy"]);
         assert_eq!(strip_priority_markers(&blocked), "do [#stg]");
-        assert_eq!(strip_in_progress_marker(&blocked), ":round_pushpin: do [#stg]");
+        assert_eq!(
+            strip_in_progress_marker(&blocked),
+            ":round_pushpin: do [#stg]"
+        );
         // Repaint replaces the token, including a changed blocker list.
         assert_eq!(
             apply_lifecycle_marker_with_blockers(
@@ -2005,11 +2022,31 @@ mod tests {
             "🙋⛔ ⟦blocked by sbx, deploy⟧ :round_pushpin: do [#stg] [#subagent-operator-request-x]"
         );
         // A bare annotation left behind by a hand edit is still projection.
-        assert_eq!(strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"), "do [#stg]");
+        assert_eq!(
+            strip_priority_markers("⟦blocked by sbx⟧ do [#stg]"),
+            "do [#stg]"
+        );
         // An operator's own prose is never read as the annotation.
         assert_eq!(
             strip_priority_markers("⟦blocked by sbx do [#stg]"),
             "⟦blocked by sbx do [#stg]"
+        );
+    }
+
+    #[test]
+    fn report_state_suffix_is_cosmetic_for_identity() {
+        assert_eq!(
+            strip_priority_markers("☑️ [#subagent:recover#3] recover worker result ⟦local⟧"),
+            "recover worker result"
+        );
+        assert_eq!(
+            strip_priority_markers("recover worker result ⟦published+local⟧\n  - child"),
+            "recover worker result\n  - child"
+        );
+        assert_eq!(
+            strip_priority_markers("explain ⟦local⟧ in prose"),
+            "explain ⟦local⟧ in prose",
+            "only the canonical trailing annotation is projection"
         );
     }
 

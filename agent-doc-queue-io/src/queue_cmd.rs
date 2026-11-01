@@ -298,10 +298,7 @@ pub fn derive_claim_runtime_projection_scoped(
     )
 }
 
-fn derive_blocker_runtime_projection(
-    file: &Path,
-    current: &str,
-) -> Result<ClaimRuntimeProjection> {
+fn derive_blocker_runtime_projection(file: &Path, current: &str) -> Result<ClaimRuntimeProjection> {
     derive_runtime_projection_scoped(
         file,
         current,
@@ -659,12 +656,7 @@ pub fn project_all_queue_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
-    project_runtime_state_with_effects(
-        effects,
-        file,
-        None,
-        RuntimeProjectionRows::All,
-    )
+    project_runtime_state_with_effects(effects, file, None, RuntimeProjectionRows::All)
 }
 
 /// Repaint only rows that are blocked now or still carry a stale blocked
@@ -942,7 +934,10 @@ pub fn acknowledge_paused_free_text(
             file.display(),
             outcome.remaining
         ),
-        None => println!("{}: no exact free-text queue head to acknowledge.", file.display()),
+        None => println!(
+            "{}: no exact free-text queue head to acknowledge.",
+            file.display()
+        ),
     }
     Ok(())
 }
@@ -998,6 +993,35 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
+    // A torn realtime merge can place the binary completion cell underneath
+    // the queue row it reports instead of in `agent:exchange`. That corrupts
+    // the queue grammar and makes every later strike fail the conversation
+    // integrity gate, which in turn strands the reported row. Recover the
+    // hash-attested (or keyed rolling-upgrade) cell losslessly into exchange
+    // before any queue parsing or lifecycle projection.
+    let completion_cell_repaired = if let Some(repaired) =
+        agent_doc_template::repair_subagent_completion_cells_inside_queue(&content)?
+    {
+        effects.converge_document_or_disk(
+            file,
+            &repaired,
+            &content,
+            "queue_sync_completion_cell_repair",
+        )?;
+        content = effects.current_document_content(file, "queue_sync_after_completion_repair")?;
+        if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[queue sync] warning: failed to update snapshot after completion-cell repair: {warning}"
+            );
+        }
+        true
+    } else {
+        false
+    };
     // Older binaries could project `📥` onto a retained generated Response child
     // whose id differed from the terminal parent's latest response backlink.
     // Repair that binary-owned cosmetic corruption before parsing queue work so
@@ -1025,26 +1049,20 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             );
         }
     }
-    let explicit_routing =
-        crate::one_shot_sync::sync_explicit_backlog_queue_routes_with_snapshot(
-            file,
-            &content,
-            |path, current, target| {
-                effects.converge_document_or_disk(
-                    path,
-                    target,
-                    current,
-                    "queue_sync_explicit_routes",
-                )
-            },
-            |path, content| {
-                agent_doc_snapshot_io::checkpoint_document_baseline(
-                    path,
-                    content,
-                    agent_doc_ops_log_io::log_op,
-                )
-            },
-        )?;
+    let explicit_routing = crate::one_shot_sync::sync_explicit_backlog_queue_routes_with_snapshot(
+        file,
+        &content,
+        |path, current, target| {
+            effects.converge_document_or_disk(path, target, current, "queue_sync_explicit_routes")
+        },
+        |path, content| {
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                path,
+                content,
+                agent_doc_ops_log_io::log_op,
+            )
+        },
+    )?;
     if explicit_routing.changed {
         // Re-read the accepted authority cut before the legacy mirror pass.
         // The editor convergence boundary may normalize unrelated bytes.
@@ -1090,7 +1108,9 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             "{}: nonterminal queue placement debt: item_id={} requested_queue_id={} eligible_queue_ids={}; operation=reconcile",
             file.display(),
             debt.item_id,
-            debt.requested_queue_id.as_deref().unwrap_or("<unspecified>"),
+            debt.requested_queue_id
+                .as_deref()
+                .unwrap_or("<unspecified>"),
             debt.eligible_queue_ids.join(","),
         );
     }
@@ -1142,14 +1162,16 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
                 eprintln!("[queue sync] warning: failed to update snapshot: {warning}");
             }
         }
-        None if response_metadata_repaired
+        None if completion_cell_repaired
+            || response_metadata_repaired
             || lifecycle_changed
             || answered_count > 0
             || action_debt_remains =>
         {
             println!(
-                "{}: reconciled queue state (response_metadata_repaired={}, lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
+                "{}: reconciled queue state (completion_cell_repaired={}, response_metadata_repaired={}, lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
                 file.display(),
+                completion_cell_repaired,
                 response_metadata_repaired,
                 lifecycle_changed,
                 answered_count,
@@ -1280,9 +1302,7 @@ mod tests {
         let projection = derive_claim_runtime_projection(&doc, &content, None).unwrap();
         assert_eq!(queue_len(&projection.target_content), 3);
         assert!(
-            projection
-                .target_content
-                .contains(&format!("- {parent}\n")),
+            projection.target_content.contains(&format!("- {parent}\n")),
             "{}",
             projection.target_content
         );
@@ -1560,7 +1580,6 @@ mod tests {
         fn prune_noise_queue_heads(&self, _file: &Path) -> Result<usize> {
             Ok(0)
         }
-
     }
 
     #[test]
@@ -1585,6 +1604,66 @@ mod tests {
             reconciled.contains("- 📥 unanswered manual prompt"),
             "sync should paint the pending lifecycle projection: {reconciled}"
         );
+    }
+
+    #[test]
+    fn sync_recovers_completion_cell_welded_under_queue_row() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue subagents -->\n",
+            "- reported recovery\n",
+            "  ### Re: Subagent completed: `subagent:old` returned work for queue item “old task” — agent-doc\n",
+            "  > **Subagent response:**\n",
+            "  >\n",
+            "  > Complete.\n",
+            "  > **Queue prompt:** old task\n",
+            "  <!-- agent-doc-subagent-completion key=legacy-key -->\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+
+        sync_with_effects(&effects, &doc)
+            .expect("queue sync should recover the cell before lifecycle parsing");
+
+        let reconciled = std::fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&reconciled).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap()
+            .content(&reconciled);
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&reconciled);
+        assert!(
+            !queue.contains("### Re: Subagent completed"),
+            "{reconciled}"
+        );
+        assert!(
+            !queue.contains("> **Queue prompt:** old task"),
+            "{reconciled}"
+        );
+        assert!(
+            exchange.contains("### Re: Subagent completed"),
+            "{reconciled}"
+        );
+        assert!(
+            exchange.contains(agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX),
+            "{reconciled}"
+        );
+        agent_doc_template::guard_no_conversation_content_inside_tracked_components(&reconciled)
+            .unwrap();
+
+        sync_with_effects(&effects, &doc).expect("the recovery must be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), reconciled);
     }
 
     /// `#queuesyncterminalresponse`: an explicit full queue sync is a derived-state
@@ -1719,11 +1798,7 @@ mod tests {
         let synced = std::fs::read_to_string(&doc).unwrap();
         let components = agent_doc_element::element::parse(&synced).unwrap();
         let queues = agent_doc_queue::queue_set::QueueSet::parse(&synced, &components).unwrap();
-        let triage = queues
-            .block("triage")
-            .unwrap()
-            .component
-            .content(&synced);
+        let triage = queues.block("triage").unwrap().component.content(&synced);
         let build = queues.block("build").unwrap().component.content(&synced);
         assert!(triage.contains("do [#classify]"), "{synced}");
         assert!(!triage.contains("do [#compile]"), "{synced}");
@@ -2919,8 +2994,14 @@ mod tests {
 
         assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
         let projected = std::fs::read_to_string(&doc).unwrap();
-        assert!(projected.contains("- operator unsaved sibling"), "{projected}");
-        assert!(!projected.contains("📥 operator unsaved sibling"), "{projected}");
+        assert!(
+            projected.contains("- operator unsaved sibling"),
+            "{projected}"
+        );
+        assert!(
+            !projected.contains("📥 operator unsaved sibling"),
+            "{projected}"
+        );
         assert!(
             projected.contains("- 🟡 [#subagent:worker#1] dispatched worker work"),
             "{projected}"

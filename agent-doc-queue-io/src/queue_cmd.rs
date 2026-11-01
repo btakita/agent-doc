@@ -1561,7 +1561,7 @@ mod tests {
     /// must not cause the parent to be treated as a live group and projected back
     /// to `Pending`.
     #[test]
-    fn sync_preserves_terminal_row_with_canonical_response_child() {
+    fn sync_preserves_terminal_row_with_current_and_retained_response_children() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("s.md");
@@ -1571,6 +1571,7 @@ mod tests {
             "## Run <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push: approve all worktree removals\" priority go -->\n",
             "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
             "  - **Response [#r-0648593c3bc4]:** Added the response id to each related header.\n",
+            "  - **Response [#r-fedcba987654]:** Older retained response context.\n",
             "- another live row\n",
             "<!-- /agent:run -->\n",
         );

@@ -401,64 +401,21 @@ fn canonical_bracketed_response_id(value: &str) -> Option<&str> {
     .then_some(value)
 }
 
-fn completed_prompt_tree_parent<'a>(
-    lines: &'a [&'a str],
-    opener_index: usize,
-    child_indent: usize,
-) -> Option<&'a str> {
-    let parent = lines[..opener_index].iter().rev().find(|line| {
-        let line = line.trim_end_matches(['\r', '\n']);
-        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
-        indent < child_indent
-    })?;
-    let parent = parent.trim_end_matches(['\r', '\n']);
-    let parent_indent = parent.len() - parent.trim_start_matches([' ', '\t']).len();
-    let payload = strip_bullet(parent)?;
-    let payload = payload.trim();
-    (child_indent == parent_indent + 2 && payload.starts_with("~~") && payload[2..].contains("~~"))
-        .then_some(payload)
-}
-
-fn completed_parent_response_id<'a>(
-    lines: &'a [&'a str],
-    opener_index: usize,
-    child_indent: usize,
-) -> Option<&'a str> {
-    let payload = completed_prompt_tree_parent(lines, opener_index, child_indent)?;
-    // Lifecycle metadata may be appended after the response backlink (for
-    // example `addressed-at:`). The backlink still owns exactly one canonical
-    // token; requiring it to be the final bytes made generated response,
-    // choice, action, and relation rows executable after a later transition.
-    let response_id = payload
-        .rsplit_once("response: ")?
-        .1
-        .split_whitespace()
-        .next()?
-        .trim_end_matches([';', ',']);
-    canonical_bracketed_response_id(response_id)
-}
-
 /// Return the exclusive line index of a reserved GFM response-details child.
 ///
 /// Recognition is deliberately narrow: a canonical generated response id, the
-/// fixed summary, and a balanced details element are all required. When an
-/// immediate completed prompt-tree parent carries a response id, it must match.
-/// Ordinary `<details>` blocks remain typed document content.
+/// fixed summary, and a balanced details element are all required. A completed
+/// parent may retain response children from older attempts; every canonical
+/// generated response remains inert regardless of which response id the
+/// parent's latest backlink names. Ordinary `<details>` blocks remain typed
+/// document content.
 pub fn response_details_child_end(
     lines: &[&str],
     opener_index: usize,
     item_indent: usize,
 ) -> Option<usize> {
     let opener = lines.get(opener_index)?;
-    let details_id = canonical_response_details_id(strip_bullet(opener)?)?;
-    if let Some(parent_response_id) = completed_parent_response_id(lines, opener_index, item_indent)
-        && parent_response_id
-            .strip_prefix("[#r-")
-            .and_then(|value| value.strip_suffix(']'))
-            != Some(details_id)
-    {
-        return None;
-    }
+    canonical_response_details_id(strip_bullet(opener)?)?;
 
     let summary = lines.get(opener_index + 1)?.trim_end_matches(['\r', '\n']);
     let summary_indent = summary.len() - summary.trim_start_matches([' ', '\t']).len();
@@ -511,20 +468,17 @@ fn canonical_response_choice(item_content: &str) -> bool {
 /// Return the exclusive line index of a reserved visible response row.
 ///
 /// The canonical response-id spelling reserves the row as response metadata.
-/// When an immediate completed prompt carries a response id, it must match.
+/// A completed parent may retain response children from older attempts; every
+/// canonical generated response remains inert regardless of which response id
+/// the parent's latest backlink names.
 /// A summary row may own one exact `**Choices:**` subtree; a lookup-only row
 /// owns no descendants.
 pub fn response_row_child_end(
     lines: &[&str],
     opener_index: usize,
-    item_indent: usize,
+    _item_indent: usize,
 ) -> Option<usize> {
-    let (response_id, _) = canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
-    if let Some(parent_response_id) = completed_parent_response_id(lines, opener_index, item_indent)
-        && parent_response_id != response_id
-    {
-        return None;
-    }
+    canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
     Some(opener_index + 1)
 }
 
@@ -1918,24 +1872,26 @@ mod tests {
     }
 
     #[test]
-    fn response_row_reserves_canonical_id_and_rejects_mismatched_completed_parent() {
+    fn response_row_reserves_every_canonical_id_including_older_retained_responses() {
         let live = concat!(
             "- live parent\n",
             "  - **Response [#r-0123456789ab]:** Summary.\n",
         );
         assert_eq!(response_row_child_ranges(live).len(), 1, "{live}");
-        for source in [
-            concat!(
-                "- ~~done~~ — auto-struck: response: [#r-fedcba987654]\n",
-                "  - **Response [#r-0123456789ab]:** Summary.\n",
-            ),
-            concat!(
-                "- ~~done~~ — auto-struck: response: [#r-0123456789ab]\n",
-                "  - **Response [#r-NOTCANONICAL]:** Summary.\n",
-            ),
-        ] {
-            assert!(response_row_child_ranges(source).is_empty(), "{source}");
-        }
+        let retained = concat!(
+            "- ~~done~~ — auto-struck: response: [#r-fedcba987654]\n",
+            "  - **Response [#r-0123456789ab]:** Older retained summary.\n",
+        );
+        assert_eq!(response_row_child_ranges(retained).len(), 1, "{retained}");
+
+        let malformed = concat!(
+            "- ~~done~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-NOTCANONICAL]:** Summary.\n",
+        );
+        assert!(
+            response_row_child_ranges(malformed).is_empty(),
+            "{malformed}"
+        );
     }
 
     #[test]
@@ -2075,7 +2031,7 @@ mod tests {
     }
 
     #[test]
-    fn response_details_inertness_requires_reserved_id_matching_parent_when_present_and_balance() {
+    fn response_details_inertness_requires_reserved_id_and_balance_not_latest_parent_id() {
         let live = concat!(
             "- live prompt\n",
             "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
@@ -2084,6 +2040,18 @@ mod tests {
             "    </details>\n",
         );
         assert_eq!(response_details_child_ranges(live).len(), 1, "{live}");
+        let retained = concat!(
+            "- ~~done~~ — auto-struck: response: [#r-fedcba987654]\n",
+            "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "    <summary>Response</summary>\n",
+            "    older retained response\n",
+            "    </details>\n",
+        );
+        assert_eq!(
+            response_details_child_ranges(retained).len(),
+            1,
+            "{retained}"
+        );
         for source in [
             concat!(
                 "- ~~done~~\n",

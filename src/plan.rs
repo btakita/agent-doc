@@ -1804,7 +1804,7 @@ Done.
             2
         );
         assert_eq!(plan.required_commands.len(), 7);
-        for chunk in plan.required_commands[..6].chunks_exact(3) {
+        for chunk in plan.required_commands[..6].as_chunks::<3>().0 {
             assert!(chunk[0].contains("before spawn"), "{chunk:?}");
             assert!(chunk[0].contains("projects the row as claimed (🟡)"), "{chunk:?}");
             assert!(chunk[1].contains("Only after the successful claim"), "{chunk:?}");

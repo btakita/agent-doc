@@ -1093,7 +1093,7 @@ mod tests {
             "Verification: reproduced the sampleorders Codex stop-hook shape without drift.";
         let exchange = format!("### Re: deploy — gpt-5\n\n{prose}\n");
         let queue = format!(
-            "- ~~do [#seopdp] deploy product page~~\n  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n    <summary>Response</summary>\n    \n    ### Re: deploy — gpt-5\n\n    {prose}\n    </details>\n- do [#smoke] verify checkout\n"
+            "- ~~do [#seopdp] deploy product page~~ — auto-struck: response: [#r-0123456789ab]\n  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n    <summary>Response</summary>\n    \n    ### Re: deploy — gpt-5\n\n    {prose}\n    </details>\n- do [#smoke] verify checkout\n"
         );
         assert!(
             queue_response_contamination_candidates(&queue, &exchange).is_empty(),

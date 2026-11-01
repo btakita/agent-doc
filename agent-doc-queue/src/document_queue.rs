@@ -472,6 +472,18 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
+            if rest.trim() == "%%"
+                && let Some(end_i) =
+                    agent_doc_markdown_ast::overlay::multiline_list_comment_end(&lines, i, indent)
+            {
+                entries.push((
+                    QueueEntry::Freeform(lines[i..end_i].join("\n")),
+                    span(start_i, end_i),
+                ));
+                bare_prompt_allowed = false;
+                i = end_i;
+                continue;
+            }
             let entry = if rest.trim().is_empty() {
                 // An editor's trailing `- ` placeholder carries no work. Keep
                 // its bytes, but never surface an empty runnable queue head.
@@ -10127,6 +10139,30 @@ mod tests {
                 "[//]: # (note) plus runnable work"
             ]
         );
+        assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn multiline_list_comment_body_is_preserved_but_not_runnable() {
+        let body = concat!(
+            "- completed item\n",
+            "  - %%\n",
+            "    ### Re: completed item\n",
+            "\n",
+            "    - response bullet, not queue work\n",
+            "    %%\n",
+            "- next task\n",
+        );
+        let entries = parse(body).unwrap();
+        let prompts = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(prompts, vec!["completed item", "next task"]);
         assert_eq!(render(&entries), body);
     }
 

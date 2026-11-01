@@ -351,6 +351,62 @@ pub fn is_ignored_list_comment(item_content: &str) -> bool {
     title.starts_with('(') && title.ends_with(')')
 }
 
+/// Return the exclusive line index of a balanced indented Obsidian comment
+/// whose opening delimiter is the list item at `opener_index`.
+pub fn multiline_list_comment_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let opener = lines.get(opener_index)?;
+    let item_content = strip_bullet(opener)?;
+    if item_content.trim() != "%%" {
+        return None;
+    }
+
+    for (index, line) in lines.iter().enumerate().skip(opener_index + 1) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+        if indent <= item_indent {
+            return None;
+        }
+        if trimmed == "%%" {
+            return Some(index + 1);
+        }
+    }
+    None
+}
+
+/// Byte ranges occupied by balanced indented Obsidian comments represented as
+/// list children (`- %%` ... `%%`).
+///
+/// These ranges are inert queue metadata even when their hidden payload looks
+/// like a heading, prompt scaffold, or another list item.
+pub fn multiline_list_comment_ranges(source: &str) -> Vec<(usize, usize)> {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
+        if let Some(end) = multiline_list_comment_end(&lines, index, item_indent) {
+            ranges.push((offsets[index], offsets[end]));
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
 /// True when `line` may continue the queue list item directly above it
 /// (`#queuecruft`).
 ///
@@ -1269,6 +1325,15 @@ pub fn components(source: &str) -> Vec<Component> {
         if let Some(comp) = open.as_mut()
             && let Some(item_content) = strip_bullet(content)
         {
+            let item_indent = content.len() - content.trim_start_matches([' ', '\t']).len();
+            if item_content.trim() == "%%"
+                && let Some(end_index) =
+                    multiline_list_comment_end(&content_lines, index, item_indent)
+            {
+                continuable_item = None;
+                line_index = end_index;
+                continue;
+            }
             if is_ignored_list_comment(item_content) {
                 continue;
             }
@@ -1333,6 +1398,41 @@ mod tests {
             assert!(source.contains("- [//]: # (markdown note)"));
             assert!(source.contains("- %%obsidian note%%"));
         }
+    }
+
+    #[test]
+    fn multiline_list_comment_body_is_preserved_but_not_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- parent\n",
+            "  - %%\n",
+            "    ### Re: parent\n",
+            "\n",
+            "    - response bullet, not queue work\n",
+            "    %%\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["parent", "next task"]);
+        let ranges = multiline_list_comment_ranges(source);
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(
+            &source[ranges[0].0..ranges[0].1],
+            concat!(
+                "  - %%\n",
+                "    ### Re: parent\n",
+                "\n",
+                "    - response bullet, not queue work\n",
+                "    %%\n",
+            )
+        );
     }
 
     #[test]

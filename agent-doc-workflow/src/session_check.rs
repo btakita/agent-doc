@@ -603,10 +603,22 @@ pub fn queue_response_contamination_candidates_since_baseline(
     // A malformed visible-write projection can fuse a completed response into
     // queue freeform rather than a parseable prompt. Compare line starts in the
     // raw queue body as a fail-closed fallback; the response extractor has
-    // already removed headings, comments, and blockquoted prompt echoes.
+    // already removed headings, comments, and blockquoted prompt echoes. A
+    // balanced Obsidian list comment is deliberate inert response metadata,
+    // so its hidden lines are not raw contamination candidates.
     if contaminated.is_empty() {
+        let comment_ranges =
+            agent_doc_markdown_ast::overlay::multiline_list_comment_ranges(queue_body);
+        let mut offset = 0usize;
         let queue_line_prefixes = queue_body
-            .lines()
+            .split_inclusive('\n')
+            .filter(|line| {
+                let line_start = offset;
+                offset += line.len();
+                !comment_ranges
+                    .iter()
+                    .any(|&(start, end)| line_start >= start && line_start < end)
+            })
             .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
             .filter(|line| line.chars().count() >= 40)
             .map(|line| line.chars().take(40).collect::<String>())
@@ -1073,6 +1085,21 @@ mod tests {
                 "Yes. I drove the already-authenticated Google Ads browser session with chromium-"
                     .to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_ignores_balanced_multiline_comment_child() {
+        let prose =
+            "Verification: reproduced the sampleorders Codex stop-hook shape without drift.";
+        let queue = format!(
+            "- ~~do [#seopdp] deploy product page~~\n  - %%\n    ### Re: deploy — gpt-5\n\n    {prose}\n    %%\n- do [#smoke] verify checkout\n"
+        );
+        let exchange = format!("### Re: deploy — gpt-5\n\n{prose}\n");
+
+        assert!(
+            queue_response_contamination_candidates(&queue, &exchange).is_empty(),
+            "the explicit inert response child must not look like synthesized queue work"
         );
     }
 

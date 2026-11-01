@@ -438,7 +438,9 @@ pub fn out_of_loop_items_for_content(
     file: &Path,
     content: &str,
 ) -> agent_doc_queue::queue_claim::ClaimedQueueItems {
-    let claimed = crate::queue_claim::in_flight_claimed_items_for_content(file, content);
+    let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, content);
+    let worker_owned = crate::queue_claim::worker_owned_items_for_content(file, content);
+    let claimed = in_flight.with_claimed(&worker_owned);
     // A Reported attempt suppresses fresh dispatch at the safe coordinator
     // boundary, but those candidates remain worker-owned and out of the
     // inline drain loop until the coordinator persists the closeout.
@@ -1717,8 +1719,8 @@ queue: go
             "fresh candidates remain held until reported closeout is persisted"
         );
         assert!(
-            !held.claims(question),
-            "the coordinator must be able to select the reported row for closeout"
+            held.claims(question),
+            "reported coordinator debt is out of the fresh drain loop"
         );
     }
 

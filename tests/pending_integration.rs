@@ -3385,9 +3385,9 @@ fn write_patch_todo_creates_missing_todo_component() {
         !component_body(&content, "exchange").contains("Publish draft"),
         "todo checklist must not spill into exchange:\n{content}"
     );
-    let pending_close = content.find("<!-- /agent:pending -->").unwrap();
-    let todo_open = content.find("<!-- agent:todo priority -->").unwrap();
-    assert!(pending_close < todo_open, "{content}");
+    let todo_close = content.find("<!-- /agent:todo -->").unwrap();
+    let pending_open = content.find("<!-- agent:pending -->").unwrap();
+    assert!(todo_close < pending_open, "{content}");
 }
 
 /// `#closeouttrackedtxn`: one finalize/write envelope may close some review

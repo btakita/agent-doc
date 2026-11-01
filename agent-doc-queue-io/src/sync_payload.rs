@@ -146,11 +146,30 @@ fn apply_response_evidence(
     content: &str,
     claims: &[agent_doc_queue::queue_claim::QueueClaim],
 ) {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    apply_response_evidence_with(payload, content, claims, |claim| {
+        home.as_deref().map_or(HistoryResponse::Missing, |home| {
+            recover_agent_history_response_from(home, claim)
+        })
+    });
+}
+
+fn apply_response_evidence_with(
+    payload: &mut QueueSyncPayload,
+    content: &str,
+    claims: &[agent_doc_queue::queue_claim::QueueClaim],
+    mut recover: impl FnMut(&agent_doc_queue::queue_claim::QueueClaim) -> HistoryResponse,
+) {
     let claims = claims
         .iter()
         .map(|claim| (claim.identity.clone(), claim))
         .collect::<std::collections::HashMap<_, _>>();
-    for item in &mut payload.lost_reported {
+    let root_exchange = root_authored_exchange(content);
+    for item in payload
+        .reported_checkmark
+        .iter_mut()
+        .chain(&mut payload.lost_reported)
+    {
         let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
         let Some(claim) = claims.get(&identity).copied() else {
             item.response_evidence = QueueSyncResponseEvidence::Missing;
@@ -159,37 +178,129 @@ fn apply_response_evidence(
             continue;
         };
         let key = crate::queue_claim::completion_feedback_key(claim).ok();
-        if key
+        let has_outbox_receipt = key
             .as_deref()
-            .is_some_and(|key| completion_cell_has_response(content, key))
-        {
-            item.response_evidence = QueueSyncResponseEvidence::ExchangeOutbox;
-            item.missing_response_debt = false;
+            .is_some_and(|key| completion_cell_has_response(content, key));
+        item.completion_response_receipt = has_outbox_receipt;
+        apply_completed_response_evidence(item, &root_exchange, recover(claim));
+        // Keep any recovery failure as the terminal blocker. The separate
+        // receipt bit preserves the valid completion evidence without letting
+        // its possibly abbreviated body stand in for the full worker result.
+    }
+
+    // A child can finish and persist its terminal rollout after the root sees
+    // the mailbox notification but before the root records report-complete.
+    // Stable terminal history is positive completion evidence, so promote that
+    // stale Running projection into coordinator integration debt. A merely
+    // missing/unsupported history source does not prove a still-running child
+    // completed and therefore remains a normal wait.
+    let mut waiting = Vec::new();
+    for mut item in std::mem::take(&mut payload.running) {
+        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+        let Some(claim) = claims.get(&identity).copied() else {
+            waiting.push(item);
+            continue;
+        };
+        let key = crate::queue_claim::completion_feedback_key(claim).ok();
+        let has_outbox_receipt = key
+            .as_deref()
+            .is_some_and(|key| completion_cell_has_response(content, key));
+        let history = recover(claim);
+        let completed = has_outbox_receipt
+            || matches!(
+                &history,
+                HistoryResponse::Recovered(_) | HistoryResponse::Ambiguous
+            );
+        if !completed {
+            waiting.push(item);
             continue;
         }
-        match recover_agent_history_response(claim) {
-            HistoryResponse::Recovered(response) => {
+        item.lifecycle = agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReportedCheckmark;
+        item.operation = QueueSyncOperation::IntegrateClose;
+        item.completion_response_receipt = has_outbox_receipt;
+        apply_completed_response_evidence(&mut item, &root_exchange, history);
+        payload.reported_checkmark.push(item);
+    }
+    payload.running = waiting;
+}
+
+fn apply_completed_response_evidence(
+    item: &mut agent_doc_queue::queue_sync_payload::QueueSyncItem,
+    root_exchange: &str,
+    history: HistoryResponse,
+) {
+    match history {
+        HistoryResponse::Recovered(response) => {
+            if response_is_consolidated(root_exchange, &response) {
+                item.response_evidence = QueueSyncResponseEvidence::ConsolidatedExchange;
+                item.recovered_response = None;
+            } else {
                 item.response_evidence = QueueSyncResponseEvidence::AgentHistory;
                 item.recovered_response = Some(response);
-                item.missing_response_debt = false;
             }
-            HistoryResponse::Missing => {
-                item.response_evidence = QueueSyncResponseEvidence::Missing;
-                item.missing_response_debt = true;
-                item.operation = QueueSyncOperation::Reconcile;
-            }
-            HistoryResponse::Ambiguous => {
-                item.response_evidence = QueueSyncResponseEvidence::AmbiguousHistory;
-                item.missing_response_debt = true;
-                item.operation = QueueSyncOperation::Reconcile;
-            }
-            HistoryResponse::Unsupported => {
-                item.response_evidence = QueueSyncResponseEvidence::UnsupportedHistory;
-                item.missing_response_debt = true;
-                item.operation = QueueSyncOperation::Reconcile;
-            }
+            item.missing_response_debt = false;
+        }
+        HistoryResponse::Missing => {
+            item.response_evidence = QueueSyncResponseEvidence::Missing;
+            item.missing_response_debt = true;
+            item.operation = QueueSyncOperation::Reconcile;
+        }
+        HistoryResponse::Ambiguous => {
+            item.response_evidence = QueueSyncResponseEvidence::AmbiguousHistory;
+            item.missing_response_debt = true;
+            item.operation = QueueSyncOperation::Reconcile;
+        }
+        HistoryResponse::Unsupported => {
+            item.response_evidence = QueueSyncResponseEvidence::UnsupportedHistory;
+            item.missing_response_debt = true;
+            item.operation = QueueSyncOperation::Reconcile;
         }
     }
+}
+
+fn root_authored_exchange(content: &str) -> String {
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return String::new();
+    };
+    components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .flat_map(|component| {
+            let exchange = agent_doc_document::subagent_completion::strip_completion_cells(
+                component.content(content),
+            );
+            agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(&exchange)
+                .into_iter()
+                .filter_map(|node| {
+                    matches!(
+                        node.kind,
+                        agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+                    )
+                    .then(|| node.render())
+                })
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn response_is_consolidated(root_exchange: &str, response: &str) -> bool {
+    let response = normalize_response_comparison(response);
+    !response.is_empty() && normalize_response_comparison(root_exchange).contains(&response)
+}
+
+fn normalize_response_comparison(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            line.trim_start()
+                .strip_prefix('>')
+                .unwrap_or(line.trim_start())
+                .trim_start()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn completion_cell_has_response(content: &str, key: &str) -> bool {
@@ -209,7 +320,8 @@ fn completion_cell_has_response(content: &str, key: &str) -> bool {
         })
 }
 
-fn recover_agent_history_response(
+fn recover_agent_history_response_from(
+    home: &Path,
     claim: &agent_doc_queue::queue_claim::QueueClaim,
 ) -> HistoryResponse {
     let Some(session) = claim.owner_session.as_ref() else {
@@ -227,11 +339,8 @@ fn recover_agent_history_response(
     ) else {
         return HistoryResponse::Missing;
     };
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
-        return HistoryResponse::Missing;
-    };
     match harness {
-        "claude" | "claude-code" => recover_claude_history_response(&home, session_id, worker_id),
+        "claude" | "claude-code" => recover_claude_history_response(home, session_id, worker_id),
         "codex" => {
             if claim.generation == 0 {
                 return HistoryResponse::Unsupported;
@@ -241,7 +350,7 @@ fn recover_agent_history_response(
                 return HistoryResponse::Unsupported;
             };
             recover_codex_history_response(
-                &home,
+                home,
                 CodexHistoryLocator {
                     coordinator_thread_id: session_id,
                     native_subagent_id: worker_id,
@@ -762,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn released_recovered_completion_keeps_lost_and_outbox_state_in_sync() {
+    fn released_recovered_completion_preserves_loss_and_receipt_without_claiming_delivery() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir(root.path().join(".agent-doc")).unwrap();
         let doc = root.path().join("session.md");
@@ -826,12 +935,13 @@ mod tests {
         let item = &payload.lost_reported[0];
         assert!(item.completion_outbox_recovered);
         assert!(!item.retry_safe);
-        assert_eq!(item.operation, QueueSyncOperation::IntegrateClose);
+        assert_eq!(item.operation, QueueSyncOperation::Reconcile);
         assert_eq!(
             item.response_evidence,
-            QueueSyncResponseEvidence::ExchangeOutbox
+            QueueSyncResponseEvidence::UnsupportedHistory
         );
-        assert!(!item.missing_response_debt);
+        assert!(item.completion_response_receipt);
+        assert!(item.missing_response_debt);
         assert_eq!(
             item.execution_evidence,
             QueueSyncExecutionEvidence::CompletedOutbox
@@ -946,6 +1056,215 @@ mod tests {
             recover_codex_history_response(home.path(), locator),
             HistoryResponse::Recovered("Exact Codex response.".to_string())
         );
+    }
+
+    fn reported_claim(
+        item: &str,
+        owner: &str,
+        worker: &str,
+        parent: &str,
+    ) -> agent_doc_queue::queue_claim::QueueClaim {
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(item, owner, 10, 600);
+        let mut claim = ledger.claims.remove(0);
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Reported;
+        claim.worker = Some(agent_doc_queue::queue_claim::QueueWorkerBinding {
+            worker_id: worker.to_string(),
+            started_at_secs: 11,
+        });
+        claim.owner_session = Some(agent_doc_queue::queue_claim::ClaimOwnerSession {
+            harness: Some("codex".to_string()),
+            session_id: Some(parent.to_string()),
+            ..Default::default()
+        });
+        claim
+    }
+
+    #[test]
+    fn replacement_coordinator_recovers_multiple_results_and_replays_each_exactly_once() {
+        let home = tempfile::tempdir().unwrap();
+        let first = reported_claim("first child", "subagent:first", "worker-first", "parent");
+        let second = reported_claim("second child", "subagent:second", "worker-second", "parent");
+        write_codex_rollout(
+            home.path(),
+            "one",
+            "parent",
+            "worker-first",
+            &[(
+                "turn-first",
+                "Full first child result with implementation details.",
+            )],
+        );
+        write_codex_rollout(
+            home.path(),
+            "two",
+            "parent",
+            "worker-second",
+            &[(
+                "turn-second",
+                "Full second child result with verification details.",
+            )],
+        );
+        let first_receipt = agent_doc_document::subagent_completion::cell_with_response(
+            &first.owner,
+            &first.item_text,
+            &crate::queue_claim::completion_feedback_key(&first).unwrap(),
+            "Completed first worker.",
+        )
+        .unwrap();
+        let second_receipt = agent_doc_document::subagent_completion::cell_with_response(
+            &second.owner,
+            &second.item_text,
+            &crate::queue_claim::completion_feedback_key(&second).unwrap(),
+            "Completed second worker.",
+        )
+        .unwrap();
+        let content = format!(
+            "<!-- agent:exchange -->\n❯ Full first child result with implementation details.\n\n### Re: retained parent synthesis — agent\nFull second child result with verification details.\n\n{first_receipt}\n\n{second_receipt}\n<!-- /agent:exchange -->\n<!-- agent:run id=run subagents -->\n- ☑️ first child\n- ☑️ second child\n<!-- /agent:run -->\n"
+        );
+        let claims = vec![first, second];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/replacement.md",
+            QueueSyncDocumentScope::Current,
+            &content,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        apply_response_evidence_with(&mut payload, &content, &claims, |claim| {
+            recover_agent_history_response_from(home.path(), claim)
+        });
+
+        assert_eq!(payload.reported_checkmark.len(), 2);
+        let first = payload
+            .reported_checkmark
+            .iter()
+            .find(|item| item.item.contains("first child"))
+            .unwrap();
+        assert!(first.completion_response_receipt);
+        assert_eq!(
+            first.response_evidence,
+            QueueSyncResponseEvidence::AgentHistory
+        );
+        assert_eq!(
+            first.recovered_response.as_deref(),
+            Some("Full first child result with implementation details.")
+        );
+        assert!(!first.missing_response_debt);
+
+        let second = payload
+            .reported_checkmark
+            .iter()
+            .find(|item| item.item.contains("second child"))
+            .unwrap();
+        assert!(second.completion_response_receipt);
+        assert_eq!(
+            second.response_evidence,
+            QueueSyncResponseEvidence::ConsolidatedExchange
+        );
+        assert_eq!(second.recovered_response, None);
+        assert!(!second.missing_response_debt);
+    }
+
+    #[test]
+    fn terminal_child_history_recovers_interruption_before_parent_report_receipt() {
+        let home = tempfile::tempdir().unwrap();
+        let mut claim = reported_claim(
+            "finished before receipt",
+            "subagent:interrupted",
+            "worker-interrupted",
+            "parent",
+        );
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Running;
+        write_codex_rollout(
+            home.path(),
+            "interrupted",
+            "parent",
+            "worker-interrupted",
+            &[("turn", "Terminal result retained only in child history.")],
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: parent status — agent\nThe worker completed.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:run id=run subagents -->\n",
+            "- 🚧 finished before receipt\n",
+            "<!-- /agent:run -->\n",
+        );
+        let claims = vec![claim];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/interrupted.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &claims,
+        )
+        .unwrap();
+        assert_eq!(payload.running.len(), 1);
+
+        apply_response_evidence_with(&mut payload, content, &claims, |claim| {
+            recover_agent_history_response_from(home.path(), claim)
+        });
+
+        assert!(payload.running.is_empty());
+        assert_eq!(payload.reported_checkmark.len(), 1);
+        let item = &payload.reported_checkmark[0];
+        assert_eq!(
+            item.lifecycle,
+            agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReportedCheckmark
+        );
+        assert_eq!(item.operation, QueueSyncOperation::IntegrateClose);
+        assert_eq!(
+            item.recovered_response.as_deref(),
+            Some("Terminal result retained only in child history.")
+        );
+        assert!(!item.completion_response_receipt);
+    }
+
+    #[test]
+    fn abbreviated_receipt_does_not_hide_unsupported_or_ambiguous_history_debt() {
+        let claim = reported_claim("receipt only", "subagent:receipt", "worker", "parent");
+        let receipt = agent_doc_document::subagent_completion::cell_with_response(
+            &claim.owner,
+            &claim.item_text,
+            &crate::queue_claim::completion_feedback_key(&claim).unwrap(),
+            "Done.",
+        )
+        .unwrap();
+        let content = format!(
+            "<!-- agent:exchange -->\n{receipt}\n<!-- /agent:exchange -->\n<!-- agent:run id=run subagents -->\n- ☑️ receipt only\n<!-- /agent:run -->\n"
+        );
+        let claims = vec![claim];
+        for (history, expected) in [
+            (
+                HistoryResponse::Unsupported,
+                QueueSyncResponseEvidence::UnsupportedHistory,
+            ),
+            (
+                HistoryResponse::Ambiguous,
+                QueueSyncResponseEvidence::AmbiguousHistory,
+            ),
+        ] {
+            let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+                "/tmp/debt.md",
+                QueueSyncDocumentScope::Current,
+                &content,
+                None,
+                &claims,
+            )
+            .unwrap();
+            apply_response_evidence_with(&mut payload, &content, &claims, |_| match &history {
+                HistoryResponse::Unsupported => HistoryResponse::Unsupported,
+                HistoryResponse::Ambiguous => HistoryResponse::Ambiguous,
+                _ => unreachable!(),
+            });
+            let item = &payload.reported_checkmark[0];
+            assert!(item.completion_response_receipt);
+            assert!(item.missing_response_debt);
+            assert_eq!(item.operation, QueueSyncOperation::Reconcile);
+            assert_eq!(item.response_evidence, expected);
+        }
     }
 
     #[test]

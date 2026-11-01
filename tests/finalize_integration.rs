@@ -412,7 +412,12 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
         "{}",
         String::from_utf8_lossy(&second.get_output().stderr)
     );
-    run(&["session-check", file]);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["session-check", file])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing_response_debt=1"));
 
     let log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(

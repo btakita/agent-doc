@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. `lost_reported` / `⚠️☑️` is urgent nonterminal coordinator debt: prefer the durable exchange outbox/report receipt and recovered effect receipts, then an exact unambiguous retained agent-history response; materialize any history-recovered response in exchange, integrate effects, close, and strike in this turn. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -114,6 +114,11 @@ pub enum QueueSyncExecutionEvidence {
 #[serde(rename_all = "snake_case")]
 pub enum QueueSyncResponseEvidence {
     NotApplicable,
+    /// The full history-attested worker response is already present in the
+    /// root-authored exchange outside binary completion-receipt cells.
+    ConsolidatedExchange,
+    /// A binary completion receipt exists. This is completion/outbox evidence,
+    /// but an abbreviated receipt never proves full root-response delivery.
     ExchangeOutbox,
     AgentHistory,
     Missing,
@@ -164,7 +169,12 @@ pub struct QueueSyncItem {
     /// True only when exact fenced completion was recovered after the attempt
     /// had already become lost. The visible row projects `⚠️☑️` as well.
     pub completion_outbox_recovered: bool,
-    /// Exact response source for urgent recovered-loss integration.
+    /// A generation-fenced binary completion cell carries a response receipt.
+    /// The receipt may be intentionally abbreviated, so this is completion
+    /// evidence rather than proof of full root-response delivery.
+    #[serde(default)]
+    pub completion_response_receipt: bool,
+    /// Exact response source for reported-result integration.
     pub response_evidence: QueueSyncResponseEvidence,
     /// Response recovered from exact retained agent history when the exchange
     /// outbox was missing. The coordinator must materialize it in exchange and
@@ -402,6 +412,7 @@ pub fn project_document_queue_sync(
                         execution_evidence: execution_evidence(claim),
                         completion_outbox_recovered: claim
                             .is_some_and(|claim| claim.completion_recovered_after_loss),
+                        completion_response_receipt: false,
                         response_evidence: if claim
                             .is_some_and(|claim| claim.completion_recovered_after_loss)
                         {
@@ -443,6 +454,7 @@ pub fn project_document_queue_sync(
                         generation: None,
                         execution_evidence: QueueSyncExecutionEvidence::Unknown,
                         completion_outbox_recovered: false,
+                        completion_response_receipt: false,
                         response_evidence: QueueSyncResponseEvidence::NotApplicable,
                         recovered_response: None,
                         missing_response_debt: false,

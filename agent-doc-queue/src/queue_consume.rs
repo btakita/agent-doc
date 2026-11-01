@@ -2529,16 +2529,133 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
     after: &str,
     response_body: &str,
 ) -> anyhow::Result<String> {
-    let response_policy =
-        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+    #[derive(Clone)]
+    struct ResponseCandidate {
+        body: String,
+        policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy,
+    }
+
+    let response_body = response_body_without_exchange_transport(response_body);
+    let response_nodes = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(response_body)
+        .into_iter()
+        .filter(|node| {
+            matches!(
+                node.kind,
+                agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    let response_candidates = response_nodes
+        .iter()
+        .map(|node| ResponseCandidate {
+            body: node.render(),
+            policy:
+                agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
+                    std::slice::from_ref(node),
+                ),
+        })
+        .collect::<Vec<_>>();
+    let composite_candidate = ResponseCandidate {
+        body: response_body.to_string(),
+        policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
             response_body,
-        ));
-    let response_id = response_lookup_id_for_document(after, &response_policy)?;
-    if response_id.is_empty() {
+        )),
+    };
+    if composite_candidate.policy.response_id().is_empty() {
         return Ok(after.to_string());
     }
 
-    let after = annotate_exchange_response_with_lookup_id(after, &response_policy, &response_id)?;
+    let struck_before: HashSet<String> =
+        agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+            .map(|nodes| {
+                nodes
+                    .into_iter()
+                    .filter(|node| node.item.struck)
+                    .map(|node| node.node_key)
+                    .collect()
+            })
+            .unwrap_or_default();
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue") {
+        Ok(nodes) => nodes,
+        Err(_) => return Ok(after.to_string()),
+    };
+
+    let newly_struck = nodes
+        .iter()
+        .filter(|node| {
+            node.item.struck
+                && !struck_before.contains(&node.node_key)
+                && node.item.surface
+                    != agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+        })
+        .collect::<Vec<_>>();
+    if newly_struck.is_empty() {
+        return Ok(after.to_string());
+    }
+
+    // A closeout may carry several independently authored `### Re:` sections.
+    // Bind each newly completed prompt to the one section that explicitly
+    // targets or echoes it. The former composite-cell projection gave every
+    // prompt the aggregate turn's id and summary, which made unrelated queue
+    // decisions indistinguishable. Preserve intentional one-section batch
+    // closeouts (for example several explicit `--done` ids), but a closeout
+    // that supplies distinct sections must map those sections one-to-one.
+    let mut candidates_by_node_key = Vec::<(String, ResponseCandidate)>::new();
+    let mut claimed_sections = HashSet::<usize>::new();
+    for node in &newly_struck {
+        let matching = response_candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| {
+                crate::queue_response::queue_head_answered_by_response(
+                    after,
+                    &candidate.body,
+                    &node.item.text,
+                ) || crate::queue_response::response_explicitly_targets_queue_head(
+                    &candidate.body,
+                    &node.item.text,
+                )
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+
+        let candidate = match matching.as_slice() {
+            [index] if response_candidates.len() <= 1 || claimed_sections.insert(*index) => {
+                response_candidates[*index].clone()
+            }
+            [] if response_candidates.len() <= 1 => composite_candidate.clone(),
+            [] if newly_struck.len() == 1 => composite_candidate.clone(),
+            [] => anyhow::bail!(
+                "newly completed queue prompt has no unique response section: {}",
+                node.item.text.trim()
+            ),
+            [index] => anyhow::bail!(
+                "response section {} answers more than one newly completed queue prompt",
+                index + 1
+            ),
+            _ => anyhow::bail!(
+                "newly completed queue prompt matches multiple response sections: {}",
+                node.item.text.trim()
+            ),
+        };
+        candidates_by_node_key.push((node.node_key.clone(), candidate));
+    }
+
+    let mut after = after.to_string();
+    let mut projection_by_node_key = HashMap::<String, (String, String)>::new();
+    for (node_key, candidate) in candidates_by_node_key {
+        let response_id = response_lookup_id_for_document(&after, &candidate.policy)?;
+        if response_id.is_empty() {
+            continue;
+        }
+        after = annotate_exchange_response_with_lookup_id(&after, &candidate.policy, &response_id)?;
+        projection_by_node_key.insert(node_key, (candidate.body, response_id));
+    }
+
+    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
+        Ok(nodes) => nodes,
+        Err(_) => return Ok(after),
+    };
     let queue_response_ranges = element::parse(&after)?
         .into_iter()
         .filter(|component| component.name == "queue")
@@ -2551,29 +2668,11 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         })
         .collect::<Vec<_>>();
 
-    let struck_before: HashSet<String> =
-        agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
-            .map(|nodes| {
-                nodes
-                    .into_iter()
-                    .filter(|node| node.item.struck)
-                    .map(|node| node.node_key)
-                    .collect()
-            })
-            .unwrap_or_default();
-    let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
-        Ok(nodes) => nodes,
-        Err(_) => return Ok(after),
-    };
-
     let mut edits = Vec::new();
     for node in &nodes {
-        if !node.item.struck
-            || struck_before.contains(&node.node_key)
-            || node.item.surface == agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
-        {
+        let Some((response_body, response_id)) = projection_by_node_key.get(&node.node_key) else {
             continue;
-        }
+        };
         let raw = &after[node.item.start_byte..node.item.end_byte];
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
         let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
@@ -2584,7 +2683,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             .iter()
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
             .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
-        let lookup_children = response_lookup_children(response_body, &response_id, response_mode);
+        let lookup_children = response_lookup_children(response_body, response_id, response_mode);
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
@@ -2599,13 +2698,14 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
                 node.item.end_byte,
                 indent,
                 needs_inline_id,
+                response_id.clone(),
                 missing_children,
             ));
         }
     }
 
     let mut out = after;
-    for (start, end, indent, needs_inline_id, children) in edits.into_iter().rev() {
+    for (start, end, indent, needs_inline_id, response_id, children) in edits.into_iter().rev() {
         let mut replacement = if needs_inline_id {
             annotate_struck_line_with_response_id(&out[start..end], &response_id)
         } else {
@@ -3156,6 +3256,96 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_closeout_projects_each_queue_item_from_its_own_response_section() {
+        let response = concat!(
+            "### Re: alpha — test\n\n",
+            "> **Queue prompt:** Investigate alpha [#q-alpha]\n\n",
+            "Alpha is fixed and verified.\n\n",
+            "### Re: beta — test\n\n",
+            "> **Queue prompt:** Investigate beta [#q-beta]\n\n",
+            "Beta needs the operator to choose a deployment target.\n",
+            "**Operator input needed**\n",
+            "- Request: Choose the deployment target.\n",
+            "- Why: The target changes the publication path.\n",
+            "- Choices:\n",
+            "  - **staging**: Publish only to staging.\n",
+            "  - **production**: Publish to production.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- Investigate alpha [#q-alpha]\n- Investigate beta [#q-beta]\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ~~Investigate alpha [#q-alpha]~~\n- ~~Investigate beta [#q-beta]~~\n",
+            response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let sections = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(response)
+            .into_iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        let ids = sections
+            .iter()
+            .map(|node| {
+                let policy = agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
+                    std::slice::from_ref(node),
+                );
+                response_lookup_id_for_document(&annotated, &policy).unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert_ne!(ids[0], ids[1], "each response section needs its own id");
+        assert!(
+            annotated.contains(&format!(
+                "- ~~Investigate alpha [#q-alpha]~~ — auto-struck: response: {}\n  - **Response {}:** Alpha is fixed and verified.\n",
+                ids[0], ids[0]
+            )),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains(&format!(
+                "- ~~Investigate beta [#q-beta]~~ — auto-struck: response: {}\n  - **Response {}:** Beta needs the operator to choose a deployment target.",
+                ids[1], ids[1]
+            )),
+            "{annotated}"
+        );
+        assert_eq!(
+            annotated
+                .matches(&format!("**Response {}**", ids[0]))
+                .count(),
+            1
+        );
+        assert_eq!(
+            annotated
+                .matches(&format!("**Response {}**", ids[1]))
+                .count(),
+            1
+        );
+        assert!(!annotated.contains(&format!(
+            "Investigate alpha [#q-alpha]~~ — auto-struck: response: {}",
+            ids[1]
+        )));
+
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&annotated)).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "generated response and choice descendants must stay inert:\n{entries:#?}\n{annotated}"
+        );
+    }
+
+    #[test]
     fn completed_row_response_child_strips_exchange_transport_wrapper() {
         let head = "do [#subagent-response-exchange-gap]";
         let before = inline_response_queue_doc(&format!("- {head}\n"));
@@ -3172,7 +3362,7 @@ mod tests {
         );
         let response_id =
             agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
-                response,
+                response_body_without_exchange_transport(response),
             ))
             .response_id()
             .to_string();
@@ -3225,7 +3415,14 @@ mod tests {
         let after = before
             .replace("- do [#terse]", "- ~~do [#terse]~~")
             .replace("- do [#expanded]", "- ~~do [#expanded]~~");
-        let response = "### Re: queues — test\n\nCompleted both rows.\n";
+        let response = concat!(
+            "### Re: terse — test\n\n",
+            "> **Queue prompt:** do [#terse]\n\n",
+            "Completed the terse row.\n\n",
+            "### Re: expanded — test\n\n",
+            "> **Queue prompt:** do [#expanded]\n\n",
+            "Completed the expanded row.\n",
+        );
 
         let annotated =
             annotate_newly_struck_queue_items_with_response_id(before, &after, response).unwrap();

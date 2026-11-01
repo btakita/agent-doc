@@ -26,7 +26,7 @@ use agent_doc_queue::{
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        response_lookup_id_for_document, strike_all_noise_queue_heads,
+        strike_all_noise_queue_heads,
     },
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
@@ -1361,16 +1361,31 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         return Ok(0);
     }
 
-    let response_policy =
-        agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
-            response_body,
-        ));
-    let response_id = response_lookup_id_for_document(&target, &response_policy)?;
-    let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
-    let annotated = target
-        .matches(&needle)
-        .count()
-        .saturating_sub(current.matches(&needle).count());
+    let mut response_ids = target
+        .lines()
+        .filter_map(|line| {
+            let (_, tail) = line.rsplit_once(RESPONSE_ID_NOTE_PREFIX)?;
+            let response_id = tail.split_whitespace().next()?.trim_end_matches([';', ',']);
+            agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
+                .then_some(response_id.to_string())
+        })
+        .filter(|response_id| {
+            let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
+            target.matches(&needle).count() > current.matches(&needle).count()
+        })
+        .collect::<Vec<_>>();
+    response_ids.sort();
+    response_ids.dedup();
+    let annotated = response_ids
+        .iter()
+        .map(|response_id| {
+            let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
+            target
+                .matches(&needle)
+                .count()
+                .saturating_sub(current.matches(&needle).count())
+        })
+        .sum::<usize>();
 
     if skip_visible_guard {
         effects.atomic_write(file, &target)?;
@@ -1396,9 +1411,9 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_response_backlink file={} response_id={} prompts={annotated}",
+            "queue_response_backlink file={} response_ids={} prompts={annotated}",
             file.display(),
-            response_id
+            response_ids.join(",")
         ),
     );
     Ok(annotated)
@@ -3701,6 +3716,67 @@ mod core_tests {
                 "{content}"
             );
             assert!(content.contains("- do [#later]\n"), "{content}");
+        }
+    }
+
+    #[test]
+    fn aggregate_closeout_counts_and_persists_each_per_section_backlink() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let response = concat!(
+            "### Re: alpha — test\n\n",
+            "> **Queue prompt:** alpha task [#q-alpha]\n\n",
+            "Alpha completed.\n\n",
+            "### Re: beta — test\n\n",
+            "> **Queue prompt:** beta task [#q-beta]\n\n",
+            "Beta completed.\n",
+        );
+        let before = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- alpha task [#q-alpha]\n",
+            "- beta task [#q-beta]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let current = format!(
+            concat!(
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- ~~alpha task [#q-alpha]~~\n",
+                "- ~~beta task [#q-beta]~~\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response
+        );
+        fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let count = annotate_newly_completed_queue_prompts_with_response_id(
+            &doc,
+            before,
+            response,
+            false,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+
+        assert_eq!(count, 2);
+        let updated = fs::read_to_string(&doc).unwrap();
+        let response_ids = updated
+            .lines()
+            .filter_map(|line| line.split_once("auto-struck: response: ").map(|(_, id)| id))
+            .collect::<Vec<_>>();
+        assert_eq!(response_ids.len(), 2, "{updated}");
+        assert_ne!(response_ids[0], response_ids[1]);
+        for response_id in response_ids {
+            assert!(updated.contains(&format!("**Response {response_id}**")));
+            assert!(updated.contains(&format!("**Response {response_id}:**")));
         }
     }
 

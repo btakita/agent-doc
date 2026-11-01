@@ -1131,6 +1131,45 @@ mod tests {
     }
 
     #[test]
+    fn live_per_section_response_ids_keep_queue_backlinks_resolvable() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let raw = concat!(
+            "### Re: alpha\n\nAlpha result.\n\n",
+            "### Re: beta\n\nBeta result.\n",
+        );
+        let nodes = parse_exchange_nodes(raw)
+            .into_iter()
+            .filter(|node| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+            .collect::<Vec<_>>();
+        let mut live = raw.to_string();
+        let mut ids = Vec::new();
+        for node in &nodes {
+            let policy = ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(node));
+            let response_id = response_lookup_id(&live, &policy);
+            live = agent_doc_markdown_ast::exchange_tree::annotate_response_with_lookup_id(
+                &live,
+                &policy,
+                &response_id,
+            );
+            ids.push(response_id);
+        }
+        live.push_str(&format!(
+            "\n- ~~alpha~~ — auto-struck: response: {}\n- ~~beta~~ — auto-struck: response: {}\n",
+            ids[0], ids[1]
+        ));
+
+        assert_ne!(ids[0], ids[1]);
+        assert!(
+            dangling_response_references(&doc, &live)
+                .unwrap()
+                .is_empty(),
+            "every queue backlink must resolve to its own live response section:\n{live}"
+        );
+    }
+
+    #[test]
     fn decision_pins_are_dangling_without_verified_live_or_archive_evidence() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());

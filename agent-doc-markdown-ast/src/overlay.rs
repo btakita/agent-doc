@@ -425,7 +425,16 @@ fn completed_parent_response_id<'a>(
     child_indent: usize,
 ) -> Option<&'a str> {
     let payload = completed_prompt_tree_parent(lines, opener_index, child_indent)?;
-    let response_id = payload.rsplit_once("response: ")?.1.trim();
+    // Lifecycle metadata may be appended after the response backlink (for
+    // example `addressed-at:`). The backlink still owns exactly one canonical
+    // token; requiring it to be the final bytes made generated response,
+    // choice, action, and relation rows executable after a later transition.
+    let response_id = payload
+        .rsplit_once("response: ")?
+        .1
+        .split_whitespace()
+        .next()?
+        .trim_end_matches([';', ',']);
     canonical_bracketed_response_id(response_id)
 }
 
@@ -476,14 +485,17 @@ pub fn response_details_child_end(
 
 fn canonical_response_row(item_content: &str) -> Option<(&str, bool)> {
     let body = item_content.trim().strip_prefix("**Response ")?;
-    if let Some(response_id) = body.strip_suffix("**") {
-        return canonical_bracketed_response_id(response_id).map(|id| (id, false));
+    // Parse the summary form first. Its prose may legitimately end in bold
+    // text (`... **Operator input needed**`); treating every trailing `**` as
+    // the lookup-only form made that generated row executable queue work.
+    if let Some((response_id, summary)) = body.split_once(":** ") {
+        if summary.trim().is_empty() {
+            return None;
+        }
+        return canonical_bracketed_response_id(response_id).map(|id| (id, true));
     }
-    let (response_id, summary) = body.split_once(":** ")?;
-    if summary.trim().is_empty() {
-        return None;
-    }
-    canonical_bracketed_response_id(response_id).map(|id| (id, true))
+    let response_id = body.strip_suffix("**")?;
+    canonical_bracketed_response_id(response_id).map(|id| (id, false))
 }
 
 fn canonical_response_choice(item_content: &str) -> bool {
@@ -1896,6 +1908,51 @@ mod tests {
         assert_eq!(texts, vec!["done", "I opened it; verify the screenshot."]);
         let ranges = response_row_child_ranges(source);
         assert_eq!(ranges.len(), 3, "{ranges:?}");
+    }
+
+    #[test]
+    fn generated_response_tree_stays_inert_after_lifecycle_metadata_is_appended() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~done~~ — auto-struck: response: [#r-0123456789ab]; addressed-at: 2026-11-01T12:00:00Z\n",
+            "  - **Response [#r-0123456789ab]:** Choose a target, then publish.\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Publish to staging.\n",
+            "        - Use staging.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Publish the selected target.\n",
+            "        - I selected staging; publish it now.\n",
+            "    - **Related:** [#q-sibling]\n",
+            "      - Compare this result with the sibling.\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "done",
+                "Use staging.",
+                "I selected staging; publish it now.",
+                "Compare this result with the sibling."
+            ]
+        );
+        let ranges = inert_list_child_ranges(source);
+        assert!(
+            ranges
+                .iter()
+                .any(|&(start, end)| source[start..end].contains("**Response"))
+        );
+        assert!(
+            ranges
+                .iter()
+                .any(|&(start, end)| source[start..end].contains("**Related:**"))
+        );
     }
 
     #[test]

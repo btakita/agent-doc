@@ -219,6 +219,7 @@ name = "agent-doc-archive-io"
 version = "0.35.564"
 dependencies = [
  "agent-doc-document",
+ "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
  "agent-doc-project-root-io",

@@ -1555,6 +1555,38 @@ mod tests {
         );
     }
 
+    /// `#queuesyncterminalresponse`: an explicit full queue sync is a derived-state
+    /// repaint, not an instruction to reopen an answered row.  In particular, the
+    /// canonical visible response child is context for the terminal parent; it
+    /// must not cause the parent to be treated as a live group and projected back
+    /// to `Pending`.
+    #[test]
+    fn sync_preserves_terminal_row_with_canonical_response_child() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "<!-- agent:queue id=\"prelude\" -->\n",
+            "<!-- /agent:queue -->\n",
+            "## Run <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push: approve all worktree removals\" priority go -->\n",
+            "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
+            "  - **Response [#r-0648593c3bc4]:** Added the response id to each related header.\n",
+            "- another live row\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+
+        sync_with_effects(&effects, &doc).expect("terminal response evidence must be sync-safe");
+
+        let expected = content.replace("- another live row\n", "- 📥 another live row\n");
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            expected,
+            "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
+        );
+    }
+
     #[test]
     fn sync_plan_is_read_only_and_uses_shared_document_generic_inventory() {
         let dir = tempfile::tempdir().unwrap();

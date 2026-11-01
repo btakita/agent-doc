@@ -1840,15 +1840,22 @@ fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Optio
     let mut saw_leaf = false;
     let mut all_struck = true;
     for descendant in index + 1..end {
-        if entry_indent(&entries[descendant]).is_none()
-            || entry_is_group_parent(entries, descendant)
-        {
-            continue;
+        match &entries[descendant] {
+            QueueEntry::Prompt(_) | QueueEntry::Completed(_)
+                if !entry_is_group_parent(entries, descendant) =>
+            {
+                saw_leaf = true;
+                all_struck &= matches!(entries[descendant], QueueEntry::Completed(_));
+            }
+            // Reserved response rows retain list indentation so their choices
+            // and actions stay attached to the prompt tree.  They are context,
+            // not executable leaves, and therefore cannot reopen a terminal
+            // prompt merely because another row triggers lifecycle projection
+            // (`#queuesyncterminalresponse`).
+            _ => continue,
         }
-        saw_leaf = true;
-        all_struck &= matches!(entries[descendant], QueueEntry::Completed(_));
     }
-    Some(saw_leaf && all_struck)
+    saw_leaf.then_some(all_struck)
 }
 
 fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {

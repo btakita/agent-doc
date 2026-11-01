@@ -31540,11 +31540,11 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         "MUST preserve every existing item",
         "--todo-add",
         "**Auto-created `todo` component.**",
-        "directly after the last `agent:run`",
-        "`agent:review` is never",
+        "queue-centric canonical rank",
         "**Default template order.**",
-        "`agent:todo` sits directly below",
-        "`agent:run` and above `agent:backlog`",
+        "`agent:status`, `agent:run`",
+        "`agent:done`, `agent:exchange`",
+        "never silently reorders",
         "**Operator-todo advisory.**",
         "**Completing a todo (`#tododone`).**",
         "--todo-done <selector>",
@@ -31557,6 +31557,35 @@ fn test_operator_todo_authoring_contract_is_documented_across_instruction_surfac
         assert!(
             document_spec.contains(required),
             "document format spec must define the operator TODO authoring contract: {required}"
+        );
+    }
+}
+
+#[test]
+fn test_queue_centric_template_order_is_mirrored_across_harness_runbooks() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let canonical = fs::read_to_string(manifest_dir.join("runbooks/document-format.md")).unwrap();
+    for required in [
+        "status, run, review, todo, backlog",
+        "icebox, notes, done, then exchange last",
+        "previous order are not silently reordered",
+    ] {
+        assert!(
+            canonical.contains(required),
+            "missing canonical order contract: {required}"
+        );
+    }
+    for relative_path in [
+        ".claude/skills/agent-doc/runbooks/document-format.md",
+        ".codex/skills/agent-doc/runbooks/document-format.md",
+        ".opencode/skills/agent-doc/runbooks/document-format.md",
+        ".grok/skills/agent-doc/runbooks/document-format.md",
+        ".cursor/rules/runbooks/document-format.md",
+    ] {
+        let mirror = fs::read_to_string(manifest_dir.join(relative_path)).unwrap();
+        assert_eq!(
+            mirror, canonical,
+            "{relative_path} drifted from the canonical runbook"
         );
     }
 }

@@ -4,35 +4,41 @@ use agent_doc_frontmatter::{frontmatter, project_config};
 
 const DEFAULT_TEMPLATE_STATUS_OPEN: &str = "\n\n## Status <!-- agent:status patch=replace -->\n";
 const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
-const DEFAULT_TEMPLATE_COMPONENTS_AFTER_STATUS: &str = concat!(
-    "\n## Exchange <!-- agent:exchange patch=append -->\n",
-    "<!-- /agent:exchange -->\n",
+const DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE: &str = concat!(
     // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     "\n## Run <!-- agent:run priority subagents clear -->\n",
     "<!-- /agent:run -->\n",
+    "\n## Review <!-- agent:review -->\n",
+    "<!-- /agent:review -->\n",
     "\n## Todo <!-- agent:todo priority -->\n",
     "<!-- /agent:todo -->\n",
     "\n## Backlog <!-- agent:backlog priority queue -->\n",
     "<!-- /agent:backlog -->\n",
-    "\n## Review <!-- agent:review -->\n",
-    "<!-- /agent:review -->\n",
     "\n## Icebox <!-- agent:icebox -->\n",
     "<!-- /agent:icebox -->\n",
-    "\n## Done <!-- agent:done -->\n",
-    "<!-- /agent:done -->\n",
     "\n## Notes <!-- agent:notes -->\n",
     "<!-- /agent:notes -->\n",
+    "\n## Done <!-- agent:done -->\n",
+    "<!-- /agent:done -->\n",
 );
+const DEFAULT_TEMPLATE_EXCHANGE_OPEN: &str = "\n## Exchange <!-- agent:exchange patch=append -->\n";
+const DEFAULT_TEMPLATE_EXCHANGE_CLOSE: &str = "<!-- /agent:exchange -->\n";
 
 /// The default managed components. The status body starts with the
 /// binary-owned queue marker legend (`#queuemarkerlegend`) so a new document
 /// explains its `agent:run` prefixes before the first status write; later
 /// status writes keep exactly one legend line.
-fn default_template_components() -> String {
+pub fn render_default_template_components(exchange_content: &str) -> String {
     let status_body = crate::status_projection::apply_queue_marker_legend("\n", true);
+    let exchange_body = exchange_content.trim_matches('\n');
+    let exchange_body = if exchange_body.is_empty() {
+        String::new()
+    } else {
+        format!("{exchange_body}\n")
+    };
     format!(
-        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_COMPONENTS_AFTER_STATUS}",
-        status_body.trim_start_matches('\n')
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
+        status_body.trim_start_matches('\n'),
     )
 }
 
@@ -43,7 +49,7 @@ pub fn should_scaffold_empty_markdown(content: &str, extension: Option<&str>) ->
 pub fn render_empty_template_scaffold(session_id: &str) -> String {
     format!(
         "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---{}",
-        default_template_components()
+        render_default_template_components("")
     )
 }
 
@@ -84,7 +90,7 @@ pub fn scaffold_default_template_components(content: &str) -> Result<Option<Stri
     Ok(Some(format!(
         "{}{}",
         content.trim_end(),
-        default_template_components()
+        render_default_template_components("")
     )))
 }
 
@@ -146,14 +152,14 @@ mod tests {
             section_headers,
             [
                 "## Status <!-- agent:status patch=replace -->",
-                "## Exchange <!-- agent:exchange patch=append -->",
                 "## Run <!-- agent:run priority subagents clear -->",
+                "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
                 "## Backlog <!-- agent:backlog priority queue -->",
-                "## Review <!-- agent:review -->",
                 "## Icebox <!-- agent:icebox -->",
-                "## Done <!-- agent:done -->",
                 "## Notes <!-- agent:notes -->",
+                "## Done <!-- agent:done -->",
+                "## Exchange <!-- agent:exchange patch=append -->",
             ],
             "claim scaffolds keep every level-two heading on its component opening-tag line"
         );
@@ -169,10 +175,11 @@ mod tests {
         assert!(
             scaffold.contains(concat!(
                 "<!-- /agent:run -->\n",
+                "\n## Review <!-- agent:review -->\n<!-- /agent:review -->\n",
                 "\n## Todo <!-- agent:todo priority -->\n<!-- /agent:todo -->\n",
                 "\n## Backlog <!-- agent:backlog priority queue -->\n"
             )),
-            "agent:todo must sit below agent:run and above agent:backlog"
+            "active work must follow queue -> review -> todo -> backlog"
         );
 
         let components = agent_doc_element::element::parse(&scaffold)
@@ -184,13 +191,13 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "exchange", "queue", "todo", "backlog", "review", "icebox", "done",
-                "notes",
+                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "exchange",
             ],
             "claim scaffolds every canonical component in stable document order"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
-        assert_eq!(components[1].patch_mode(), Some("append"));
+        assert_eq!(components[8].patch_mode(), Some("append"));
         let backlog = components
             .iter()
             .find(|component| component.name == "backlog")
@@ -198,19 +205,19 @@ mod tests {
         assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert_eq!(
-            components[2].attrs.get("priority").map(String::as_str),
+            components[1].attrs.get("priority").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[2].attrs.get("subagents").map(String::as_str),
+            components[1].attrs.get("subagents").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[2].attrs.get("clear").map(String::as_str),
+            components[1].attrs.get("clear").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[2].attrs.len(), 3);
-        assert_default_run_omits_queue_control(&components[2]);
+        assert_eq!(components[1].attrs.len(), 3);
+        assert_default_run_omits_queue_control(&components[1]);
         assert!(
             !scaffold.contains("\nqueue:"),
             "the scaffold must not write queue: go; absence is already go-mode"
@@ -221,7 +228,7 @@ mod tests {
             .expect("default scaffold includes todo");
         assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
-            components[3..]
+            components[2..8]
                 .iter()
                 .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .all(|component| component.attrs.is_empty())
@@ -303,8 +310,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "exchange", "queue", "todo", "backlog", "review", "icebox", "done",
-                "notes",
+                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "exchange",
             ],
             "claim must use the same canonical component sequence for non-empty templates"
         );
@@ -342,6 +349,17 @@ mod tests {
             .find(|component| component.name == "queue")
             .expect("legacy queue alias keeps the stable internal queue identity");
         assert_eq!(queue.content(doc), "- existing work\n");
+    }
+
+    #[test]
+    fn rendered_exchange_content_stays_in_the_final_component() {
+        let scaffold = render_default_template_components("Prompt text.\n");
+        let components = agent_doc_element::element::parse(&scaffold).unwrap();
+        assert_eq!(components.last().unwrap().name, "exchange");
+        assert_eq!(
+            components.last().unwrap().content(&scaffold),
+            "Prompt text.\n"
+        );
     }
 
     #[test]

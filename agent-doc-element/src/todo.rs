@@ -177,20 +177,7 @@ pub fn find_todo_component(content: &str) -> Result<Option<Component>> {
 
 /// Byte offset where a missing `agent:todo` section is inserted.
 fn todo_insertion_offset(content: &str, components: &[Component]) -> usize {
-    let anchors: [fn(&str) -> bool; 3] = [
-        |name| name == "queue",
-        element::is_backlog_component,
-        |name| name == "exchange",
-    ];
-    anchors
-        .iter()
-        .find_map(|is_anchor| {
-            components
-                .iter()
-                .rfind(|component| is_anchor(&component.name))
-                .map(|component| component.close_end)
-        })
-        .unwrap_or(content.len())
+    element::canonical_managed_component_insertion_offset(content, components, TODO_COMPONENT)
 }
 
 /// Insert an empty `agent:todo` section when the document has none.
@@ -2474,7 +2461,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_inserts_todo_below_backlog_and_above_review_with_scaffold_heading() {
+    fn ensure_inserts_todo_after_review_without_reordering_legacy_components() {
         let content = concat!(
             "<!-- agent:exchange -->\n### Re: prior\n<!-- /agent:exchange -->\n\n",
             "## Backlog\n\n<!-- agent:backlog -->\n- [ ] [#work] do work\n<!-- /agent:backlog -->\n\n",
@@ -2484,15 +2471,11 @@ mod tests {
         let (updated, todo, created) = ensure_todo_component_in_document(content).unwrap();
         assert!(created);
         assert_eq!(todo.content(&updated), "");
-        let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
+        let review_end = updated.find("<!-- /agent:review -->").unwrap();
         let todo_start = updated.find("<!-- agent:todo priority -->").unwrap();
-        let review_heading = updated.find("## Review").unwrap();
+        assert!(review_end < todo_start, "{updated}");
         assert!(
-            backlog_end < todo_start && todo_start < review_heading,
-            "{updated}"
-        );
-        assert!(
-            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n## Review\n\n<!-- agent:review -->"),
+            updated.contains("<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->"),
             "{updated}"
         );
         // Everything outside the inserted section is byte-identical.
@@ -2500,7 +2483,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_places_agent_todo_below_agent_queue_and_above_agent_backlog() {
+    fn ensure_places_agent_todo_after_review_in_an_established_legacy_layout() {
         let content = concat!(
             "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
             "## Queue\n\n<!-- agent:queue -->\n- do x\n<!-- /agent:queue -->\n",
@@ -2510,22 +2493,19 @@ mod tests {
         let (updated, _, created) = ensure_todo_component_in_document(content).unwrap();
         assert!(created);
         assert!(
-            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Backlog"),
+            updated.contains("<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->"),
             "{updated}"
         );
-        let queue_end = updated.find("<!-- /agent:queue -->").unwrap();
+        let review_end = updated.find("<!-- /agent:review -->").unwrap();
         let todo_start = updated.find("<!-- agent:todo priority -->").unwrap();
-        let backlog_heading = updated.find("## Backlog").unwrap();
         assert!(
-            queue_end < todo_start && todo_start < backlog_heading,
-            "agent:todo must sit below agent:queue and above agent:backlog:\n{updated}"
+            review_end < todo_start,
+            "agent:todo must sit below agent:review without moving the old backlog/review layout:\n{updated}"
         );
     }
 
     #[test]
-    fn ensure_anchors_on_the_last_backlog_and_never_on_review() {
-        // Legacy `agent:pending` counts as backlog; review after it does not
-        // pull Todo below Review.
+    fn ensure_anchors_on_the_last_canonical_predecessor() {
         let content = concat!(
             "<!-- agent:review -->\n<!-- /agent:review -->\n",
             "<!-- agent:pending -->\n- [ ] a\n<!-- /agent:pending -->\n",
@@ -2533,15 +2513,13 @@ mod tests {
             "## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n",
         );
         let (updated, _, _) = ensure_todo_component_in_document(content).unwrap();
-        assert!(
-            updated.contains("<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Review"),
-            "{updated}"
-        );
+        let last_review = updated.rfind("<!-- /agent:review -->").unwrap();
+        let todo_start = updated.find("<!-- agent:todo priority -->").unwrap();
+        assert!(last_review < todo_start, "{updated}");
     }
 
     #[test]
-    fn ensure_falls_back_to_queue_then_exchange_then_end_without_backlog() {
-        // No backlog: after the queue, which keeps Todo above a later Review.
+    fn ensure_uses_canonical_predecessor_then_successor_then_end() {
         let queue_and_review = concat!(
             "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
             "<!-- agent:queue -->\n- do x\n<!-- /agent:queue -->\n",
@@ -2549,7 +2527,7 @@ mod tests {
         );
         let (updated, _, _) = ensure_todo_component_in_document(queue_and_review).unwrap();
         assert!(
-            updated.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->\n## Review"),
+            updated.contains("<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo priority -->\n<!-- /agent:todo -->"),
             "{updated}"
         );
 
@@ -2560,29 +2538,33 @@ mod tests {
             "{updated}"
         );
 
-        // Exchange + review only: after the exchange, still above Review.
+        // Review is the closest canonical predecessor even in a legacy layout.
         let exchange_and_review = "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n<!-- agent:review -->\n<!-- /agent:review -->\n";
         let (updated, _, _) = ensure_todo_component_in_document(exchange_and_review).unwrap();
         assert_eq!(
             updated,
             format!(
-                "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n{TODO_SECTION}<!-- agent:review -->\n<!-- /agent:review -->\n"
+                "<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n<!-- agent:review -->\n<!-- /agent:review -->\n{TODO_SECTION}"
             )
         );
 
+        // With no predecessor, Todo is inserted before the final Exchange.
         let exchange = "# Title\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->";
         let (updated, _, _) = ensure_todo_component_in_document(exchange).unwrap();
         assert_eq!(
             updated,
             format!(
-                "# Title\n\n<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->\n{TODO_SECTION}"
+                "# Title\n\n{TODO_SECTION}<!-- agent:exchange -->\nhi\n<!-- /agent:exchange -->"
             )
         );
 
-        // Review alone is not an anchor: end of document.
+        // Insertion after Review preserves trailing prose byte-for-byte.
         let review_only = "# Notes\n\n<!-- agent:review -->\n<!-- /agent:review -->\nprose";
         let (updated, _, _) = ensure_todo_component_in_document(review_only).unwrap();
-        assert_eq!(updated, format!("{review_only}\n{TODO_SECTION}"));
+        assert_eq!(
+            updated,
+            format!("# Notes\n\n<!-- agent:review -->\n<!-- /agent:review -->\n{TODO_SECTION}prose")
+        );
 
         let plain = "# Notes only\n\nprose";
         let (updated, _, _) = ensure_todo_component_in_document(plain).unwrap();

@@ -368,17 +368,11 @@ fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
     })]);
     let block = format!("<!-- agent:run go -->\n{}<!-- /agent:run -->\n\n", body);
     let components = agent_doc_element::element::parse(content)?;
-    let insert_at = components
-        .iter()
-        .find(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
-        .map(|component| component.open_start)
-        .or_else(|| {
-            components
-                .iter()
-                .find(|component| component.name == "exchange")
-                .map(|component| component.close_end)
-        })
-        .unwrap_or(content.len());
+    let insert_at = agent_doc_element::element::canonical_managed_component_insertion_offset(
+        content,
+        &components,
+        "queue",
+    );
     let mut result = String::with_capacity(content.len() + block.len() + 2);
     result.push_str(&content[..insert_at]);
     if insert_at > 0 && !result.ends_with("\n\n") {
@@ -573,6 +567,10 @@ mod tests {
         assert!(
             update.content.find("<!-- agent:run go -->").unwrap()
                 < update.content.find("<!-- agent:backlog -->").unwrap()
+        );
+        assert!(
+            update.content.find("<!-- agent:run go -->").unwrap()
+                < update.content.find("<!-- agent:exchange -->").unwrap()
         );
     }
 

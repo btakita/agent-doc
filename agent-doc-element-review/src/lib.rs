@@ -36,7 +36,7 @@ pub fn find_review_component_in_content(content: &str) -> Result<Option<element:
         .find(|c| element::is_review_component(&c.name)))
 }
 
-fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
+fn insert_empty_review_in_canonical_slot(content: &str) -> Result<String> {
     let components = element::parse(content).context("failed to parse components")?;
     if components
         .iter()
@@ -44,15 +44,17 @@ fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
     {
         return Ok(content.to_string());
     }
-    let backlog = components
+    components
         .iter()
         .find(|c| element::is_backlog_component(&c.name))
         .context("document has no backlog/pending component for review insertion")?;
+    let insert_at =
+        element::canonical_managed_component_insertion_offset(content, &components, "review");
     let insert = "\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n";
     let mut out = String::with_capacity(content.len() + insert.len());
-    out.push_str(&content[..backlog.close_end]);
+    out.push_str(&content[..insert_at]);
     out.push_str(insert);
-    out.push_str(&content[backlog.close_end..]);
+    out.push_str(&content[insert_at..]);
     Ok(out)
 }
 
@@ -61,7 +63,7 @@ fn insert_empty_review_after_backlog(content: &str) -> Result<String> {
 /// Returns the possibly-updated content and the review component span in that
 /// updated content. File IO stays with callers.
 pub fn ensure_review_component_in_document(content: &str) -> Result<(String, element::Component)> {
-    let content = insert_empty_review_after_backlog(content)?;
+    let content = insert_empty_review_in_canonical_slot(content)?;
     let comp = find_review_component_in_content(&content)?
         .context("document has no review component after insertion")?;
     Ok((content, comp))
@@ -620,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_review_component_inserts_after_backlog() {
+    fn ensure_review_component_inserts_before_backlog_without_a_queue() {
         let content = concat!(
             "---\nagent_doc_session: test\n---\n\n",
             "<!-- agent:backlog -->\n",
@@ -633,19 +635,34 @@ mod tests {
 
         let (updated, review) = ensure_review_component_in_document(content).unwrap();
         assert!(element::is_review_component(&review.name));
-        let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
         let review_start = updated.find("<!-- agent:review -->").unwrap();
+        let backlog_end = updated.find("<!-- /agent:backlog -->").unwrap();
+        let backlog_start = updated.find("<!-- agent:backlog -->").unwrap();
         let exchange_start = updated.find("<!-- agent:exchange -->").unwrap();
         assert!(
-            backlog_end < review_start && review_start < exchange_start,
-            "review component should be inserted after backlog and before exchange:\n{updated}"
+            review_start < backlog_start && backlog_end < exchange_start,
+            "review component should be inserted before backlog and exchange:\n{updated}"
         );
         assert!(
-            updated[backlog_end..review_start].contains("## Review"),
+            updated[..review_start].contains("## Review"),
             "review heading should be inserted before the review component:\n{updated}"
         );
         assert_eq!(review.content(&updated), "");
         assert!(updated.contains("<!-- agent:exchange -->"));
+    }
+
+    #[test]
+    fn ensure_review_component_uses_queue_predecessor_without_reordering_exchange() {
+        let content = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:run -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        let (updated, _) = ensure_review_component_in_document(content).unwrap();
+        assert!(updated.contains(
+            "<!-- /agent:run -->\n\n## Review\n\n<!-- agent:review -->\n<!-- /agent:review -->\n<!-- agent:backlog -->"
+        ));
+        assert!(updated.starts_with("<!-- agent:exchange -->"));
     }
 
     #[test]

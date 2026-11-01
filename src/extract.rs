@@ -10,7 +10,7 @@
 //!   content from `source` to `target`, clearing the source component and appending to the target
 //!   component (or end of file if the target has no matching component).  If `target` does not exist,
 //!   it is auto-created as a template document with the standard
-//!   status/exchange/run/todo/backlog/review/icebox/done/notes scaffold, each `## Heading` on the
+//!   status/run/review/todo/backlog/icebox/notes/done/exchange scaffold, each `## Heading` on the
 //!   same line as its opener (`## Run <!-- agent:run ... -->`), reusing any heading the source wrote
 //!   on that component's opener line (`#extractlayout`).  Backlog transfers accept both the canonical `backlog` name and the legacy `pending`
 //!   alias. When `bypass_claim` is false and the target is owned by a different tmux pane, transfer
@@ -240,15 +240,15 @@ pub(crate) fn render_component_section(
 /// in the default template order, with each opener's attributes.
 const TARGET_SCAFFOLD_COMPONENTS: &[(&str, &str)] = &[
     ("status", " patch=replace"),
-    ("exchange", " patch=append"),
     // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     ("run", " priority subagents clear"),
+    ("review", ""),
     ("todo", " priority"),
     ("backlog", " priority queue"),
-    ("review", ""),
     ("icebox", ""),
-    ("done", ""),
     ("notes", ""),
+    ("done", ""),
+    ("exchange", " patch=append"),
 ];
 
 /// Render a new extract/transfer target document.
@@ -1161,10 +1161,11 @@ mod tests {
         assert!(
             scaffold.contains(concat!(
                 "<!-- agent:run priority subagents clear -->\n<!-- /agent:run -->\n\n",
+                "## Review <!-- agent:review -->\n<!-- /agent:review -->\n\n",
                 "## Todo <!-- agent:todo priority -->\n<!-- /agent:todo -->\n\n",
                 "## Backlog <!-- agent:backlog priority queue -->"
             )),
-            "agent:todo must sit below agent:run and above agent:backlog"
+            "active work must follow queue -> review -> todo -> backlog"
         );
     }
 
@@ -1190,14 +1191,14 @@ mod tests {
             headings,
             vec![
                 "## Status <!-- agent:status patch=replace -->",
-                "## Exchange <!-- agent:exchange patch=append -->",
                 "## Run <!-- agent:run priority subagents clear -->",
+                "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
                 "## Backlog <!-- agent:backlog priority queue -->",
-                "## Review <!-- agent:review -->",
                 "## Icebox <!-- agent:icebox -->",
-                "## Done <!-- agent:done -->",
                 "## Notes <!-- agent:notes -->",
+                "## Done <!-- agent:done -->",
+                "## Exchange <!-- agent:exchange patch=append -->",
             ],
             "{body}"
         );

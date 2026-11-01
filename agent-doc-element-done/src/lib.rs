@@ -152,15 +152,21 @@ fn bare_boundary_identifier(line: &str) -> bool {
     bare_hex || uuid
 }
 
-/// Insert the canonical done archive component after the last tracked-work
-/// component in `content`.
+/// Insert the canonical done archive component in its queue-centric slot.
+/// Existing components are never moved.
 pub fn insert_done_component_after_tracked_work(content: &str) -> Option<String> {
     let components = agent_doc_element::element::parse(content).ok()?;
-    let anchor = components
+    if !components
         .iter()
-        .filter(|c| agent_doc_element::element::is_tracked_work_component(&c.name))
-        .max_by_key(|c| c.close_end)?;
-    let insert_at = anchor.close_end;
+        .any(|component| agent_doc_element::element::is_tracked_work_component(&component.name))
+    {
+        return None;
+    }
+    let insert_at = agent_doc_element::element::canonical_managed_component_insertion_offset(
+        content,
+        &components,
+        "done",
+    );
     let mut result = String::with_capacity(content.len() + EMPTY_DONE_COMPONENT.len() + 2);
     result.push_str(&content[..insert_at]);
     if !result.ends_with("\n\n") {
@@ -473,6 +479,23 @@ mod tests {
         let exchange_start = updated.find("<!-- agent:exchange -->").unwrap();
         assert!(review_end < done_start);
         assert!(done_start < exchange_start);
+    }
+
+    #[test]
+    fn insert_done_component_uses_notes_predecessor_and_keeps_exchange_last() {
+        let content = concat!(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+            "<!-- agent:notes -->\nreference\n<!-- /agent:notes -->\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+        );
+        let updated = insert_done_component_after_tracked_work(content).unwrap();
+        let notes_end = updated.find("<!-- /agent:notes -->").unwrap();
+        let done_start = updated.find("<!-- agent:done -->").unwrap();
+        let exchange_start = updated.find("<!-- agent:exchange -->").unwrap();
+        assert!(
+            notes_end < done_start && done_start < exchange_start,
+            "{updated}"
+        );
     }
 
     #[test]

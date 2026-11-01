@@ -128,6 +128,61 @@ pub fn canonical_component_name(name: &str) -> &str {
     }
 }
 
+/// Queue-centric order used by new template scaffolds and by repairs that must
+/// insert a missing managed component. Existing components are never moved.
+pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 9] = [
+    "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done", "exchange",
+];
+
+/// Return a managed component's queue-centric scaffold rank.
+///
+/// Public marker aliases share their canonical semantic slot: `run`, `queue`,
+/// and `loop` are runnable work, while legacy `pending` is backlog work.
+pub fn canonical_managed_component_rank(name: &str) -> Option<usize> {
+    let name = if is_backlog_component(name) {
+        BACKLOG_COMPONENT
+    } else {
+        canonical_component_name(name)
+    };
+    CANONICAL_MANAGED_COMPONENT_ORDER
+        .iter()
+        .position(|candidate| *candidate == name)
+}
+
+/// Choose the canonical slot for a missing managed component without moving
+/// any established component.
+///
+/// Prefer the last canonical predecessor already present. If none exists, put
+/// the new component before the first canonical successor. This makes a
+/// structure repair converge toward the current scaffold order while leaving
+/// an otherwise valid legacy-order document byte-for-byte stable.
+pub fn canonical_managed_component_insertion_offset(
+    content: &str,
+    components: &[Component],
+    name: &str,
+) -> usize {
+    let Some(target_rank) = canonical_managed_component_rank(name) else {
+        return content.len();
+    };
+    components
+        .iter()
+        .filter_map(|component| {
+            let rank = canonical_managed_component_rank(&component.name)?;
+            (rank < target_rank).then_some(component.close_end)
+        })
+        .max()
+        .or_else(|| {
+            components
+                .iter()
+                .filter_map(|component| {
+                    let rank = canonical_managed_component_rank(&component.name)?;
+                    (rank > target_rank).then_some(component.open_start)
+                })
+                .min()
+        })
+        .unwrap_or(content.len())
+}
+
 /// Add semantics implied by a component's canonical marker spelling.
 fn apply_component_implied_attrs(name: &str, attrs: &mut HashMap<String, String>) {
     if name == LOOP_COMPONENT {
@@ -2700,6 +2755,37 @@ mod tests {
         assert_eq!(legacy_component.name, "queue");
         assert_eq!(canonical_component.content(canonical), "canonical\n");
         assert_eq!(legacy_component.content(legacy), "legacy\n");
+    }
+
+    #[test]
+    fn canonical_managed_insertion_uses_predecessors_without_reordering_legacy_layouts() {
+        assert_eq!(
+            CANONICAL_MANAGED_COMPONENT_ORDER,
+            [
+                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "exchange",
+            ]
+        );
+        let legacy = concat!(
+            "<!-- agent:status -->\n<!-- /agent:status -->\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:run -->\n<!-- /agent:run -->\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        let components = parse(legacy).unwrap();
+        let todo_offset =
+            canonical_managed_component_insertion_offset(legacy, &components, "todo");
+        assert_eq!(
+            todo_offset,
+            components
+                .iter()
+                .find(|component| component.name == "queue")
+                .unwrap()
+                .close_end
+        );
+        assert!(todo_offset > legacy.find("<!-- /agent:exchange -->").unwrap());
+        assert_eq!(canonical_managed_component_rank("pending"), Some(4));
+        assert_eq!(canonical_managed_component_rank("run"), Some(1));
     }
 
     #[test]

@@ -39,7 +39,7 @@
 //! - no_create_backlog_skips_when_absent: `--no-create-backlog` + absent → no-op
 //! - backlog_add_with_message_writes_both: backlog + message → both written
 //! - backlog_only_updates_baseline: backlog-only → typed baseline checkpointed
-//! - auto_create_inserts_after_exchange: component placed after exchange close tag
+//! - auto_create_inserts_before_final_exchange: missing backlog uses the canonical slot
 //! - message_required_without_backlog: no message, no backlog → `Err`
 
 use anyhow::{Context, Result, bail};
@@ -109,8 +109,8 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
         bail!("document has no backlog component and --no-create-backlog was set");
     }
 
-    // Insert before ## Assistant / ## Pending / end-of-file, whichever comes first.
-    // Prefer inserting before the exchange close tag if it exists, otherwise at end.
+    // This command already has to repair missing structure. Insert the backlog
+    // at its canonical slot without moving any established component.
     let insert_pos = find_pending_insert_position(&doc, &components);
 
     let pending_block = "\n<!-- agent:backlog priority queue -->\n<!-- /agent:backlog -->\n";
@@ -129,12 +129,7 @@ fn ensure_pending_component(file: &Path, no_create: bool) -> Result<bool> {
 
 /// Find the best position to insert a backlog component.
 fn find_pending_insert_position(doc: &str, components: &[element::Component]) -> usize {
-    // After the exchange close tag if one exists
-    if let Some(exchange) = components.iter().find(|c| c.name == "exchange") {
-        return exchange.close_end;
-    }
-    // Otherwise at end of document
-    doc.len()
+    element::canonical_managed_component_insertion_offset(doc, components, "backlog")
 }
 
 /// Append a notification to a document's exchange component, update the snapshot,
@@ -716,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_create_inserts_after_exchange() {
+    fn auto_create_inserts_before_final_exchange() {
         let dir = setup_project();
         let doc = write_doc(
             dir.path(),
@@ -729,10 +724,11 @@ mod tests {
 
         let result = std::fs::read_to_string(&doc).unwrap();
         let exchange_close = result.find("<!-- /agent:exchange -->").unwrap();
+        let exchange_open = result.find("<!-- agent:exchange").unwrap();
         let backlog_open = result.find("<!-- agent:backlog").unwrap();
         assert!(
-            backlog_open > exchange_close,
-            "backlog should be after exchange close"
+            backlog_open < exchange_open && exchange_open < exchange_close,
+            "backlog should be inserted before the final exchange"
         );
     }
 

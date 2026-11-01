@@ -513,12 +513,12 @@ fn find_component(doc: &str, name: &str) -> Result<Option<element::Component>> {
     }))
 }
 
-/// Append a missing component section to `doc` (`#extractlayout`): the
+/// Insert a missing component section into its canonical slot (`#extractlayout`): the
 /// heading shares its line with the opener, and its text is the source
 /// document's own heading for that component when it has one, else the
 /// canonical name (`## Run` for the runnable-work component).
 fn ensure_component(
-    mut doc: String,
+    doc: String,
     name: &str,
     source_headings: &BTreeMap<String, String>,
 ) -> Result<String> {
@@ -537,9 +537,22 @@ fn ensure_component(
     else {
         bail!("unsupported focused-extract component '{name}'");
     };
-    doc.push_str("\n\n");
-    doc.push_str(&section);
-    Ok(doc)
+    let components = element::parse(&doc).context("failed to parse agent components")?;
+    let insert_at = element::canonical_managed_component_insertion_offset(&doc, &components, name);
+    let mut updated = String::with_capacity(doc.len() + section.len() + 2);
+    updated.push_str(&doc[..insert_at]);
+    if !updated.ends_with("\n\n") {
+        if !updated.ends_with('\n') {
+            updated.push('\n');
+        }
+        updated.push('\n');
+    }
+    updated.push_str(&section);
+    if insert_at < doc.len() && !doc[insert_at..].starts_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(&doc[insert_at..]);
+    Ok(updated)
 }
 
 fn append_to_component(doc: &str, name: &str, moved: &str) -> Result<String> {
@@ -2377,7 +2390,7 @@ mod tests {
         let doc = ensure_component("# T\n".to_string(), "queue", &none).unwrap();
         assert_eq!(
             doc,
-            "# T\n\n\n## Run <!-- agent:run -->\n<!-- /agent:run -->\n"
+            "# T\n\n## Run <!-- agent:run -->\n<!-- /agent:run -->\n"
         );
         let headings = BTreeMap::from([("backlog".to_string(), "Later".to_string())]);
         let doc = ensure_component(doc, "backlog", &headings).unwrap();
@@ -2401,6 +2414,22 @@ mod tests {
         }
         assert!(find_component(&doc, "backlog").unwrap().is_some());
         assert!(ensure_component(doc, "bogus", &none).is_err());
+    }
+
+    #[test]
+    fn ensure_component_places_notes_before_done_and_final_exchange() {
+        let none = BTreeMap::new();
+        let doc = concat!(
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n",
+            "<!-- agent:done -->\n<!-- /agent:done -->\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+        )
+        .to_string();
+        let updated = ensure_component(doc, "notes", &none).unwrap();
+        let notes = updated.find("<!-- agent:notes -->").unwrap();
+        let done = updated.find("<!-- agent:done -->").unwrap();
+        let exchange = updated.find("<!-- agent:exchange -->").unwrap();
+        assert!(notes < done && done < exchange, "{updated}");
     }
 
     #[test]

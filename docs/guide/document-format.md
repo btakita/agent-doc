@@ -109,6 +109,12 @@ Both modes work simultaneously because the run sends a diff, not a parsed struct
 
 Documents can contain **components** — named, re-renderable regions marked with HTML comment pairs:
 
+New template documents use the queue-centric managed order `status`, `run`,
+`review`, `todo`, `backlog`, `icebox`, `notes`, `done`, then `exchange` last.
+When a command must create a missing managed component, it uses that relative
+slot without moving existing components. Older valid documents keep their
+established order.
+
 ```markdown
 <!-- agent:status -->
 | Field | Value |

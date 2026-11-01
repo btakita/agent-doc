@@ -803,24 +803,24 @@ Every agent-side todo write (`--todo-add` or `patch:todo`) therefore creates the
 component when the document has none, instead of dropping the action or routing
 a `patch:todo` body into `exchange` as missing-component overflow. The binary
 inserts an empty `## Todo` section with `<!-- agent:todo priority -->` /
-`<!-- /agent:todo -->` markers at one deterministic, operator-facing location:
-directly after the last `agent:run`; else after the last `agent:backlog` /
-legacy `agent:pending`; else after the last `agent:exchange`; else at the end of
-the document. `agent:review` is never an anchor, so in the canonical layout
-`agent:todo` lands below `agent:run` and above `agent:backlog`; a document
-without `agent:run` still gets Todo above any Review that follows its backlog
-or exchange. Nothing outside the inserted section changes. A document that
-already has `agent:todo` is left structurally unchanged, wherever its Todo
-section sits.
+`<!-- /agent:todo -->` markers at one deterministic, operator-facing location.
+Missing managed components use the queue-centric canonical rank below: the
+repair inserts after the last canonical predecessor already present, otherwise
+before the first canonical successor, otherwise at the end. Nothing outside
+the inserted section changes. A document that already has `agent:todo` is left
+structurally unchanged, wherever its Todo section sits.
 
 **Default template order.** The default template scaffold (Claim for Tmux Pane,
 Sync, and `claim` on an empty or component-less template document) emits the
-canonical managed components in this order: `agent:status`, `agent:exchange`,
-`agent:run`, `agent:todo`, `agent:backlog`, `agent:review`, `agent:icebox`,
-`agent:done`, `agent:notes`. Thus `agent:todo` sits directly below
-`agent:run` and above `agent:backlog`, matching the auto-created placement,
-and its marker carries bare `priority` by default. Existing `agent:todo` markers
-remain unchanged. To maximize visible content in a tmux view pane, each generated
+canonical managed components in this order: `agent:status`, `agent:run`,
+`agent:review`, `agent:todo`, `agent:backlog`, `agent:icebox`, `agent:notes`,
+`agent:done`, `agent:exchange`. The queue stays near status and the exchange is
+the final managed component. `agent:todo` carries bare `priority` by default.
+This order governs newly generated scaffolds and missing-component insertion
+when a command already has to repair structure. It never silently reorders an
+established, structurally valid document merely because that document uses the
+previous order; existing headings, markers, and component blocks remain where
+the operator put them. To maximize visible content in a tmux view pane, each generated
 level-two heading shares its line with its component opening tag (for example,
 `## Run <!-- agent:run priority subagents clear -->`); the runnable-work heading
 is `## Run`, not `## Queue`. That `agent:run` marker does not carry `go`,

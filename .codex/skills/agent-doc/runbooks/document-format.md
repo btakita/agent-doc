@@ -32,21 +32,38 @@ The body alternates `## User` and `## Assistant` blocks. Inline annotations with
 The body contains named components delimited by HTML comment markers:
 
 ```markdown
-<!-- agent:exchange -->
-<!-- /agent:exchange -->
+<!-- agent:status patch=replace -->
+<!-- /agent:status -->
 
 <!-- agent:run priority subagents clear -->
 <!-- /agent:run -->
 
-<!-- agent:backlog -->
-<!-- /agent:backlog -->
-
 <!-- agent:review -->
 <!-- /agent:review -->
 
+<!-- agent:todo priority -->
+<!-- /agent:todo -->
+
+<!-- agent:backlog priority queue -->
+<!-- /agent:backlog -->
+
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+<!-- agent:notes -->
+<!-- /agent:notes -->
+
+<!-- agent:done -->
+<!-- /agent:done -->
+
+<!-- agent:exchange patch=append -->
+<!-- /agent:exchange -->
 ```
+
+New scaffolds use this queue-centric order: status, run, review, todo, backlog,
+icebox, notes, done, then exchange last. Missing-component repairs use the same
+relative slots without moving established components; valid documents in the
+previous order are not silently reordered.
 
 ### Conventional component names
 

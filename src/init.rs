@@ -101,8 +101,10 @@ fn prepare_editor_session_with(
     } else {
         format!("{initial}\n")
     };
+    let components =
+        agent_doc_document::claim_scaffold::render_default_template_components(&initial);
     let content = format!(
-        "---\nagent_doc_session: {session_id}\nagent: {agent}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {title}\n\n## Exchange\n\n<!-- agent:exchange -->\n{initial}<!-- /agent:exchange -->\n"
+        "---\nagent_doc_session: {session_id}\nagent: {agent}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {title}{components}"
     );
     std::fs::write(file, content)?;
     eprintln!("Initialized {}", file.display());
@@ -189,9 +191,10 @@ fn init_file(
     let mode = mode.unwrap_or("append");
 
     let content = if mode == "template" || mode == "stream" {
+        let components = agent_doc_document::claim_scaffold::render_default_template_components("");
         format!(
-            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {}\n\n## Exchange\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
-            session_id, agent, title
+            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {}{}",
+            session_id, agent, title, components
         )
     } else {
         format!(
@@ -271,7 +274,19 @@ mod tests {
         );
         assert!(content.contains("# Release notes"));
         assert!(content.contains("agent_doc_format: template"));
-        assert!(content.contains("<!-- agent:exchange -->\nKeep this prompt.\n"));
+        let components = agent_doc_element::element::parse(&content).unwrap();
+        assert_eq!(
+            components
+                .iter()
+                .map(|component| component.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "exchange",
+            ]
+        );
+        let exchange = components.last().unwrap();
+        assert_eq!(exchange.content(&content), "Keep this prompt.\n");
     }
 
     #[test]

@@ -8909,6 +8909,13 @@ Reviewed the gated items.\n\
         .unwrap();
         track_doc(&dir, &doc, "");
         complete_run(&doc);
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            "do [#held]",
+            claim.generation,
+            "The worker completed the held queue item.",
+        )
+        .unwrap();
         agent_doc_queue_io::claim_release_receipt::release(
             &doc,
             "do [#held]",
@@ -11656,6 +11663,13 @@ Reviewed the gated items.\n\
             "worker:page-status-enum",
             3600,
             1,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            prompt,
+            1,
+            "The page status enum values were inspected and reported.",
         )
         .unwrap();
         agent_doc_queue_io::claim_release_receipt::release(

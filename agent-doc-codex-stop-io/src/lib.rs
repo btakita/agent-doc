@@ -1730,27 +1730,53 @@ fn apply_bound_stop(
             // auto-queue head when that status merely mentioned the head. Finish
             // the idempotent terminal maintenance first and never capture the
             // predecessor payload on this branch.
-            if agent_doc_session_check_io::is_completed_pending_reap_interruption(&reason)
+            let completed_pending_reap =
+                agent_doc_session_check_io::is_completed_pending_reap_interruption(&reason);
+            let completed_free_text_residue =
+                agent_doc_session_check_io::is_completed_free_text_queue_residue_interruption(
+                    &reason,
+                );
+            if (completed_pending_reap || completed_free_text_residue)
                 && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
             {
+                let maintenance_kind = if completed_free_text_residue {
+                    "answered_free_text_queue_residue"
+                } else {
+                    "completed_tracked_item_reap"
+                };
                 agent_doc_ops_log_io::log_op(
                     file,
-                    "codex_stop_terminal_reap_maintenance_started capture_skipped=true",
+                    &format!(
+                        "codex_stop_terminal_reap_maintenance_started capture_skipped=true kind={maintenance_kind}"
+                    ),
                 );
-                let closeout_result =
-                    agent_doc_closeout_runtime_io::complete_required_closeout(file, false);
+                // `#qresiduestop`: the completed free-text guard names a
+                // committed predecessor. Run the same queue catch-up that the
+                // next admission would own before strict closeout; never let
+                // the predecessor's closing assistant text become a response
+                // to an adjacent queue head.
+                let closeout_result = if completed_free_text_residue {
+                    agent_doc_closeout_runtime_io::complete_answered_free_text_queue_residue(
+                        file, false,
+                    )
+                } else {
+                    agent_doc_closeout_runtime_io::complete_required_closeout(file, false)
+                };
                 invalidate_stop_document_cache();
                 let status = agent_doc_session_check_io::inspect(
                     file,
                     &agent_doc_closeout_runtime_io::session_check_effects(),
                 )?;
-                let completed_reap_still_pending = matches!(
+                let terminal_maintenance_still_pending = matches!(
                     &status,
                     agent_doc_session_check_io::SessionCheckStatus::Interrupted(message)
                         | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message)
-                        if agent_doc_session_check_io::is_completed_pending_reap_interruption(message)
+                        if (completed_pending_reap
+                            && agent_doc_session_check_io::is_completed_pending_reap_interruption(message))
+                            || (completed_free_text_residue
+                                && agent_doc_session_check_io::is_completed_free_text_queue_residue_interruption(message))
                 );
-                if !completed_reap_still_pending {
+                if !terminal_maintenance_still_pending {
                     let closeout_outcome = if closeout_result.is_ok() {
                         "closed"
                     } else {
@@ -1759,7 +1785,7 @@ fn apply_bound_stop(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "codex_stop_terminal_reap_maintenance_settled capture_skipped=true outcome={closeout_outcome}"
+                            "codex_stop_terminal_reap_maintenance_settled capture_skipped=true kind={maintenance_kind} outcome={closeout_outcome}"
                         ),
                     );
 
@@ -1800,15 +1826,28 @@ fn apply_bound_stop(
                     .unwrap_or_default();
                 agent_doc_ops_log_io::log_op(
                     file,
-                    "codex_stop_terminal_reap_maintenance_still_pending capture_skipped=true",
+                    &format!(
+                        "codex_stop_terminal_reap_maintenance_still_pending capture_skipped=true kind={maintenance_kind}"
+                    ),
                 );
+                let recovery = if completed_free_text_residue {
+                    format!(
+                        "Report this binary-owned maintenance failure and stop. Do not resubmit the response, strike the queue row by hand, or invoke preflight; the next `agent-doc {}` admission may retry the same catch-up.",
+                        file.display(),
+                    )
+                } else {
+                    format!(
+                        "Run `agent-doc repair {}` and then `agent-doc session-check {}`.",
+                        file.display(),
+                        file.display(),
+                    )
+                };
                 let message = format!(
-                    "agent-doc Stop hook could not persist terminal completed-item maintenance for {}. {}{} The predecessor assistant text was not captured or replayed. Run `agent-doc repair {}` and then `agent-doc session-check {}`. Do not send the final answer yet.",
+                    "agent-doc Stop hook could not persist terminal completed-item maintenance for {}. {}{} The predecessor assistant text was not captured or replayed. {} Do not send the final answer yet.",
                     file.display(),
                     reason,
                     closeout_note,
-                    file.display(),
-                    file.display(),
+                    recovery,
                 );
                 if input.stop_hook_active {
                     return Ok(StopResponse::RefuseExit { reason: message });
@@ -7381,6 +7420,134 @@ queue: go
             "{ops}"
         );
         assert!(!ops.contains("codex_stop_capture_saved"), "{ops}");
+    }
+
+    /// `#qresiduestop` (haiven-dev sdk-demo.md, 2026-10-31): strict
+    /// session-check correctly found an answered free-text row still live after
+    /// its response commit, but recursive Stop treated the terminal residue as
+    /// an open response cycle and refused to exit. The hook must run the same
+    /// binary-owned catch-up as the next admission, commit it, and never replay
+    /// the predecessor's closing assistant text.
+    #[test]
+    fn recursive_stop_persists_answered_free_text_residue_without_replaying_predecessor_text() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let head = "We are using project templates now. Remove all guidance for the env variables. ⟦local⟧";
+        let committed = format!(
+            "---\n\
+agent_doc_session: sid\n\
+agent_doc_format: template\n\
+queue_active: true\n\
+---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: Boss Room project-template guidance cleanup — gpt-5\n\n\
+> **Queue prompt:**\n>\n> {head}\n\n\
+The environment-variable guidance was removed from the project template.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue auto go -->\n\
+- {head}\n\
+<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        let terminal_cycle =
+            agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+                .unwrap();
+        agent_doc_capture_io::capture_response(
+            &doc,
+            &format!(
+                "<!-- patch:exchange -->\n### Re: Boss Room project-template guidance cleanup — gpt-5\n\n> **Queue prompt:**\n>\n> {head}\n\nThe environment-variable guidance was removed from the project template.\n<!-- /patch:exchange -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => assert!(
+                agent_doc_session_check_io::is_completed_free_text_queue_residue_interruption(
+                    &message
+                ),
+                "unexpected interruption: {message}"
+            ),
+            other => panic!("fixture must begin with answered queue residue, got {other:?}"),
+        }
+
+        let stale_predecessor_text = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: SDK cycle complete — gpt-5\n\n",
+            "Lyra and Boss Room integrations are complete; one queue cleanup remains.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: stale_predecessor_text.to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::AllowExit);
+        let after = fs::read_to_string(&doc).unwrap();
+        let components = agent_doc_element::element::parse(&after).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .expect("queue remains structurally present");
+        let entries = agent_doc_queue::document_queue::parse(queue.content(&after)).unwrap();
+        assert!(
+            agent_doc_queue::document_queue::prompts(&entries).is_empty(),
+            "the answered head must no longer be live:\n{after}"
+        );
+        assert!(
+            !after.contains("Lyra and Boss Room integrations are complete"),
+            "the predecessor Stop payload must not be replayed:\n{after}"
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            state.cycle_id, terminal_cycle.cycle_id,
+            "terminal maintenance must not open a successor response cycle"
+        );
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message) => {
+                assert!(message.contains("committed"), "{message}");
+            }
+            other => panic!("terminal residue maintenance must settle, got {other:?}"),
+        }
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains(
+                "codex_stop_terminal_reap_maintenance_settled capture_skipped=true kind=answered_free_text_queue_residue"
+            ),
+            "terminal maintenance proof must name the residue class:\n{log}"
+        );
     }
 
     #[test]

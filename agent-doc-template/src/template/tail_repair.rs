@@ -897,12 +897,35 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
     {
         let body = &doc[component.open_end..component.close_start];
         let mut offset = component.open_end;
+        let mut multiline_queue_item_indent = None;
         for line in body.split_inclusive('\n') {
             let line_start = offset;
             offset += line.len();
+            let content = line.trim_end_matches(['\r', '\n']);
+            let trimmed = content.trim_start_matches([' ', '\t']);
+            let indent = content.len().saturating_sub(trimmed.len());
+
+            let queue_prompt_is_quoted_evidence = if component.name == "queue" {
+                if let Some(item_indent) = multiline_queue_item_indent
+                    && !trimmed.is_empty()
+                    && indent <= item_indent
+                {
+                    multiline_queue_item_indent = None;
+                }
+                let is_queue_row = trimmed.starts_with("- ");
+                if is_queue_row && multiline_queue_item_indent.is_none() {
+                    multiline_queue_item_indent =
+                        content.trim_end().ends_with(">-").then_some(indent);
+                }
+                multiline_queue_item_indent.is_some_and(|item_indent| indent > item_indent)
+            } else {
+                false
+            };
             if line
                 .match_indices("> **Queue prompt:**")
-                .any(|(relative, _)| !ignored(line_start + relative))
+                .any(|(relative, _)| {
+                    !queue_prompt_is_quoted_evidence && !ignored(line_start + relative)
+                })
             {
                 anyhow::bail!(
                     "binary conversation scaffold is embedded inside `agent:{}`; \
@@ -2117,6 +2140,41 @@ mod tests {
         );
 
         guard_no_conversation_content_inside_tracked_components(document).unwrap();
+    }
+
+    #[test]
+    fn guard_allows_queue_prompt_evidence_inside_explicit_multiline_queue_item() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- 🚧 [#subagent:response-quality#1] This response was not useful: >-\n",
+            "  ### Re: prior response\n",
+            "  > **Subagent response:**\n",
+            "  > Implemented the wrong task.\n",
+            "  > **Queue prompt:** original prompt\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        guard_no_conversation_content_inside_tracked_components(document).unwrap();
+    }
+
+    #[test]
+    fn guard_rejects_queue_prompt_after_explicit_multiline_queue_item_ends() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- Preserve this operator evidence: >-\n",
+            "  quoted evidence\n",
+            "> **Queue prompt:** welded response\n",
+            "- do [#next]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        guard_no_conversation_content_inside_tracked_components(document)
+            .expect_err("unindented response scaffold must still fail closed");
     }
     #[test]
     fn guard_no_conversation_tail_outside_exchange_fails_on_tail_after_session_digest() {

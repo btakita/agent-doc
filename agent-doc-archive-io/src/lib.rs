@@ -444,6 +444,25 @@ pub fn dangling_response_references_with_pins(
     content: &str,
     pinned: impl IntoIterator<Item = String>,
 ) -> Result<Vec<String>> {
+    let indexed = verified_indexed_response_ids(doc)?;
+    let live = response_nodes(content)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect::<BTreeSet<_>>();
+    let mut refs = extract_response_reference_ids(content);
+    refs.extend(pinned);
+    let resolved = live.union(&indexed).cloned().collect::<BTreeSet<_>>();
+    let mut dangling = refs.difference(&resolved).cloned().collect::<Vec<_>>();
+    dangling.retain(|response_id| {
+        compatibility_git_history_response(doc, response_id)
+            .ok()
+            .flatten()
+            .is_none()
+    });
+    Ok(dangling)
+}
+
+fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
     let index = parse_response_index_file(&response_index_path(doc))?;
     let root = project_root(doc)?;
     let mut indexed = BTreeSet::new();
@@ -473,21 +492,7 @@ pub fn dangling_response_references_with_pins(
         );
         indexed.insert(entry.response_id.clone());
     }
-    let live = response_nodes(content)
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect::<BTreeSet<_>>();
-    let mut refs = extract_response_reference_ids(content);
-    refs.extend(pinned);
-    let resolved = live.union(&indexed).cloned().collect::<BTreeSet<_>>();
-    let mut dangling = refs.difference(&resolved).cloned().collect::<Vec<_>>();
-    dangling.retain(|response_id| {
-        compatibility_git_history_response(doc, response_id)
-            .ok()
-            .flatten()
-            .is_none()
-    });
-    Ok(dangling)
+    Ok(indexed)
 }
 
 /// Render only response bodies not pinned by authoritative decision evidence.
@@ -807,7 +812,7 @@ pub fn read_current_exchange_archive(doc: &Path) -> Result<Option<String>> {
 fn compatibility_git_history_response(
     doc: &Path,
     response_id: &str,
-) -> Result<Option<(String, String, usize)>> {
+) -> Result<Option<CompatibilityGitHistoryResponse>> {
     let root = project_root(doc)?;
     let doc_rel = relative_slash(&root, doc)?;
     let candidates = git_stdout(
@@ -823,14 +828,22 @@ fn compatibility_git_history_response(
             &doc_rel,
         ],
     )?;
-    let mut checked = 0usize;
-    for commit in candidates.lines().filter(|line| !line.trim().is_empty()) {
-        checked += 1;
+    for (offset, commit) in candidates
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .enumerate()
+    {
+        let checked = offset + 1;
         let Ok(current) = head_blob(&root, commit, &doc_rel) else {
             continue;
         };
         if let Some(content) = response_content_by_id(&current, response_id, None) {
-            return Ok(Some((content, commit.to_string(), checked)));
+            return Ok(Some(CompatibilityGitHistoryResponse {
+                content,
+                commit: commit.to_string(),
+                candidates_checked: checked,
+                inline_projection: false,
+            }));
         }
 
         let parent = head_blob(&root, &format!("{commit}^"), &doc_rel).unwrap_or_default();
@@ -851,10 +864,168 @@ fn compatibility_git_history_response(
             })
             .collect::<Vec<_>>();
         if let Some(content) = historical_response_window(&added, response_id) {
-            return Ok(Some((content, commit.to_string(), checked)));
+            return Ok(Some(CompatibilityGitHistoryResponse {
+                content,
+                commit: commit.to_string(),
+                candidates_checked: checked,
+                inline_projection: false,
+            }));
+        }
+
+        let inline_added = added_inline_response_summaries(&parent, &current, response_id);
+        if let [summary] = inline_added.as_slice() {
+            return Ok(Some(CompatibilityGitHistoryResponse {
+                content: inline_summary_response_cell(response_id, summary),
+                commit: commit.to_string(),
+                candidates_checked: checked,
+                inline_projection: true,
+            }));
         }
     }
     Ok(None)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompatibilityGitHistoryResponse {
+    content: String,
+    commit: String,
+    candidates_checked: usize,
+    inline_projection: bool,
+}
+
+fn inline_response_summaries(content: &str, response_id: &str) -> Vec<String> {
+    let prefix = format!("**Response {response_id}:**");
+    let mut summaries = Vec::new();
+    let mut fence: Option<String> = None;
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim_start();
+        let fence_marker = trimmed
+            .strip_prefix("```")
+            .map(|_| "```")
+            .or_else(|| trimmed.strip_prefix("~~~").map(|_| "~~~"));
+        if let Some(marker) = fence_marker {
+            if fence.as_deref() == Some(marker) {
+                fence = None;
+            } else if fence.is_none() {
+                fence = Some(marker.to_string());
+            }
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
+        let Some(item) = trimmed.strip_prefix("- ") else {
+            continue;
+        };
+        let Some(summary) = item.strip_prefix(&prefix) else {
+            continue;
+        };
+        let summary = summary.trim();
+        if !summary.is_empty() {
+            summaries.push(summary.to_string());
+        }
+    }
+    summaries
+}
+
+fn added_inline_response_summaries(parent: &str, current: &str, response_id: &str) -> Vec<String> {
+    let mut parent_counts = BTreeMap::<String, usize>::new();
+    for summary in inline_response_summaries(parent, response_id) {
+        *parent_counts.entry(summary).or_default() += 1;
+    }
+    inline_response_summaries(current, response_id)
+        .into_iter()
+        .filter(|summary| {
+            let count = parent_counts.entry(summary.clone()).or_default();
+            if *count == 0 {
+                true
+            } else {
+                *count -= 1;
+                false
+            }
+        })
+        .collect()
+}
+
+fn inline_summary_response_cell(response_id: &str, summary: &str) -> String {
+    format!("### Re: recovered inline queue response\n\n{summary}\n\n**Response {response_id}**\n")
+}
+
+/// Restore canonical inline response summaries that were committed before the
+/// sibling response index existed. Recovery is deliberately narrow: only a
+/// single newly introduced `**Response [#r-…]:**` row in one of the bounded Git
+/// candidates is eligible. Aggregate exchange reconstruction remains lookup
+/// compatibility only because splitting it into indexed per-section evidence
+/// would invent ownership.
+pub fn restore_inline_response_references_from_git(
+    doc: &Path,
+    content: &str,
+) -> Result<Vec<String>> {
+    let refs = extract_response_reference_ids(content);
+    ensure!(
+        refs.len() <= 64,
+        "document references {} response ids; bounded compatibility recovery limit is 64",
+        refs.len()
+    );
+    let live = response_nodes(content)
+        .into_iter()
+        .map(|(response_id, _)| response_id)
+        .collect::<BTreeSet<_>>();
+    let indexed = verified_indexed_response_ids(doc)?;
+    let unresolved = refs
+        .difference(&live.union(&indexed).cloned().collect())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut recovered = Vec::<(String, String)>::new();
+    for response_id in unresolved {
+        let Some(compatibility) = compatibility_git_history_response(doc, &response_id)? else {
+            continue;
+        };
+        if compatibility.inline_projection {
+            recovered.push((response_id, compatibility.content));
+        }
+    }
+    if recovered.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let recovered_cells = recovered
+        .iter()
+        .map(|(_, content)| content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let write = write_exchange_archive(doc, &recovered_cells)?;
+    let restored_ids = recovered
+        .into_iter()
+        .map(|(response_id, _)| response_id)
+        .collect::<BTreeSet<_>>();
+    let mut entries = parse_response_index_file(&write.index_path)?;
+    for response_id in &restored_ids {
+        let entry = entries.get_mut(response_id).with_context(|| {
+            format!("restored response archive omitted indexed id {response_id}")
+        })?;
+        entry.action = "restored".to_string();
+    }
+    atomic_write(
+        &write.index_path,
+        render_response_index(doc, entries.values()).as_bytes(),
+    )?;
+
+    let cache_entries = entries
+        .values()
+        .map(
+            |entry| agent_doc_sqlite::archive_index::ResponseLocationCacheEntry {
+                response_id: entry.response_id.clone(),
+                archive_path: entry.archive_path.clone(),
+                anchor: entry.anchor.clone(),
+                content_sha256: entry.content_sha256.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    agent_doc_sqlite::archive_index::replace_response_location_cache(doc, &cache_entries)?;
+    agent_doc_sqlite::archive_index::index_archive(doc, &write.archive_path)?;
+    Ok(restored_ids.into_iter().collect())
 }
 
 fn historical_response_window(nodes: &[ExchangeNode], response_id: &str) -> Option<String> {
@@ -994,16 +1165,14 @@ pub fn recover_response_with_metrics(
             ));
         }
     }
-    if let Some((content, commit, compatibility_checked)) =
-        compatibility_git_history_response(doc, response_id)?
-    {
-        checked += compatibility_checked;
+    if let Some(compatibility) = compatibility_git_history_response(doc, response_id)? {
+        checked += compatibility.candidates_checked;
         return Ok((
             ResponseRecovery::Found(RecoveredResponse {
                 source: RecoverySource::GitHistoryCompatibility,
                 response_id: response_id.to_string(),
-                content,
-                commit: Some(commit),
+                content: compatibility.content,
+                commit: Some(compatibility.commit),
             }),
             lookup_metrics("git-history-compatibility", started, checked),
         ));
@@ -1511,6 +1680,81 @@ mod tests {
             dangling_response_references(&doc, &historical)
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn committed_inline_response_summary_is_restored_to_the_tracked_index() {
+        const RESPONSE_ID: &str = "[#r-f656df4698e6]";
+        const UNRELATED_ID: &str = "[#r-deadbeefcafe]";
+        const SUMMARY: &str = "Implemented and installed. Every open agent:todo now emits a selector-preserving todo_sync_required preflight obligation.";
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let initial = concat!(
+            "<!-- agent:queue -->\n",
+            "- agent-doc issues in sdk-dev.md\n",
+            "  - The same response was duplicated for several queue items.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, initial).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "initial"]);
+
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- agent-doc issues in sdk-dev.md\n",
+                "  - ~~The same response was duplicated for several queue items.~~ — auto-struck: response: {id}\n",
+                "    - **Response {id}:** {summary}\n",
+                "  - ~~unrelated unresolved item~~ — auto-struck: response: {unrelated}\n",
+                "<!-- /agent:queue -->\n",
+                "```md\n",
+                "- **Response {id}:** example only\n",
+                "```\n",
+            ),
+            id = RESPONSE_ID,
+            summary = SUMMARY,
+            unrelated = UNRELATED_ID,
+        );
+        std::fs::write(&doc, &historical).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "committed inline response"],
+        );
+
+        let recovered = recover_response(&doc, RESPONSE_ID, None).unwrap();
+        let ResponseRecovery::Found(recovered) = recovered else {
+            panic!("committed inline response should be recoverable")
+        };
+        assert_eq!(recovered.source, RecoverySource::GitHistoryCompatibility);
+        assert!(recovered.content.contains(SUMMARY), "{}", recovered.content);
+        assert!(
+            recovered
+                .content
+                .contains(&format!("**Response {RESPONSE_ID}**"))
+        );
+
+        assert_eq!(
+            restore_inline_response_references_from_git(&doc, &historical).unwrap(),
+            [RESPONSE_ID.to_string()]
+        );
+        let index = parse_response_index_file(&response_index_path(&doc)).unwrap();
+        assert_eq!(index[RESPONSE_ID].action, "restored");
+        let archive = std::fs::read_to_string(exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains(SUMMARY), "{archive}");
+        assert!(archive.contains(&format!("**Response {RESPONSE_ID}**")));
+        assert_eq!(
+            dangling_response_references(&doc, &historical).unwrap(),
+            [UNRELATED_ID.to_string()],
+            "bounded recovery must not cover an unrelated true orphan"
+        );
+        assert_eq!(
+            restore_inline_response_references_from_git(&doc, &historical).unwrap(),
+            Vec::<String>::new(),
+            "restoration is idempotent once the tracked index resolves the id"
         );
     }
 

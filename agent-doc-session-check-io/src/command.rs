@@ -406,6 +406,13 @@ pub trait SessionCheckEffects {
     fn settle_response_replay_canonicalization(&self, _file: &Path) -> Result<()> {
         anyhow::bail!("response-replay canonicalization settlement is unavailable")
     }
+    /// Restore a canonical inline response summary from bounded committed Git
+    /// history into the tracked archive/index. The default is inert; production
+    /// owns the exact archive-only commit and must leave the session document
+    /// byte-identical.
+    fn restore_committed_response_evidence(&self, _file: &Path) -> Result<bool> {
+        Ok(false)
+    }
     fn closeout_recovery_hint(&self, file: &Path) -> String;
     /// Whether observed closeout drift is *document-only* — the recovery
     /// classifier finds nothing pending, so no response body is at risk and the
@@ -1429,6 +1436,9 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     let out = crate::with_current_document_pass(|| {
+        if effects.restore_committed_response_evidence(file)? {
+            crate::invalidate_current_document_pass(file);
+        }
         let content = crate::resolve_current_document_content(
             file,
             "session_check_response_archive_orphan_guard",
@@ -1636,6 +1646,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
         self.inner.settle_response_replay_canonicalization(file)
     }
 
+    fn restore_committed_response_evidence(&self, file: &Path) -> Result<bool> {
+        self.inner.restore_committed_response_evidence(file)
+    }
+
     fn closeout_recovery_hint(&self, file: &Path) -> String {
         self.inner.closeout_recovery_hint(file)
     }
@@ -1723,8 +1737,9 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
 /// retained `write_applied` closeout, and resume that exact already-captured
 /// cycle after the save is proven exact. It may also apply and commit the one
 /// lossless response-replay canonicalization proven from `HEAD`, authority,
-/// and disk. It cannot replace, repair, replay, or commit unrelated document
-/// content.
+/// and disk, or an archive-only response-index restoration proven by bounded
+/// committed history. It cannot replace, repair, replay, or commit unrelated
+/// document content.
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,

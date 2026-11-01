@@ -904,11 +904,12 @@ impl agent_doc_git_io::capture_materialization_guard::CaptureMaterializationGuar
             return Ok(Some(capture));
         }
         Ok(agent_doc_capture_io::load_active(file)?.map(|capture| {
-            let response_body = agent_doc_turn::response_replay::retained_response_materialization_body(
-                &capture.response_body,
-                capture.intent_body.as_deref(),
-            )
-            .to_string();
+            let response_body =
+                agent_doc_turn::response_replay::retained_response_materialization_body(
+                    &capture.response_body,
+                    capture.intent_body.as_deref(),
+                )
+                .to_string();
             agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
                 capture_id: capture.capture_id,
                 response_sha256: capture.response_sha256,
@@ -982,12 +983,11 @@ fn projected_active_capture_materialization(
         agent_doc_git_io::capture_materialization_guard::ActiveCaptureMaterialization {
             capture_id: projected.capture_id,
             response_sha256: projected.response_sha256,
-            response_body:
-                agent_doc_turn::response_replay::retained_response_materialization_body(
-                    &projected.response_body,
-                    projected.intent_body.as_deref(),
-                )
-                .to_string(),
+            response_body: agent_doc_turn::response_replay::retained_response_materialization_body(
+                &projected.response_body,
+                projected.intent_body.as_deref(),
+            )
+            .to_string(),
             terminal: !state.is_open(),
         },
     ))
@@ -1798,6 +1798,144 @@ fn commit_proven_response_replay_canonicalization_scoped(file: &Path) -> Result<
         ),
     );
     Ok(true)
+}
+
+/// Recover a response summary already proven by committed document history into
+/// the tracked sibling archive/index without changing the session document.
+///
+/// This is the narrow status-check self-heal for pre-index inline response
+/// children. Authority, disk, and `HEAD` must be byte-identical before the
+/// archive projection is created, and the private-index transaction stages the
+/// unchanged `HEAD` document plus only binary-owned response archive paths.
+pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        let authority =
+            commit_current_document_content(file, "commit_historical_response_evidence_authority")?;
+        if agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty() {
+            return Ok(false);
+        }
+        let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "commit_historical_response_evidence_disk",
+        )?;
+        let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+            return Ok(false);
+        };
+        if authority != disk || disk != head {
+            return Ok(false);
+        }
+
+        let restored =
+            agent_doc_archive_io::restore_inline_response_references_from_git(file, &authority)?;
+        let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
+        let mut affected =
+            agent_doc_archive_io::affected_response_ids_for_commit(file, Some(&head), &head)?;
+        affected.retain(|response_id| referenced.contains(response_id));
+        affected.extend(restored);
+        if affected.is_empty() {
+            return Ok(false);
+        }
+
+        let side_effects = agent_doc_archive_io::response_archive_commit_paths(file)?;
+        anyhow::ensure!(
+            !side_effects.is_empty(),
+            "historical response-evidence recovery produced no archive/index paths"
+        );
+        let (super_root, resolved) = resolve_to_git_root(file)?;
+        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+        let relative_document = resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let msg = agent_doc_archive_io::append_affected_id_trailers(
+            "agent-doc: restore committed response evidence",
+            &relative_document,
+            affected.clone(),
+            std::iter::empty(),
+        );
+
+        let mut attempts = 0u32;
+        let commit_output = loop {
+            match stage_and_commit_exact_paths_once(
+                &git_root,
+                &resolved,
+                Some(&head),
+                &side_effects,
+                &msg,
+            ) {
+                Ok(output) => break output,
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
+                    if attempts < 3 =>
+                {
+                    attempts += 1;
+                    eprintln!(
+                        "[commit] historical response recovery index.lock contention during {} (retry {}/3): {}",
+                        phase, attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(attempts));
+                }
+                Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
+                    attempts += 1;
+                    eprintln!(
+                        "[commit] HEAD moved during historical response recovery (retry {}/3): {}",
+                        attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(attempts));
+                }
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                    anyhow::bail!(
+                        "git {phase} failed after historical response recovery retries: {detail}"
+                    );
+                }
+                Err(CommitTransactionError::RetryableHeadMoved { detail }) => {
+                    anyhow::bail!(
+                        "historical response recovery failed after HEAD compare-and-swap retries: {detail}"
+                    );
+                }
+                Err(CommitTransactionError::IgnoredPath { path }) => {
+                    anyhow::bail!(
+                        "refusing historical response recovery for ignored untracked path {path}"
+                    );
+                }
+                Err(CommitTransactionError::Fatal(error)) => return Err(error),
+            }
+        };
+        anyhow::ensure!(
+            commit_output.status.success(),
+            "historical response recovery update-ref did not report success for {}",
+            file.display()
+        );
+        let post_head = agent_doc_git_io::revision::show_head(file)?;
+        anyhow::ensure!(
+            post_head.as_deref() == Some(head.as_str()),
+            "historical response recovery changed the session document in HEAD for {}",
+            file.display()
+        );
+        let indexed = agent_doc_archive_io::indexed_response_ids(file)?;
+        anyhow::ensure!(
+            affected.is_subset(&indexed),
+            "historical response recovery commit omitted referenced response id(s): {}",
+            affected
+                .difference(&indexed)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if in_submodule {
+            update_parent_submodule_pointer(&super_root, &git_root, &msg)?;
+        }
+        agent_doc_archive_io::record_exchange_archive_receipt(file)?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "historical_response_evidence_restored file={} ids={} proof=git_history_inline_response",
+                file.display(),
+                affected.into_iter().collect::<Vec<_>>().join(",")
+            ),
+        );
+        Ok(true)
+    })
 }
 
 /// How a closeout's delegation to the CP controller's `commit_document` ended.

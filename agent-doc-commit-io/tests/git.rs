@@ -4,7 +4,7 @@ use std::process::Command;
 
 use agent_doc_commit_io::{
     commit, commit_document_only_drift, commit_proven_response_replay_canonicalization,
-    commit_with_authoritative_compaction,
+    commit_with_authoritative_compaction, restore_and_commit_historical_response_evidence,
 };
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 
@@ -848,6 +848,71 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
         assert_eq!(commit_count_before.stdout, commit_count_after.stdout);
+    }
+
+    #[test]
+    fn historical_inline_response_evidence_commits_without_changing_the_document() {
+        const RESPONSE_ID: &str = "[#r-f656df4698e6]";
+        const SUMMARY: &str = "Implemented and installed. Every open agent:todo now emits a selector-preserving todo_sync_required preflight obligation.";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let initial = concat!(
+            "<!-- agent:queue -->\n",
+            "- agent-doc issues in sdk-dev.md\n",
+            "  - The same response was duplicated for several queue items.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        th::commit_file(root, "session.md", initial, "initial queue");
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- agent-doc issues in sdk-dev.md\n",
+                "  - ~~The same response was duplicated for several queue items.~~ — auto-struck: response: {id}\n",
+                "    - **Response {id}:** {summary}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = RESPONSE_ID,
+            summary = SUMMARY,
+        );
+        th::commit_file(root, "session.md", &historical, "committed inline response");
+        let doc = root.join("session.md");
+
+        assert!(
+            restore_and_commit_historical_response_evidence(&doc)
+                .expect("committed inline evidence should be archived")
+        );
+        let head_document = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&head_document.stdout), historical);
+
+        let index = agent_doc_archive_io::parse_response_index_file(
+            &agent_doc_archive_io::response_index_path(&doc),
+        )
+        .unwrap();
+        assert_eq!(index[RESPONSE_ID].action, "restored");
+        let archive =
+            fs::read_to_string(agent_doc_archive_io::exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains(SUMMARY), "{archive}");
+        assert!(archive.contains(&format!("**Response {RESPONSE_ID}**")));
+        let message = Command::new("git")
+            .current_dir(root)
+            .args(["log", "-1", "--format=%B"])
+            .output()
+            .unwrap();
+        let message = String::from_utf8_lossy(&message.stdout);
+        assert!(
+            message.contains("Agent-Doc-Response: r-f656df4698e6"),
+            "{message}"
+        );
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc)
+                .expect("indexed response should be idempotent")
+        );
     }
 
     #[test]

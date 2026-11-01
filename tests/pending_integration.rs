@@ -1345,14 +1345,14 @@ fn write_todo_add_creates_missing_todo_component_and_preserves_items() {
             "- [ ] [#{id}] Verify [#rvw1] in a live pane (source: agent:review [#rvw1])"
         )
     );
-    let pending_close = content.find("<!-- /agent:pending -->").unwrap();
+    let pending_open = content.find("<!-- agent:pending -->").unwrap();
     let todo_open = content
         .find("## Todo\n\n<!-- agent:todo priority -->")
         .unwrap();
-    let review_open = content.find("<!-- agent:review -->").unwrap();
+    let review_close = content.find("<!-- /agent:review -->").unwrap();
     assert!(
-        pending_close < todo_open && todo_open < review_open,
-        "Todo must sit below the backlog and above Review:\n{content}"
+        review_close < todo_open && todo_open < pending_open,
+        "Todo must sit below Review and above the backlog:\n{content}"
     );
 
     // The operator checks the item off and adds their own note.

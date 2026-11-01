@@ -916,8 +916,16 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
                 }
                 let is_queue_row = trimmed.starts_with("- ");
                 if is_queue_row && multiline_queue_item_indent.is_none() {
+                    let row = content.trim_end();
+                    let has_folded_evidence_marker = row.ends_with(">-")
+                        || row.rsplit_once(">-").is_some_and(|(_, suffix)| {
+                            let suffix = suffix.trim();
+                            suffix.starts_with("[#q-")
+                                && suffix.ends_with(']')
+                                && !suffix.contains(char::is_whitespace)
+                        });
                     multiline_queue_item_indent =
-                        content.trim_end().ends_with(">-").then_some(indent);
+                        has_folded_evidence_marker.then_some(indent);
                 }
                 multiline_queue_item_indent.is_some_and(|item_indent| indent > item_indent)
             } else {
@@ -1801,6 +1809,48 @@ mod tests {
         );
         guard_no_conversation_content_inside_tracked_components(&unbalanced)
             .expect_err("an unbalanced delimiter must not hide response debris");
+    }
+
+    #[test]
+    fn guard_accepts_indented_queue_prompt_evidence_inside_run_and_loop_rows() {
+        for component_name in ["run", "loop"] {
+            let document = format!(
+                concat!(
+                    "<!-- agent:exchange -->\n",
+                    "### Re: prior — gpt-5\n\n",
+                    "Done.\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:{} -->\n",
+                    "- ☑️ [#subagent:worker#1] reported result >- [#q-45f4823d1b8a]\n",
+                    "  ### Re: reported result — gpt-5\n",
+                    "  > **Queue prompt:** do [#reported]\n",
+                    "  >\n",
+                    "  > Completed with durable evidence.\n",
+                    "<!-- /agent:{} -->\n",
+                ),
+                component_name, component_name
+            );
+
+            guard_no_conversation_content_inside_tracked_components(&document).unwrap();
+        }
+    }
+
+    #[test]
+    fn guard_rejects_unquoted_queue_prompt_scaffold_inside_run_row() {
+        let document = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: prior — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run -->\n",
+            "- 📥 ordinary queue item\n",
+            "  > **Queue prompt:** leaked response scaffold\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let error = guard_no_conversation_content_inside_tracked_components(document)
+            .expect_err("a run row without the quoted-evidence marker must fail closed");
+        assert!(error.to_string().contains("agent:queue"));
     }
 
     const GH86_WELDED_BACKLOG: &str = concat!(

@@ -336,6 +336,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      `agent-doc queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'`.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode.
+     Before treating the handback as complete, compare it with the queue item,
+     resolved presets, nested authorization, and any effect named by the worker.
+     A prepared review or other artifact is not complete while an authorized
+     post/publish/push/message/API effect remains (`#effectbeforecloseout`). Have
+     the still-running worker execute it, or execute the coordinator-owned
+     effect with the returned artifact, and verify the effect result before
+     response persistence and the final `session-check`. Never let queue
+     auto-clear or `next_queue_prompt` move past that effect. If it cannot run,
+     keep the item live and record the exact blocker.
      The exact generation fence prevents a late result from mutating a reclaimed
      item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration; keep the live row until the coordinator strikes it).
      `☑️` is not an end-of-turn timer: as soon as the coordinator integrates

@@ -7,11 +7,21 @@ carries the rest.
 
 ## Ordering: finish work before persisting
 
-Complete requested implementation, verification, build/install, and local
-inspection **before** persisting. The response-persistence command is the final
-document-mutation boundary for the cycle, not an intermediate checkpoint. After
-`finalize` / `write --commit`, do not start more long-running task work for that
-same turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a
+Complete requested implementation, verification, build/install, local
+inspection, and every authorized current-item or returned-subagent outward
+effect **before** persisting (`#effectbeforecloseout`). This includes posting a
+completed review or performing any push, publish, message, or API mutation that
+the prompt, a resolved preset, a nested authorization, or the worker handback
+requires. Execute the effect and verify its result; a prepared artifact or
+worker report alone is not completion. Do not run the final `session-check`
+first and treat an auto-clear `END THIS TURN` or `next_queue_prompt` as permission
+to abandon the effect. If the effect cannot run, keep the current item live and
+record its exact blocker.
+
+The response-persistence command is the final document-mutation boundary for the cycle,
+not an intermediate checkpoint. After `finalize` / `write --commit`, do
+not start more long-running task work or required outward effects for that same
+turn. Codex hooks in user-level `$CODEX_HOME/hooks.json` plus project-local `.codex/config.toml` are a
 fail-closed backstop, not a replacement for explicit closeout.
 
 ## Agent harnesses own tiered verification

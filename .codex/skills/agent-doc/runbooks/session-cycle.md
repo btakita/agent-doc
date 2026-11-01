@@ -98,9 +98,20 @@ only the compact routing table that survives context compaction.
   protocol lives in [respond.md](respond.md) (`#queuesubagents`).
 - MCP auth / OAuth is a sub-step, not a closeout boundary. Resume the same cycle
   after authentication.
-- Complete requested implementation, verification, build/install, and local
-  inspection before response persistence. Do not keep appending
+- Complete requested implementation, verification, build/install, local
+  inspection, and every authorized current-item or returned-subagent outward
+  effect before response persistence. Do not keep appending
   "starting/continuing" status prose while requested work remains undone.
+- **Authorized effects precede closeout (`#effectbeforecloseout`).** Posting a
+  review, publishing, pushing, sending a message, or making another external
+  mutation required by the prompt, a resolved preset, a nested authorization,
+  or a completed subagent handback is part of the current work. Execute it and
+  verify its result before `respond` / `finalize` and the final `session-check`.
+  A worker report or prepared artifact is not completion while its authorized
+  effect remains. Queue auto-clear and `next_queue_prompt` apply only after
+  those effects finish; they never preempt, defer, or cancel them. If an effect
+  cannot run, keep the current item live and report the exact blocker instead of
+  closing it and advancing to the next head.
 - **Completion-seeking managed work (`#managedlistcompletionintent`).** Every
   incomplete Managed List Item is a durable completion objective, not permission
   to let work linger. During its selected cycle, proactively execute every

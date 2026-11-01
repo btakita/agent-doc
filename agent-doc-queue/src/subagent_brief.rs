@@ -580,12 +580,17 @@ pub const SUBAGENT_OPERATOR_REQUEST_PROTOCOL: &str = concat!(
 /// Task authorization guidance emitted only when all declared presets resolved
 /// (or when the item text is the whole authorization). An unresolved preset
 /// must not inherit example outward actions from this text.
+/// `#effectbeforecloseout`: resolved authorization makes named effects worker
+/// work, not coordinator-closeout leftovers.
 pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "The queue item and resolved preset lookup values above are current operator authorization for the ",
     "work and actions they name. If they say `go`, `push`, `publish`, `commit + push`, or carry an ",
     "authorizing preset such as `#auth`, do the work without asking the operator to repeat those ",
-    "words, reconfirm, or invoke the preset again. This task authorization does not itself grant ",
-    "a harness-native tool permission.\n"
+    "words, reconfirm, or invoke the preset again. Complete each authorized outward effect before ",
+    "handback and include its result or receipt; returning a prepared artifact does not defer the ",
+    "effect to coordinator closeout (`#effectbeforecloseout`). If the effect cannot run, return the ",
+    "exact blocker and leave the task incomplete. This task authorization does not itself grant a ",
+    "harness-native tool permission.\n"
 );
 
 /// `#nestedoutwardauth`: a live nested sub-prompt that names push or publish
@@ -1482,6 +1487,11 @@ agent_doc_format: template
         );
         assert!(preamble.contains("not a chat reply"), "{preamble}");
         assert!(preamble.contains("`publish`"), "{preamble}");
+        assert!(
+            preamble.contains("Complete each authorized outward effect before handback")
+                && preamble.contains("#effectbeforecloseout"),
+            "resolved authorization must keep outward effects ahead of handback: {preamble}"
+        );
         assert!(
             !preamble.contains("ask the coordinator for its text"),
             "a request annotation is not missing backlog text: {preamble}"

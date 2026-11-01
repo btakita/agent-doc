@@ -5136,6 +5136,10 @@ mod tests {
         assert!(persist_closeout.contains("Do not rely on a pre-commit hook"));
         assert!(persist_closeout.contains("Capture two independent proofs"));
         assert!(persist_closeout.contains("deliberately failing run"));
+        assert!(session_cycle.contains("#effectbeforecloseout"));
+        assert!(session_cycle.contains("authorized current-item or returned-subagent outward"));
+        assert!(persist_closeout.contains("Do not run the final `session-check`"));
+        assert!(persist_closeout.contains("auto-clear `END THIS TURN`"));
         assert!(manual_job_packets.contains("target runner's native"));
         assert!(manual_job_packets.contains("generic cross-runner"));
         assert!(manual_job_packets.contains("grep is not acceptable verification"));

@@ -148,7 +148,9 @@ pub const EXCHANGE_PROMPT_PREEMPTION_GUIDANCE: &str = "queue continuation suppre
 
 /// `#bgclearpolicy`: named reason for an in-session drain that hands the item
 /// boundary to the supervisor so the next head runs in a fresh agent context.
-pub const QUEUE_AUTO_CLEAR_YIELD_GUIDANCE: &str = "queue auto-clear — drainable heads remain, and this queue resets agent context between items (the default, positively declared by bare `clear`; legacy `disable-auto-clear` turns it off). After this item's proven closeout, END THIS TURN: do not schedule `/loop`, do not continue in-pane, and do not re-trigger agent-doc <FILE>. The ready supervisor clears the context at the idle boundary (Claude Code `/clear` and OpenCode `/new` typed into the live process; Codex gets a fresh restart) and dispatches the next head to the fresh context. Subagent queues wait until in-flight claims settle before that idle boundary is safe. This is NOT a drained or stalled queue. A clear does not shrink the document: session-accretion `block` measures the exchange size, which only compaction reduces.";
+/// `#effectbeforecloseout`: the handoff owns only later heads and cannot cancel
+/// an authorized effect still owed by the item whose closeout triggered it.
+pub const QUEUE_AUTO_CLEAR_YIELD_GUIDANCE: &str = "queue auto-clear — drainable heads remain, and this queue resets agent context between items (the default, positively declared by bare `clear`; legacy `disable-auto-clear` turns it off). This handoff governs later queue heads only: it never preempts, defers, or cancels an authorized current-item or returned-subagent post/publish/push/message/API effect. Such an effect is part of the item being closed and must already have executed with its result verified before final response persistence and this final session-check (`#effectbeforecloseout`). After that proven closeout, END THIS TURN: do not schedule `/loop`, do not continue in-pane, and do not re-trigger agent-doc <FILE>. The ready supervisor clears the context at the idle boundary (Claude Code `/clear` and OpenCode `/new` typed into the live process; Codex gets a fresh restart) and dispatches the next head to the fresh context. Subagent queues wait until in-flight claims settle before that idle boundary is safe. This is NOT a drained or stalled queue. A clear does not shrink the document: session-accretion `block` measures the exchange size, which only compaction reduces.";
 
 /// `#bgclearpolicy`: apply the auto-clear hand-off to the effective
 /// continuation. A yield turns a required continuation into a named,
@@ -2619,6 +2621,14 @@ mod tests {
         assert!(!yielded.required);
         let guidance = yielded.guidance.unwrap();
         assert!(guidance.contains("END THIS TURN"), "{guidance}");
+        assert!(
+            guidance.contains("never preempts, defers, or cancels")
+                && guidance.contains("authorized current-item or returned-subagent")
+                && guidance
+                    .contains("before final response persistence and this final session-check")
+                && guidance.contains("#effectbeforecloseout"),
+            "auto-clear must not strand an authorized effect from the completed item: {guidance}"
+        );
         assert!(guidance.contains("disable-auto-clear"), "{guidance}");
         assert!(guidance.contains("only compaction reduces"), "{guidance}");
         assert_eq!(apply_auto_clear_yield(required.clone(), false), required);

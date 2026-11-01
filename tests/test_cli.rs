@@ -36068,8 +36068,11 @@ fn test_skill_md_contains_required_steps() {
     let harness = std::fs::read_to_string(runbook_root.join("harness-invocation.md")).unwrap();
     let persist = std::fs::read_to_string(runbook_root.join("persist-closeout.md")).unwrap();
     let planning = std::fs::read_to_string(runbook_root.join("planning-dispatch.md")).unwrap();
+    let queue_auto_loop =
+        std::fs::read_to_string(runbook_root.join("queue-auto-loop.md")).unwrap();
     let respond = std::fs::read_to_string(runbook_root.join("respond.md")).unwrap();
-    let routed_contract = format!("{cycle}\n{harness}\n{persist}\n{planning}\n{respond}");
+    let routed_contract =
+        format!("{cycle}\n{harness}\n{persist}\n{planning}\n{queue_auto_loop}\n{respond}");
 
     let required_steps = ["## 0.", "## 1.", "## 2."];
     for step in &required_steps {
@@ -36147,6 +36150,16 @@ fn test_skill_md_contains_required_steps() {
     assert!(
         persist.contains("billing/spending-limit exhaustion"),
         "persist-closeout.md should name billing/spending-limit failures as CI-start blockers"
+    );
+    assert!(
+        cycle.contains("#effectbeforecloseout")
+            && cycle.contains("returned-subagent outward")
+            && persist.contains("Do not run the final `session-check`")
+            && persist.contains("auto-clear `END THIS TURN`")
+            && respond.contains("A prepared review or other artifact is not complete")
+            && queue_auto_loop.contains("#effectbeforecloseout")
+            && queue_auto_loop.contains("preempt, defer, or cancel"),
+        "installed runbooks must keep authorized effects ahead of closeout and auto-clear"
     );
     assert!(
         respond.contains("create the plan file first"),

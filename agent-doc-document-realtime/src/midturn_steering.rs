@@ -1447,7 +1447,10 @@ pub fn render_steering_context(
 /// (`#reportedrelease`): the closeout that strikes the line, not a bare
 /// `queue release`, which leaves the line queued and answered nowhere.
 pub const REPORTED_WORKER_CLOSEOUT: &str = "When the subagent reports back, persist its result in \
-     THIS turn with the closeout that strikes the item: `agent-doc finalize` with the verbatim \
+     THIS turn. First compare the handback with the item and resolved preset actions: execute and \
+     verify every authorized current-item or returned-subagent outward effect before closeout; a \
+     prepared artifact does not defer a post/publish/push/message/API effect to auto-clear \
+     (`#effectbeforecloseout`). Then use the closeout that strikes the item: `agent-doc finalize` with the verbatim \
      `> **Queue prompt:** <line>` echo for a free-text line, or `--done <id>` for an id head. \
      That closeout also ends the claim. Only when integration must finish first, run \
      `agent-doc queue release` (it records that the worker reported, so the line is never \
@@ -1845,7 +1848,11 @@ pub fn instruction_for(item: &SteeringItem) -> &'static str {
              it; then paste the output of `agent-doc queue brief <FILE> --item <id-or-line>` \
              verbatim at the top of the subagent prompt (the operator's authorization for the \
              item, `#waypostauthorization`). When the subagent reports back, persist its result \
-             in THIS turn with the closeout that strikes the item (`agent-doc finalize` with the \
+             in THIS turn, but first execute and verify every authorized current-item or \
+             returned-subagent outward effect before closeout; \
+             a prepared artifact does not defer a post/publish/push/message/API effect to \
+             auto-clear (`#effectbeforecloseout`). Use the closeout that strikes the item \
+             (`agent-doc finalize` with the \
              verbatim `> **Queue prompt:** <line>` echo, or `--done <id>`); that also ends the \
              claim. Keep working the current item yourself; record the item as dispatched in \
              your response."
@@ -3407,6 +3414,11 @@ mod tests {
             "{queue}"
         );
         assert!(queue.contains("> **Queue prompt:** <line>"), "{queue}");
+        assert!(
+            queue.contains("authorized current-item or returned-subagent outward effect")
+                && queue.contains("#effectbeforecloseout"),
+            "queue dispatch guidance must keep returned effects ahead of closeout: {queue}"
+        );
         let closeout =
             render_closeout_steering_context("tasks/bugs.md", &[item(SteeringSource::Queue)], 0)
                 .unwrap();

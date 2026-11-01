@@ -998,6 +998,33 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
     let mut content = effects.current_document_content(file, "queue_sync")?;
+    // Older binaries could project `📥` onto a retained generated Response child
+    // whose id differed from the terminal parent's latest response backlink.
+    // Repair that binary-owned cosmetic corruption before parsing queue work so
+    // the child cannot reopen its parent or enter the sync payload. The shared
+    // normalizer recognizes only canonical response metadata and leaves ordinary
+    // operator rows, including lookalikes with malformed ids, byte-for-byte.
+    let normalized_responses =
+        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(&content);
+    let response_metadata_repaired = normalized_responses != content;
+    if response_metadata_repaired {
+        effects.converge_document_or_disk(
+            file,
+            &normalized_responses,
+            &content,
+            "queue_sync_response_metadata_repair",
+        )?;
+        content = effects.current_document_content(file, "queue_sync_after_response_repair")?;
+        if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[queue sync] warning: failed to update snapshot after response metadata repair: {warning}"
+            );
+        }
+    }
     let explicit_routing =
         crate::one_shot_sync::sync_explicit_backlog_queue_routes_with_snapshot(
             file,
@@ -1115,10 +1142,15 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
                 eprintln!("[queue sync] warning: failed to update snapshot: {warning}");
             }
         }
-        None if lifecycle_changed || answered_count > 0 || action_debt_remains => {
+        None if response_metadata_repaired
+            || lifecycle_changed
+            || answered_count > 0
+            || action_debt_remains =>
+        {
             println!(
-                "{}: reconciled queue state (lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
+                "{}: reconciled queue state (response_metadata_repaired={}, lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
                 file.display(),
+                response_metadata_repaired,
                 lifecycle_changed,
                 answered_count,
                 if action_debt_remains {
@@ -1571,7 +1603,7 @@ mod tests {
             "## Run <!-- agent:run id=\"main\" subagents preset=\"#spec-test-build-install-commit-push: approve all worktree removals\" priority go -->\n",
             "- ~~The response id belongs in every related response header. [#q-f07f85cbaefd] ⟦local⟧~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-0648593c3bc4] ⟦addressed-at:2026-11-01T12:08:38.000Z⟧\n",
             "  - **Response [#r-0648593c3bc4]:** Added the response id to each related header.\n",
-            "  - **Response [#r-fedcba987654]:** Older retained response context.\n",
+            "  - 📥 **Response [#r-fedcba987654]:** Older retained response context.\n",
             "- another live row\n",
             "<!-- /agent:run -->\n",
         );
@@ -1580,12 +1612,20 @@ mod tests {
 
         sync_with_effects(&effects, &doc).expect("terminal response evidence must be sync-safe");
 
-        let expected = content.replace("- another live row\n", "- 📥 another live row\n");
+        let expected = content
+            .replace(
+                "  - 📥 **Response [#r-fedcba987654]:**",
+                "  - **Response [#r-fedcba987654]:**",
+            )
+            .replace("- another live row\n", "- 📥 another live row\n");
         assert_eq!(
             std::fs::read_to_string(&doc).unwrap(),
             expected,
             "queue sync may paint live siblings but must not reopen or canonicalize a terminal row"
         );
+
+        sync_with_effects(&effects, &doc).expect("response metadata repair must be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
     }
 
     #[test]

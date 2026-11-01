@@ -2031,6 +2031,35 @@ mod tests {
     }
 
     #[test]
+    fn generated_response_marker_repair_preserves_noncanonical_lookalikes() {
+        let canonical_details = concat!(
+            "- 📥 <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "  <summary>Response</summary>\n",
+            "  retained response\n",
+            "  </details>\n",
+        );
+        assert_eq!(
+            normalize_generated_response_lifecycle_markers(canonical_details),
+            canonical_details.replacen("📥 ", "", 1)
+        );
+
+        for malformed in [
+            "- 📥 **Response [#r-NOTCANONICAL]:** Operator-authored lookalike.\n",
+            concat!(
+                "- 📥 <details data-agent-doc-response-id=\"r-NOTCANONICAL\">\n",
+                "  <summary>Response</summary>\n",
+                "  operator-authored lookalike\n",
+                "  </details>\n",
+            ),
+        ] {
+            assert_eq!(
+                normalize_generated_response_lifecycle_markers(malformed),
+                malformed
+            );
+        }
+    }
+
+    #[test]
     fn response_details_inertness_requires_reserved_id_and_balance_not_latest_parent_id() {
         let live = concat!(
             "- live prompt\n",

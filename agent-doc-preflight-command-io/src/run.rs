@@ -1486,7 +1486,7 @@ fn run_with_options_to_writer_in_pass(
         let prompt_source = if let Some(command) = slash_command.as_deref() {
             command.to_string()
         } else {
-            agent_doc_queue::queue_response::submitted_continuation_prompt(
+            agent_doc_queue::queue_response::submitted_continuation_prompt_with_context(
                 queue_authoritative_content,
                 head_prompt,
                 |row| queue_state.head_is_claimed(row),
@@ -2828,7 +2828,7 @@ fn run_with_options_to_writer_in_pass(
         .map(serde_json::from_value)
         .transpose()
         .context("failed to decode derived preflight session accretion")?;
-    let selected_queue_prompts = if exchange_prompt_preempts_queue {
+    let selected_queue_heads = if exchange_prompt_preempts_queue {
         Vec::new()
     } else {
         preflight_read_projection.queue.selected_prompts.clone()
@@ -2836,7 +2836,12 @@ fn run_with_options_to_writer_in_pass(
     // `#qheadannotation`: surface operator text appended to a selected `do [#id]`
     // head as a typed directive instead of leaving it buried in the head string.
     let queue_head_annotations =
-        agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected_queue_prompts);
+        agent_doc_queue::queue_head_annotation::queue_head_annotations(&selected_queue_heads);
+    let selected_queue_prompts =
+        agent_doc_queue::queue_response::submitted_prompts_with_context_for_heads(
+            queue_authoritative_content,
+            &selected_queue_heads,
+        );
     // `#noopnamefault`: a bare `no_changes: true` left the agent to guess why
     // nothing ran, and it told an operator with a live, synced editor to "save
     // the file". Name the source preflight read and any stopped-queue items.
@@ -4114,6 +4119,15 @@ mod tests {
                 .is_some_and(|diff| diff.contains("+do [#runctrlclaude]")),
             "{parsed:#}"
         );
+        let selected = parsed["selected_queue_prompts"][0]
+            .as_str()
+            .expect("selected sequential prompt");
+        assert!(
+            selected.contains("\"item_id\":\"runctrlclaude\""),
+            "{selected}"
+        );
+        assert!(selected.ends_with("\n\ndo [#runctrlclaude]"), "{selected}");
+        assert_eq!(selected.matches("<agent-doc-prompt-context>").count(), 1);
     }
 
     /// A real operator edit still admits a cycle while a head is claimed.

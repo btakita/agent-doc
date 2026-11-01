@@ -3551,6 +3551,197 @@ fn response_context_row(entry: &QueueEntry) -> Option<(usize, Option<String>)> {
         .then(|| (indent, Some(content.to_string())))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructuredResponseContext {
+    Container,
+    Response {
+        response_id: String,
+        summary: String,
+    },
+    Choice {
+        label: String,
+        effect: String,
+    },
+    Action(String),
+}
+
+fn structured_response_context(entry: &QueueEntry) -> Option<(usize, StructuredResponseContext)> {
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    let (indent, _, item_content) = split_list_item(raw)?;
+    let content = item_content.trim();
+    if matches!(content, "**Choices:**" | "**Next actions:**") {
+        return Some((indent, StructuredResponseContext::Container));
+    }
+    if let Some(body) = content.strip_prefix("**Response ")
+        && let Some((response_id, summary)) = body.split_once(":** ")
+        && agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
+        && !summary.trim().is_empty()
+    {
+        return Some((
+            indent,
+            StructuredResponseContext::Response {
+                response_id: response_id.to_string(),
+                summary: summary.trim().to_string(),
+            },
+        ));
+    }
+    if let Some(action) = content.strip_prefix("**Action:** ")
+        && !action.trim().is_empty()
+    {
+        return Some((
+            indent,
+            StructuredResponseContext::Action(action.trim().to_string()),
+        ));
+    }
+    let choice = content.strip_prefix("**")?;
+    let (label, effect) = choice.split_once("**: ")?;
+    (!label.trim().is_empty() && !effect.trim().is_empty()).then(|| {
+        (
+            indent,
+            StructuredResponseContext::Choice {
+                label: label.trim().to_string(),
+                effect: effect.trim().to_string(),
+            },
+        )
+    })
+}
+
+/// Bounded ancestry for the executable prompt at `index`.
+///
+/// Only the strict structural ancestor chain is inspected. Prior siblings and
+/// cousins are deliberately invisible even when they contain response rows.
+pub fn prompt_context_packet_at(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<agent_doc_prompt_context::lineage::PromptContextPacket> {
+    use agent_doc_prompt_context::lineage::{
+        ClaimLineage, PromptContextPacket, PromptOrigin, PromptProducer, PromptProducerKind,
+        PromptSelection, PromptSelectionKind, ResponseLineage,
+    };
+
+    let leaf = match entries.get(index)? {
+        QueueEntry::Prompt(prompt) => prompt,
+        _ => return None,
+    };
+    let mut chain = vec![index];
+    let mut depth = leaf.indent;
+    for (candidate_index, entry) in entries[..index].iter().enumerate().rev() {
+        let Some(indent) = entry_indent(entry) else {
+            continue;
+        };
+        if indent < depth {
+            chain.push(candidate_index);
+            depth = indent;
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+    chain.reverse();
+
+    let origin_index = chain
+        .iter()
+        .copied()
+        .find(|candidate| prompt_of(&entries[*candidate]).is_some())
+        .unwrap_or(index);
+    let origin_prompt = prompt_of(&entries[origin_index])?;
+    let origin_text = nest_row_work_text(&origin_prompt.text);
+    let origin_head = origin_text.lines().next().unwrap_or("").trim();
+    let item_id = match agent_doc_element_queue::queue_head_identity(origin_head) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
+        agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+    };
+
+    let mut response = None;
+    let mut selection = None;
+    let mut decision_evidence = Vec::new();
+    for candidate in chain.iter().copied() {
+        match structured_response_context(&entries[candidate]).map(|(_, context)| context) {
+            Some(StructuredResponseContext::Response {
+                response_id,
+                summary,
+            }) => {
+                response = Some(ResponseLineage {
+                    response_id: Some(response_id),
+                    summary,
+                });
+            }
+            Some(StructuredResponseContext::Choice { label, effect }) => {
+                selection = Some(PromptSelection {
+                    kind: PromptSelectionKind::Choice,
+                    label: Some(label),
+                    text: effect,
+                });
+            }
+            Some(StructuredResponseContext::Action(action)) => {
+                selection = Some(PromptSelection {
+                    kind: PromptSelectionKind::Action,
+                    label: None,
+                    text: action,
+                });
+            }
+            Some(StructuredResponseContext::Container) | None => {}
+        }
+        if candidate != origin_index
+            && let Some(prompt) = prompt_of(&entries[candidate])
+        {
+            let evidence = nest_row_work_text(&prompt.text);
+            if !evidence.trim().is_empty() {
+                decision_evidence.push(evidence);
+            }
+        }
+    }
+
+    let (claim_owner, claim_generation) = projected_claim(&origin_prompt.text)
+        .map(|(owner, generation)| (Some(owner), Some(generation)))
+        .unwrap_or_default();
+    let response_child = response.is_some() || selection.is_some();
+    let producer = if response_child {
+        PromptProducer {
+            kind: PromptProducerKind::Operator,
+            identity: Some("operator".to_string()),
+        }
+    } else if claim_owner.is_some() {
+        PromptProducer {
+            kind: PromptProducerKind::SubagentReturn,
+            identity: claim_owner.clone(),
+        }
+    } else {
+        PromptProducer {
+            kind: PromptProducerKind::Queue,
+            identity: item_id.clone(),
+        }
+    };
+    Some(
+        PromptContextPacket {
+            origin: PromptOrigin {
+                item_id,
+                item_text: origin_text,
+            },
+            response,
+            selection,
+            decision_evidence,
+            producer,
+            claim: claim_generation.map(|generation| ClaimLineage {
+                generation: Some(generation),
+                worker: None,
+            }),
+            ..PromptContextPacket::default()
+        }
+        .bounded(),
+    )
+}
+
+fn projected_claim(text: &str) -> Option<(String, u64)> {
+    let start = text.find("[#subagent:")? + 2;
+    let token = text.get(start..)?.split_once(']')?.0;
+    let (owner, generation) = token.rsplit_once('#')?;
+    let generation = generation.parse().ok()?;
+    Some((owner.to_string(), generation))
+}
+
 /// Index of the first prompt or completed row whose work text is `prompt_text`.
 pub fn prompt_index_for_text(entries: &[QueueEntry], prompt_text: &str) -> Option<usize> {
     entries.iter().position(|entry| {
@@ -3771,6 +3962,13 @@ pub fn submitted_prompt_at(entries: &[QueueEntry], index: usize) -> Option<Strin
     })
 }
 
+/// [`submitted_prompt_at`] with the general prompt ancestry packet attached.
+pub fn submitted_prompt_with_context_at(entries: &[QueueEntry], index: usize) -> Option<String> {
+    let prompt = submitted_prompt_at(entries, index)?;
+    let packet = prompt_context_packet_at(entries, index)?;
+    Some(agent_doc_prompt_context::lineage::attach(&packet, &prompt))
+}
+
 /// Work text submitted when the selected continuation row is a group parent.
 ///
 /// Group parents are not executable nested leaves, so the ordinary
@@ -3790,6 +3988,16 @@ pub fn submitted_group_prompt_at(entries: &[QueueEntry], index: usize) -> Option
     }
     let lineage = nest_vector_at(entries, index, &identity).unwrap_or(identity);
     Some(with_prompt_tree(entries, index, &lineage))
+}
+
+/// [`submitted_group_prompt_at`] with the general prompt ancestry packet attached.
+pub fn submitted_group_prompt_with_context_at(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<String> {
+    let prompt = submitted_group_prompt_at(entries, index)?;
+    let packet = prompt_context_packet_at(entries, index)?;
+    Some(agent_doc_prompt_context::lineage::attach(&packet, &prompt))
 }
 
 const PROMPT_TREE_HEADER: &str =
@@ -10262,6 +10470,33 @@ mod tests {
             "{submitted}"
         );
         assert!(!submitted.contains("**production**"), "{submitted}");
+
+        let packet = prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert_eq!(packet.origin.item_id.as_deref(), Some("answered"));
+        assert_eq!(
+            packet.response.as_ref().unwrap().response_id.as_deref(),
+            Some("[#r-0123456789ab]")
+        );
+        assert_eq!(
+            packet.selection.as_ref().unwrap().label.as_deref(),
+            Some("staging")
+        );
+        assert_eq!(
+            packet.decision_evidence,
+            ["Use staging and run the smoke test."]
+        );
+        assert_eq!(
+            packet.producer.kind,
+            agent_doc_prompt_context::lineage::PromptProducerKind::Operator
+        );
+        let serialized = submitted_prompt_with_context_at(&entries, executable[0]).unwrap();
+        assert_eq!(
+            serialized
+                .matches(agent_doc_prompt_context::lineage::PROMPT_CONTEXT_OPEN)
+                .count(),
+            1
+        );
+        assert!(!serialized.contains("production"), "{serialized}");
     }
 
     #[test]
@@ -10294,6 +10529,22 @@ mod tests {
             ),
             "{submitted}"
         );
+        let packet = prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert_eq!(
+            packet.selection.unwrap().kind,
+            agent_doc_prompt_context::lineage::PromptSelectionKind::Action
+        );
+    }
+
+    #[test]
+    fn projected_subagent_attempt_carries_owner_and_generation_without_inventing_worker() {
+        let entries = parse("- ☑️ [#subagent:sdk#4] fix sdk demo\n").unwrap();
+        let packet = prompt_context_packet_at(&entries, 0).unwrap();
+        assert_eq!(packet.origin.item_id, None);
+        assert_eq!(packet.origin.item_text, "fix sdk demo");
+        assert_eq!(packet.producer.identity.as_deref(), Some("subagent:sdk"));
+        assert_eq!(packet.claim.as_ref().unwrap().generation, Some(4));
+        assert_eq!(packet.claim.as_ref().unwrap().worker, None);
     }
 
     #[test]

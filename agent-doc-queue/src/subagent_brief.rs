@@ -107,6 +107,9 @@ pub struct SubagentAuthorization {
     /// Resolved harness reasoning-effort override for this dispatch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
+    /// Machine-readable copy of the one packet serialized into the submitted prompt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_context: Option<agent_doc_prompt_context::lineage::PromptContextPacket>,
     /// Paste this verbatim at the top of the subagent's prompt.
     pub subagent_prompt_preamble: String,
 }
@@ -227,7 +230,7 @@ pub fn subagent_authorization(document: &str, content: &str, item: &str) -> Suba
         .as_ref()
         .map(|fm| fm.prompt_presets.clone())
         .unwrap_or_default();
-    let submitted = crate::queue_response::submitted_queue_prompt(content, item);
+    let submitted = crate::queue_response::submitted_queue_prompt_with_context(content, item);
     subagent_authorization_with_presets(
         document,
         content,
@@ -383,16 +386,27 @@ pub fn subagent_authorization_with_presets(
         presets,
         model,
         effort,
+        prompt_context: None,
         subagent_prompt_preamble: String::new(),
     };
     let computed;
+    let attached;
     let submitted = match submitted_prompt {
-        Some(prompt) => prompt,
+        Some(prompt) if agent_doc_prompt_context::lineage::split(prompt).0.is_some() => prompt,
+        Some(prompt) => {
+            computed = crate::queue_response::submitted_queue_prompt_with_context(content, item);
+            let packet = agent_doc_prompt_context::lineage::split(&computed)
+                .0
+                .expect("canonical queue prompt has context");
+            attached = agent_doc_prompt_context::lineage::attach(&packet, prompt);
+            attached.as_str()
+        }
         None => {
-            computed = crate::queue_response::submitted_queue_prompt(content, item);
+            computed = crate::queue_response::submitted_queue_prompt_with_context(content, item);
             computed.as_str()
         }
     };
+    authorization.prompt_context = agent_doc_prompt_context::lineage::split(submitted).0;
     authorization.subagent_prompt_preamble =
         render_preamble(document, content, &authorization, submitted);
     authorization
@@ -941,9 +955,11 @@ agent_doc_format: template
             "{preamble}"
         );
         assert!(
-            preamble.contains(
-                "Submitted prompt (`#nestsubmit`), including parent lineage and the prompt tree:\n> https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"
-            ),
+            preamble.contains("Submitted prompt (`#nestsubmit`), including parent lineage and the prompt tree:\n> <agent-doc-prompt-context>\n"),
+            "{preamble}"
+        );
+        assert!(
+            preamble.contains("> https://github.com/haiven-dev/haiven-api/pull/736: #rebase\n"),
             "{preamble}"
         );
         assert!(
@@ -1197,6 +1213,19 @@ agent_doc_format: template
             auth.subagent_prompt_preamble
                 .contains("No backlog/review/todo item in the document carries #nope")
         );
+    }
+
+    #[test]
+    fn authorization_context_round_trips_and_old_payload_defaults_absent() {
+        let content = doc("", "subagents", &["do [#known]"], &["[ ] [#known] thing"]);
+        let auth = subagent_authorization("doc.md", &content, "do [#known]");
+        assert!(auth.prompt_context.is_some());
+        let mut json = serde_json::to_value(&auth).unwrap();
+        let round_trip: SubagentAuthorization = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(round_trip, auth);
+        json.as_object_mut().unwrap().remove("prompt_context");
+        let old: SubagentAuthorization = serde_json::from_value(json).unwrap();
+        assert_eq!(old.prompt_context, None);
     }
 
     #[test]

@@ -521,7 +521,8 @@ pub fn subagent_authorization_for_content(
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     let components = agent_doc_element::element::parse(content).unwrap_or_default();
     let _guard = crate::queue_claim::steer_guard_for(file, content);
-    let submitted = agent_doc_queue::queue_response::submitted_queue_prompt(content, item);
+    let submitted =
+        agent_doc_queue::queue_response::submitted_queue_prompt_with_context(content, item);
     Ok(
         agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
             &file.display().to_string(),
@@ -587,7 +588,8 @@ pub fn subagent_authorization_for_item(
     let prompt_presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(&content, file)?;
     let components = agent_doc_element::element::parse(&content).unwrap_or_default();
-    let submitted = agent_doc_queue::queue_response::submitted_queue_prompt(&content, &head);
+    let submitted =
+        agent_doc_queue::queue_response::submitted_queue_prompt_with_context(&content, &head);
     Ok(
         agent_doc_queue::subagent_brief::subagent_authorization_with_presets(
             &file.display().to_string(),

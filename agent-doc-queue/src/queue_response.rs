@@ -748,12 +748,8 @@ fn located_prompt(
             {
                 return None;
             }
-            crate::document_queue::row_matches_submitted_head_text(
-                entries,
-                index,
-                prompt_text,
-            )
-            .then_some(index)
+            crate::document_queue::row_matches_submitted_head_text(entries, index, prompt_text)
+                .then_some(index)
         }) {
             return Some((entries.clone(), index));
         }
@@ -828,6 +824,62 @@ fn first_submitted_in_document(
     None
 }
 
+fn first_submitted_with_context_in_document(
+    content: &str,
+    head_text: &str,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    for entries in parsed_queue_bodies(content) {
+        for (index, entry) in entries.iter().enumerate() {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if skip(&prompt.text) {
+                continue;
+            }
+            if crate::document_queue::entry_is_group_parent(&entries, index) {
+                if !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                    && crate::document_queue::row_matches_submitted_head_text(
+                        &entries, index, head_text,
+                    )
+                {
+                    return crate::document_queue::submitted_group_prompt_with_context_at(
+                        &entries, index,
+                    );
+                }
+                continue;
+            }
+            if crate::document_queue::row_matches_head_text(&entries, index, head_text) {
+                return crate::document_queue::submitted_prompt_with_context_at(&entries, index);
+            }
+        }
+    }
+    None
+}
+
+fn first_submitted_group_with_context_in_document(
+    content: &str,
+    head_text: &str,
+    skip: &impl Fn(&str) -> bool,
+) -> Option<String> {
+    for entries in parsed_queue_bodies(content) {
+        for (index, entry) in entries.iter().enumerate() {
+            let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            if crate::document_queue::entry_is_group_parent(&entries, index)
+                && crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                && !skip(&prompt.text)
+            {
+                return crate::document_queue::submitted_group_prompt_with_context_at(
+                    &entries, index,
+                );
+            }
+        }
+    }
+    None
+}
+
 /// Submit a selected group parent with its nested authorization/context rows.
 ///
 /// This is continuation-only: ordinary queue submission still treats a
@@ -866,6 +918,64 @@ fn first_submitted_group_in_document(
 /// rows do not match.
 pub fn submitted_queue_prompt(content: &str, head_text: &str) -> String {
     submitted_queue_prompt_skipping(content, head_text, |_| false)
+}
+
+/// Prompt text plus its bounded ancestry packet.
+///
+/// This is the canonical serialized representation used by both sequential
+/// execution and subagent authorization.
+pub fn submitted_queue_prompt_with_context(content: &str, head_text: &str) -> String {
+    if head_text.trim().is_empty() || crate::queue_command::slash_command_text(head_text).is_some()
+    {
+        return head_text.to_string();
+    }
+    first_submitted_with_context_in_document(content, head_text, &|_| false)
+        .unwrap_or_else(|| attach_fallback_context(head_text))
+}
+
+/// [`submitted_continuation_prompt`] with the canonical ancestry packet.
+pub fn submitted_continuation_prompt_with_context(
+    content: &str,
+    head_text: &str,
+    skip: impl Fn(&str) -> bool,
+) -> String {
+    if head_text.trim().is_empty() || crate::queue_command::slash_command_text(head_text).is_some()
+    {
+        return head_text.to_string();
+    }
+    let prefer = |row: &str| {
+        skip(row)
+            || !crate::queue_continuation::is_drainable_queue_head(
+                &agent_doc_document::queue_projection::strip_in_progress_marker(row),
+            )
+    };
+    first_submitted_with_context_in_document(content, head_text, &prefer)
+        .or_else(|| first_submitted_group_with_context_in_document(content, head_text, &prefer))
+        .or_else(|| first_submitted_group_with_context_in_document(content, head_text, &skip))
+        .or_else(|| first_submitted_with_context_in_document(content, head_text, &skip))
+        .unwrap_or_else(|| attach_fallback_context(head_text))
+}
+
+fn attach_fallback_context(head_text: &str) -> String {
+    use agent_doc_prompt_context::lineage::{
+        PromptContextPacket, PromptOrigin, PromptProducer, PromptProducerKind,
+    };
+    let (existing, body) = agent_doc_prompt_context::lineage::split(head_text);
+    if let Some(packet) = existing {
+        return agent_doc_prompt_context::lineage::attach(&packet, body);
+    }
+    let packet = PromptContextPacket {
+        origin: PromptOrigin {
+            item_id: None,
+            item_text: body.trim().to_string(),
+        },
+        producer: PromptProducer {
+            kind: PromptProducerKind::Queue,
+            identity: None,
+        },
+        ..PromptContextPacket::default()
+    };
+    agent_doc_prompt_context::lineage::attach(&packet, body)
 }
 
 /// [`submitted_queue_prompt`], skipping live rows for which `skip` is true.
@@ -925,9 +1035,34 @@ pub fn submitted_continuation_prompt(
 /// different parents. A later section's rows and subprompts stay in that
 /// head's prompt tree when an earlier section already matched a different head.
 pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<String> {
+    submitted_prompts_for_heads_mode(content, heads, false)
+}
+
+/// [`submitted_prompts_for_heads`] with one bounded ancestry packet per prompt.
+pub fn submitted_prompts_with_context_for_heads(content: &str, heads: &[String]) -> Vec<String> {
+    submitted_prompts_for_heads_mode(content, heads, true)
+}
+
+fn submitted_prompts_for_heads_mode(
+    content: &str,
+    heads: &[String],
+    include_context: bool,
+) -> Vec<String> {
     let bodies = parsed_queue_bodies(content);
     if bodies.is_empty() {
-        return heads.to_vec();
+        return heads
+            .iter()
+            .map(|head| {
+                if include_context
+                    && !head.trim().is_empty()
+                    && crate::queue_command::slash_command_text(head).is_none()
+                {
+                    attach_fallback_context(head)
+                } else {
+                    head.clone()
+                }
+            })
+            .collect();
     }
     let mut cursors = vec![0usize; bodies.len()];
     heads
@@ -945,7 +1080,15 @@ pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<Strin
                         continue;
                     }
                     let submitted = if crate::document_queue::entry_is_group_parent(entries, idx) {
-                        crate::document_queue::submitted_group_prompt_at(entries, idx)
+                        if include_context {
+                            crate::document_queue::submitted_group_prompt_with_context_at(
+                                entries, idx,
+                            )
+                        } else {
+                            crate::document_queue::submitted_group_prompt_at(entries, idx)
+                        }
+                    } else if include_context {
+                        crate::document_queue::submitted_prompt_with_context_at(entries, idx)
                     } else {
                         crate::document_queue::submitted_prompt_at(entries, idx)
                     };
@@ -956,7 +1099,11 @@ pub fn submitted_prompts_for_heads(content: &str, heads: &[String]) -> Vec<Strin
                     return submitted;
                 }
             }
-            head.clone()
+            if include_context {
+                attach_fallback_context(head)
+            } else {
+                head.clone()
+            }
         })
         .collect()
 }
@@ -3380,6 +3527,46 @@ queue_active: true
             submitted_continuation_prompt(content, "#rebase", |_| false),
             submitted
         );
+        let continuation =
+            submitted_continuation_prompt_with_context(content, "#rebase", |_| false);
+        let (packet, body) = agent_doc_prompt_context::lineage::split(&continuation);
+        assert!(packet.is_some());
+        assert_eq!(body, submitted);
+    }
+
+    #[test]
+    fn sequential_and_subagent_paths_share_the_exact_lineage_packet() {
+        let content = concat!(
+            "<!-- agent:queue go -->\n",
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Deployment is blocked. Which target?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging.\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let head = "Use staging and run the smoke test.".to_string();
+        let single = submitted_queue_prompt_with_context(content, &head);
+        let batch = submitted_prompts_with_context_for_heads(content, &[head]);
+        assert_eq!(batch.as_slice(), std::slice::from_ref(&single));
+
+        let (packet, body) = agent_doc_prompt_context::lineage::split(&single);
+        let packet = packet.expect("the shared serialized packet is present");
+        assert_eq!(
+            agent_doc_prompt_context::lineage::serialize(&packet),
+            single.split("\n\n").next().unwrap()
+        );
+        assert!(body.contains("**staging**"), "{body}");
+        assert!(!body.contains("**production**"), "{body}");
+    }
+
+    #[test]
+    fn fallback_context_keeps_free_text_identity_absent() {
+        let submitted = submitted_queue_prompt_with_context("", "unresolved free text");
+        let (packet, body) = agent_doc_prompt_context::lineage::split(&submitted);
+        assert_eq!(packet.unwrap().origin.item_id, None);
+        assert_eq!(body, "unresolved free text");
     }
 
     /// A selected tracked directive can own the operator's answers to a prior

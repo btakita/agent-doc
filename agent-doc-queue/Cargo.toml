@@ -22,6 +22,7 @@ agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.564
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.564" }
 agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.564" }
 agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.564" }
+agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.35.564" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.564" }
 anyhow = "1"
 lazily = { version = "0.61.0", features = ["thread-safe"] }

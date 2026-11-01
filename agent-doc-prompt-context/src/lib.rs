@@ -4,6 +4,7 @@ use agent_doc_session_accretion::{SessionAccretionReport, level_label};
 use std::path::Path;
 
 pub mod dynamic_context;
+pub mod lineage;
 pub mod loaded_context;
 
 const BACKLOG_HEAD_LIMIT: usize = 3;

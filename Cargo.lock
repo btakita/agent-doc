@@ -1782,6 +1782,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-lease",
  "agent-doc-markdown-ast",
+ "agent-doc-prompt-context",
  "agent-doc-prompt-lines",
  "agent-doc-state-scope",
  "anyhow",

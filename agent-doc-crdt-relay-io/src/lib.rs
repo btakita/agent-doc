@@ -9183,20 +9183,29 @@ mod tests {
             .as_secs();
         let mut claims = agent_doc_queue::queue_claim::QueueClaimLedger::default();
         claims.claim(item, "subagent:sdk", now, 3600);
-        claims
+        let running = claims
             .start(item, "subagent:sdk", "worker:sdk", now, 3600, Some(1))
             .unwrap();
-        let reported = claims.report(item, Some(1)).unwrap();
         let key = agent_doc_queue::queue_claim::completion_attestation_key(
-            &reported.identity,
-            &reported.owner,
-            reported.generation,
-            reported.claimed_at_secs,
-            &reported.worker.as_ref().unwrap().worker_id,
+            &running.identity,
+            &running.owner,
+            running.generation,
+            running.claimed_at_secs,
+            &running.worker.as_ref().unwrap().worker_id,
         )
         .unwrap();
         let mut receipts =
             agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger::default();
+        receipts
+            .record_response_capture(
+                &running,
+                key.clone(),
+                "The SDK demo was completed.",
+                now + 1,
+                3600,
+            )
+            .unwrap();
+        let reported = claims.report(item, Some(1)).unwrap();
         receipts
             .record(&reported, key.clone(), now + 1, 3600)
             .unwrap();

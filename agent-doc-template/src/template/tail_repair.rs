@@ -897,7 +897,7 @@ pub fn repair_subagent_completion_cells_inside_queue(doc: &str) -> Result<Option
                 agent_doc_document::subagent_completion::is_completion_heading(line.trim_start())
             })
     }) else {
-        return Ok(None);
+        return repair_orphaned_completion_queue_prompt_tail(doc);
     };
     if !components
         .iter()
@@ -966,31 +966,47 @@ pub fn repair_subagent_completion_cells_inside_queue(doc: &str) -> Result<Option
         let strict = canonical_lines.join("\n");
         let strict_range =
             agent_doc_document::subagent_completion::completion_cell_line_ranges(&strict);
-        let canonical = if strict_range.len() == 1 && strict_range[0] == (0..canonical_lines.len())
-        {
-            strict
-        } else {
-            let body = &canonical_lines[1..canonical_lines.len().saturating_sub(1)];
-            if body.first().copied() != Some("> **Subagent response:**")
-                || body.len() < 2
-                || body
-                    .iter()
-                    .any(|line| !line.is_empty() && !line.starts_with('>'))
-            {
-                index += 1;
-                continue;
-            }
-            let body = body.join("\n");
-            let digest = agent_doc_hash::content_hash(&body);
-            format!(
-                "{}\n{}{digest} -->\n{body}\n{marker}",
-                canonical_lines[0],
-                agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX,
-            )
-        };
+        let mut canonical =
+            if strict_range.len() == 1 && strict_range[0] == (0..canonical_lines.len()) {
+                strict
+            } else {
+                let body = &canonical_lines[1..canonical_lines.len().saturating_sub(1)];
+                if body.first().copied() != Some("> **Subagent response:**")
+                    || body.len() < 2
+                    || body
+                        .iter()
+                        .any(|line| !line.is_empty() && !line.starts_with('>'))
+                {
+                    index += 1;
+                    continue;
+                }
+                let body = body.join("\n");
+                let digest = agent_doc_hash::content_hash(&body);
+                format!(
+                    "{}\n{}{digest} -->\n{body}\n{marker}",
+                    canonical_lines[0],
+                    agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX,
+                )
+            };
 
-        cells.push((index..marker_index + 1, key.to_string(), canonical));
-        index = marker_index + 1;
+        // Older completion scaffolds wrote their exact Queue-prompt evidence
+        // immediately after the keyed marker. It is part of the same binary
+        // cell even though the completion-evidence digest intentionally covers
+        // only the worker response. Move that contiguous tail atomically so it
+        // cannot remain behind as executable queue children.
+        let mut cell_end = marker_index + 1;
+        while cell_end < lines.len()
+            && lines[cell_end]
+                .trim_start()
+                .starts_with("> **Queue prompt:**")
+        {
+            canonical.push('\n');
+            canonical.push_str(lines[cell_end].trim_start());
+            cell_end += 1;
+        }
+
+        cells.push((index..cell_end, key.to_string(), canonical));
+        index = cell_end;
     }
 
     if cells.is_empty() {
@@ -1040,6 +1056,113 @@ pub fn repair_subagent_completion_cells_inside_queue(doc: &str) -> Result<Option
     };
     guard_no_conversation_content_inside_tracked_components(&repaired)?;
     Ok(Some(repaired))
+}
+
+/// Finish an interrupted rolling repair where the keyed completion cell has
+/// already reached exchange but its immediately trailing Queue-prompt evidence
+/// remained under the reported queue row.
+///
+/// The tail is moved only when one of its exact prompt lines matches the queue
+/// item recorded by a digest-attested completion cell in exchange. That keyed
+/// cross-component proof keeps ordinary operator-authored blockquotes intact.
+fn repair_orphaned_completion_queue_prompt_tail(doc: &str) -> Result<Option<String>> {
+    let Ok(components) = element::parse(doc) else {
+        return Ok(None);
+    };
+    let Some(exchange) = components
+        .iter()
+        .find(|component| component.name == "exchange")
+    else {
+        return Ok(None);
+    };
+    let exchange_content = exchange.content(doc);
+    let evidence = agent_doc_document::subagent_completion::completion_evidence(exchange_content);
+    if evidence.is_empty() {
+        return Ok(None);
+    }
+
+    for queue in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "queue" | "run"))
+    {
+        let queue_body = queue.content(doc);
+        let segments = queue_body.split_inclusive('\n').collect::<Vec<_>>();
+        let lines = segments
+            .iter()
+            .map(|segment| segment.trim_end_matches(['\r', '\n']))
+            .collect::<Vec<_>>();
+        let mut start = 0usize;
+        while start < lines.len() {
+            let prompt = lines[start].trim_start();
+            if !prompt.starts_with("> **Queue prompt:**") {
+                start += 1;
+                continue;
+            }
+            let prompt_indent = lines[start].len().saturating_sub(prompt.len());
+            let Some(parent_index) = (0..start)
+                .rev()
+                .find(|&index| !lines[index].trim().is_empty())
+            else {
+                start += 1;
+                continue;
+            };
+            let parent = lines[parent_index].trim_start();
+            let parent_indent = lines[parent_index].len().saturating_sub(parent.len());
+            if !parent.starts_with("- ☑️") || parent_indent >= prompt_indent {
+                start += 1;
+                continue;
+            }
+
+            let mut end = start;
+            while end < lines.len() && lines[end].trim_start().starts_with("> **Queue prompt:**") {
+                end += 1;
+            }
+            let matching = lines[start..end].iter().find_map(|line| {
+                let prompt = line
+                    .trim_start()
+                    .strip_prefix("> **Queue prompt:**")?
+                    .trim();
+                let prompt = agent_doc_document::subagent_completion::heading_item_text(prompt);
+                evidence.iter().find(|cell| cell.item == prompt)
+            });
+            let Some(matching) = matching else {
+                start = end;
+                continue;
+            };
+
+            let tail = lines[start..end]
+                .iter()
+                .map(|line| line.trim_start())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let mut rebuilt_queue = String::with_capacity(queue_body.len());
+            for (line_index, segment) in segments.iter().enumerate() {
+                if !(start..end).contains(&line_index) {
+                    rebuilt_queue.push_str(segment);
+                }
+            }
+            let queue_repaired = queue.replace_content(doc, &rebuilt_queue);
+            let repaired_components = element::parse(&queue_repaired)
+                .context("orphaned completion-tail repair broke component structure")?;
+            let exchange = repaired_components
+                .iter()
+                .find(|component| component.name == "exchange")
+                .context("exchange disappeared during orphaned completion-tail repair")?;
+            let marker = agent_doc_document::subagent_completion::marker(&matching.key);
+            let exchange_content = exchange.content(&queue_repaired);
+            let marker_line = format!("{marker}\n");
+            let replacement = format!("{marker}\n{tail}\n");
+            let repaired_exchange = exchange_content.replacen(&marker_line, &replacement, 1);
+            anyhow::ensure!(
+                repaired_exchange != exchange_content,
+                "completion marker disappeared during orphaned Queue-prompt-tail repair"
+            );
+            let repaired = exchange.replace_content(&queue_repaired, &repaired_exchange);
+            guard_no_conversation_content_inside_tracked_components(&repaired)?;
+            return Ok(Some(repaired));
+        }
+    }
+    Ok(None)
 }
 
 /// Reject binary-authored conversation scaffolding embedded inside a tracked
@@ -2380,6 +2503,9 @@ mod tests {
             "  > Implemented the old task.\n",
             "  > **Queue prompt:** old task\n",
             "  <!-- agent-doc-subagent-completion key=legacy-key -->\n",
+            "  > **Queue prompt:** first related task\n",
+            "  > **Queue prompt:** second related task\n",
+            "  > **Queue prompt:** old task\n",
             "- next task\n",
             "<!-- /agent:run -->\n",
         );
@@ -2395,6 +2521,10 @@ mod tests {
             .content(&repaired);
         assert!(!run.contains("### Re: Subagent completed"), "{repaired}");
         assert!(!run.contains("> **Queue prompt:** old task"), "{repaired}");
+        assert!(
+            !run.contains("> **Queue prompt:** first related task"),
+            "{repaired}"
+        );
         assert!(run.contains("- next task"), "{repaired}");
 
         let exchange = components
@@ -2410,6 +2540,15 @@ mod tests {
             exchange.contains(agent_doc_document::subagent_completion::RESPONSE_DIGEST_PREFIX),
             "legacy quoted body must be upgraded to digest-attested evidence: {repaired}"
         );
+        assert!(
+            exchange.contains(
+                "<!-- agent-doc-subagent-completion key=legacy-key -->\n\
+                 > **Queue prompt:** first related task\n\
+                 > **Queue prompt:** second related task\n\
+                 > **Queue prompt:** old task"
+            ),
+            "the keyed Queue-prompt tail must move atomically with the cell: {repaired}"
+        );
         assert_eq!(
             agent_doc_document::subagent_completion::completion_response(exchange, "legacy-key")
                 .as_deref(),
@@ -2420,6 +2559,60 @@ mod tests {
             repair_subagent_completion_cells_inside_queue(&repaired).unwrap(),
             None,
             "repair must be idempotent"
+        );
+    }
+
+    #[test]
+    fn repair_finishes_orphaned_queue_prompt_tail_after_partial_relocation() {
+        let key = "745cf1c8d85051664584e9ad9369e8f911ffb410b2e322ef925bf0c37a428ec1";
+        let item = "The agent-doc sessions are split between two tmux windows.";
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:split_tmux_windows",
+            item,
+            key,
+            "Implemented and verified the split-window fix.",
+        )
+        .unwrap();
+        let document = format!(
+            "<!-- agent:exchange -->\n{cell}\n<!-- agent:boundary:abc123 -->\n<!-- /agent:exchange -->\n\n<!-- agent:run id=main subagents -->\n- ☑️ [#subagent:split_tmux_response_quality_recovery#2] This response did not give me any useful information: >- [#q-d8ef5105ef17]\n  > **Queue prompt:** preset guidance task\n  > **Queue prompt:** symbolic lookup task\n  > **Queue prompt:** {item}\n- next task\n<!-- /agent:run -->\n"
+        );
+
+        let repaired = repair_subagent_completion_cells_inside_queue(&document)
+            .unwrap()
+            .expect("the interrupted repair tail must remain recoverable");
+        let components = element::parse(&repaired).unwrap();
+        let run = components
+            .iter()
+            .find(|component| {
+                component
+                    .content(&repaired)
+                    .contains("This response did not give me any useful information")
+            })
+            .unwrap()
+            .content(&repaired);
+        assert!(!run.contains("> **Queue prompt:**"), "{repaired}");
+        assert!(run.contains("This response did not give me any useful information"));
+        assert!(run.contains("- next task"));
+
+        let exchange = components
+            .iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&repaired);
+        assert!(
+            exchange.contains(&format!(
+                "{}\n> **Queue prompt:** preset guidance task\n\
+                 > **Queue prompt:** symbolic lookup task\n\
+                 > **Queue prompt:** {item}",
+                agent_doc_document::subagent_completion::marker(key)
+            )),
+            "the orphaned tail must reattach to its keyed completion cell: {repaired}"
+        );
+        guard_no_conversation_content_inside_tracked_components(&repaired).unwrap();
+        assert_eq!(
+            repair_subagent_completion_cells_inside_queue(&repaired).unwrap(),
+            None,
+            "tail recovery must be idempotent"
         );
     }
 

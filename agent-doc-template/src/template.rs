@@ -2574,16 +2574,18 @@ All green.
             !exchange.content(&result).contains("Verify [#gate]"),
             "todo checklist must not spill into exchange:\n{result}"
         );
-        // `agent:todo` lands directly below `agent:queue` and above `agent:backlog`.
-        let queue_end = result.find("<!-- /agent:queue -->").unwrap();
+        // The authored backlog/review order remains untouched; the missing
+        // `agent:todo` lands after review and before the next existing
+        // canonical successor.
+        let review_end = result.find("<!-- /agent:review -->").unwrap();
         let todo_start = result.find("<!-- agent:todo priority -->").unwrap();
-        let backlog_heading = result.find("## Backlog").unwrap();
+        let done_heading = result.find("## Done").unwrap();
         assert!(
-            queue_end < todo_start && todo_start < backlog_heading,
-            "agent:todo must sit below agent:queue and above agent:backlog:\n{result}"
+            review_end < todo_start && todo_start < done_heading,
+            "agent:todo must sit below agent:review and above agent:done:\n{result}"
         );
         assert!(
-            result.contains("<!-- /agent:queue -->\n\n## Todo\n\n<!-- agent:todo priority -->\n"),
+            result.contains("<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo priority -->\n"),
             "{result}"
         );
     }

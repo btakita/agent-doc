@@ -4134,7 +4134,7 @@ mod tests {
     }
 
     #[test]
-    fn todo_add_creates_missing_todo_below_backlog_and_is_idempotent() {
+    fn todo_add_creates_missing_todo_after_review_and_is_idempotent() {
         let (_tmp, doc) = doc_with_review("- [/] [#aa11] gated work\n");
         let before = fs::read_to_string(&doc).unwrap();
         assert!(!before.contains("agent:todo"));
@@ -4151,7 +4151,7 @@ mod tests {
         assert_ne!(id, "aa11", "{after}");
         assert!(
             after.contains(&format!(
-                "<!-- /agent:backlog -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane (source: agent:review [#aa11])\n<!-- /agent:todo -->\n\n<!-- agent:review -->"
+                "<!-- /agent:review -->\n\n## Todo\n\n<!-- agent:todo priority -->\n- [ ] [#{id}] Verify [#aa11] in a live pane (source: agent:review [#aa11])\n<!-- /agent:todo -->"
             )),
             "{after}"
         );

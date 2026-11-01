@@ -1320,6 +1320,15 @@ pub fn normalize_exchange_prefixes_for_targets(doc: &str, prefix_lines: &[String
                     is_prefixed_exchange_response_heading_for_prefix_repair(trimmed);
                 return doc_line.to_string();
             }
+            // Markdown quote envelopes carry their own prompt provenance.  In
+            // particular, binary-authored `> **Chat prompt ...**` records must
+            // stay valid blockquotes even when a stale normalization target
+            // names the exact line.  Prefixing one as `❯ > ...` disagrees with
+            // committed-exchange canonicalization and creates perpetual
+            // post-commit working-tree drift.
+            if trimmed.starts_with('>') {
+                return doc_line.to_string();
+            }
             let normalized = doc_line.trim_end();
             let is_target = normalization_target_matches_line(doc_line, &remaining);
             if in_response_block {
@@ -3011,6 +3020,25 @@ The separate ONNX path remains optional.
 
         assert_eq!(repaired, working);
         assert!(!repaired.contains("\n❯ "));
+    }
+
+    #[test]
+    fn normalize_exchange_prefixes_never_prefixes_chat_prompt_quote_preludes() {
+        let working = "\
+<!-- agent:exchange patch=append -->
+> **Chat prompt (#chatprompt:abc123):** Why did the hook stop?
+
+### Re: Hook state — gpt-5
+
+The queue guard stopped terminal closeout.
+<!-- /agent:exchange -->
+";
+        let target = "> **Chat prompt (#chatprompt:abc123):** Why did the hook stop?";
+
+        let repaired = normalize_exchange_prefixes_for_targets(working, &[target.to_string()]);
+
+        assert_eq!(repaired, working);
+        assert!(!repaired.contains("❯ > **Chat prompt"));
     }
 
     #[test]

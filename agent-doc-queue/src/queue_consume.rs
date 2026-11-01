@@ -4173,6 +4173,76 @@ mod tests {
         );
     }
 
+    /// `#reviewloopterminal`: posting a review is a phase result, not terminal
+    /// proof for a goal-like review preset when that review reports actionable
+    /// findings. The exact queue echo must remain a deferral in both the live
+    /// closeout and the committed-exchange residue pass. A later fresh clean
+    /// result for the same unchanged head can close the row.
+    #[test]
+    fn goal_like_review_preset_waits_for_address_and_a_fresh_clean_review() {
+        const HEAD: &str = "https://github.com/example/sample-sdk/pull/190: #deep-review";
+        let content = concat!(
+            "---\nqueue_active: true\n",
+            "prompt_presets:\n",
+            "  '#deep-review': '/goal Keep one coordinator-owned review, fix, and fresh-review loop live until clean.'\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- https://github.com/example/sample-sdk/pull/190: #deep-review\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let actionable_review = concat!(
+            "### Re: independent review cycle 1\n\n",
+            "> **Queue prompt:** https://github.com/example/sample-sdk/pull/190: #deep-review\n\n",
+            "Posted one review against exact unchanged head `abc123`.\n\n",
+            "The review is not clean. It identifies one must-fix P2 in reconnect bookkeeping.\n\n",
+            "The review effect is published. Its actionable finding is the next fixer dependency; ",
+            "the pull request cannot be review-clean until that fix lands and a fresh exact-head review passes.\n",
+        );
+
+        assert!(
+            !queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                actionable_review,
+                &[],
+            )
+            .unwrap(),
+            "an actionable review must keep the goal-like preset row live"
+        );
+        assert!(crate::queue_response::latest_queue_head_echo_is_deferral(
+            content,
+            actionable_review,
+            HEAD,
+        ));
+
+        let clean_review = concat!(
+            "### Re: independent review cycle 2\n\n",
+            "> **Queue prompt:** https://github.com/example/sample-sdk/pull/190: #deep-review\n\n",
+            "A fresh independent review covered exact unchanged head `def456`. ",
+            "It is review-clean with zero must-fix and zero optional findings, and the final remote-head re-query is unchanged.\n",
+        );
+        assert!(
+            queue_consumption_allowed_for_response(
+                Path::new("session.md"),
+                Some(content),
+                content,
+                clean_review,
+                &[],
+            )
+            .unwrap(),
+            "fresh review-clean evidence on the unchanged head is terminal"
+        );
+        let accumulated = format!(
+            "{actionable_review}\n{clean_review}\n### Re: another pull request\n\n\
+             Its review is not review-clean and one P1 survives.\n"
+        );
+        assert!(
+            !crate::queue_response::latest_queue_head_echo_is_deferral(content, &accumulated, HEAD,),
+            "the latest clean echo supersedes the earlier actionable review"
+        );
+    }
+
     #[test]
     fn preset_incidental_status_words_do_not_create_a_deferral_veto() {
         let content = upgrade_preset_document();

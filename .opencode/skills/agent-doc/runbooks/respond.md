@@ -612,6 +612,30 @@ Address every resolved preset expansion supplied by preflight. The closeout gate
 matches response evidence against those expansions, so a literal `#preset` or
 `[#preset]` queue-head quote is optional.
 
+**Goal-like review presets close on their terminal condition, not on one phase
+effect (`#reviewloopterminal`).** When a resolved preset owns a review → fix →
+fresh-review loop, posting one review does not complete the queue row. If that
+review has any actionable finding:
+
+1. Keep the coordinator-owned preset row live. Put `**Deferred:**` immediately
+   after its queue-prompt echo and state the next dependency; the binary also
+   treats explicit non-clean/actionable-review prose as a fail-closed deferral.
+2. Materialize the fixer as an immediate dependent effect with
+   `agent-doc queue follow-up <FILE> --id <origin-queue-id> --after <origin-head>
+   --item "<fixer-preset invocation>"`. Claim, spawn, and start that new row in
+   the same coordinator cycle under the normal subagent protocol. Do not leave
+   the dependency only in response prose or backlog.
+3. After the fixer publishes, fetch the new exact remote head and dispatch a
+   fresh independent reviewer. A review of the old head, or a review by the
+   fixer, cannot satisfy the preset.
+4. Close the original row only when the preset's latest terminal check is a
+   fresh independent review of the unchanged current remote head with zero
+   actionable findings and every other terminal gate the preset names is clear.
+
+The goal/preset must identify the fixer preset and its required arguments. If it
+does not, keep the row deferred and ask for that missing contract instead of
+inventing an effect.
+
 An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave

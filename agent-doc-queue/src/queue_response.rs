@@ -1927,6 +1927,30 @@ const FREE_TEXT_HEAD_DEFERRAL_MARKERS: &[&str] = &[
     "will be handled next",
 ];
 
+/// Review-result phrases that prove a goal-like review preset has not reached
+/// its terminal condition (`#reviewloopterminal`). Unlike ordinary deferral
+/// markers, these may appear after a short publication paragraph, so their scan
+/// extends to the next response heading or queue-prompt echo. The forms are
+/// deliberately nonzero/negative: "no actionable findings" and "zero must-fix
+/// findings" remain valid terminal evidence.
+const NONTERMINAL_REVIEW_MARKERS: &[&str] = &[
+    "review is not clean",
+    "not review-clean",
+    "not review clean",
+    "one must-fix",
+    "identifies a must-fix",
+    "found a must-fix",
+    "one actionable finding",
+    "found an actionable finding",
+    "actionable findings remain",
+    "actionable findings survive",
+    "actionable finding remains",
+    "actionable finding survives",
+    "one p0 survives",
+    "one p1 survives",
+    "one p2 survives",
+];
+
 /// True when the response both quotes `head_text` AND states, next to that quote,
 /// that the head is still outstanding (`#ftstrikedefer`).
 ///
@@ -2114,6 +2138,13 @@ fn text_states_deferral(text: &str) -> bool {
         .any(|marker| prose.contains(marker))
 }
 
+fn text_states_nonterminal_review(text: &str) -> bool {
+    let prose = deferral_scan_text(text);
+    NONTERMINAL_REVIEW_MARKERS
+        .iter()
+        .any(|marker| prose.contains(marker))
+}
+
 /// The lead statement of a block: its first list item (with continuation
 /// lines) when the block is a list, otherwise the whole paragraph.
 fn block_lead_statement(block: &str) -> String {
@@ -2179,6 +2210,25 @@ fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
     if text_states_deferral(&prose(blocks[index])) {
         return true;
     }
+
+    // A review response often opens with a one-line publication receipt and
+    // states its verdict in the following paragraph. Scan only this response
+    // cell: another queue echo or `### Re:` heading begins a different result.
+    let states_nonterminal_review = blocks
+        .iter()
+        .enumerate()
+        .skip(index)
+        .take_while(|(offset, block)| {
+            *offset == index
+                || !block.lines().any(|line| {
+                    let line = line.trim_start();
+                    line.starts_with("### Re:") || line.starts_with("> **Queue prompt:**")
+                })
+        })
+        .any(|(_, block)| text_states_nonterminal_review(&prose(block)));
+    if states_nonterminal_review {
+        return true;
+    }
     let Some(next) = blocks
         .iter()
         .skip(index + 1)
@@ -2187,8 +2237,13 @@ fn deferral_scope_has_marker(blocks: &[&str], index: usize) -> bool {
         return false;
     };
     let next = prose(next);
-    deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
+    if deferral_scan_text(&next).contains(STRUCTURED_DEFERRAL_MARKER)
         || text_states_deferral(&block_lead_statement(&next))
+    {
+        return true;
+    }
+
+    false
 }
 
 /// True when `block` is nothing but a `> **Operator note:** ...` blockquote

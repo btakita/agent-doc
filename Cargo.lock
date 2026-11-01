@@ -219,7 +219,13 @@ name = "agent-doc-archive-io"
 version = "0.35.564"
 dependencies = [
  "agent-doc-document",
+ "agent-doc-hash",
+ "agent-doc-markdown-ast",
  "agent-doc-project-root-io",
+ "agent-doc-sqlite",
+ "anyhow",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -458,6 +464,7 @@ dependencies = [
 name = "agent-doc-compact-io"
 version = "0.35.564"
 dependencies = [
+ "agent-doc-archive-io",
  "agent-doc-capture-io",
  "agent-doc-commit-io",
  "agent-doc-controller-io",

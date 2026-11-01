@@ -2,8 +2,9 @@
 //!
 //! ## Spec
 //! - Maintains a derived sqlite index at `.agent-doc/archive-index.db` for compacted-turn lookup.
-//! - Markdown archives under `.agent-doc/archives/*.md` remain canonical history; this DB is
-//!   rebuildable and may be dropped/recreated from those files.
+//! - Legacy archives under `.agent-doc/archives/*.md` and tracked sibling
+//!   exchange archives/response indexes remain canonical history; this DB is a
+//!   rebuildable lookup/search projection.
 //! - `run_index(file, rebuild)` creates or refreshes the index for the target project.
 //! - `run_search(file, query, backlog_id, session, limit, json, rebuild)` queries indexed archive
 //!   chunks, biasing results toward the current document and recent archives.
@@ -82,6 +83,16 @@ pub struct IndexedArchiveTurn {
     pub preview: String,
     pub refs: Vec<String>,
     pub text: String,
+}
+
+/// Rebuildable acceleration entry for a tracked response-index locator. The
+/// tracked Markdown index and archive checksum remain authoritative.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResponseLocationCacheEntry {
+    pub response_id: String,
+    pub archive_path: String,
+    pub anchor: String,
+    pub content_sha256: String,
 }
 
 #[derive(Debug)]
@@ -165,6 +176,66 @@ pub fn index_archive(doc: &Path, archive_path: &Path) -> Result<()> {
     let record = parse_archive(doc, archive_path, &project_root)?;
     upsert_archive(&conn, &record)?;
     Ok(())
+}
+
+pub fn replace_response_location_cache(
+    doc: &Path,
+    entries: &[ResponseLocationCacheEntry],
+) -> Result<usize> {
+    let project_root = find_project_root(doc)?;
+    let document_path = canonical_document_key(doc, &project_root)?;
+    let db_path = db_path(&project_root);
+    let mut conn = open_archive_index(&db_path)?;
+    ensure_schema(&conn)?;
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM response_locations WHERE document_path = ?1",
+        params![document_path],
+    )?;
+    for entry in entries {
+        tx.execute(
+            "INSERT INTO response_locations (
+                 document_path, response_id, archive_path, anchor,
+                 content_sha256, indexed_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                document_path,
+                entry.response_id,
+                entry.archive_path,
+                entry.anchor,
+                entry.content_sha256,
+                timestamp_now(),
+            ],
+        )?;
+    }
+    tx.commit()?;
+    Ok(entries.len())
+}
+
+pub fn lookup_response_location_cache(
+    doc: &Path,
+    response_id: &str,
+) -> Result<Option<ResponseLocationCacheEntry>> {
+    let project_root = find_project_root(doc)?;
+    let document_path = canonical_document_key(doc, &project_root)?;
+    let db_path = db_path(&project_root);
+    let conn = open_archive_index(&db_path)?;
+    ensure_schema(&conn)?;
+    let mut stmt = conn.prepare(
+        "SELECT response_id, archive_path, anchor, content_sha256
+         FROM response_locations
+         WHERE document_path = ?1 AND response_id = ?2",
+    )?;
+    let mut rows = stmt.query(params![document_path, response_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    Ok(Some(ResponseLocationCacheEntry {
+        response_id: row.get(0)?,
+        archive_path: row.get(1)?,
+        anchor: row.get(2)?,
+        content_sha256: row.get(3)?,
+    }))
 }
 
 pub fn list_recent_turns(
@@ -619,19 +690,31 @@ fn ensure_schema(conn: &Connection) -> Result<()> {
              ref_value TEXT NOT NULL,
              UNIQUE(archive_id, ref_kind, ref_value)
          );
+         CREATE TABLE IF NOT EXISTS response_locations (
+             document_path TEXT NOT NULL,
+             response_id TEXT NOT NULL,
+             archive_path TEXT NOT NULL,
+             anchor TEXT NOT NULL,
+             content_sha256 TEXT NOT NULL,
+             indexed_at TEXT NOT NULL,
+             PRIMARY KEY(document_path, response_id)
+         );
          CREATE INDEX IF NOT EXISTS idx_archive_turns_normalized_text
              ON archive_turns(normalized_text);
          CREATE INDEX IF NOT EXISTS idx_archive_refs_lookup
              ON archive_refs(ref_kind, ref_value);
          CREATE INDEX IF NOT EXISTS idx_archives_document_archived_at
-             ON archives(document_path, archived_at DESC);",
+             ON archives(document_path, archived_at DESC);
+         CREATE INDEX IF NOT EXISTS idx_response_locations_response
+             ON response_locations(response_id);",
     )?;
     Ok(())
 }
 
 fn reset_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(
-        "DROP TABLE IF EXISTS archive_refs;
+        "DROP TABLE IF EXISTS response_locations;
+         DROP TABLE IF EXISTS archive_refs;
          DROP TABLE IF EXISTS archive_turns;
          DROP TABLE IF EXISTS archives;",
     )?;
@@ -775,6 +858,9 @@ fn parse_archive_from_project_root(
 
 fn split_archive_frontmatter(raw: &str) -> Result<(BTreeMap<String, String>, String)> {
     let Some(rest) = raw.strip_prefix("---\n") else {
+        if raw.contains("<!-- agent-doc-exchange-archive-v1 -->") {
+            return Ok((BTreeMap::new(), raw.to_string()));
+        }
         anyhow::bail!("archive missing frontmatter header");
     };
     let Some((frontmatter, body)) = rest.split_once("\n---\n") else {

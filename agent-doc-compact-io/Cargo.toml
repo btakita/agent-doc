@@ -17,6 +17,7 @@ name = "agent_doc_compact_io"
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.564" }
+agent-doc-archive-io = { path = "../agent-doc-archive-io", version = "0.35.564" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.564" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.564" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.564" }

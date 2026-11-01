@@ -944,6 +944,11 @@ fn run_in_controller_scoped(
         agent_doc_session_accretion_io::record_recent_exchange_compaction(file)?;
     }
 
+    // References may leave the live exchange only when the tracked response
+    // index resolves them. Decision-evidence references use the same guard and
+    // therefore remain pinned against retained-state GC.
+    agent_doc_archive_io::ensure_no_dangling_response_references(file, &targets.live)?;
+
     let updated = effects
         .force_disk_document_content(file, "compact_post_write_disk_verify")
         .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
@@ -1419,7 +1424,31 @@ fn commit_compacted_authoritative(
     // does not land the compacted content.
     let outcome = closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)?;
+    settle_exchange_archive_durability(file)?;
     Ok(outcome)
+}
+
+fn settle_exchange_archive_durability(file: &Path) -> Result<()> {
+    let Some(receipt) = agent_doc_archive_io::record_exchange_archive_receipt(file)? else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        agent_doc_archive_io::exchange_archive_receipt_proves_durability(file)?,
+        "exchange archive durability receipt for {} did not verify against HEAD; retained response state is preserved",
+        file.display(),
+    );
+    if let Some(archive) = agent_doc_archive_io::read_current_exchange_archive(file)? {
+        agent_doc_capture_io::discard_captures_for_archived_responses(file, &archive).with_context(
+            || {
+                format!(
+                    "durable exchange archive committed in {} but retained capture GC failed for {}",
+                    receipt.commit,
+                    file.display(),
+                )
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn fence_compacted_crdt_epoch(file: &Path) -> Result<()> {
@@ -1587,6 +1616,25 @@ fn closeout_compact_with_commit(file: &Path) -> Result<CompactCommitOutcome> {
 /// capture facts whose response body was just archived. Never fails the
 /// compaction — a discard error is logged and ignored.
 fn discard_archived_captures(file: &Path, archived_text: &str) {
+    if agent_doc_archive_io::response_index_path(file).exists() {
+        match agent_doc_archive_io::exchange_archive_receipt_proves_durability(file) {
+            Ok(true) => {}
+            Ok(false) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    "compact_capture_gc_retained reason=git_archive_receipt_not_durable",
+                );
+                return;
+            }
+            Err(error) => {
+                eprintln!(
+                    "[compact] warning: response archive durability proof failed for {}; retaining capture tombstone: {error:#}",
+                    file.display(),
+                );
+                return;
+            }
+        }
+    }
     if let Err(e) =
         agent_doc_capture_io::discard_captures_for_archived_responses(file, archived_text)
     {
@@ -2386,10 +2434,14 @@ fn run_component_compact_with_options(
     }
 
     // Archive old content
-    let archive_path = save_archive(
-        file,
-        &build_component_archive(file, content, target, &archive_content),
-    )?;
+    let archive_path = if target == "exchange" {
+        save_exchange_archive(file, &archive_content)?
+    } else {
+        save_archive(
+            file,
+            &build_component_archive(file, content, target, &archive_content),
+        )?
+    };
 
     // Build summary marker
     let mut summary = match message {
@@ -2531,10 +2583,14 @@ fn run_component_compact_partial(
         archive_body.push_str("\n\n");
     }
 
-    let archive_path = save_archive(
-        file,
-        &build_component_archive(file, content, target, &archive_body),
-    )?;
+    let archive_path = if target == "exchange" {
+        save_exchange_archive(file, &archive_body)?
+    } else {
+        save_archive(
+            file,
+            &build_component_archive(file, content, target, &archive_body),
+        )?
+    };
 
     // Build new component content. The committed snapshot intentionally omits
     // unresolved trailing prompt text after the boundary so compact+commit can
@@ -2693,6 +2749,42 @@ fn save_archive(doc: &Path, content: &str) -> Result<std::path::PathBuf> {
     }
 
     Ok(archive_path)
+}
+
+/// Persist first-class exchange history beside the live Markdown document.
+/// The tracked response index is written in the same pre-commit effect; Git is
+/// the atomic durability boundary for document + archive + index.
+fn save_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<std::path::PathBuf> {
+    let write = agent_doc_archive_io::write_exchange_archive(doc, archived_exchange)?;
+    let cache_entries = write
+        .entries
+        .iter()
+        .map(
+            |entry| agent_doc_sqlite::archive_index::ResponseLocationCacheEntry {
+                response_id: entry.response_id.clone(),
+                archive_path: entry.archive_path.clone(),
+                anchor: entry.anchor.clone(),
+                content_sha256: entry.content_sha256.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    if let Err(error) =
+        agent_doc_sqlite::archive_index::replace_response_location_cache(doc, &cache_entries)
+    {
+        eprintln!(
+            "[compact] warning: response lookup cache update failed for {}: {}",
+            doc.display(),
+            error,
+        );
+    }
+    if let Err(error) = archive_index::index_archive(doc, &write.archive_path) {
+        eprintln!(
+            "[compact] warning: rebuildable SQLite archive index update failed for {}: {}",
+            write.archive_path.display(),
+            error,
+        );
+    }
+    Ok(write.archive_path)
 }
 
 fn archive_document_value(doc: &Path) -> Result<String> {
@@ -3249,11 +3341,7 @@ mod tests {
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        let archives = || {
-            std::fs::read_dir(agent_doc_dir.join("archives"))
-                .unwrap()
-                .count()
-        };
+        let archives = || usize::from(agent_doc_archive_io::exchange_archive_path(&file).exists());
 
         run_component_compact_force_disk(&file, COMPACTDROPITEM_DOC, "exchange", None, false)
             .unwrap();
@@ -3493,12 +3581,11 @@ mod tests {
             "unresolved trailing prompt must remain live drift after full compact, not committed snapshot state:\n{snapshot_after}"
         );
 
-        let archive_dir = agent_doc_dir.join("archives");
-        let archive_path = std::fs::read_dir(&archive_dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .find(|path| path.extension().is_some_and(|ext| ext == "md"))
-            .expect("compact should write an archive");
+        let archive_path = agent_doc_archive_io::exchange_archive_path(&file);
+        assert!(
+            archive_path.exists(),
+            "compact should write a sibling archive"
+        );
         let archive = std::fs::read_to_string(archive_path).unwrap();
         assert!(
             !archive.contains(prompt),
@@ -3743,7 +3830,7 @@ mod tests {
     }
 
     #[test]
-    fn component_compact_preserves_summary_leading_code_fence() {
+    fn component_compact_rejects_prompt_only_exchange_even_with_summary() {
         let doc = concat!(
             "---\nagent_doc_session: test-compact-fence\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -3768,32 +3855,22 @@ mod tests {
         )
         .unwrap();
 
-        run_component_compact_force_disk(
+        let error = run_component_compact_force_disk(
             &file,
             doc,
             "exchange",
             Some("```\ncompacted summary\n```"),
             false,
         )
-        .unwrap();
+        .unwrap_err();
 
         let result = std::fs::read_to_string(&file).unwrap();
-        let exchange_after = agent_doc_element::element::parse(&result)
-            .unwrap()
-            .into_iter()
-            .find(|component| component.name == "exchange")
-            .unwrap()
-            .content(&result)
-            .to_string();
-
-        assert_eq!(
-            exchange_after.matches("```").count(),
-            2,
-            "compact summary fences must survive:\n{exchange_after}"
-        );
+        assert_eq!(result, doc, "an incomplete prompt cell must stay live");
         assert!(
-            exchange_after.starts_with("```\ncompacted summary\n```\n"),
-            "compact summary leading fence must remain first content:\n{exchange_after}"
+            error
+                .to_string()
+                .contains("no complete terminal response cells"),
+            "unexpected error: {error:#}"
         );
     }
 
@@ -3946,10 +4023,15 @@ mod tests {
     }
 
     fn archived_text(dir: &tempfile::TempDir) -> String {
-        std::fs::read_dir(dir.path().join(".agent-doc/archives"))
+        std::fs::read_dir(dir.path())
             .unwrap()
             .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".exchange-archive.md")
+            })
             .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
             .collect()
     }
@@ -4231,12 +4313,8 @@ mod tests {
         )
         .unwrap();
 
-        let archive = std::fs::read_dir(agent_doc_dir.join("archives"))
-            .unwrap()
-            .filter_map(Result::ok)
-            .find(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("md"))
-            .map(|entry| std::fs::read_to_string(entry.path()).unwrap())
-            .expect("compact archive");
+        let archive = std::fs::read_to_string(agent_doc_archive_io::exchange_archive_path(&file))
+            .expect("compact sibling archive");
         assert!(archive.contains("Captured response that never reached"));
         let head = agent_doc_git_io::revision::show_head(&file)
             .unwrap()

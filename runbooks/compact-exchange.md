@@ -70,8 +70,10 @@ foreground ACK-recovery request or polling barrier.
 - Inside that scope, relay reads/writes and the commit use in-process controller
   state rather than recursively requesting the controller socket. This removes
   the short generic RPC timeout and self-queue deadlock from Compact Exchange.
-   - Archives the original content to `.agent-doc/archives/`
-   - When the active captured response is folded into that archive and removed from the compacted document, closeout accepts the exact response in the referenced archive as materialization evidence. Missing or unrelated archive content still blocks the commit and preserves the captured cycle.
+   - Moves only complete terminal response cells into the ordinary sibling `<document>.exchange-archive.md`; a partial or prompt-only cell stays live and blocks that archive cut. The tracked `<document>.response-index.md` preserves each `[#r-…]` anchor, exact-content checksum, path, and action.
+   - When the active captured response is folded into that archive and removed from the compacted document, closeout accepts it only through the response index and exact checksum. Missing, dangling, or unrelated evidence blocks the commit and preserves the retained capture/tombstone.
+   - The document, archive, and index are staged in one private Git transaction. Only after a receipt verifies all exact committed blobs may retained response state be collected. Recovery checks retained state, the tracked index/archive, the rebuildable SQLite cache, then checksum-verifies Git trailer candidates; ambiguous deletion offers restore/detach/replace-evidence choices and never overwrites editor authority.
+   - Commit messages list sorted affected `Agent-Doc-Response` trailers plus the relative `Agent-Doc-Document`; decision registry callers use the same generic encoder for sorted `Agent-Doc-Decision` trailers. These are lookup accelerators, never authoritative evidence.
    - Replaces exchange content with the supplied summary, or when no custom `--message` is provided, with a default session summary that includes archive pointer plus live backlog/queue/icebox context
 - Updates the document baseline only after the Lazily settlement projection
 proves the exact canonical target editor-visible or detached-disk authoritative;

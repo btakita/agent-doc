@@ -757,12 +757,13 @@ fn rebase_snapshot_onto_operator_current_if_enabled(
 }
 
 fn binary_owned_commit_side_effects(file: &Path, content: &str) -> Result<Vec<PathBuf>> {
+    let mut paths = agent_doc_archive_io::response_archive_commit_paths(file)?;
     let Some(archive) =
         agent_doc_element_backlog_io::done_archive::configured_external_done_archive(
             file, content,
         )?
     else {
-        return Ok(Vec::new());
+        return Ok(paths);
     };
     let worktree = match std::fs::read_to_string(&archive) {
         Ok(content) => Some(content),
@@ -777,7 +778,12 @@ fn binary_owned_commit_side_effects(file: &Path, content: &str) -> Result<Vec<Pa
         }
     };
     let head = agent_doc_git_io::revision::show_head(&archive)?;
-    Ok((worktree != head).then_some(archive).into_iter().collect())
+    if worktree != head {
+        paths.push(archive);
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
 }
 
 pub struct CommitCoordinatorPorts<
@@ -3294,6 +3300,24 @@ where
                     .collect::<Vec<_>>()
                     .join(",")
             ),
+        );
+    }
+    let affected_response_ids = agent_doc_archive_io::affected_response_ids_for_commit(
+        file,
+        head_doc.as_deref(),
+        snapshot_content.as_deref().unwrap_or(&file_content),
+    )?;
+    if !affected_response_ids.is_empty() {
+        let relative_document = resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_string_lossy()
+            .replace('\\', "/");
+        msg = agent_doc_archive_io::append_affected_id_trailers(
+            &msg,
+            &relative_document,
+            affected_response_ids,
+            std::iter::empty(),
         );
     }
     let elapsed_reposition = t_reposition.elapsed().as_millis();

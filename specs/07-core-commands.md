@@ -103,6 +103,22 @@ remain reserved for explicit status commands and actual recovery transitions.
   within `agent:exchange` remains fail-closed.
 - Template-mode full exchange compaction must split the component at the live `agent:boundary` marker. Content before the boundary is archiveable and may be summarized; content after the boundary is unresolved live prompt drift and must remain visible in the working tree while staying out of the archive body, compact summary digest, saved snapshot, and closeout commit.
 - Template-mode partial exchange compaction follows the same unresolved-tail rule when keeping recent `### Re:` sections.
+- Exchange compaction moves only complete terminal response cells, never a
+  partial prompt/response cell, into the ordinary sibling
+  `<document>.exchange-archive.md`. It maintains the tracked
+  `<document>.response-index.md`, whose `[#r-…]` locators bind archive path,
+  stable anchor, content checksum, and last action. A prompt-only exchange is
+  not archiveable and remains live.
+- The live document, sibling archive, and response index are one selective Git
+  transaction. Retained response bodies/tombstones are GC-eligible only after a
+  receipt verifies all three exact blobs in the resulting commit. Commit or
+  receipt failure retains them. Response or decision-evidence references may
+  not be orphaned by compact or `session-check`.
+- Recovery order is retained state, tracked response index/archive, rebuildable
+  SQLite response-location cache, then checksum-verified Git trailer
+  candidates. Ambiguous deletion returns structured restore, detach-reference,
+  and replace-evidence choices without changing editor authority. Git history
+  is never a normal lookup path.
 - `--commit` closes compacted state through the normal binary-owned commit path. It commits only the compacted snapshot state; any unresolved post-boundary prompt left visible remains the next prompt-bearing diff for a later `agent-doc <FILE>` cycle.
 - Controller-local compact continuation facts must pass through the same typed
   admission and deduplication boundary as external events and enter the existing
@@ -208,8 +224,9 @@ banner.
 
 `agent-doc archive-index <FILE> [--rebuild]`
 
-- Builds or refreshes the derived sqlite compacted-turn index at `.agent-doc/archive-index.db`.
-- The index is rebuildable from `.agent-doc/archives/*.md`; archive markdown remains the canonical history artifact.
+- Builds or refreshes the derived sqlite compacted-turn and response-location index at `.agent-doc/archive-index.db`.
+- The index is rebuildable from archive Markdown and tracked response indexes;
+  sibling archive Markdown plus its tracked checksum index remain canonical.
 - `--rebuild` drops all derived rows and recreates them from the archive corpus.
 
 ## archive-search

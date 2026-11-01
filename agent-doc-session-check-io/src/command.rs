@@ -1286,6 +1286,20 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     let out = crate::with_current_document_pass(|| {
+        if agent_doc_archive_io::response_index_path(file).exists() {
+            let content = crate::resolve_current_document_content(
+                file,
+                "session_check_response_archive_orphan_guard",
+            )?;
+            if let Err(error) =
+                agent_doc_archive_io::ensure_no_dangling_response_references(file, &content)
+            {
+                return Err(SessionCheckInterrupted(format!(
+                    "[session-check] INTERRUPTED: {error:#}. Restore the indexed response, detach the stale reference, or explicitly replace its decision evidence; editor authority was not changed."
+                ))
+                .into());
+            }
+        }
         run_with_options_inner(file, codex_final_gate, effects)
     });
     crate::profile::report(file, started.elapsed());

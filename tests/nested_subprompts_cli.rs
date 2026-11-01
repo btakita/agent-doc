@@ -645,9 +645,23 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     );
 
     preflight_json(dir.path(), &doc);
+    let admitted = run_body(&doc, "run");
     let echo: String = CHILDREN
         .iter()
-        .map(|child| format!(">   - {child}\n"))
+        .map(|child| {
+            let line = admitted
+                .lines()
+                .find(|line| line.contains(child))
+                .unwrap_or_else(|| panic!("missing admitted child {child}:\n{admitted}"));
+            let id_start = line
+                .rfind("[#q-")
+                .unwrap_or_else(|| panic!("missing stable id for {child}: {line}"));
+            let id_end = id_start
+                + line[id_start..]
+                    .find(']')
+                    .unwrap_or_else(|| panic!("unterminated stable id for {child}: {line}"));
+            format!(">   - {child} {}\n", &line[id_start..=id_end])
+        })
         .collect();
     let response = format!(
         "<!-- patch:exchange -->\n### Re: PM sync — gpt-5\n\n> **Queue prompt:** {PARENT}\n{echo}\nPart 1 shipped; Part 2 is a design doc.\n<!-- /patch:exchange -->\n"

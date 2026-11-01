@@ -488,9 +488,16 @@ pub fn free_text_queue_head_provenance_decision_with_claims(
 
     for head in active_free_text_queue_heads {
         // Preserve the operator-action projection until its linked todo is
-        // answered. Stripping cosmetic markers below intentionally produces
-        // work identity, so this gate must inspect the visible row first.
-        if agent_doc_document::queue_projection::operator_action_holds_row(head, &open_todo_ids) {
+        // answered. Cycle state records the head as it looked at preflight,
+        // before a worker handoff can append `🙋`, lifecycle/owner prefixes,
+        // and the request id. Resolve that recorded identity back to the live
+        // row before reading the hold; inspecting only `head` makes an open
+        // `🙋☑️` handoff look like completed residue after its response echo.
+        let visible_head = current_free_text_queue_row(content, head);
+        if agent_doc_document::queue_projection::operator_action_holds_row(
+            visible_head.as_deref().unwrap_or(head),
+            &open_todo_ids,
+        ) {
             continue;
         }
         let head = strip_priority_markers(head);
@@ -543,6 +550,29 @@ pub fn free_text_queue_head_provenance_decision_with_claims(
         response_proven_removed,
         completed_residue,
     })
+}
+
+/// Resolve a preflight-recorded free-text identity to its current visible row.
+///
+/// Queue projection can add lifecycle/owner prefixes and append an operator
+/// request after preflight. The existing provenance rules already treat such
+/// an appended row as the same in-flight head (`#qheadcomposing`); the
+/// operator-action veto must inspect that same row rather than the older,
+/// undecorated cycle-state copy.
+fn current_free_text_queue_row(content: &str, recorded: &str) -> Option<String> {
+    let recorded = queue_heads::free_text_queue_head_identity(recorded);
+    if recorded.is_empty() {
+        return None;
+    }
+    queue_heads::active_queue_heads(content)
+        .into_iter()
+        .find(|current| {
+            let current_identity = queue_heads::free_text_queue_head_identity(current);
+            queue_response::queue_prompt_text_is_free_text(content, current)
+                && (current_identity == recorded
+                    || (current_identity.len() > recorded.len()
+                        && current_identity.starts_with(&recorded)))
+        })
 }
 
 fn normalize_id(id: &str) -> String {
@@ -1077,6 +1107,71 @@ mod tests {
         assert_eq!(decision.response_proven_removed, vec![first.to_string()]);
         assert!(decision.unresolved.is_empty(), "{decision:?}");
         assert!(decision.completed_residue.is_empty(), "{decision:?}");
+    }
+
+    /// Live sdk-demo shape (2026-10-31): preflight recorded the worker's work
+    /// before its reported handoff appended an operator request. Session-check
+    /// must read the hold from the current `🙋☑️` row, not classify the older
+    /// undecorated cycle-state text as completed residue.
+    #[test]
+    fn open_operator_request_on_current_worker_row_vetoes_recorded_head_residue() {
+        let work = "We are using project templates now. Remove all guidance for the env variables. ⟦local⟧";
+        let request_id = "subagent-operator-request-bossroom-template-guidance-publish";
+        let response = format!(
+            "### Re: Boss Room project-template guidance cleanup\n\n> **Queue prompt:** {work}\n\nValidated locally; publication needs authorization.\n"
+        );
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [#bossroom-sbx-vars]\n",
+                "  - 🙋☑️ [#subagent:bossroom-remove-env-guidance#1] {} [#{}]\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{}] Publish the validated cleanup.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            response, work, request_id, request_id,
+        );
+
+        let decision = free_text_queue_head_provenance_decision(
+            &[work.to_string()],
+            &content,
+            Some(&response),
+        )
+        .unwrap();
+        assert!(decision.completed_residue.is_empty(), "{decision:?}");
+        assert!(decision.unresolved.is_empty(), "{decision:?}");
+        assert!(decision.response_proven_removed.is_empty(), "{decision:?}");
+    }
+
+    #[test]
+    fn closed_operator_request_restores_recorded_head_residue_classification() {
+        let work = "publish the validated project-template cleanup";
+        let request_id = "subagent-operator-request-template-publish";
+        let response =
+            format!("### Re: template cleanup\n\n> **Queue prompt:** {work}\n\nPublished.\n");
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- ☑️ [#subagent:template-cleanup#1] {} [#{}]: authorized\n",
+                "<!-- /agent:queue -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [x] [#{}] Publish the validated cleanup.\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            response, work, request_id, request_id,
+        );
+
+        let decision = free_text_queue_head_provenance_decision(
+            &[work.to_string()],
+            &content,
+            Some(&response),
+        )
+        .unwrap();
+        assert_eq!(decision.completed_residue, vec![work.to_string()]);
+        assert!(decision.unresolved.is_empty(), "{decision:?}");
     }
 
     /// `#qheadresiduescope`: a closeout that does not quote a re-typed repeated

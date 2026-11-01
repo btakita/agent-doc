@@ -31,11 +31,16 @@ Read `ui_outcome` before describing a stop:
   drain the head in-session now.
 - `no_drainable_work`: the queue is drained.
 
-`queue_auto_clear_yield: true` is an intentional supervisor handoff. End after
-the proven closeout; the ready supervisor resets context and dispatches the next
-item. With auto-clear off or no ready supervisor, continuation remains true and
-the current harness keeps draining. A context clear does not shrink the
-document; only compaction reduces exchange accretion.
+`queue_auto_clear_yield: true` is an intentional supervisor handoff only after
+the just-completed item's authorized current-item and returned-subagent outward
+effects have executed and their results are verified (`#effectbeforecloseout`).
+`END THIS TURN` and `next_queue_prompt` govern later queue work; they never
+preempt, defer, or cancel a required post/publish/push/message/API effect from
+the item being closed. End after that proven closeout; the ready supervisor
+resets context and dispatches the next item. With auto-clear off or no ready
+supervisor, continuation remains true and the current harness keeps draining. A
+context clear does not shrink the document; only compaction reduces exchange
+accretion.
 
 ## Harness behavior
 

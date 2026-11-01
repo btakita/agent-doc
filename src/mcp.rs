@@ -1324,6 +1324,12 @@ mod tests {
                 .as_str()
                 .is_some_and(|guidance| guidance.contains("END THIS TURN"))
         );
+        assert!(
+            result["queue_continuation_guidance"]
+                .as_str()
+                .is_some_and(|guidance| guidance.contains("#effectbeforecloseout")
+                    && guidance.contains("never preempts, defers, or cancels"))
+        );
     }
 
     #[test]

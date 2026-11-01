@@ -24,7 +24,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FI
 **Note:** Slash commands (`/agent-doc`) are installed as an OpenCode command via `agent-doc skill install --harness opencode`. Other harnesses receive the document path directly.
 ## Required cycle
 
-This file is a routing table, not the workflow manual. For every normal turn, read [runbooks/session-cycle.md](runbooks/session-cycle.md), then load the branch runbooks it requires. Complete requested work before the mandatory binary-owned closeout. Never manually patch the final response into the session document.
+This file is a routing table, not the workflow manual. For every normal turn, read [runbooks/session-cycle.md](runbooks/session-cycle.md), then load the branch runbooks it requires. Complete requested work and every authorized current-item or returned-subagent effect before the mandatory binary-owned closeout. Never manually patch the final response into the session document.
 
 **Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if newer, follow the OpenCode update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), then continue as directed.
 

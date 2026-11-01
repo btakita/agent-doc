@@ -28,7 +28,7 @@ Arguments: `FILE` — path to the session document (e.g., `plan.md`). With no FI
 Claude Code slash-command equivalents are `/agent-doc <FILE>`, `/agent-doc claim <FILE>`, `/agent-doc compact <FILE>`, and `/agent-doc compact exchange <FILE>`.
 ## Required cycle
 
-This file is a routing table, not the workflow manual. For every normal turn, read [runbooks/session-cycle.md](runbooks/session-cycle.md), then load the branch runbooks it requires. Complete requested work before the mandatory binary-owned closeout. Never manually patch the final response into the session document.
+This file is a routing table, not the workflow manual. For every normal turn, read [runbooks/session-cycle.md](runbooks/session-cycle.md), then load the branch runbooks it requires. Complete requested work and every authorized current-item or returned-subagent effect before the mandatory binary-owned closeout. Never manually patch the final response into the session document.
 
 **Auto-update skill:** Compare `agent-doc --version` to `agent-doc-version`; if newer, follow the Codex update procedure in [runbooks/harness-invocation.md](runbooks/harness-invocation.md), re-read the installed skill after a real update, and continue the same turn.
 

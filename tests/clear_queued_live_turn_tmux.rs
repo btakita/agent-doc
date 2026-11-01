@@ -1541,8 +1541,12 @@ impl LiveClearScenario {
             String::from_utf8_lossy(&preflight.stdout),
             stderr(&preflight)
         );
+        let admitted = std::fs::read_to_string(&self.doc).unwrap();
+        let queue_head = agent_doc_queue::queue_heads::active_queue_head_text(&admitted)
+            .unwrap()
+            .expect("preflight leaves the admitted queue head active");
         let response = format!(
-            "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n"
+            "<!-- patch:exchange -->\n### Re: {head} — test-model\n\n> **Queue prompt:** {queue_head}\n\nDone: {head}.\n<!-- /patch:exchange -->\n"
         );
         let write = self.agent_doc(&["write", "--commit", DOC], &pane, Some(&response));
         assert!(
@@ -1606,17 +1610,19 @@ fn queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes() {
     scenario.answer_head("answer item one");
     let committed = std::fs::read_to_string(&scenario.doc).unwrap();
     assert!(
-        committed.contains("- ~~answer item one~~"),
-        "item one is committed before the watch observes: {committed}"
+        committed.contains("- ~~answer item one [#q-"),
+        "item one is committed before the watch observes: {committed}\n--- ops.log tail ---\n{}",
+        scenario.ops_log_tail(),
     );
-    assert_eq!(
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &committed,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        )
-        .as_deref(),
-        Some("answer item two"),
-        "item two is the next drainable head despite its live status marker: {committed}"
+    let next = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+        &committed,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    );
+    assert!(
+        next.as_deref().is_some_and(|id| {
+            id.starts_with("q-") && committed.contains(&format!("answer item two [#{id}]"))
+        }),
+        "item two is the next drainable stable identity despite its live status marker: {committed}"
     );
     assert_eq!(
         (scenario.triggers(), scenario.clears()),
@@ -1755,8 +1761,7 @@ fn an_orphan_drain_during_a_preserved_child_reexec_defers_to_the_restarting_supe
     scenario.open_orphan_drain();
     let orphan_dispatched = |ops: &str| {
         ops.lines().any(|line| {
-            line.contains("] controller_orphan_drain_dispatch ")
-                && line.contains("head=answer item two")
+            line.contains("] controller_orphan_drain_dispatch ") && line.contains("head=q-")
         })
     };
     scenario.wait_until(

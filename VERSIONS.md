@@ -2,7 +2,11 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
-## 0.35.564
+## 0.35.565
+
+- **Queue responses are promptable subitems by default.** A queue without an explicit `response` attribute renders an actionable summary child with enough context, choices, and next steps; `response="inline"` adds the full GFM `<details data-agent-doc-response-id="r-…">` response, while `response="lookup"` keeps the compact response-id reference. Authored descendants remain executable prompts, retained response children stay inert, and stable prompt/response identities survive reparenting.
+- **Project decisions and compacted exchanges retain durable Markdown evidence.** Mutable salient decisions have stable decision ids, archived revisions, and response evidence; exchange compaction writes a running archive instead of orphaning response ids, and queue/Todo prompt lineage can refer back to those records after the live exchange is compacted.
+- **Queue response recovery is lossless across interrupted and legacy states.** Queue sync repairs lifecycle metadata, restores committed or undelivered response evidence, keeps terminal response parents closed, and relocates legacy completion cells plus their trailing Queue-prompt evidence out of queue/run components before guarded strikes. Report-state suffixes no longer change prompt identity, so reported rows close without replaying or losing their responses.
 
 - **Prompt presets can now specialize guidance for each agent harness.** Scalar bodies still apply everywhere; structured presets accept a `default` fallback plus `claude`, `codex`, `opencode`, and `grok` overrides selected from the effective `agent:` before nested-preset interpolation. Existing `prompt` structured bodies remain compatible fallbacks, and serialization preserves all authored variants.
 - **Dispatch briefs use the live canonical origin queue id.** `queue brief` now reads the same editor/CRDT authority cut as `queue claim`, falling back to disk only while detached, so stale disk cannot label an `id="main"` queue as the marker-kind alias `run` or render a broken `queue follow-up --id run` command.
@@ -13,6 +17,9 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 - **Codex Stop no longer spends its internal budget replaying the cycle projection twice.** Queue-closeout classification reuses the exact open/reopened cycle state already read by the terminal-reopen check. A momentarily busy controller can therefore no longer send this phase through a second live RPC plus full cold-ledger replay that consumed 38 seconds of the 45-second Stop budget; the retained closeout remains owned by the route supervisor.
 - **Idle supervisors now wake coordinators for reported queue work.** `Claimed` and `Running` attempts still suppress double dispatch, while `Reported` attempts remain drainable integration/writeback debt so `☑️` rows do not wait forever for an unrelated document edit. The same rule covers editor-projected report markers in documents with several open `agent:run` components; later runs cannot hide the reported coordinator debt.
 - **Subagent work reserves its queue row before native launch.** Dispatch contracts now require and expose `claim -> spawn -> start`: the claim must visibly move a row from Pending to Claimed before a worker can begin, and worker binding is the coordinator's immediate post-spawn action, so executing work cannot remain rendered as `📥`.
+
+## 0.35.564
+
 - **Managed List work now stays completion-seeking through every lifecycle state.** Selected incomplete items must either reach their authorized delivery boundary or retain explicit evidence, the exact blocker, its owner, and the next action; claims, reports, and gates are no longer mistaken for completion.
 - **Executable leaves keep terminal state while structural parents derive lazily.** Completed or reported leaves are not reopened automatically, parents strike only when every descendant is terminal, and adding or recovering a live child reopens only the structural parent.
 - **Reported completion evidence survives rekeying and closes before fresh dispatch.** A reported attempt cannot time out into Lost, same-generation rekeys preserve its evidence, and coordinators must integrate and persist verified reports at the next safe boundary before starting new sibling work.

@@ -1254,6 +1254,149 @@ impl std::fmt::Display for SessionCheckInterrupted {
 
 impl std::error::Error for SessionCheckInterrupted {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseOrphanGuardDisposition {
+    Clear,
+    DeferredToOwnedRetainedCloseout,
+    Refuse,
+}
+
+fn response_orphan_guard_disposition(
+    dangling_response_ids: &[String],
+    dangling_decision_ids: &[String],
+    retained_response_ids: &BTreeSet<String>,
+) -> ResponseOrphanGuardDisposition {
+    if dangling_response_ids.is_empty() && dangling_decision_ids.is_empty() {
+        return ResponseOrphanGuardDisposition::Clear;
+    }
+    if dangling_response_ids
+        .iter()
+        .chain(dangling_decision_ids)
+        .all(|response_id| retained_response_ids.contains(response_id))
+    {
+        ResponseOrphanGuardDisposition::DeferredToOwnedRetainedCloseout
+    } else {
+        ResponseOrphanGuardDisposition::Refuse
+    }
+}
+
+fn retained_closeout_response_ids_from_parts(
+    response_body: &str,
+    response_sha256: &str,
+    target_content: &str,
+    target_hash: &str,
+) -> BTreeSet<String> {
+    if agent_doc_hash::content_hash(response_body) != response_sha256
+        || agent_doc_hash::content_hash(target_content) != target_hash
+    {
+        return BTreeSet::new();
+    }
+    let response_ids = agent_doc_archive_io::retained_response_ids_in_content(response_body);
+    let projected_references = agent_doc_archive_io::extract_response_reference_ids(target_content);
+    response_ids
+        .intersection(&projected_references)
+        .cloned()
+        .collect()
+}
+
+fn verified_captured_response_ids(
+    response_body: &str,
+    response_sha256: &str,
+    baseline_content: Option<&str>,
+    file_hash: Option<&str>,
+) -> BTreeSet<String> {
+    if agent_doc_hash::content_hash(response_body) != response_sha256
+        || !baseline_content
+            .zip(file_hash)
+            .is_some_and(|(baseline, file_hash)| {
+                agent_doc_hash::content_hash(baseline) == file_hash
+            })
+    {
+        return BTreeSet::new();
+    }
+    agent_doc_archive_io::retained_response_ids_in_content(response_body)
+}
+
+fn durable_retained_closeout_response_ids(file: &Path) -> Result<BTreeSet<String>> {
+    let mut response_ids = BTreeSet::new();
+    if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
+        && let Some(continuation) = pending.continuation.as_ref()
+    {
+        response_ids.extend(retained_closeout_response_ids_from_parts(
+            &continuation.response_body,
+            &continuation.response_sha256,
+            &pending.target_content,
+            &pending.target_hash,
+        ));
+    }
+    if let Some(capture) = agent_doc_capture_io::load_active(file)?
+        && agent_doc_hash::content_hash(&capture.response_body) == capture.response_sha256
+    {
+        response_ids.extend(agent_doc_archive_io::retained_response_ids_in_content(
+            &capture.response_body,
+        ));
+    }
+    // A half-applied closeout may already have advanced to a synthetic
+    // committed checkpoint and retired its active/pending projections. The
+    // newest content-bearing capture is still durable authorship proof when
+    // both its response and baseline hashes verify. Post-recovery strict
+    // validation below prevents that proof from becoming a permanent bypass.
+    if let Some(checkpoint) =
+        agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(file, 1)?
+            .into_iter()
+            .next()
+    {
+        response_ids.extend(verified_captured_response_ids(
+            &checkpoint.response_body,
+            &checkpoint.response_sha256,
+            checkpoint.baseline_content.as_deref(),
+            checkpoint.file_hash.as_deref(),
+        ));
+    }
+    Ok(response_ids)
+}
+
+fn response_orphan_guard(
+    file: &Path,
+    content: &str,
+    allow_owned_retained_closeout: bool,
+) -> Result<ResponseOrphanGuardDisposition> {
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+    let decision_validation = agent_doc_decision_io::validate(&project_root)?;
+    let dangling_response_ids = agent_doc_archive_io::dangling_response_references(file, content)?;
+    let retained_response_ids = if allow_owned_retained_closeout {
+        durable_retained_closeout_response_ids(file)?
+    } else {
+        BTreeSet::new()
+    };
+    let disposition = response_orphan_guard_disposition(
+        &dangling_response_ids,
+        &decision_validation.dangling_response_ids,
+        &retained_response_ids,
+    );
+    if disposition != ResponseOrphanGuardDisposition::Refuse {
+        return Ok(disposition);
+    }
+    anyhow::ensure!(
+        dangling_response_ids.is_empty(),
+        "response index would orphan referenced response id(s): {}",
+        dangling_response_ids.join(", ")
+    );
+    anyhow::ensure!(
+        decision_validation.dangling_response_ids.is_empty(),
+        "decision evidence would orphan response id(s): {}",
+        decision_validation.dangling_response_ids.join(", ")
+    );
+    unreachable!("refusal must carry a dangling response or decision id")
+}
+
+fn response_orphan_interruption(error: anyhow::Error) -> anyhow::Error {
+    SessionCheckInterrupted(format!(
+        "[session-check] INTERRUPTED: {error:#}. Restore the indexed response, detach the stale reference, or explicitly replace its decision evidence; editor authority was not changed."
+    ))
+    .into()
+}
+
 /// Print an INTERRUPTED outcome to stdout and exit `1`, as the CLI always has;
 /// pass every other result through.
 fn exit_on_interrupted(file: &Path, outcome: Result<()>) -> Result<()> {
@@ -1290,28 +1433,23 @@ pub fn try_run_with_options(
             file,
             "session_check_response_archive_orphan_guard",
         )?;
-        let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
-        let decision_validation = agent_doc_decision_io::validate(&project_root)?;
-        if let Err(error) = agent_doc_archive_io::dangling_response_references(file, &content)
-            .and_then(|dangling| {
-            anyhow::ensure!(
-                dangling.is_empty(),
-                "response index would orphan referenced response id(s): {}",
-                dangling.join(", ")
-            );
-            anyhow::ensure!(
-                decision_validation.dangling_response_ids.is_empty(),
-                "decision evidence would orphan response id(s): {}",
-                decision_validation.dangling_response_ids.join(", ")
-            );
-            Ok(())
-        }) {
-            return Err(SessionCheckInterrupted(format!(
-                "[session-check] INTERRUPTED: {error:#}. Restore the indexed response, detach the stale reference, or explicitly replace its decision evidence; editor authority was not changed."
-            ))
-            .into());
+        let orphan_disposition =
+            response_orphan_guard(file, &content, true).map_err(response_orphan_interruption)?;
+        run_with_options_inner(file, codex_final_gate, effects)?;
+        if orphan_disposition == ResponseOrphanGuardDisposition::DeferredToOwnedRetainedCloseout {
+            // The pre-check deferred only IDs cryptographically owned by the
+            // exact retained response/target pair. Recovery above must now
+            // have materialized or indexed that response before this pass may
+            // report terminal success.
+            crate::invalidate_current_document_pass(file);
+            let settled_content = crate::resolve_current_document_content(
+                file,
+                "session_check_response_archive_orphan_guard_after_retained_closeout",
+            )?;
+            response_orphan_guard(file, &settled_content, false)
+                .map_err(response_orphan_interruption)?;
         }
-        run_with_options_inner(file, codex_final_gate, effects)
+        Ok(())
     });
     crate::profile::report(file, started.elapsed());
     out
@@ -4529,6 +4667,97 @@ mod terminal_convergence_tests {
         projection.observe_cycle_phase(Some(CyclePhase::WriteApplied));
         projection.observe_retained_document_write_blocks(false);
         assert!(!projection.should_resume());
+    }
+
+    /// `#retainedresponseorphanordering`: anonymized from the 2026-11-01 live
+    /// half-apply. Queue consumption projected the backlink before the retained
+    /// exchange response, so the backlink must admit only its own closeout into
+    /// recovery and must never cover a second, unrelated orphan.
+    #[test]
+    fn retained_closeout_backlink_defers_only_for_its_exact_response() {
+        let response_id = "[#r-f656df4698e6]";
+        let response_body = format!(
+            "<!-- patch:exchange -->\n### Re: reported row {response_id}\n\n**Response {response_id}**\n\nExact retained response.\n<!-- /patch:exchange -->\n"
+        );
+        let target_content = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~reported row~~\n",
+                "  - **Response {}:** Exact retained response.\n",
+                "<!-- /agent:queue -->\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: reported row {}\n\nExact retained response.\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            response_id, response_id
+        );
+        let owned = retained_closeout_response_ids_from_parts(
+            &response_body,
+            &agent_doc_hash::content_hash(&response_body),
+            &target_content,
+            &agent_doc_hash::content_hash(&target_content),
+        );
+        assert_eq!(owned, BTreeSet::from([response_id.to_string()]));
+        assert_eq!(
+            response_orphan_guard_disposition(&[response_id.to_string()], &[], &owned),
+            ResponseOrphanGuardDisposition::DeferredToOwnedRetainedCloseout
+        );
+
+        let unrelated = "[#r-deadbeefcafe]".to_string();
+        assert_eq!(
+            response_orphan_guard_disposition(&[response_id.to_string(), unrelated], &[], &owned,),
+            ResponseOrphanGuardDisposition::Refuse,
+            "one owned retained response must not suppress an unrelated true orphan"
+        );
+        assert!(
+            retained_closeout_response_ids_from_parts(
+                &response_body,
+                "wrong-response-hash",
+                &target_content,
+                &agent_doc_hash::content_hash(&target_content),
+            )
+            .is_empty(),
+            "unverified retained bytes never authorize orphan deferral"
+        );
+        let baseline = "<!-- agent:queue -->\n- reported row\n<!-- /agent:queue -->\n";
+        assert!(
+            verified_captured_response_ids(
+                &response_body,
+                &agent_doc_hash::content_hash(&response_body),
+                Some(baseline),
+                Some("wrong-baseline-hash"),
+            )
+            .is_empty(),
+            "a response checkpoint without its exact baseline proof is not retained authority"
+        );
+        assert!(
+            verified_captured_response_ids(
+                &response_body,
+                &agent_doc_hash::content_hash(&response_body),
+                Some(baseline),
+                Some(&agent_doc_hash::content_hash(baseline)),
+            )
+            .contains(response_id),
+            "the durable checkpoint that created the half-applied backlink owns its response id"
+        );
+
+        let unmarked_response = "<!-- patch:exchange -->\n### Re: derived response\n\nDerived retained response.\n<!-- /patch:exchange -->\n";
+        let derived_ids = agent_doc_archive_io::response_ids_in_content(unmarked_response);
+        let derived_id = derived_ids.iter().next().expect("one derived response id");
+        assert_eq!(derived_ids.len(), 1);
+        let derived_target = format!(
+            "<!-- agent:queue -->\n- ~~derived row~~; response: {derived_id}\n<!-- /agent:queue -->\n"
+        );
+        assert_eq!(
+            retained_closeout_response_ids_from_parts(
+                unmarked_response,
+                &agent_doc_hash::content_hash(unmarked_response),
+                &derived_target,
+                &agent_doc_hash::content_hash(&derived_target),
+            ),
+            derived_ids,
+            "ordinary retained response bodies prove their content-derived backlink id"
+        );
     }
 
     struct TestEffects;

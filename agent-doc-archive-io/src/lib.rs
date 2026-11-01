@@ -201,6 +201,34 @@ fn response_nodes(content: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Response ids owned by response sections in `content`.
+///
+/// Unlike [`extract_response_reference_ids`], this derives ids from the
+/// response cells themselves. It is used when a durable retained closeout must
+/// prove that a projected backlink belongs to the exact response still waiting
+/// to materialize.
+pub fn response_ids_in_content(content: &str) -> BTreeSet<String> {
+    response_nodes(content)
+        .into_iter()
+        .map(|(response_id, _)| response_id)
+        .collect()
+}
+
+/// Every response identity that a retained response body can durably own.
+///
+/// Current responses own one id per response section. Responses captured by
+/// older projections can also have a single aggregate turn id, so retained
+/// closeout recovery accepts that compatibility identity without teaching the
+/// response index to create new aggregate entries.
+pub fn retained_response_ids_in_content(content: &str) -> BTreeSet<String> {
+    let mut response_ids = response_ids_in_content(content);
+    let aggregate = ResponseTurnCellPolicy::from_response(Some(content));
+    if !aggregate.response_id().is_empty() {
+        response_ids.insert(aggregate.response_id().to_string());
+    }
+    response_ids
+}
+
 fn terminal_response_cells(content: &str) -> Vec<(String, String, String)> {
     let nodes = parse_exchange_nodes(content);
     nodes

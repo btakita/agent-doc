@@ -607,8 +607,7 @@ pub fn queue_response_contamination_candidates_since_baseline(
     // balanced Obsidian list comment is deliberate inert response metadata,
     // so its hidden lines are not raw contamination candidates.
     if contaminated.is_empty() {
-        let comment_ranges =
-            agent_doc_markdown_ast::overlay::multiline_list_comment_ranges(queue_body);
+        let comment_ranges = agent_doc_markdown_ast::overlay::inert_list_child_ranges(queue_body);
         let mut offset = 0usize;
         let queue_line_prefixes = queue_body
             .split_inclusive('\n')
@@ -1089,17 +1088,16 @@ mod tests {
     }
 
     #[test]
-    fn queue_response_contamination_ignores_balanced_multiline_comment_child() {
+    fn queue_response_contamination_ignores_reserved_response_details() {
         let prose =
             "Verification: reproduced the sampleorders Codex stop-hook shape without drift.";
-        let queue = format!(
-            "- ~~do [#seopdp] deploy product page~~\n  - %%\n    ### Re: deploy — gpt-5\n\n    {prose}\n    %%\n- do [#smoke] verify checkout\n"
-        );
         let exchange = format!("### Re: deploy — gpt-5\n\n{prose}\n");
-
+        let queue = format!(
+            "- ~~do [#seopdp] deploy product page~~\n  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n    <summary>Response</summary>\n    \n    ### Re: deploy — gpt-5\n\n    {prose}\n    </details>\n- do [#smoke] verify checkout\n"
+        );
         assert!(
             queue_response_contamination_candidates(&queue, &exchange).is_empty(),
-            "the explicit inert response child must not look like synthesized queue work"
+            "the reserved GFM response child must not look like synthesized queue work"
         );
     }
 

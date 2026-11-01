@@ -1762,6 +1762,26 @@ fn apply_bound_stop(
                 } else {
                     agent_doc_closeout_runtime_io::complete_required_closeout(file, false)
                 };
+                // `#qresiduenextedit`: queue catch-up is deliberately unable to
+                // commit through a newer operator-authored typed-component edit.
+                // That typed refusal is a successful cycle boundary, not a Stop
+                // failure: leave both the edit and any uncommitted answered-row
+                // residue for the next admission, which owns their ordered
+                // reconciliation. In particular, a recursive Codex Stop must not
+                // surface this expected handoff as "Hook stopped".
+                if completed_free_text_residue
+                    && closeout_result
+                        .as_ref()
+                        .err()
+                        .is_some_and(unanswered_edit_pending_commit_refusal)
+                {
+                    invalidate_stop_document_cache();
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit (#qresiduenextedit)",
+                    );
+                    return Ok(StopResponse::AllowExit);
+                }
                 invalidate_stop_document_cache();
                 let status = agent_doc_session_check_io::inspect(
                     file,
@@ -7547,6 +7567,98 @@ The environment-variable guidance was removed from the project template.\n\
                 "codex_stop_terminal_reap_maintenance_settled capture_skipped=true kind=answered_free_text_queue_residue"
             ),
             "terminal maintenance proof must name the residue class:\n{log}"
+        );
+    }
+
+    #[test]
+    fn recursive_stop_hands_answered_residue_to_fresh_typed_edit_without_hook_failure() {
+        let dir = setup_project();
+        let doc = dir.path().join("task.md");
+        let answered_head = "Print the response for each queue item as a child.";
+        let committed = format!(
+            "---\n\
+agent_doc_session: sid\n\
+agent_doc_format: template\n\
+queue_active: true\n\
+---\n\n\
+## Exchange\n\n\
+<!-- agent:exchange patch=append -->\n\
+### Re: queue response child — gpt-5\n\n\
+> **Queue prompt:**\n>\n> {answered_head}\n\n\
+The completed response is already committed.\n\
+<!-- /agent:exchange -->\n\n\
+## Queue\n\n\
+<!-- agent:queue auto go -->\n\
+- {answered_head}\n\
+<!-- /agent:queue -->\n"
+        );
+        fs::write(&doc, &committed).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        agent_doc_capture_io::capture_response(
+            &doc,
+            &format!(
+                "<!-- patch:exchange -->\n### Re: queue response child — gpt-5\n\n> **Queue prompt:**\n>\n> {answered_head}\n\nThe completed response is already committed.\n<!-- /patch:exchange -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+
+        let fresh_head = "Install [#subagent:response_comment_child#1].";
+        let editor_authoritative = committed.replace(
+            "<!-- /agent:queue -->",
+            &format!("- {fresh_head}\n<!-- /agent:queue -->"),
+        );
+        fs::write(&doc, &editor_authoritative).unwrap();
+
+        let response = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: "This predecessor text must not be replayed.".to_string(),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        assert_eq!(response, StopResponse::AllowExit);
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(
+            after.contains(fresh_head),
+            "the next-cycle edit must remain live:\n{after}"
+        );
+        assert!(
+            !after.contains("This predecessor text must not be replayed"),
+            "the committed predecessor must not be captured again:\n{after}"
+        );
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .expect("committed session document");
+        assert!(
+            !head.contains(fresh_head),
+            "Stop must not commit and swallow the next-cycle prompt:\n{head}"
+        );
+        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains(
+                "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit"
+            ),
+            "the clean handoff must be explicit and deterministic:\n{log}"
         );
     }
 

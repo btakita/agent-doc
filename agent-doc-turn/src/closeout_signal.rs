@@ -840,7 +840,7 @@ pub fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) ->
 
 fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
-    let comment_ranges = agent_doc_markdown_ast::overlay::multiline_list_comment_ranges(doc);
+    let comment_ranges = agent_doc_markdown_ast::overlay::inert_list_child_ranges(doc);
     let mut offset = 0usize;
     for line in doc.split_inclusive('\n') {
         let line_start = offset;
@@ -2235,18 +2235,19 @@ Closes #lostid.
     }
 
     #[test]
-    fn direct_response_patchback_heading_policy_ignores_multiline_comment_children() {
+    fn direct_response_patchback_heading_policy_ignores_reserved_response_details() {
         let before = "<!-- agent:queue -->\n- ~~do [#done]~~\n<!-- /agent:queue -->\n";
         let after = concat!(
             "<!-- agent:queue -->\n",
             "- ~~do [#done]~~\n",
-            "  - %%\n",
+            "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "    <summary>Response</summary>\n",
+            "    \n",
             "    ### Re: done — gpt-5\n\n",
             "    Completed.\n",
-            "    %%\n",
+            "    </details>\n",
             "<!-- /agent:queue -->\n",
         );
-
         assert!(!has_new_response_heading_marker(before, after));
     }
 

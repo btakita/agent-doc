@@ -472,9 +472,8 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // the marker as data lets `render` preserve every operator-authored byte
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
-            if rest.trim() == "%%"
-                && let Some(end_i) =
-                    agent_doc_markdown_ast::overlay::multiline_list_comment_end(&lines, i, indent)
+            if let Some(end_i) =
+                agent_doc_markdown_ast::overlay::inert_list_child_end(&lines, i, indent)
             {
                 entries.push((
                     QueueEntry::Freeform(lines[i..end_i].join("\n")),

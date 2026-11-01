@@ -380,6 +380,88 @@ pub fn multiline_list_comment_end(
     None
 }
 
+fn canonical_response_details_id(item_content: &str) -> Option<&str> {
+    let response_id = item_content
+        .trim()
+        .strip_prefix("<details data-agent-doc-response-id=\"r-")?
+        .strip_suffix("\">")?;
+    (response_id.len() >= 12
+        && response_id
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)))
+    .then_some(response_id)
+}
+
+fn completed_prompt_tree_parent(lines: &[&str], opener_index: usize, child_indent: usize) -> bool {
+    let Some(parent) = opener_index
+        .checked_sub(1)
+        .and_then(|index| lines.get(index))
+    else {
+        return false;
+    };
+    let parent = parent.trim_end_matches(['\r', '\n']);
+    let parent_indent = parent.len() - parent.trim_start_matches([' ', '\t']).len();
+    let Some(payload) = strip_bullet(parent) else {
+        return false;
+    };
+    let payload = payload.trim();
+    child_indent == parent_indent + 2 && payload.starts_with("~~") && payload[2..].contains("~~")
+}
+
+/// Return the exclusive line index of a reserved GFM response-details child.
+///
+/// Recognition is deliberately narrow: a canonical generated response id, an
+/// immediate completed prompt-tree parent, the fixed summary, and a balanced
+/// details element are all required. Ordinary `<details>` blocks remain typed
+/// document content.
+pub fn response_details_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let opener = lines.get(opener_index)?;
+    canonical_response_details_id(strip_bullet(opener)?)?;
+    if !completed_prompt_tree_parent(lines, opener_index, item_indent) {
+        return None;
+    }
+
+    let summary = lines.get(opener_index + 1)?.trim_end_matches(['\r', '\n']);
+    let summary_indent = summary.len() - summary.trim_start_matches([' ', '\t']).len();
+    if summary_indent <= item_indent || summary.trim() != "<summary>Response</summary>" {
+        return None;
+    }
+
+    let mut depth = 1usize;
+    for (index, line) in lines.iter().enumerate().skip(opener_index + 2) {
+        let line = line.trim_end_matches(['\r', '\n']);
+        let trimmed = line.trim();
+        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+        if trimmed.starts_with("<details") && trimmed.ends_with('>') {
+            depth += 1;
+        } else if trimmed == "</details>" {
+            depth -= 1;
+            if depth == 0 {
+                return (indent > item_indent).then_some(index + 1);
+            }
+        }
+    }
+    None
+}
+
+/// Return the end of an inert list child.
+///
+/// Operator-authored multiline Obsidian comments retain their general list
+/// annotation semantics. Generated response projections use only the reserved
+/// response-details representation.
+pub fn inert_list_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    multiline_list_comment_end(lines, opener_index, item_indent)
+        .or_else(|| response_details_child_end(lines, opener_index, item_indent))
+}
+
 /// Byte ranges occupied by balanced indented Obsidian comments represented as
 /// list children (`- %%` ... `%%`).
 ///
@@ -398,6 +480,53 @@ pub fn multiline_list_comment_ranges(source: &str) -> Vec<(usize, usize)> {
     while index < lines.len() {
         let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
         if let Some(end) = multiline_list_comment_end(&lines, index, item_indent) {
+            ranges.push((offsets[index], offsets[end]));
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
+/// Byte ranges occupied by inert list children.
+pub fn inert_list_child_ranges(source: &str) -> Vec<(usize, usize)> {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
+        if let Some(end) = inert_list_child_end(&lines, index, item_indent) {
+            ranges.push((offsets[index], offsets[end]));
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
+/// Byte ranges occupied specifically by reserved GFM response-details
+/// children.
+pub fn response_details_child_ranges(source: &str) -> Vec<(usize, usize)> {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
+        if let Some(end) = response_details_child_end(&lines, index, item_indent) {
             ranges.push((offsets[index], offsets[end]));
             index = end;
         } else {
@@ -1326,10 +1455,7 @@ pub fn components(source: &str) -> Vec<Component> {
             && let Some(item_content) = strip_bullet(content)
         {
             let item_indent = content.len() - content.trim_start_matches([' ', '\t']).len();
-            if item_content.trim() == "%%"
-                && let Some(end_index) =
-                    multiline_list_comment_end(&content_lines, index, item_indent)
-            {
+            if let Some(end_index) = inert_list_child_end(&content_lines, index, item_indent) {
                 continuable_item = None;
                 line_index = end_index;
                 continue;
@@ -1433,6 +1559,73 @@ mod tests {
                 "    %%\n",
             )
         );
+    }
+
+    #[test]
+    fn reserved_response_details_child_is_preserved_but_not_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "    <summary>Response</summary>\n",
+            "    \n",
+            "    > **Queue prompt:** copied evidence\n",
+            "    ### Re: copied heading\n",
+            "    - [ ] copied task-like row\n",
+            "    <details>\n",
+            "    <summary>Nested</summary>\n",
+            "    nested body\n",
+            "    </details>\n",
+            "    </details>\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["do [#answered]", "next task"]);
+        let ranges = response_details_child_ranges(source);
+        assert_eq!(ranges.len(), 1);
+        assert!(source[ranges[0].0..ranges[0].1].contains("copied task-like row"));
+    }
+
+    #[test]
+    fn response_details_inertness_requires_reserved_id_completed_parent_and_balance() {
+        for source in [
+            concat!(
+                "- ~~done~~\n",
+                "  - <details>\n",
+                "    <summary>Response</summary>\n",
+                "    body\n",
+                "    </details>\n",
+            ),
+            concat!(
+                "- live prompt\n",
+                "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+                "    <summary>Response</summary>\n",
+                "    body\n",
+                "    </details>\n",
+            ),
+            concat!(
+                "- ~~done~~\n",
+                "  - <details data-agent-doc-response-id=\"r-NOTCANONICAL\">\n",
+                "    <summary>Response</summary>\n",
+                "    body\n",
+                "    </details>\n",
+            ),
+            concat!(
+                "- ~~done~~\n",
+                "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+                "    <summary>Response</summary>\n",
+                "    body\n",
+            ),
+        ] {
+            assert!(response_details_child_ranges(source).is_empty(), "{source}");
+        }
     }
 
     #[test]

@@ -884,8 +884,7 @@ pub fn guard_no_conversation_content_inside_tracked_components(doc: &str) -> Res
     let components = element::parse(doc).context("failed to parse components")?;
     let code_ranges = element::find_code_ranges(doc);
     let comment_ranges = element::find_non_agent_html_comment_ranges(doc);
-    let multiline_comment_ranges =
-        agent_doc_markdown_ast::overlay::multiline_list_comment_ranges(doc);
+    let multiline_comment_ranges = agent_doc_markdown_ast::overlay::inert_list_child_ranges(doc);
     let ignored = |position: usize| {
         code_ranges
             .iter()
@@ -1773,7 +1772,7 @@ mod tests {
     }
 
     #[test]
-    fn guard_accepts_queue_response_scaffold_inside_balanced_multiline_comment() {
+    fn guard_accepts_queue_response_scaffold_inside_reserved_response_details() {
         let document = concat!(
             "<!-- agent:exchange -->\n",
             "### Re: prior — gpt-5\n\n",
@@ -1781,20 +1780,25 @@ mod tests {
             "<!-- /agent:exchange -->\n\n",
             "<!-- agent:queue -->\n",
             "- ~~do [#ads-audit]~~\n",
-            "  - %%\n",
+            "  - <details data-agent-doc-response-id=\"r-0123456789ab\">\n",
+            "    <summary>Response</summary>\n",
+            "    \n",
             "    ### Re: do [#ads-audit] — gpt-5\n\n",
             "    > **Queue prompt:**\n",
             "    >\n",
             "    > do [#ads-audit]\n\n",
             "    The audit is complete.\n",
-            "    %%\n",
+            "    </details>\n",
             "<!-- /agent:queue -->\n",
         );
 
         guard_no_conversation_content_inside_tracked_components(document).unwrap();
 
-        let unbalanced =
-            document.replacen("    %%\n<!-- /agent:queue -->", "<!-- /agent:queue -->", 1);
+        let unbalanced = document.replacen(
+            "    </details>\n<!-- /agent:queue -->",
+            "<!-- /agent:queue -->",
+            1,
+        );
         guard_no_conversation_content_inside_tracked_components(&unbalanced)
             .expect_err("an unbalanced delimiter must not hide response debris");
     }

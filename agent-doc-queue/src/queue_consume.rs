@@ -1971,7 +1971,7 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
         "~~{}{STRUCK_FREE_TEXT_NOTE}",
         agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
     );
-    let queue_body = strip_response_multiline_comment_children(queue.content(content));
+    let queue_body = strip_response_details_children(queue.content(content));
     let body = queue_body
         .split_inclusive('\n')
         .filter_map(|line| {
@@ -2000,40 +2000,16 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
         .collect())
 }
 
-fn strip_response_multiline_comment_children(body: &str) -> String {
-    let lines = body.split_inclusive('\n').collect::<Vec<_>>();
-    let mut out = String::new();
-    let mut index = 0usize;
-    while index < lines.len() {
-        let opener = lines[index].trim_end_matches(['\n', '\r']);
-        if opener.trim() == "- %%" {
-            let opener_indent = opener.len() - opener.trim_start_matches([' ', '\t']).len();
-            let mut end = index + 1;
-            while end < lines.len() {
-                let line = lines[end].trim_end_matches(['\n', '\r']);
-                let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
-                if !line.trim().is_empty() && indent <= opener_indent {
-                    break;
-                }
-                if line.trim() == "%%" {
-                    let next = lines
-                        .get(end + 1)
-                        .map(|line| line.trim_end_matches(['\n', '\r']));
-                    if next.is_some_and(is_response_id_lookup_comment) {
-                        index = end + 1;
-                    }
-                    break;
-                }
-                end += 1;
-            }
-            if index > end {
-                continue;
-            }
-        }
-        out.push_str(lines[index]);
-        index += 1;
+fn strip_response_details_children(body: &str) -> String {
+    let mut without_details = body.to_string();
+    for (start, end) in
+        agent_doc_markdown_ast::overlay::response_details_child_ranges(&without_details)
+            .into_iter()
+            .rev()
+    {
+        without_details.replace_range(start..end, "");
     }
-    out
+    without_details
 }
 
 fn is_response_id_lookup_comment(line: &str) -> bool {
@@ -2684,10 +2660,15 @@ pub fn response_lookup_id_for_document(
 }
 
 fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<String> {
-    let mut children = vec![
-        response_multiline_comment(response_body),
-        format!("%% response {response_id} %%"),
-    ];
+    // `patch:exchange` is the response transport envelope. The exchange
+    // materializer consumes it, but this queue projection receives the original
+    // captured payload so it must cross the same visibility boundary explicitly.
+    // Strip only one complete outer pair; literal examples inside an ordinary
+    // response remain operator-visible.
+    let response_body = response_body_without_exchange_transport(response_body);
+    let response_child = response_details_child(response_body, response_id)
+        .expect("response lookup ids are canonical response ids");
+    let mut children = vec![response_child, format!("%% response {response_id} %%")];
 
     for (index, code) in response_body.split('`').enumerate() {
         if index % 2 == 1 && artifact_reference(code) {
@@ -2711,9 +2692,124 @@ fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<Strin
     children
 }
 
-fn response_multiline_comment(response_body: &str) -> String {
-    let escaped = response_body.trim_end().replace("%%", "%\\%");
-    format!("%%\n{escaped}\n%%")
+fn response_body_without_exchange_transport(response: &str) -> &str {
+    const OPEN: &str = "<!-- patch:exchange -->";
+    const CLOSE: &str = "<!-- /patch:exchange -->";
+
+    let trimmed = response.trim();
+    let Some(after_open) = trimmed.strip_prefix(OPEN) else {
+        return response;
+    };
+    let Some(after_open) = after_open
+        .strip_prefix("\r\n")
+        .or_else(|| after_open.strip_prefix('\n'))
+    else {
+        return response;
+    };
+    let Some(before_close) = after_open.strip_suffix(CLOSE) else {
+        return response;
+    };
+    let Some(body) = before_close
+        .strip_suffix("\r\n")
+        .or_else(|| before_close.strip_suffix('\n'))
+    else {
+        return response;
+    };
+    body
+}
+
+fn response_details_child(response_body: &str, response_id: &str) -> Option<String> {
+    let attribute_id = response_id.strip_prefix("[#")?.strip_suffix(']')?;
+    let hash = attribute_id.strip_prefix("r-")?;
+    if hash.len() < 12
+        || !hash
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+    {
+        return None;
+    }
+    let body = balance_nested_details_for_response(response_body.trim_end());
+    Some(format!(
+        "<details data-agent-doc-response-id=\"{attribute_id}\">\n<summary>Response</summary>\n\n{body}\n</details>"
+    ))
+}
+
+fn balance_nested_details_for_response(response_body: &str) -> String {
+    #[derive(Clone, Copy)]
+    enum Kind {
+        Open,
+        Close,
+    }
+
+    let code_ranges = element::find_code_ranges(response_body);
+    let bytes = response_body.as_bytes();
+    let mut tokens = Vec::<(usize, Kind, bool)>::new();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let Some(relative) = bytes[cursor..].iter().position(|byte| *byte == b'<') else {
+            break;
+        };
+        let start = cursor + relative;
+        cursor = start + 1;
+        if code_ranges
+            .iter()
+            .any(|&(range_start, range_end)| start >= range_start && start < range_end)
+        {
+            continue;
+        }
+        let Some(relative_end) = bytes[start..].iter().position(|byte| *byte == b'>') else {
+            break;
+        };
+        let end = start + relative_end + 1;
+        let tag = response_body[start..end].to_ascii_lowercase();
+        let kind = if tag.starts_with("<details")
+            && tag
+                .as_bytes()
+                .get("<details".len())
+                .is_some_and(|byte| *byte == b'>' || byte.is_ascii_whitespace())
+        {
+            Some(Kind::Open)
+        } else if tag.starts_with("</details") && tag["</details".len()..].trim() == ">" {
+            Some(Kind::Close)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let line_start = response_body[..start].rfind('\n').map_or(0, |at| at + 1);
+            let line_end = response_body[end..]
+                .find('\n')
+                .map_or(response_body.len(), |at| end + at);
+            let standalone =
+                response_body[line_start..line_end].trim() == &response_body[start..end];
+            tokens.push((start, kind, standalone));
+        }
+        cursor = end;
+    }
+
+    let mut stack = Vec::new();
+    let mut matched = vec![false; tokens.len()];
+    for (index, (_, kind, standalone)) in tokens.iter().enumerate() {
+        if !standalone {
+            continue;
+        }
+        match kind {
+            Kind::Open => stack.push(index),
+            Kind::Close => {
+                if let Some(open) = stack.pop() {
+                    matched[open] = true;
+                    matched[index] = true;
+                }
+            }
+        }
+    }
+
+    let mut balanced = response_body.to_string();
+    for (index, (start, _, _)) in tokens.into_iter().enumerate().rev() {
+        if !matched[index] {
+            balanced.replace_range(start..start + 1, "&lt;");
+        }
+    }
+    balanced
 }
 
 fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
@@ -2837,14 +2933,10 @@ mod tests {
             )),
             "{annotated}"
         );
+        let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(
-            annotated.contains(concat!(
-                "  - %%\n",
-                "    ### Re: fresh — test\n",
-                "    \n",
-                "    Completed `/work/tasks/result.md`.\n",
-                "    %\\% response published locally; coordinator install remains %\\%\n",
-                "    %%\n",
+            annotated.contains(&format!(
+                "  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: fresh — test\n    \n    Completed `/work/tasks/result.md`.\n    %% response published locally; coordinator install remains %%\n    </details>\n"
             )),
             "{annotated}"
         );
@@ -2873,6 +2965,112 @@ mod tests {
     }
 
     #[test]
+    fn completed_row_response_child_strips_exchange_transport_wrapper() {
+        let head = "do [#subagent-response-exchange-gap]";
+        let before = queue_doc(&format!("- {head}\n"));
+        let after = queue_doc(&format!("- ~~{head}~~\n"));
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: subagent response exchange gap — test\n\n",
+            "The response body stays readable and lossless.\n",
+            "> **Queue prompt:** copied evidence must stay inert.\n",
+            "### Re: copied nested heading\n",
+            "- [ ] copied task-like row\n",
+            "A literal %% pair remains balanced after child escaping.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .response_id()
+            .to_string();
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+
+        assert!(
+            annotated
+                .contains("- ~~do [#subagent-response-exchange-gap]~~ — auto-struck: response: "),
+            "{annotated}"
+        );
+        let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
+        assert!(
+            annotated.contains(&format!(
+                "  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: subagent response exchange gap — test\n    \n    The response body stays readable and lossless.\n    > **Queue prompt:** copied evidence must stay inert.\n    ### Re: copied nested heading\n    - [ ] copied task-like row\n    A literal %% pair remains balanced after child escaping.\n    </details>\n"
+            )),
+            "the exact struck-parent child projection must remain balanced and nested:\n{annotated}"
+        );
+        assert!(
+            !annotated.contains("<!-- patch:exchange -->"),
+            "{annotated}"
+        );
+        assert!(
+            !annotated.contains("<!-- /patch:exchange -->"),
+            "{annotated}"
+        );
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&annotated)).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "copied response scaffolding must never become another prompt:\n{annotated}"
+        );
+    }
+
+    #[test]
+    fn response_child_preserves_literal_exchange_wrapper_documentation() {
+        let response = concat!(
+            "### Re: transport documentation — test\n\n",
+            "The literals `<!-- patch:exchange -->` and ",
+            "`<!-- /patch:exchange -->` are documentation.\n",
+        );
+
+        assert_eq!(response_body_without_exchange_transport(response), response);
+        let child = response_details_child(
+            response_body_without_exchange_transport(response),
+            "[#r-0123456789ab]",
+        )
+        .unwrap();
+        assert!(child.contains("`<!-- patch:exchange -->`"), "{child}");
+        assert!(child.contains("`<!-- /patch:exchange -->`"), "{child}");
+    }
+
+    #[test]
+    fn response_details_balances_nested_blocks_and_escapes_unmatched_tags() {
+        let response = concat!(
+            "### Re: nested details — test\n\n",
+            "<details>\n<summary>Nested</summary>\n\nNested body.\n</details>\n\n",
+            "An unmatched raw close follows: </details>\n",
+            "Inline code stays literal: `</details>`.\n",
+            "<details>\n",
+        );
+
+        let child = response_details_child(response, "[#r-0123456789ab]").unwrap();
+        assert!(
+            child.contains("<details>\n<summary>Nested</summary>\n\nNested body.\n</details>"),
+            "{child}"
+        );
+        assert!(
+            child.contains("An unmatched raw close follows: &lt;/details>"),
+            "{child}"
+        );
+        assert!(child.contains("`</details>`"), "{child}");
+        assert!(child.contains("&lt;details>\n</details>"), "{child}");
+
+        let mixed = response_details_child(
+            "Inline <details> then a standalone closer.\n</details>\nStill inert.",
+            "[#r-0123456789ab]",
+        )
+        .unwrap();
+        assert!(mixed.contains("Inline &lt;details>"), "{mixed}");
+        assert!(mixed.contains("&lt;/details>\nStill inert."), "{mixed}");
+    }
+
+    #[test]
     fn nested_queue_lookup_children_follow_the_completed_item_indent() {
         let before = queue_doc("- group\n  - do [#nested]\n- later\n");
         let after = queue_doc("- group\n  - ~~do [#nested]~~\n- later\n");
@@ -2889,7 +3087,8 @@ mod tests {
 
         assert!(
             annotated.contains(&format!(
-                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - %%\n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      %%\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n"
+                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - <details data-agent-doc-response-id=\"{}\">\n      <summary>Response</summary>\n      \n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      </details>\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n",
+                response_id.trim_start_matches("[#").trim_end_matches(']')
             )),
             "{annotated}"
         );
@@ -5400,8 +5599,9 @@ Old.
             ))
             .response_id()
             .to_string();
+        let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - %%\n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    %%\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - <details data-agent-doc-response-id=\"{attribute_id}\">\n    <summary>Response</summary>\n    \n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    </details>\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
         )));
     }
 

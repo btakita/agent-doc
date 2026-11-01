@@ -345,6 +345,16 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      response persistence and the final `session-check`. Never let queue
      auto-clear or `next_queue_prompt` move past that effect. If it cannot run,
      keep the item live and record the exact blocker.
+     A short acknowledgement such as “completed” may remain as a legitimate
+     receipt, but it is not proof that the complete child result reached the
+     root-authored `agent:exchange` response (`#subagent-response-exchange-gap`).
+     Before handoff or terminal success, reconcile every reported child against
+     `queue_sync_payload`: include each `recovered_response` in the root response
+     exactly once. `response_evidence=consolidated_exchange` means the full
+     history-attested result is already present outside binary completion cells
+     and must not be replayed. A named `missing_response_debt` (missing,
+     ambiguous, or unsupported stable history) blocks clean closeout; preserve
+     the row and surface that concrete blocker instead of redispatching it.
      The exact generation fence prevents a late result from mutating a reclaimed
      item and changes its marker to `☑️` (worker-complete handoff/outbox, awaiting integration; keep the live row until the coordinator strikes it).
      `☑️` is not an end-of-turn timer: as soon as the coordinator integrates

@@ -9,6 +9,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
 
 - Address the user's changes naturally in the console; that response is the
   document response.
+- **Lead queue closeouts with an actionable summary (`#queueresponsesummary`).**
+  Start the consolidated report for queue work with one substantive paragraph
+  labelled `**Outcome:**`, `**Current state:**`, `**Blocked:**`,
+  `**Blocker:**`, or `**Next action:**`. State the outcome/current state and,
+  when applicable, the blocker or required next action in complete sentences.
+  This lead is the deterministic source for a completed row's default
+  `response="summary"` projection; do not put essential action after it. A
+  blocking operator-request packet remains separate and canonical so the
+  binary can append its complete request and every choice to that summary.
 - **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
   invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
   `request_user_input`, or the active harness's equivalent), materialize the
@@ -443,7 +452,8 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   status prose while the requested work remains undone.
 
 **Draining a free-text queue head — quote it (`#qdeferstrike`).** When you answer a
-free-text queue prompt (a queue head with **no** `#id`), quote it verbatim as a
+free-text queue prompt (including one carrying a trailing binary-owned
+`[#q-<stable>]`), quote its work text verbatim as a
 `> **Queue prompt:**` blockquote at the top of your response. The position-
 independent strike (`#ftstrike` / `strike_answered_free_text_queue_heads`) matches
 the head's prose against your response's **blockquote** region — a `### Re:` heading
@@ -457,6 +467,14 @@ consume stops at that deferred id-head, so the **only** path that can strike the
 free-text item is the blockquote-matched `#ftstrike`. `do [#id]` heads are
 different — they strike by id via `--done <id>` regardless of position and need no
 quote.
+
+Preserve any authored semantic ID and any existing q-ID exactly. Do not invent,
+move, or rewrite `[#q-…]` yourself: preflight admits missing IDs only from the
+current editor-authoritative document through CAS. The q-ID is correlation
+metadata, not a `--done` target. A generated `- **Related:** [#id] …` row is inert
+and non-ordering; do not treat it like `after=`. Explicit operator bullets nested
+beneath generated Response/Choices/Next-action/Action/Related metadata remain
+ordinary queue prompts and must be answered normally.
 
 When a queue response contains a terse salient fact the operator should not
 miss in the larger exchange, include it as its own `%% response <snippet> %%`

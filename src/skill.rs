@@ -161,6 +161,7 @@ const BUNDLED_RUNBOOKS: &[(&str, &str)] = &[
         include_str!("../runbooks/transfer-extract.md"),
     ),
     ("pending-ops.md", include_str!("../runbooks/pending-ops.md")),
+    ("decisions.md", include_str!("../runbooks/decisions.md")),
     (
         "model-tier-gate.md",
         include_str!("../runbooks/model-tier-gate.md"),

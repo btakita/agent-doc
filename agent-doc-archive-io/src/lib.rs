@@ -152,11 +152,35 @@ fn response_nodes(content: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Append complete response nodes to the one ordinary Markdown sibling archive
-/// and atomically replace its compact response-id index. Node bytes are copied
-/// verbatim; anchors are archive framing and never inserted into a response.
+fn terminal_response_cells(content: &str) -> Vec<(String, String, String)> {
+    let nodes = parse_exchange_nodes(content);
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| matches!(node.kind, ExchangeNodeKind::Response { .. }))
+        .map(|(index, node)| {
+            let policy = ResponseTurnCellPolicy::from_response_nodes(std::slice::from_ref(node));
+            let response_id = response_lookup_id(content, &policy);
+            let response = node.render();
+            let prompt = index
+                .checked_sub(1)
+                .and_then(|previous| nodes.get(previous))
+                .filter(|node| matches!(node.kind, ExchangeNodeKind::Prompt))
+                .map(|node| node.render())
+                .unwrap_or_default();
+            let cell = format!("{prompt}{response}");
+            (response_id, response, cell)
+        })
+        .filter(|(response_id, response, _)| !response_id.is_empty() && !response.trim().is_empty())
+        .collect()
+}
+
+/// Append complete terminal prompt/response cells to the one ordinary Markdown
+/// sibling archive and atomically replace its compact response-id index. Cell
+/// bytes are copied verbatim; anchors are archive framing and never inserted
+/// into a prompt or response.
 pub fn write_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<ExchangeArchiveWrite> {
-    let nodes = response_nodes(archived_exchange);
+    let nodes = terminal_response_cells(archived_exchange);
     ensure!(
         !nodes.is_empty(),
         "exchange compact selected no complete terminal response cells"
@@ -181,10 +205,10 @@ pub fn write_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<Exc
     };
     let mut entries = parse_response_index_file(&index_path)?;
     let mut changed = false;
-    for (response_id, body) in nodes {
+    for (response_id, response, cell) in nodes {
         let anchor = anchor_for(&response_id)?;
         let anchor_marker = format!("<a id=\"{anchor}\"></a>");
-        let checksum = agent_doc_hash::content_hash(&body);
+        let checksum = agent_doc_hash::content_hash(&response);
         if !archive.contains(&anchor_marker) {
             if !archive.ends_with('\n') {
                 archive.push('\n');
@@ -197,7 +221,7 @@ pub fn write_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<Exc
             archive.push_str(&format!("❯ Archived response locator {response_id}\n\n"));
             archive.push_str(&anchor_marker);
             archive.push('\n');
-            archive.push_str(&body);
+            archive.push_str(&cell);
             if !archive.ends_with('\n') {
                 archive.push('\n');
             }
@@ -335,20 +359,64 @@ pub fn response_archive_commit_paths(doc: &Path) -> Result<Vec<PathBuf>> {
 /// cell or to the durable sibling index. This is the shared compaction and
 /// session-check orphan guard.
 pub fn dangling_response_references(doc: &Path, content: &str) -> Result<Vec<String>> {
+    dangling_response_references_with_pins(doc, content, std::iter::empty())
+}
+
+pub fn dangling_response_references_with_pins(
+    doc: &Path,
+    content: &str,
+    pinned: impl IntoIterator<Item = String>,
+) -> Result<Vec<String>> {
     let index = parse_response_index_file(&response_index_path(doc))?;
-    if index.is_empty() {
-        return Ok(Vec::new());
+    let root = project_root(doc)?;
+    let mut indexed = BTreeSet::new();
+    let mut archive_proofs = BTreeMap::<String, BTreeMap<String, String>>::new();
+    for entry in index.values() {
+        if !archive_proofs.contains_key(&entry.archive_path) {
+            let archive =
+                std::fs::read_to_string(root.join(&entry.archive_path)).with_context(|| {
+                    format!(
+                        "response index points to unreadable archive {}",
+                        entry.archive_path
+                    )
+                })?;
+            archive_proofs.insert(
+                entry.archive_path.clone(),
+                response_nodes(&archive)
+                    .into_iter()
+                    .map(|(id, body)| (id, agent_doc_hash::content_hash(&body)))
+                    .collect(),
+            );
+        }
+        ensure!(
+            archive_proofs[&entry.archive_path].get(&entry.response_id)
+                == Some(&entry.content_sha256),
+            "archive checksum proof failed for {}",
+            entry.response_id,
+        );
+        indexed.insert(entry.response_id.clone());
     }
-    let indexed = index.keys().cloned().collect::<BTreeSet<_>>();
     let live = response_nodes(content)
         .into_iter()
         .map(|(id, _)| id)
         .collect::<BTreeSet<_>>();
-    let refs = extract_response_ids(content);
+    let mut refs = extract_response_ids(content);
+    refs.extend(pinned);
     Ok(refs
         .difference(&live.union(&indexed).cloned().collect())
         .cloned()
         .collect())
+}
+
+/// Render only response bodies not pinned by authoritative decision evidence.
+/// Archive bytes are never rewritten; this view is solely a retained-state GC
+/// input after the Git durability receipt verifies.
+pub fn unpinned_response_content(archive: &str, pinned: &BTreeSet<String>) -> String {
+    response_nodes(archive)
+        .into_iter()
+        .filter(|(response_id, _)| !pinned.contains(response_id))
+        .map(|(_, body)| body)
+        .collect()
 }
 
 pub fn ensure_no_dangling_response_references(doc: &Path, content: &str) -> Result<()> {
@@ -478,6 +546,13 @@ pub fn affected_response_ids_for_commit(
     let after_refs = response_id_counts(after_document);
     for response_id in before_refs.keys().chain(after_refs.keys()) {
         if before_refs.get(response_id) != after_refs.get(response_id) {
+            affected.insert(response_id.clone());
+        }
+    }
+    let before_responses = before_document.map(response_checksums).unwrap_or_default();
+    let after_responses = response_checksums(after_document);
+    for response_id in before_responses.keys().chain(after_responses.keys()) {
+        if before_responses.get(response_id) != after_responses.get(response_id) {
             affected.insert(response_id.clone());
         }
     }
@@ -743,6 +818,13 @@ fn response_id_counts(content: &str) -> BTreeMap<String, usize> {
     counts
 }
 
+fn response_checksums(content: &str) -> BTreeMap<String, String> {
+    response_nodes(content)
+        .into_iter()
+        .map(|(response_id, body)| (response_id, agent_doc_hash::content_hash(&body)))
+        .collect()
+}
+
 fn relative_slash(root: &Path, path: &Path) -> Result<String> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -936,6 +1018,22 @@ mod tests {
     }
 
     #[test]
+    fn sibling_archive_moves_prompt_and_response_as_one_terminal_cell() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let cell = "❯ preserve this exact prompt\n\n### Re: exact\n\nExact response.\n";
+
+        let write = write_exchange_archive(&doc, cell).unwrap();
+        let archive = std::fs::read_to_string(write.archive_path).unwrap();
+        assert!(
+            archive.contains(cell),
+            "terminal cell was split:\n{archive}"
+        );
+    }
+
+    #[test]
     fn archive_sharding_threshold_is_deterministic_and_starts_with_one_sibling() {
         let doc = Path::new("notes/session.md");
         assert_eq!(
@@ -1026,6 +1124,31 @@ mod tests {
             }
             other => panic!("unexpected recovery: {other:?}"),
         }
+    }
+
+    #[test]
+    fn decision_pins_are_dangling_without_verified_live_or_archive_evidence() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let pinned = "[#r-0123456789ab]".to_string();
+
+        assert_eq!(
+            dangling_response_references_with_pins(&doc, "live\n", [pinned.clone()]).unwrap(),
+            [pinned]
+        );
+    }
+
+    #[test]
+    fn decision_pins_are_excluded_from_retained_state_gc_input() {
+        let first = response("first", "keep pinned");
+        let second = response("second", "collect durable");
+        let archive = format!("{first}{second}");
+        let first_id = response_nodes(&first)[0].0.clone();
+        let gc = unpinned_response_content(&archive, &BTreeSet::from([first_id]));
+        assert!(!gc.contains("keep pinned"));
+        assert!(gc.contains("collect durable"));
     }
 
     #[test]
@@ -1155,5 +1278,21 @@ mod tests {
                 < message.find("Agent-Doc-Decision: d-z").unwrap()
         );
         assert!(message.contains("Agent-Doc-Document: notes/session.md"));
+    }
+
+    #[test]
+    fn changed_response_body_is_affected_even_when_lookup_marker_is_stable() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let response_id = "[#r-0123456789ab]";
+        let before = format!("### Re: stable\n\n**Response {response_id}**\n\nold body\n");
+        let after = before.replace("old body", "new body");
+
+        assert_eq!(
+            affected_response_ids_for_commit(&doc, Some(&before), &after).unwrap(),
+            BTreeSet::from([response_id.to_string()]),
+        );
     }
 }

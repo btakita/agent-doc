@@ -947,7 +947,19 @@ fn run_in_controller_scoped(
     // References may leave the live exchange only when the tracked response
     // index resolves them. Decision-evidence references use the same guard and
     // therefore remain pinned against retained-state GC.
-    agent_doc_archive_io::ensure_no_dangling_response_references(file, &targets.live)?;
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+    let dangling = agent_doc_archive_io::dangling_response_references(file, &targets.live)?;
+    anyhow::ensure!(
+        dangling.is_empty(),
+        "response index would orphan referenced response id(s): {}",
+        dangling.join(", ")
+    );
+    let decision_validation = agent_doc_decision_io::validate(&project_root)?;
+    anyhow::ensure!(
+        decision_validation.dangling_response_ids.is_empty(),
+        "decision evidence would orphan response id(s): {}",
+        decision_validation.dangling_response_ids.join(", ")
+    );
 
     let updated = effects
         .force_disk_document_content(file, "compact_post_write_disk_verify")
@@ -1438,7 +1450,10 @@ fn settle_exchange_archive_durability(file: &Path) -> Result<()> {
         file.display(),
     );
     if let Some(archive) = agent_doc_archive_io::read_current_exchange_archive(file)? {
-        agent_doc_capture_io::discard_captures_for_archived_responses(file, &archive).with_context(
+        let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+        let pinned = agent_doc_decision_io::pinned_response_ids(&project_root)?;
+        let gc_eligible = agent_doc_archive_io::unpinned_response_content(&archive, &pinned);
+        agent_doc_capture_io::discard_captures_for_archived_responses(file, &gc_eligible).with_context(
             || {
                 format!(
                     "durable exchange archive committed in {} but retained capture GC failed for {}",

@@ -1286,19 +1286,30 @@ pub fn try_run_with_options(
     crate::profile::reset();
     let started = std::time::Instant::now();
     let out = crate::with_current_document_pass(|| {
-        if agent_doc_archive_io::response_index_path(file).exists() {
-            let content = crate::resolve_current_document_content(
-                file,
-                "session_check_response_archive_orphan_guard",
-            )?;
-            if let Err(error) =
-                agent_doc_archive_io::ensure_no_dangling_response_references(file, &content)
-            {
-                return Err(SessionCheckInterrupted(format!(
-                    "[session-check] INTERRUPTED: {error:#}. Restore the indexed response, detach the stale reference, or explicitly replace its decision evidence; editor authority was not changed."
-                ))
-                .into());
-            }
+        let content = crate::resolve_current_document_content(
+            file,
+            "session_check_response_archive_orphan_guard",
+        )?;
+        let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
+        let decision_validation = agent_doc_decision_io::validate(&project_root)?;
+        if let Err(error) = agent_doc_archive_io::dangling_response_references(file, &content)
+            .and_then(|dangling| {
+            anyhow::ensure!(
+                dangling.is_empty(),
+                "response index would orphan referenced response id(s): {}",
+                dangling.join(", ")
+            );
+            anyhow::ensure!(
+                decision_validation.dangling_response_ids.is_empty(),
+                "decision evidence would orphan response id(s): {}",
+                decision_validation.dangling_response_ids.join(", ")
+            );
+            Ok(())
+        }) {
+            return Err(SessionCheckInterrupted(format!(
+                "[session-check] INTERRUPTED: {error:#}. Restore the indexed response, detach the stale reference, or explicitly replace its decision evidence; editor authority was not changed."
+            ))
+            .into());
         }
         run_with_options_inner(file, codex_final_gate, effects)
     });

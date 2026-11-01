@@ -2287,15 +2287,6 @@ where
         })?;
     guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
-    let decision_trailers = agent_doc_decision_io::trailers_for_diff(
-        head_doc.as_deref().unwrap_or_default(),
-        &file_content,
-    )
-    .render();
-    if !decision_trailers.is_empty() {
-        msg.push_str("\n\n");
-        msg.push_str(&decision_trailers);
-    }
     let rebased_snapshot = match snapshot_content.as_deref() {
         Some(snapshot) => {
             let (rebased, current) =
@@ -3302,12 +3293,18 @@ where
             ),
         );
     }
-    let affected_response_ids = agent_doc_archive_io::affected_response_ids_for_commit(
+    let prospective_document = snapshot_content.as_deref().unwrap_or(&file_content);
+    let decision_trailers = agent_doc_decision_io::trailers_for_diff(
+        head_doc.as_deref().unwrap_or_default(),
+        prospective_document,
+    );
+    let mut affected_response_ids = agent_doc_archive_io::affected_response_ids_for_commit(
         file,
         head_doc.as_deref(),
-        snapshot_content.as_deref().unwrap_or(&file_content),
+        prospective_document,
     )?;
-    if !affected_response_ids.is_empty() {
+    affected_response_ids.extend(decision_trailers.response_ids);
+    if !affected_response_ids.is_empty() || !decision_trailers.decision_ids.is_empty() {
         let relative_document = resolved
             .strip_prefix(&git_root)
             .unwrap_or(&resolved)
@@ -3317,7 +3314,7 @@ where
             &msg,
             &relative_document,
             affected_response_ids,
-            std::iter::empty(),
+            decision_trailers.decision_ids,
         );
     }
     let elapsed_reposition = t_reposition.elapsed().as_millis();

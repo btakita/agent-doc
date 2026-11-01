@@ -22,6 +22,8 @@ agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.564" 
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.564" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.564" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.564" }
+agent-doc-decision-io = { path = "../agent-doc-decision-io", version = "0.35.564" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.564" }
 agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.564" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.564" }
 agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.35.564" }

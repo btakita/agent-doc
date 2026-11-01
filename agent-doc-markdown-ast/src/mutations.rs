@@ -213,7 +213,16 @@ fn consume_nodes_from_snapshot(
         let node = find_node(nodes, component, node_key)?;
         if !node.item.struck {
             let (start, end) = raw_range(source, component, node)?;
-            replacements.push((start, end, render_struck_item(&node.item, component)));
+            let top_level_queue_item = component == "queue"
+                && source[node.item.start_byte..]
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| !ch.is_whitespace());
+            replacements.push((
+                start,
+                end,
+                render_struck_item(&node.item, top_level_queue_item),
+            ));
         }
     }
     let mut out = source.to_string();
@@ -252,9 +261,9 @@ fn render_multiline_item(marker: &str, text: &str) -> String {
     rendered
 }
 
-fn render_struck_item(item: &Item, component: &str) -> String {
+fn render_struck_item(item: &Item, top_level_queue_item: bool) -> String {
     match item.surface {
-        ItemSurface::ListItem if component == "queue" => {
+        ItemSurface::ListItem if top_level_queue_item => {
             let body = item
                 .raw
                 .trim_start()
@@ -540,6 +549,11 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
         return Ok(source.to_string());
     }
     let (start, end) = raw_range(source, &patch.component, node)?;
+    let top_level_queue_item = patch.component == "queue"
+        && source[node.item.start_byte..]
+            .chars()
+            .next()
+            .is_some_and(|ch| !ch.is_whitespace());
     if node.item.surface == ItemSurface::MultilinePrompt {
         let mut out = source.to_string();
         out.replace_range(start..end, &render_multiline_item("---", &node.item.text));
@@ -550,7 +564,7 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
     // mutation nodes and do not enter this branch as one raw range.
     let (raw, subprompt_block) =
         agent_doc_element_queue::subprompts::split_subprompt_block(&source[start..end]);
-    let raw = if patch.component == "queue" {
+    let raw = if top_level_queue_item {
         raw.trim_start().strip_prefix("### ").unwrap_or(raw)
     } else {
         raw
@@ -575,7 +589,7 @@ fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResul
             node_key: patch.node_key.clone(),
         });
     };
-    let mut unstruck = if patch.component == "queue" {
+    let mut unstruck = if top_level_queue_item {
         let body = unstruck
             .trim_start()
             .strip_prefix("### ")
@@ -771,7 +785,7 @@ mod tests {
 
         let struck = consume_node(CONTINUATION_DOC, "queue", &wrapped.node_key).unwrap();
         assert!(
-            struck.contains("- ~~Wrapped free-text item\n  second line of the same item~~\n"),
+            struck.contains("- ### ~~Wrapped free-text item\n  second line of the same item~~\n"),
             "{struck}"
         );
         let struck_nodes = item_nodes(&struck, "queue").unwrap();
@@ -815,7 +829,7 @@ mod tests {
             concat!(
                 "## Run <!-- agent:run priority subagents -->\n",
                 "- do [#alpha]\n",
-                "- ~~free-text head~~\n",
+                "- ### ~~free-text head~~\n",
                 "<!-- /agent:run -->\n",
             )
         );
@@ -859,7 +873,7 @@ mod tests {
 ";
         let node = item_nodes(doc, "queue").unwrap().remove(0);
         let struck = consume_node(doc, "queue", &node.node_key).unwrap();
-        assert!(struck.contains("- ### ~~🚧 do [#alpha]~~\n"), "{struck}");
+        assert!(struck.contains("- ### ~~do [#alpha]~~\n"), "{struck}");
         assert!(!struck.contains("- ~~###"), "{struck}");
 
         let struck_node = item_nodes(&struck, "queue").unwrap().remove(0);
@@ -874,7 +888,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert!(reopened.contains("- ### 🚧 do [#alpha]\n"), "{reopened}");
+        assert!(reopened.contains("- ### do [#alpha]\n"), "{reopened}");
     }
 
     #[test]
@@ -982,7 +996,7 @@ mod tests {
         assert!(nodes[0].node_key.starts_with("queue:1:"));
 
         let updated = consume_nodes_all(doc, "queue", &[&nodes[0].node_key]).unwrap();
-        assert!(updated.contains("- ~~publish the release~~\n"), "{updated}");
+        assert!(updated.contains("- ### ~~publish the release~~\n"), "{updated}");
     }
 
     /// Structural IPC patches carry all-occurrence node keys. A key from a
@@ -1477,7 +1491,7 @@ operator note
 
     fn struck_row_line(doc: &str) -> &str {
         doc.lines()
-            .find(|line| line.starts_with("- ~~"))
+            .find(|line| line.starts_with("- ### ~~"))
             .expect("struck row present")
     }
 
@@ -1511,7 +1525,7 @@ operator note
 
         let struck = consume_node(&doc, "queue", &row.node_key).unwrap();
         let line = struck_row_line(&struck);
-        assert_eq!(line, format!("- ~~{STRIKEFORMAT_ROW}~~"), "{struck}");
+        assert_eq!(line, format!("- ### ~~{STRIKEFORMAT_ROW}~~"), "{struck}");
         assert_one_struck_span(line, STRIKEFORMAT_ROW, "");
 
         // Every struck-row reader recognizes it, idempotently.

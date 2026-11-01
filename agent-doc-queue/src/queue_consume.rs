@@ -37,6 +37,18 @@ pub const RESPONSE_ID_NOTE_PREFIX: &str = "response: ";
 /// cycle's durable addressed-at fact. Runtime adapters use the explicit `_at`
 /// APIs; this keeps legacy projections deterministic instead of reading time.
 const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
+/// Binary-owned sentinels for the closeout-maintained operator-work tree.
+///
+/// H3 deliberately keeps generated response metadata on the existing
+/// completed-row path: completed rows are visible context but never executable
+/// queue leaves.  The sentinels distinguish those rows from operator-authored
+/// prose and make refresh/removal byte-addressable without introducing another
+/// queue entry type.
+const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
+const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
+const WAITING_ON_YOU_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+const WAITING_ON_YOU_ROOT_TEXT: &str =
+    "Waiting on you — answer by adding a child line under an item";
 
 /// Pure projection of the queue mutation implied by a captured response and an
 /// authoritative markdown frontier.
@@ -4480,6 +4492,434 @@ fn remove_inline_response_id(line: &str, response_id: &str) -> String {
     line.to_string()
 }
 
+/// Project unresolved operator-owned todo work into one inert queue tree.
+///
+/// This is a pure closeout projection. `agent:todo` remains the durable source
+/// of truth; this function only maintains its queue-facing view. Generated
+/// response rows are rendered as completed nested rows, so H3's existing
+/// leaf-only scheduler treats the root and item rows as context parents and
+/// never dispatches their binary-authored metadata. A normal child the operator
+/// adds beneath an item is still an ordinary executable queue leaf.
+pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Result<Option<String>> {
+    let location = waiting_tree_location(document)?;
+    let external_ids = queue_prompt_ids_outside_waiting_tree(document, location.as_ref())?;
+    let existing = location
+        .as_ref()
+        .map(|location| existing_waiting_children(document, location))
+        .transpose()?
+        .unwrap_or_default();
+    let packets = waiting_operator_packets(document, response_body);
+
+    let mut children = Vec::new();
+    for todo in open_waiting_todos(document) {
+        if external_ids.contains(&todo.id) {
+            continue;
+        }
+        if let Some((raw, true)) = existing.get(&todo.id) {
+            children.push(raw.clone());
+            continue;
+        }
+        children.push(render_waiting_child(&todo, packets.get(&todo.id)));
+    }
+
+    let Some(location) = location else {
+        return Ok(None);
+    };
+    let replacement = if children.is_empty() {
+        String::new()
+    } else {
+        let mut tree = format!("- ### {WAITING_ON_YOU_ROOT_TEXT} {WAITING_ON_YOU_ROOT_MARKER}\n");
+        for child in children {
+            tree.push_str(&child);
+        }
+        tree
+    };
+    let mut out = document.to_string();
+    if location.start == location.end && !replacement.is_empty() {
+        let separator = if location.start > 0 && !out[..location.start].ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        out.insert_str(location.start, &format!("{separator}{replacement}"));
+    } else {
+        out.replace_range(location.start..location.end, &replacement);
+    }
+    Ok((out != document).then_some(out))
+}
+
+#[derive(Debug, Clone)]
+struct WaitingTreeLocation {
+    start: usize,
+    end: usize,
+    component_open_end: usize,
+    component_close_start: usize,
+}
+
+fn waiting_tree_location(document: &str) -> Result<Option<WaitingTreeLocation>> {
+    let components = element::parse(document)?;
+    let queue_components = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .collect::<Vec<_>>();
+    let mut roots = queue_components
+        .iter()
+        .filter_map(|component| {
+            let body = component.content(document);
+            let marker = body.find(WAITING_ON_YOU_ROOT_MARKER)?;
+            let line_start = body[..marker].rfind('\n').map_or(0, |offset| offset + 1);
+            Some((*component, component.open_end + line_start))
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        roots.len() <= 1,
+        "multiple binary-owned Waiting on you queue trees are present"
+    );
+    if let Some((component, start)) = roots.pop() {
+        let line_end = document[start..]
+            .find('\n')
+            .map_or(document.len(), |offset| start + offset + 1);
+        let raw = &document[start..line_end];
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        return Ok(Some(WaitingTreeLocation {
+            start,
+            end: descendant_region_end(document, line_end, indent),
+            component_open_end: component.open_end,
+            component_close_start: component.close_start,
+        }));
+    }
+
+    let mut main = queue_components
+        .iter()
+        .filter(|component| component.attrs.get("id").map(String::as_str) == Some("main"));
+    let target = match (main.next(), main.next(), queue_components.as_slice()) {
+        (Some(component), None, _) => Some(*component),
+        (None, None, [component]) => Some(*component),
+        _ => None,
+    };
+    Ok(target.map(|component| WaitingTreeLocation {
+        start: component.close_start,
+        end: component.close_start,
+        component_open_end: component.open_end,
+        component_close_start: component.close_start,
+    }))
+}
+
+fn queue_prompt_ids_outside_waiting_tree(
+    document: &str,
+    waiting: Option<&WaitingTreeLocation>,
+) -> Result<HashSet<String>> {
+    let mut ids = HashSet::new();
+    for component in element::parse(document)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        for (entry, span) in document_queue::parse_spans(component.content(document))? {
+            let absolute = component.open_end + span.start;
+            if waiting.is_some_and(|location| absolute >= location.start && absolute < location.end)
+            {
+                continue;
+            }
+            let QueueEntry::Prompt(prompt) = entry else {
+                continue;
+            };
+            ids.extend(document_queue::queue_prompt_reference_ids(&prompt.text));
+        }
+    }
+    Ok(ids)
+}
+
+fn existing_waiting_children(
+    document: &str,
+    location: &WaitingTreeLocation,
+) -> Result<HashMap<String, (String, bool)>> {
+    if location.start == location.end {
+        return Ok(HashMap::new());
+    }
+    let body = &document[location.component_open_end..location.component_close_start];
+    let entries = document_queue::parse_spans(body)?;
+    let root_relative = location.start - location.component_open_end;
+    let Some(root_index) = entries
+        .iter()
+        .position(|(_, span)| span.start == root_relative)
+    else {
+        return Ok(HashMap::new());
+    };
+    let mut children = HashMap::new();
+    let mut index = root_index + 1;
+    while index < entries.len() {
+        let (entry, span) = &entries[index];
+        let Some(indent) = queue_entry_indent(entry) else {
+            index += 1;
+            continue;
+        };
+        if indent == 0 {
+            break;
+        }
+        let QueueEntry::Prompt(prompt) = entry else {
+            index += 1;
+            continue;
+        };
+        if indent != 2 || !prompt.text.contains(WAITING_ON_YOU_ITEM_MARKER) {
+            index += 1;
+            continue;
+        }
+        let Some(id) = document_queue::queue_prompt_reference_ids(&prompt.text)
+            .into_iter()
+            .next()
+        else {
+            index += 1;
+            continue;
+        };
+        let mut child_end = location.end - location.component_open_end;
+        let mut has_operator_reply = false;
+        let mut next = index + 1;
+        while next < entries.len() {
+            let (candidate, candidate_span) = &entries[next];
+            if let Some(candidate_indent) = queue_entry_indent(candidate) {
+                if candidate_indent <= 2 {
+                    child_end = candidate_span.start;
+                    break;
+                }
+                if matches!(candidate, QueueEntry::Prompt(prompt) if !prompt.text.contains(WAITING_ON_YOU_METADATA_MARKER))
+                {
+                    has_operator_reply = true;
+                }
+            }
+            next += 1;
+        }
+        let absolute_start = location.component_open_end + span.start;
+        let absolute_end = location.component_open_end + child_end;
+        children.insert(
+            id,
+            (
+                document[absolute_start..absolute_end].to_string(),
+                has_operator_reply,
+            ),
+        );
+        index = next.max(index + 1);
+    }
+    Ok(children)
+}
+
+fn queue_entry_indent(entry: &QueueEntry) -> Option<usize> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt.indent),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WaitingTodo {
+    id: String,
+    action: String,
+}
+
+fn open_waiting_todos(document: &str) -> Vec<WaitingTodo> {
+    let Ok(components) = element::parse(document) else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    let mut todos = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| component.name == "todo")
+    {
+        let (_, items, _) =
+            agent_doc_element_backlog::backlog::parse_items(component.content(document));
+        for item in items {
+            if item.is_done() || item.id.is_empty() || !seen.insert(item.id.clone()) {
+                continue;
+            }
+            todos.push(WaitingTodo {
+                id: item.id,
+                action: one_line(&item.text),
+            });
+        }
+    }
+    todos
+}
+
+#[derive(Debug, Clone, Default)]
+struct WaitingOperatorPacket {
+    request: String,
+    context: String,
+    choices: Vec<String>,
+}
+
+fn waiting_operator_packets(
+    document: &str,
+    response_body: &str,
+) -> HashMap<String, WaitingOperatorPacket> {
+    let mut packets = HashMap::new();
+    for source in [document, response_body] {
+        for (id, packet) in parse_waiting_operator_packets(source) {
+            packets.insert(id, packet);
+        }
+    }
+    packets
+}
+
+fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorPacket)> {
+    #[derive(Clone, Copy)]
+    enum Field {
+        Request,
+        Context,
+        Choices,
+        Other,
+    }
+
+    let lines = source.lines().collect::<Vec<_>>();
+    let mut packets = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let Some(id) = operator_packet_id(lines[index]) else {
+            index += 1;
+            continue;
+        };
+        let mut packet = WaitingOperatorPacket::default();
+        let mut blocking = false;
+        let mut field = Field::Other;
+        index += 1;
+        while index < lines.len() {
+            let line = lines[index];
+            if operator_packet_id(line).is_some()
+                || line.trim_start().starts_with("### Re:")
+                || line.trim_start().starts_with("<!-- /agent:")
+            {
+                break;
+            }
+            let trimmed = line.trim();
+            let de_bulleted = trimmed.strip_prefix("- ").unwrap_or(trimmed);
+            let plain = de_bulleted.replace('*', "");
+            if let Some((label, value)) = plain.split_once(':') {
+                let label = label.trim().to_ascii_lowercase();
+                let value = value.trim();
+                match label.as_str() {
+                    "blocking" => {
+                        blocking = value.eq_ignore_ascii_case("true");
+                        field = Field::Other;
+                    }
+                    "request" => {
+                        field = Field::Request;
+                        if !value.is_empty() {
+                            packet.request = one_line(value);
+                        }
+                    }
+                    "context" => {
+                        field = Field::Context;
+                        if !value.is_empty() {
+                            packet.context = one_line(value);
+                        }
+                    }
+                    "choices" => field = Field::Choices,
+                    _ if matches!(field, Field::Choices) => {
+                        packet.choices.push(one_line(de_bulleted));
+                    }
+                    _ => field = Field::Other,
+                }
+            } else if !de_bulleted.is_empty() {
+                match field {
+                    Field::Request => append_field(&mut packet.request, de_bulleted),
+                    Field::Context => append_field(&mut packet.context, de_bulleted),
+                    Field::Choices => packet.choices.push(one_line(de_bulleted)),
+                    Field::Other => {}
+                }
+            }
+            index += 1;
+        }
+        if blocking && !packet.request.is_empty() {
+            packets.push((id, packet));
+        }
+    }
+    packets
+}
+
+fn operator_packet_id(line: &str) -> Option<String> {
+    if !line
+        .to_ascii_lowercase()
+        .contains("subagent operator request")
+    {
+        return None;
+    }
+    let marker = line.find("[#")? + 2;
+    let end = line[marker..].find(']')? + marker;
+    let id = &line[marker..end];
+    (!id.is_empty()).then(|| id.to_ascii_lowercase())
+}
+
+fn append_field(target: &mut String, value: &str) {
+    if !target.is_empty() {
+        target.push(' ');
+    }
+    target.push_str(&one_line(value));
+}
+
+fn one_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacket>) -> String {
+    let summary = packet
+        .map(|packet| packet.request.as_str())
+        .filter(|summary| !summary.is_empty())
+        .unwrap_or(&todo.action);
+    let mut out = format!(
+        concat!(
+            "  - [#{}] {} {}\n",
+            "    - ~~**Response:** {} {}~~\n",
+            "      - ~~**Summary:** {} {}~~"
+        ),
+        todo.id,
+        todo.action,
+        WAITING_ON_YOU_ITEM_MARKER,
+        summary,
+        WAITING_ON_YOU_METADATA_MARKER,
+        summary,
+        WAITING_ON_YOU_METADATA_MARKER
+    );
+    if let Some(packet) = packet {
+        if !packet.context.is_empty() {
+            out.push_str("\n      - ~~**Context:** ");
+            out.push_str(&packet.context);
+            out.push(' ');
+            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push_str("~~");
+        }
+        out.push_str("\n      - ~~**Question:** ");
+        out.push_str(&packet.request);
+        out.push(' ');
+        out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+        out.push_str("~~");
+        if !packet.choices.is_empty() {
+            out.push_str("\n      - ~~**Choices:** ");
+            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push_str("~~");
+            for choice in &packet.choices {
+                out.push_str("\n        - ~~");
+                out.push_str(choice);
+                out.push(' ');
+                out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+                out.push_str("~~");
+            }
+        }
+    } else {
+        out.push_str(
+            "\n      - ~~**Question:** What decision or completion result should be recorded? ",
+        );
+        out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+        out.push_str("~~");
+    }
+    out.push_str("\n      - ~~**Next actions:** ");
+    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+    out.push_str("~~\n        - ~~**Action:** ");
+    out.push_str(&todo.action);
+    out.push(' ');
+    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+    out.push_str("~~\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4499,6 +4939,199 @@ mod tests {
 
     fn queue_doc(body: &str) -> String {
         format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    fn waiting_tree_document(queue_body: &str, todo_body: &str, response: &str) -> String {
+        format!(
+            "<!-- agent:queue id=\"main\" -->\n{queue_body}<!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n{todo_body}<!-- /agent:todo -->\n\
+             <!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n"
+        )
+    }
+
+    #[test]
+    fn closeout_projects_open_todos_into_one_inert_waiting_tree() {
+        let response = "### Re: operator work — test\n\nReview the open operator items.";
+        let document = waiting_tree_document(
+            "- ### existing queue work\n",
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+
+        let projected = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .expect("open todo should create the tree");
+        assert_eq!(projected.matches(WAITING_ON_YOU_ROOT_MARKER).count(), 1);
+        assert!(
+            projected.contains("- [#approve-pr] Approve and merge PR #42."),
+            "{projected}"
+        );
+        assert!(projected.contains("**Summary:** Approve and merge PR #42."));
+        assert!(projected.contains("**Next actions:**"));
+        assert!(projected.contains("**Action:** Approve and merge PR #42."));
+
+        let queue = element::parse(&projected)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&projected)).unwrap();
+        assert!(
+            document_queue::prompts(&entries)
+                .into_iter()
+                .all(|prompt| !prompt.text.contains("Waiting on you")
+                    && !prompt.text.contains("Approve and merge")),
+            "generated waiting rows must never dispatch: {entries:?}"
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&projected, response).unwrap(),
+            None,
+            "the closeout projection must be replay-idempotent"
+        );
+    }
+
+    #[test]
+    fn waiting_tree_uses_blocking_packet_context_question_and_choices() {
+        let id = "subagent-operator-request-release-target";
+        let response = format!(
+            "### Re: release target — test\n\n\
+             [#{id}] subagent operator request\n\
+             - *kind:* question\n\
+             - *blocking:* true\n\
+             - *request:* Which release target should be used?\n\
+             - *context:* The build is ready.\n\
+             - *choices:*\n\
+               - **staging**: Publish to staging.\n\
+               - **production**: Publish to production.\n"
+        );
+        let document = waiting_tree_document(
+            "",
+            &format!("- [ ] [#{id}] Answer the release question.\n"),
+            &response,
+        );
+
+        let projected = project_waiting_on_you_tree(&document, &response)
+            .unwrap()
+            .expect("blocking todo should create the tree");
+        assert!(
+            projected.contains("**Context:** The build is ready."),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**Question:** Which release target should be used?"),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**staging**: Publish to staging."),
+            "{projected}"
+        );
+        assert!(
+            projected.contains("**production**: Publish to production."),
+            "{projected}"
+        );
+    }
+
+    #[test]
+    fn live_queue_row_prevents_waiting_tree_duplication() {
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let document = waiting_tree_document(
+            "- ### Review PR #42 [#approve-pr]\n",
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+
+        assert_eq!(
+            project_waiting_on_you_tree(&document, response).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn external_live_row_removes_an_existing_waiting_child() {
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let document = waiting_tree_document(
+            "",
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+        let projected = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .unwrap();
+        let externalized = projected.replace(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "<!-- agent:queue id=\"main\" -->\n- ### Review PR #42 [#approve-pr]\n",
+        );
+
+        let cleaned = project_waiting_on_you_tree(&externalized, response)
+            .unwrap()
+            .expect("the generated duplicate should be removed");
+        assert!(!cleaned.contains(WAITING_ON_YOU_ROOT_MARKER), "{cleaned}");
+        assert_eq!(cleaned.matches("[#approve-pr]").count(), 2, "{cleaned}");
+    }
+
+    #[test]
+    fn operator_reply_stays_promptable_until_the_todo_resolves_then_tree_leaves() {
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let document = waiting_tree_document(
+            "",
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+        let projected = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .unwrap();
+        let with_reply = projected.replacen(
+            "<!-- agent-doc:waiting-item -->\n",
+            "<!-- agent-doc:waiting-item -->\n    - approved\n",
+            1,
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&with_reply, response).unwrap(),
+            None,
+            "refresh must preserve an operator reply byte-for-byte"
+        );
+        let queue = element::parse(&with_reply)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&with_reply)).unwrap();
+        assert!(
+            document_queue::prompts(&entries)
+                .into_iter()
+                .any(|prompt| prompt.text == "approved")
+        );
+
+        let resolved = with_reply.replace(
+            "- [ ] [#approve-pr] Approve and merge PR #42.",
+            "- [x] [#approve-pr] Approve and merge PR #42.",
+        );
+        let cleaned = project_waiting_on_you_tree(&resolved, response)
+            .unwrap()
+            .expect("resolved todo should remove the tree");
+        assert!(!cleaned.contains(WAITING_ON_YOU_ROOT_MARKER), "{cleaned}");
+        assert!(!cleaned.contains("    - approved\n"), "{cleaned}");
+    }
+
+    #[test]
+    fn waiting_tree_targets_main_among_multiple_queue_components() {
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let document = format!(
+            "<!-- agent:queue id=\"other\" -->\n- ### other\n<!-- /agent:queue -->\n{}",
+            waiting_tree_document(
+                "- ### main work\n",
+                "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+                response,
+            )
+        );
+        let projected = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .unwrap();
+        let (before_main, after_main) = projected
+            .split_once("<!-- agent:queue id=\"main\" -->")
+            .unwrap();
+        assert!(!before_main.contains(WAITING_ON_YOU_ROOT_MARKER));
+        assert!(after_main.contains(WAITING_ON_YOU_ROOT_MARKER));
     }
 
     fn inline_response_queue_doc(body: &str) -> String {

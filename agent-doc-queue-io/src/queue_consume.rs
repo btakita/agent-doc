@@ -1336,6 +1336,58 @@ pub fn observe_authoritative_queue_state(file: &Path, content: &str) -> Result<u
     )
 }
 
+/// Refresh the closeout-maintained operator-work tree through the same
+/// editor-authoritative queue write path as queue consumption.
+///
+/// The response must already be materialized in the exact authority cut. This
+/// keeps a captured-but-undelivered response from publishing follow-up state
+/// ahead of its own closeout.
+pub fn refresh_waiting_on_you_tree(
+    file: &Path,
+    response_body: &str,
+    force_disk: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<bool> {
+    if response_body.trim().is_empty() {
+        return Ok(false);
+    }
+    let content = if force_disk {
+        effects.force_disk_document_content(file, "waiting_on_you_tree force_disk")?
+    } else {
+        effects.current_document_content(file, "waiting_on_you_tree")?
+    };
+    if !agent_doc_turn::response_replay::response_materialized_in_content(response_body, &content) {
+        return Ok(false);
+    }
+    let Some(target) =
+        agent_doc_queue::queue_consume::project_waiting_on_you_tree(&content, response_body)?
+    else {
+        return Ok(false);
+    };
+    if force_disk {
+        effects
+            .atomic_write(file, &target)
+            .context("Waiting on you projection: failed to write document")?;
+    } else {
+        converge_awaiting_retained_delivery(
+            effects,
+            file,
+            &target,
+            &HashSet::new(),
+            "waiting_on_you_tree",
+            || effects.converge_document_or_disk(file, &target, &content, "waiting_on_you_tree"),
+        )
+        .context("Waiting on you projection: failed to converge document")?;
+    }
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &target,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    observe_authoritative_queue_state(file, &target)?;
+    Ok(true)
+}
+
 fn has_queue_component(content: &str) -> bool {
     agent_doc_element::element::parse(content)
         .map(|components| components.iter().any(|component| component.name == "queue"))
@@ -4014,6 +4066,37 @@ mod core_tests {
             "{updated}"
         );
         assert!(!updated.contains("auto-struck: response:"), "{updated}");
+    }
+
+    #[test]
+    fn waiting_tree_refresh_converges_and_checkpoints_the_projected_queue() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("waiting.md");
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let content = format!(
+            "<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:queue id=\"main\" -->\n<!-- /agent:queue -->\n\n\
+             <!-- agent:todo -->\n- [ ] [#approve-pr] Approve and merge PR #42.\n<!-- /agent:todo -->\n"
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(refresh_waiting_on_you_tree(&doc, response, false, &TEST_EFFECTS).unwrap());
+        let projected = fs::read_to_string(&doc).unwrap();
+        assert!(projected.contains("<!-- agent-doc:waiting-on-you -->"));
+        assert!(projected.contains("[#approve-pr] Approve and merge PR #42."));
+        assert!(!refresh_waiting_on_you_tree(&doc, response, false, &TEST_EFFECTS).unwrap());
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            projected
+        );
     }
 
     #[derive(Default)]

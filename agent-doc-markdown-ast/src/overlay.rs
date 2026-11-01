@@ -1796,7 +1796,12 @@ pub fn components(source: &str) -> Vec<Component> {
                 && let Some(last) = comp.items.last_mut()
             {
                 let joined = &source[*raw_start..line_start + content.len()];
-                *last = parse_item(joined, last.start_byte, offset, comp.name == "queue");
+                *last = parse_item(
+                    joined,
+                    last.start_byte,
+                    offset,
+                    is_runnable_component(&comp.name),
+                );
                 continue;
             }
             continuable_item = None;
@@ -1854,7 +1859,7 @@ pub fn components(source: &str) -> Vec<Component> {
                 item_content,
                 line_start,
                 offset,
-                comp.name == "queue",
+                is_runnable_component(&comp.name),
             ));
             // `item_content` is a suffix slice of `content`, which starts at
             // `line_start`.

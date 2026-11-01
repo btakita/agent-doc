@@ -4298,6 +4298,28 @@ fn run_command_inner_within_pass(
         }
     }
 
+    // `#adwaitingonyoutree`: all tracked-work and queue-sync effects are now
+    // visible, so closeout can derive the final deduplicated operator-work tree
+    // from the exact authority cut that will be committed.
+    if write_result.is_ok() && commit_mode != CommitMode::None {
+        let response_body = active_capture_response_body_for_write(file)?;
+        let refresh = queue_consume::refresh_waiting_on_you_tree(
+            file,
+            &response_body,
+            options.force_disk,
+            queue_consume_writeback_effects(options.force_disk),
+        );
+        match (commit_mode, refresh) {
+            (CommitMode::BestEffort, Err(error)) => {
+                eprintln!("[queue] warning: Waiting on you projection failed: {error:#}")
+            }
+            (CommitMode::Required, result) => {
+                result?;
+            }
+            _ => {}
+        }
+    }
+
     let commit_result = if write_result.is_ok() {
         let primary = ensure_closeout_lease_still_held(_closeout_owner.as_ref())
             .and_then(|()| finalize_commit(file, commit_mode, options.force_disk));

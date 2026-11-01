@@ -3903,7 +3903,7 @@ mod tests {
             );
             let on_disk = std::fs::read_to_string(&doc).unwrap();
             assert!(
-                on_disk.contains("- ⏳ do [#verify]\n"),
+                on_disk.contains("- ### ⏳ do [#verify]\n"),
                 "press {press}: the head still projects the awaiting-operator marker:\n{on_disk}"
             );
         }
@@ -4901,6 +4901,8 @@ mod tests {
             .find(|line| line.contains("#actionable-review [#q-"))
             .unwrap()
             .trim_start_matches("- ")
+            .strip_prefix("### ")
+            .expect("queue row must carry a navigation heading")
             .to_string();
         start_worker_mid_cycle(&doc, &q_head, "subagent:review");
         assert_capture_gate_armed(&doc);

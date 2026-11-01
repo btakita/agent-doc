@@ -1075,6 +1075,8 @@ portable agent-doc fallback:
 
 ### Post-commit queue consumption
 
+- **Unresolved operator-owned work projects as one inert waiting tree (`#adwaitingonyoutree`).** Once the response, tracked-work mutations, and same-cycle backlog-to-queue synchronization are materialized, closeout derives the tree from open ID-owned rows in `agent:todo`. A matching structured blocking-response packet may supply the item's summary, context, question, choices, and next action; the durable todo remains the source of liveness. Items already named by another live queue row are excluded. The projection targets the unique queue whose component id is `main`, or the sole queue if no main id exists; multiple queues without exactly one main are left unchanged rather than guessed. It creates one top-level `Waiting on you` context row and one `#id` child per item. Root and item rows are non-leaf context, and generated metadata uses nested completed rows, so existing queue parsing and dispatch cannot execute scaffolding. An operator may add an ordinary prompt below an item; that leaf remains executable and its subtree is preserved byte-for-byte across refreshes. Repeated refreshes are idempotent. Resolving the todo, or adding a live external queue row for the same id, removes the generated child; the root disappears when no generated items remain.
+
 - **Claimed-row removal is authoritative cancellation
   (`#queue-removal-cancels`):** when an operator explicitly removes a claimed
   `agent:run` row, mid-turn steering emits `dispatch=cancel_claimed` with the

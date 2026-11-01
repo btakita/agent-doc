@@ -2811,6 +2811,71 @@ mod tests {
         );
     }
 
+    /// A terminal recovery can supersede the response cycle with a synthetic
+    /// committed cycle. The active projection then has no capture id, but the
+    /// append-only capture remains authoritative and its landed queue echoes
+    /// must not become post-closeout exchange steering.
+    #[test]
+    fn materialized_capture_survives_synthetic_terminal_cycle_for_steering_lineage() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:exchange -->\nOperator request.\n<!-- agent:boundary:base -->\n<!-- /agent:exchange -->\n";
+        let response_body = concat!(
+            "> **Queue prompt:** ☑️ [#reported] closeout effect\n",
+            "  copied explanatory detail\n\n",
+            "> **Queue prompt:** ☑️ [#format] print the response child\n\n",
+            "### Re: reported results\n\n",
+            "Both reported results were integrated.\n",
+        );
+        let response = format!(
+            "<!-- patch:exchange mode=\"append\" -->\n{response_body}<!-- /patch:exchange -->\n"
+        );
+        let operator_prompt = "❯ Preserve this operator-authored prompt child.";
+        let applied = baseline.replace(
+            "<!-- agent:boundary:base -->",
+            &format!("{response_body}\n<!-- agent:boundary:landed -->\n{operator_prompt}"),
+        );
+        std::fs::write(&file, baseline).unwrap();
+        let response_cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline))
+                .unwrap();
+        seed_for_cycle(&file, &response_cycle.cycle_id, baseline, None, Vec::new()).unwrap();
+        std::fs::write(&file, &applied).unwrap();
+        capture_response_body(&file, &response, baseline);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &applied,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        agent_doc_cycle_state_io::mark_abandoned(
+            &file,
+            "terminal_recovery",
+            Some(&applied),
+            Some(&applied),
+        )
+        .unwrap();
+        close_cycle(&file, &applied);
+        let terminal = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert!(terminal.cycle_id.starts_with("synthetic-"), "{terminal:?}");
+        assert!(terminal.capture_id.is_none(), "{terminal:?}");
+
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("the operator prompt child should still surface");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        assert_eq!(report.items[0].verbatim, operator_prompt);
+        assert_eq!(
+            crate::absorbed_steering::unanswered_prompts(&file).unwrap(),
+            vec![operator_prompt.to_string()],
+            "the committed operator prompt child must remain carried forward"
+        );
+    }
+
     #[test]
     fn missing_captured_response_body_fails_closed_without_advancing() {
         let dir = tempfile::tempdir().unwrap();

@@ -175,14 +175,16 @@ fn is_absorbable(item: &SteeringItem) -> bool {
 /// the cycle's preflight watermark: that is how it preserves an operator edit
 /// absorbed by the same commit. The comparison alone cannot distinguish that
 /// edit from the response the binary appended. The captured-response fact is
-/// the authority for that distinction.
+/// the authority for that distinction. A later synthetic terminal cycle may
+/// displace the active capture projection; then only a recent append-only
+/// capture proven materialized in committed authority participates.
 ///
 /// Formally, for a non-deleted exchange item `i` and cycle `c`:
 ///
 /// `operator_candidate(i, c) = observed_after_preflight(i, c)
 ///                             && !captured_response(c).contains(i)`
 ///
-/// If `c` claims a captured response but its body cannot be proven from the
+/// If the active cycle claims a captured response but its body cannot be proven from the
 /// same `(cycle_id, capture_id, response_sha256)` lineage, this returns an
 /// error. Callers must not surface or acknowledge the ambiguous items. Missing
 /// provenance cannot turn agent output into an operator instruction.
@@ -201,44 +203,49 @@ pub(crate) fn retain_operator_lineage(
         return Ok(0);
     }
 
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
-        return Ok(0);
-    };
-    let has_response_lineage = state.capture_id.is_some() || state.response_sha256.is_some();
-    if !has_response_lineage {
-        return Ok(0);
-    }
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    let has_response_lineage = state
+        .as_ref()
+        .is_some_and(|state| state.capture_id.is_some() || state.response_sha256.is_some());
+    let mut response_lineage = Vec::new();
+    let mut response_cycle_id = String::new();
+    let mut response_capture_id = String::new();
     // A consumer watermark can legitimately lag behind a later response cycle.
     // The current response lineage still proves which observed text is binary-
     // authored; `cycle_id` remains the steering lineage recorded in diagnostics.
-    let response_cycle_id = state.cycle_id.as_str();
-    let (Some(capture_id), Some(response_sha256)) = (
-        state.capture_id.as_deref(),
-        state.response_sha256.as_deref(),
-    ) else {
-        bail!(
-            "incomplete captured-response lineage for {} cycle {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-        );
-    };
-    let Some(capture) =
-        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
-    else {
-        bail!(
-            "missing captured-response body for {} cycle {} capture {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-            capture_id,
-        );
-    };
-    if capture.cycle_id != response_cycle_id || capture.response_sha256 != response_sha256 {
-        bail!(
-            "mismatched captured-response lineage for {} cycle {} capture {} (#assistantsteeringlineage)",
-            file.display(),
-            cycle_id,
-            capture_id,
-        );
+    if has_response_lineage {
+        let state = state.as_ref().expect("lineage implies cycle state");
+        response_cycle_id = state.cycle_id.clone();
+        let (Some(capture_id), Some(response_sha256)) = (
+            state.capture_id.as_deref(),
+            state.response_sha256.as_deref(),
+        ) else {
+            bail!(
+                "incomplete captured-response lineage for {} cycle {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+            );
+        };
+        response_capture_id = capture_id.to_string();
+        let Some(capture) =
+            agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+        else {
+            bail!(
+                "missing captured-response body for {} cycle {} capture {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+                capture_id,
+            );
+        };
+        if capture.cycle_id != response_cycle_id || capture.response_sha256 != response_sha256 {
+            bail!(
+                "mismatched captured-response lineage for {} cycle {} capture {} (#assistantsteeringlineage)",
+                file.display(),
+                cycle_id,
+                capture_id,
+            );
+        }
+        response_lineage.push((capture.response_sha256, capture.response_body));
     }
 
     // A steering watermark that lags the response cycle (an auto-reopened
@@ -247,20 +254,55 @@ pub(crate) fn retain_operator_lineage(
     // binary-authored by the same capture provenance; subtracting only the
     // newest response re-reads the earlier ones as operator prompts (the
     // v0.35.527 `> **Queue prompt:**` echo replay).
-    let mut response_bodies = vec![capture.response_body];
-    if cycle_id != response_cycle_id
-        && let Some(earlier) = agent_doc_cycle_state_io::load_captured_responses_since_cycle(
+    if has_response_lineage
+        && response_cycle_id != cycle_id
+        && let Some(captures) = agent_doc_cycle_state_io::load_captured_responses_since_cycle(
             file,
             cycle_id,
             RESPONSE_LINEAGE_WINDOW,
         )?
     {
-        response_bodies.extend(
-            earlier
-                .into_iter()
-                .filter(|checkpoint| checkpoint.response_sha256 != response_sha256)
-                .map(|checkpoint| checkpoint.response_body),
-        );
+        for checkpoint in captures {
+            if !response_lineage
+                .iter()
+                .any(|(sha, _)| sha == &checkpoint.response_sha256)
+            {
+                response_lineage.push((checkpoint.response_sha256, checkpoint.response_body));
+            }
+        }
+    }
+
+    // A retained closeout can fold its commit into a later synthetic terminal
+    // cycle. That cycle legitimately has no capture id, but the append-only
+    // response_captured fact remains authoritative. Recover only recent
+    // captures whose response is demonstrably materialized in HEAD or the
+    // committed snapshot; an unlanded draft can never suppress operator text.
+    let head = agent_doc_git_io::revision::show_head(file)?;
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
+    for checkpoint in agent_doc_cycle_state_io::load_recent_captured_response_checkpoints(
+        file,
+        RESPONSE_LINEAGE_WINDOW,
+    )? {
+        if response_lineage
+            .iter()
+            .any(|(sha, _)| sha == &checkpoint.response_sha256)
+            || !agent_doc_turn::response_replay::response_materialized_in_committed_authority(
+                &checkpoint.response_body,
+                head.as_deref(),
+                snapshot.as_deref(),
+            )
+        {
+            continue;
+        }
+        if response_cycle_id.is_empty() {
+            response_cycle_id = checkpoint.cycle_id.clone();
+            response_capture_id = checkpoint.capture_id.clone();
+        }
+        response_lineage.push((checkpoint.response_sha256, checkpoint.response_body));
+    }
+
+    if response_lineage.is_empty() {
+        return Ok(0);
     }
 
     let before = items.len();
@@ -269,7 +311,7 @@ pub(crate) fn retain_operator_lineage(
             return true;
         }
         let text = item.verbatim.trim();
-        text.is_empty() || !response_bodies.iter().any(|body| body.contains(text))
+        text.is_empty() || !response_lineage.iter().any(|(_, body)| body.contains(text))
     });
     let suppressed = before.saturating_sub(items.len());
     if suppressed > 0 {
@@ -280,8 +322,8 @@ pub(crate) fn retain_operator_lineage(
                 file.display(),
                 cycle_id,
                 response_cycle_id,
-                capture_id,
-                response_bodies.len(),
+                response_capture_id,
+                response_lineage.len(),
                 suppressed,
             ),
         );

@@ -385,14 +385,19 @@ pub fn response_materialized_in_exchange_response_cell(response: &str, content: 
         }
         // `#queuequotecell`: a queue-drain response opens with its
         // `> **Queue prompt:**` quote ABOVE the heading, so the cell must reach
-        // back over the blockquote (and blank) lines directly above it. Without
-        // that, no cell ever held the whole response once a boundary followed it,
-        // and captured-finalize resume declined its own materialized response as
-        // a replay, forever (agent-doc-bugs.md, 2026-09-30 06:17).
+        // back over the blockquote, its indented multiline continuations, and
+        // blank lines directly above it. Without that, no cell ever held the
+        // whole response once a boundary followed it, and captured-finalize
+        // resume declined its own materialized response as a replay, forever
+        // (agent-doc-bugs.md, 2026-09-30 06:17 and 2026-11-01 01:42).
         let mut cell_start = index;
         while cell_start > 0 {
-            let above = lines[cell_start - 1].trim();
-            if above.is_empty() || above.starts_with('>') {
+            let raw_above = lines[cell_start - 1];
+            let above = raw_above.trim();
+            if above.is_empty()
+                || above.starts_with('>')
+                || raw_above.len() != raw_above.trim_start().len()
+            {
                 cell_start -= 1;
             } else {
                 break;
@@ -1906,6 +1911,35 @@ mod tests {
             materialize_response_in_current_exchange(content, response).as_deref(),
             Some(content)
         );
+    }
+
+    #[test]
+    fn multiline_queue_quote_above_heading_counts_as_materialized_response_cell() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "> **Queue prompt:** close out the reported effect\n",
+            "\t\t• copied explanatory detail\n",
+            "\t\t\tcontinued detail\n\n",
+            "> **Queue prompt:** persist the response child\n\n",
+            "### Re: reported results — gpt-5\n\n",
+            "Both results were integrated.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "> **Queue prompt:** close out the reported effect\n",
+            "\t\t• copied explanatory detail\n",
+            "\t\t\tcontinued detail\n\n",
+            "> **Queue prompt:** persist the response child\n\n",
+            "### Re: reported results — gpt-5 (HEAD)\n\n",
+            "Both results were integrated.\n",
+            "<!-- agent:boundary:committed -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
     }
 
     #[test]

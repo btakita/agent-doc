@@ -491,11 +491,61 @@ pub fn mask_managed_work_components(doc: &str) -> String {
 /// The operator-text body a prompt-bearing exchange diff compares: frontmatter,
 /// comments, and every managed tracked-work component body removed.
 fn exchange_prompt_bearing_body(content: &str) -> String {
+    let (_, body) = agent_doc_frontmatter::frontmatter::split_frontmatter_parts(content);
+    // Exchange steering must never inherit text from a managed component just
+    // because an unrelated malformed marker made the whole document fail to
+    // parse. Closeout can briefly observe exactly that shape while the editor
+    // and binary projections converge. Prefer the parsed exchange, and fall
+    // back to structural marker occurrences (which still exclude markers in
+    // prose/code) before using the legacy whole-document path.
+    let exchange = agent_doc_element::element::parse(body)
+        .ok()
+        .and_then(|components| {
+            components
+                .into_iter()
+                .find(|component| component.name == "exchange")
+                .map(|component| component.content(body).to_string())
+        })
+        .or_else(|| exchange_body_between_structural_markers(body));
+    if let Some(exchange) = exchange {
+        let scoped = format!(
+            "<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            exchange.trim_matches('\n')
+        );
+        return agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(&scoped),
+        );
+    }
     agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
         &agent_doc_diff::prompt_bearing_body_for_unstarted_prompt_guard(
             &mask_managed_work_components(content),
         ),
     )
+}
+
+fn exchange_body_between_structural_markers(body: &str) -> Option<String> {
+    let occurrences = agent_doc_element::element::structural_marker_occurrences(body);
+    let mut open_end = None;
+    for occurrence in occurrences
+        .into_iter()
+        .filter(|occurrence| occurrence.line_anchored)
+    {
+        let tail = &body[occurrence.start..];
+        let marker_end = tail.find("-->")? + occurrence.start + 3;
+        let marker = body[occurrence.start + 4..marker_end - 3].trim();
+        let tag = marker.split_whitespace().next()?;
+        match tag {
+            "agent:exchange" if open_end.is_none() => {
+                open_end = Some(marker_end);
+            }
+            "/agent:exchange" => {
+                let start = open_end?;
+                return Some(body[start..occurrence.start].to_string());
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn exchange_steering_all_between(baseline: &str, current: &str) -> RealtimeSteeringSet {
@@ -990,6 +1040,32 @@ mod tests {
                 .contains("backend-signed shape"),
             "the genuine concurrent directive must survive: {:?}",
             set.directives()
+        );
+    }
+
+    #[test]
+    fn malformed_managed_component_cannot_leak_context_into_exchange_steering() {
+        // During closeout a live projection can briefly carry an unmatched
+        // managed-component marker. Exchange steering still has a structurally
+        // valid component, so copied run context must not become a fresh prompt.
+        let baseline = format!(
+            "{}\n## Run\n<!-- agent:run -->\n- old managed context\n",
+            doc("")
+        );
+        let current = format!(
+            "{}\n## Run\n<!-- agent:run -->\n- agent:todo items out of sync\n  - copied queue context\n",
+            doc("❯ Keep this operator-authored prompt child.\n")
+        );
+
+        let set = BaselineComparison::new(&baseline, &current).realtime_steering_all();
+        assert_eq!(set.len(), 1, "{:?}", set.directives());
+        assert_eq!(
+            set.primary().verbatim(),
+            Some("❯ Keep this operator-authored prompt child.")
+        );
+        assert!(
+            !set.verbatim_aggregate().unwrap().contains("agent:todo"),
+            "managed context must stay outside exchange steering"
         );
     }
 

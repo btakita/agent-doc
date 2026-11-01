@@ -1217,6 +1217,21 @@ fn response_explicit_queue_prompt_echoes_head(response_body: &str, head_text: &s
     for line in response_body.lines() {
         let trimmed = line.trim_start();
         if !trimmed.starts_with('>') {
+            // Older response scaffolds quoted only the `Queue prompt` lead and
+            // preserved an indented multiline continuation verbatim. Keep that
+            // continuation in the same exact-match run; otherwise a committed
+            // answer can leave the full queue row live and dispatch it again.
+            if in_queue_prompt_echo && let Some(candidate) = unquoted_prompt_echo_continuation(line)
+            {
+                let candidate = normalize_prompt_echo_presence_line(candidate);
+                if !candidate.is_empty() {
+                    run.push(normalize_for_answer_match(&candidate));
+                    if echo_run_ends_with_head(&run, &head_norm, head_lines) {
+                        return true;
+                    }
+                }
+                continue;
+            }
             if !trimmed.trim().is_empty() {
                 in_queue_prompt_echo = false;
                 run.clear();
@@ -1446,18 +1461,27 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
         };
         let mut raw = vec![first];
         i += 1;
-        while i < lines.len() && lines[i].trim_start().starts_with('>') {
-            if echo_start(lines[i]).is_some() {
-                break;
+        while i < lines.len() {
+            if lines[i].trim_start().starts_with('>') {
+                if echo_start(lines[i]).is_some() {
+                    break;
+                }
+                raw.push(
+                    lines[i]
+                        .trim_start()
+                        .trim_start_matches('>')
+                        .trim_start()
+                        .to_string(),
+                );
+                i += 1;
+                continue;
             }
-            raw.push(
-                lines[i]
-                    .trim_start()
-                    .trim_start_matches('>')
-                    .trim_start()
-                    .to_string(),
-            );
-            i += 1;
+            if let Some(continuation) = unquoted_prompt_echo_continuation(lines[i]) {
+                raw.push(continuation.to_string());
+                i += 1;
+                continue;
+            }
+            break;
         }
         let mut next = i;
         while next < lines.len() && lines[next].trim().is_empty() {
@@ -1502,6 +1526,11 @@ fn queue_prompt_echo_blocks(response_body: &str) -> Vec<QueuePromptEchoBlock> {
         });
     }
     blocks
+}
+
+fn unquoted_prompt_echo_continuation(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    (!trimmed.is_empty() && trimmed.len() < line.len()).then_some(trimmed)
 }
 
 /// `#bareechodrop`: a head quoted in a singular `> **Queue prompt:**` block
@@ -2730,6 +2759,32 @@ mod tests {
             "Both handled.\n",
         );
         assert!(free_text_head_answered_by_response(response, head));
+    }
+
+    #[test]
+    fn free_text_head_answered_by_response_matches_unquoted_indented_echo_continuation() {
+        let head = concat!(
+            "[#subagent:closeout_effect_order_recovery#2] An agent-doc closeout should never ",
+            "block effects from subagents: why was the review not posted?\n",
+            "\t\t• Because closeout ran before the authorized post-review effect."
+        );
+        let response = format!(
+            "> **Queue prompt:** ☑️ {head}\n\n### Re: reported subagent results — gpt-5\n\nThe review is now posted.\n"
+        );
+
+        assert!(free_text_head_answered_by_response(&response, head));
+    }
+
+    #[test]
+    fn unquoted_indented_echo_continuation_without_an_answer_remains_live() {
+        let head = concat!(
+            "[#subagent:closeout_effect_order_recovery#2] An agent-doc closeout should never ",
+            "block effects from subagents: why was the review not posted?\n",
+            "\t\t• Because closeout ran before the authorized post-review effect."
+        );
+        let response = format!("> **Queue prompt:** ☑️ {head}\n");
+
+        assert!(!free_text_head_answered_by_response(&response, head));
     }
 
     #[test]

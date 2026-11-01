@@ -981,6 +981,36 @@ mod tests {
     }
 
     #[test]
+    fn surfaced_multiline_queue_echo_is_completed_residue() {
+        let prompt = concat!(
+            "[#subagent:closeout_effect_order_recovery#2] An agent-doc closeout should never ",
+            "block effects from subagents: >-› why did the earl9 turn no post the review?\n",
+            "\t\t• Because closeout ran before the authorized post-review effect."
+        );
+        let doc = format!("<!-- agent:queue -->\n- ☑️ {prompt}\n<!-- /agent:queue -->\n");
+        let exchange = format!(
+            "> **Queue prompt:** ☑️ {prompt}\n\n### Re: reported subagent results — gpt-5\n\n- The earlier review was not posted because closeout ran before the already-authorized side effect.\n"
+        );
+        let entries = crate::document_queue::parse(
+            agent_doc_element::element::parse(&doc)
+                .unwrap()
+                .iter()
+                .find(|component| component.name == "queue")
+                .unwrap()
+                .content(&doc),
+        )
+        .unwrap();
+        let head = crate::document_queue::first_prompt(&entries)
+            .expect("the reported row remains a live queue prompt")
+            .text
+            .as_str();
+
+        assert!(free_text_queue_head_is_completed_residue(
+            &doc, &exchange, head
+        ));
+    }
+
+    #[test]
     fn unanswered_operator_action_is_not_completed_residue_after_worker_report() {
         let head = "🙋☑️ prepare sdk demo [#subagent-operator-request-sdk-demo-approval]";
         let doc = format!("<!-- agent:queue -->\n- {head}\n<!-- /agent:queue -->\n");

@@ -1263,10 +1263,25 @@ pub fn sync_in_progress_marker_regions(snapshot_content: &str, current_content: 
 /// Strip priority, lifecycle (`🚧`/`⏭️`/`⏳`), owner, and worker report-state
 /// projection from the visible prompt identity, so a decorated head compares
 /// equal to its bare form.
+fn strip_repeated_projection_heading_prefix(trimmed: &str) -> Option<&str> {
+    let after = trimmed.strip_prefix("###")?;
+    if !after.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let candidate = after.trim_start();
+    (strip_lifecycle_prefix(candidate).is_some()
+        || strip_operator_action_prefix(candidate).is_some()
+        || strip_operator_action_marker_prefix(candidate).is_some()
+        || strip_owner_annotation_prefix(candidate).is_some()
+        || priority_prefix(candidate).is_some())
+    .then_some(candidate)
+}
+
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     let mut canonical_operator_action = false;
     let mut observed_owner = None::<QueueOwnerProjection>;
+    let mut stripped_projection = false;
     loop {
         let trimmed = t.trim_start();
         let stripped = strip_lifecycle_prefix(trimmed)
@@ -1277,10 +1292,12 @@ pub fn strip_priority_markers(text: &str) -> String {
                 })
             });
         if let Some(rest) = stripped {
+            stripped_projection = true;
             t = rest.trim_start();
             continue;
         }
         if let Some((owner, rest)) = strip_owner_annotation_prefix(trimmed) {
+            stripped_projection = true;
             observed_owner.get_or_insert(owner);
             t = rest.trim_start();
             continue;
@@ -1289,11 +1306,19 @@ pub fn strip_priority_markers(text: &str) -> String {
             .as_ref()
             .and_then(|owner| strip_torn_duplicate_owner_lifecycle_prefix(trimmed, owner))
         {
+            stripped_projection = true;
             t = rest.trim_start();
             continue;
         }
         if let Some((_, rest)) = priority_prefix(trimmed) {
+            stripped_projection = true;
             t = rest.trim_start();
+            continue;
+        }
+        if stripped_projection
+            && let Some(rest) = strip_repeated_projection_heading_prefix(trimmed)
+        {
+            t = rest;
             continue;
         }
         break;
@@ -1944,6 +1969,23 @@ mod tests {
             strip_priority_markers(&unproven),
             unproven,
             "identity normalization must not repair a lookalike without owner evidence"
+        );
+    }
+
+    #[test]
+    fn repeated_projection_around_heading_token_normalizes_to_work() {
+        let row = concat!(
+            "🚧 [#subagent:adnestedclaimedidrow#1] ### ",
+            "🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]",
+        );
+        assert_eq!(strip_priority_markers(row), "do [#adnestedclaimedidrow]");
+        assert_eq!(
+            strip_priority_markers("🚧 [#subagent:x#1] ### authored heading"),
+            "### authored heading"
+        );
+        assert_eq!(
+            strip_priority_markers("### 🚧 [#subagent:x#1] do [#id]"),
+            "### 🚧 [#subagent:x#1] do [#id]"
         );
     }
 

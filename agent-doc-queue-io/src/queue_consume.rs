@@ -2536,7 +2536,7 @@ fn exact_top_level_correction_head(
     if keys.len() != 1 {
         return Ok(false);
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("open-id ack: failed to inspect queue rows: {err}"))?;
     let Some(node) = nodes.iter().find(|node| node.node_key == keys[0]) else {
         return Ok(false);
@@ -2563,7 +2563,7 @@ fn exact_top_level_correction_head(
 }
 
 fn id_backed_head_was_already_struck(content: &str, target_id: &str) -> Result<bool> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("open-id ack: failed to inspect queue rows: {err}"))?;
     Ok(nodes.iter().any(|node| {
         let text = node.item.text.trim();
@@ -2597,24 +2597,32 @@ pub fn mark_completed_queue_prompts_for_done_ids(
             done_ids,
         );
     let done_ids = eligible_done_ids.as_slice();
+    let matching_live_head_texts = |content: &str| -> Result<Vec<String>> {
+        if !element::parse(content)?
+            .iter()
+            .any(|component| component.name == "queue")
+        {
+            return Ok(Vec::new());
+        }
+        let wanted = done_ids
+            .iter()
+            .map(|id| agent_doc_queue::queue_response::normalize_done_id(id))
+            .collect::<HashSet<_>>();
+        Ok(
+            agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")?
+                .into_iter()
+                .filter(|node| !node.item.struck)
+                .filter(|node| {
+                    queue_prompt_done_id(&node.item.text)
+                        .is_some_and(|id| wanted.contains(&id))
+                })
+                .map(|node| node.item.text)
+                .collect(),
+        )
+    };
     // `#qheadannotation` never-drop backstop (see the consume path): the heads
     // this mark completes are exactly the live prompts naming a done id.
-    let heads_to_mark = {
-        let components = element::parse(&authority_content)?;
-        match components
-            .iter()
-            .find(|component| component.name == "queue")
-        {
-            Some(queue_component) => {
-                let body =
-                    &authority_content[queue_component.open_end..queue_component.close_start];
-                let entries = agent_doc_queue::document_queue::parse(body)
-                    .context("queue done-id mark: failed to parse document queue")?;
-                mark_entries_completed_by_done_ids(&entries, done_ids).1
-            }
-            None => Vec::new(),
-        }
-    };
+    let heads_to_mark = matching_live_head_texts(&authority_content)?;
     let requeued_content = requeue_unaddressed_queue_head_annotations(
         file,
         &authority_content,
@@ -2623,56 +2631,37 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     )?;
     let requeued = requeued_content.is_some();
     let content = requeued_content.unwrap_or_else(|| authority_content.clone());
-    let components = element::parse(&content)?;
-    let Some(queue_component) = components
-        .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Ok(0);
-    };
-    let body = &content[queue_component.open_end..queue_component.close_start];
-    let entries = agent_doc_queue::document_queue::parse(body)
-        .context("queue done-id mark: failed to parse document queue")?;
-    let (marked_entries, marked_texts) = mark_entries_completed_by_done_ids(&entries, done_ids);
+    let marked_texts = matching_live_head_texts(&content)?;
     if marked_texts.is_empty() {
         return Ok(0);
     }
-
-    let new_body = agent_doc_queue::document_queue::render(&marked_entries);
-    let new_document = queue_component.replace_content(&content, &new_body);
+    let (new_document, marked_count) =
+        agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+            &content, done_ids,
+        )?;
+    debug_assert_eq!(marked_count, marked_texts.len());
 
     let new_snapshot = if let Some(snapshot_content) =
         load_snapshot_recovery_only(file, "queue done-id mark")
     {
         match (|| -> Result<Option<String>> {
-            let snapshot_components = element::parse(&snapshot_content)?;
-            let Some(snapshot_queue) = snapshot_components
-                .iter()
-                .find(|component| component.name == "queue")
-            else {
-                return Ok(None);
-            };
-            let snapshot_body =
-                &snapshot_content[snapshot_queue.open_end..snapshot_queue.close_start];
-            let snapshot_entries = agent_doc_queue::document_queue::parse(snapshot_body)
-                .context("queue done-id mark: failed to parse snapshot queue")?;
-            let (snapshot_marked_entries, snapshot_marked_texts) =
-                mark_entries_completed_by_done_ids(&snapshot_entries, done_ids);
-            if snapshot_marked_texts.len() != marked_texts.len() {
+            let (snapshot_document, snapshot_marked_count) =
+                agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
+                    &snapshot_content,
+                    done_ids,
+                )?;
+            if snapshot_marked_count != marked_texts.len() {
                 log_snapshot_recovery_warning(
                     file,
                     "queue done-id mark",
                     format!(
                         "snapshot matched {} queue item(s) but document matched {}",
-                        snapshot_marked_texts.len(),
+                        snapshot_marked_count,
                         marked_texts.len()
                     ),
                 );
             }
-            let snapshot_body = agent_doc_queue::document_queue::render(&snapshot_marked_entries);
-            Ok(Some(
-                snapshot_queue.replace_content(&snapshot_content, &snapshot_body),
-            ))
+            Ok(Some(snapshot_document))
         })() {
             Ok(snapshot) => snapshot,
             Err(err) => {
@@ -9111,6 +9100,127 @@ Old.
                 .all(|claim| claim.owner != "subagent:adr0043-review"),
             "the reported attempt ended with the strike: {ledger:?}"
         );
+    }
+
+    /// `#adnestedclaimedidrow`: the released failure had a default queue before
+    /// `id=main`, with the reported id-backed row nested beneath a PR parent.
+    /// `queue consume --id` must find that later child and retire its report.
+    #[test]
+    fn orphan_id_strike_closes_nested_reported_row_in_later_queue_component() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n### Re: prior\n\nDone.\n<!-- /agent:exchange -->\n\n",
+            "## Default <!-- agent:run id=default -->\n",
+            "- unrelated default work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=main subagents priority go -->\n",
+            "- https://github.com/example/project/pull/42\n",
+            "  - do [#adnestedclaimedidrow]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Todo <!-- agent:todo priority -->\n",
+            "- [x] [#adnestedclaimedidrow] nested row work completed\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(
+            &doc,
+            "#adnestedclaimedidrow",
+            "subagent:adnestedclaimedidrow",
+        );
+        crate::queue_claim::report_attempt(&doc, "#adnestedclaimedidrow", Some(generation))
+            .unwrap();
+        let reported = std::fs::read_to_string(&doc).unwrap();
+        let exact_live_shape = reported.replace(
+            "do [#adnestedclaimedidrow]",
+            "🚧 [#subagent:adnestedclaimedidrow#1] ### 🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]",
+        );
+        assert_ne!(exact_live_shape, reported, "reported projection shape changed");
+        std::fs::write(&doc, &exact_live_shape).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &exact_live_shape,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert!(strike_orphan_id_backed_queue_head(&doc, "adnestedclaimedidrow").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- https://github.com/example/project/pull/42\n"),
+            "the context parent survives:\n{result}"
+        );
+        assert!(
+            result.contains("  - ~~do [#adnestedclaimedidrow]~~\n"),
+            "the nested row is struck without projection metadata:\n{result}"
+        );
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:adnestedclaimedidrow"),
+            "the stuck reported attempt is retired: {ledger:?}"
+        );
+    }
+
+    /// The normal `--done` closeout path uses the same all-component identity
+    /// model; it must not leave the later reported child live for `--id` repair.
+    #[test]
+    fn done_id_mark_closes_nested_reported_row_in_later_queue_component() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "## Default <!-- agent:run id=default -->\n",
+            "- unrelated default work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=main subagents priority go -->\n",
+            "- https://github.com/example/project/pull/42\n",
+            "  - 🚧 [#subagent:adnestedclaimedidrow#1] ### 🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert_eq!(
+            mark_completed_queue_prompts_for_done_ids(
+                &doc,
+                &["adnestedclaimedidrow".to_string()],
+                false,
+            )
+            .unwrap(),
+            1
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            result.contains("- https://github.com/example/project/pull/42\n"),
+            "the context parent survives:\n{result}"
+        );
+        assert!(
+            result.contains("  - ~~do [#adnestedclaimedidrow]~~\n"),
+            "the normal done-id path strikes the nested child:\n{result}"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot, result, "document and recovery snapshot converge");
     }
 
     /// `#ackkeepsopen` live shape (haiven-dev game-sessions.md, 2026-10-28):

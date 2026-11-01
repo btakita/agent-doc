@@ -657,7 +657,7 @@ pub fn node_replace_ops_from_diff(
     // which rewrites `item.start_byte..end_byte` — preserves the bullet. Using
     // `item.raw` (bullet-stripped) here would drop the bullet on apply.
     let before_spans: HashMap<String, String> =
-        agent_doc_markdown_ast::mutations::item_nodes(before, component)
+        agent_doc_markdown_ast::mutations::item_nodes_all(before, component)
             .map_err(|err| anyhow::anyhow!("node diff: failed to parse before: {err}"))?
             .into_iter()
             .map(|n| {
@@ -667,7 +667,7 @@ pub fn node_replace_ops_from_diff(
                 )
             })
             .collect();
-    let after_nodes = agent_doc_markdown_ast::mutations::item_nodes(after, component)
+    let after_nodes = agent_doc_markdown_ast::mutations::item_nodes_all(after, component)
         .map_err(|err| anyhow::anyhow!("node diff: failed to parse after: {err}"))?;
     let mut ops = Vec::new();
     for n in after_nodes {
@@ -1580,17 +1580,7 @@ pub fn queue_prompt_node_keys_for_done_ids(
         .map(|id| normalize_done_id(id))
         .collect::<HashSet<_>>();
 
-    let selected_is_first = element::parse(content)
-        .ok()
-        .and_then(|components| {
-            crate::queue_set::QueueSet::parse(content, &components)
-                .ok()
-                .and_then(|queues| queues.selected().map(|block| block.occurrence == 0))
-        })
-        .unwrap_or(false);
-    if selected_is_first
-        && let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
-    {
+    if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue") {
         let keys = nodes
             .into_iter()
             .filter(|node| !node.item.struck)
@@ -2128,7 +2118,7 @@ pub fn mark_queue_prompts_completed_by_done_ids_in_content(
     if !components.iter().any(|component| component.name == "queue") {
         return Ok((content.to_string(), 0));
     }
-    let keys = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let keys = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue done projection: failed to parse queue: {err}"))?
         .into_iter()
         .filter(|node| !node.item.struck)
@@ -2160,17 +2150,16 @@ pub fn live_queue_prompt_done_ids(content: &str, done_ids: &[String]) -> Result<
         .iter()
         .map(|id| normalize_done_id(id))
         .collect::<HashSet<_>>();
-    let components = element::parse(content)?;
-    let Some(queue) = components
+    if !element::parse(content)?
         .iter()
-        .find(|component| component.name == "queue")
-    else {
+        .any(|component| component.name == "queue")
+    {
         return Ok(Vec::new());
-    };
+    }
     let mut live = Vec::new();
-    for entry in document_queue::parse(queue.content(content))? {
-        if let QueueEntry::Prompt(prompt) = entry
-            && let Some(id) = queue_prompt_done_id(&prompt.text)
+    for node in agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")? {
+        if !node.item.struck
+            && let Some(id) = queue_prompt_done_id(&node.item.text)
             && wanted.contains(&id)
             && !live.contains(&id)
         {
@@ -2195,32 +2184,23 @@ pub fn done_ids_have_atomic_queue_completion(
         .map(|id| normalize_done_id(id))
         .collect::<HashSet<_>>();
     let states = |content: &str| -> Result<(HashSet<String>, HashSet<String>)> {
-        let components = element::parse(content)?;
-        let Some(queue) = components
+        if !element::parse(content)?
             .iter()
-            .find(|component| component.name == "queue")
-        else {
+            .any(|component| component.name == "queue")
+        {
             return Ok((HashSet::new(), HashSet::new()));
-        };
+        }
         let mut live = HashSet::new();
         let mut completed = HashSet::new();
-        for entry in document_queue::parse(queue.content(content))? {
-            match entry {
-                QueueEntry::Prompt(prompt) => {
-                    if let Some(id) = queue_prompt_done_id(&prompt.text)
-                        && done_ids.contains(&id)
-                    {
-                        live.insert(id);
-                    }
+        for node in agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")? {
+            if let Some(id) = queue_prompt_done_id(&node.item.text)
+                && done_ids.contains(&id)
+            {
+                if node.item.struck {
+                    completed.insert(id);
+                } else {
+                    live.insert(id);
                 }
-                QueueEntry::Completed(prompt) => {
-                    if let Some(id) = queue_prompt_done_id(&prompt.text)
-                        && done_ids.contains(&id)
-                    {
-                        completed.insert(id);
-                    }
-                }
-                _ => {}
             }
         }
         Ok((live, completed))
@@ -2315,7 +2295,7 @@ pub fn noise_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
                 .map(|c| crate::prompt_component_attrs::component_preset(&c.attrs).is_some())
         })
         .unwrap_or(false);
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("noise prune: failed to derive queue node keys: {err}"))?;
     let mut keys = Vec::new();
     for node in nodes {
@@ -2354,7 +2334,7 @@ pub fn orphan_id_queue_head_node_keys(content: &str) -> Result<Vec<String>> {
     if !has_backlog {
         return Ok(Vec::new());
     }
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("orphan prune: failed to derive queue node keys: {err}"))?;
     let mut keys = Vec::new();
     for node in nodes {
@@ -2455,7 +2435,7 @@ pub fn strike_all_noise_queue_heads(content: &str) -> Result<(String, usize)> {
 /// *contain* a `#token` — are excluded so the orphan escape hatch can never strike
 /// a free-text operator report by accident.
 pub fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<String>> {
-    let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
         .map_err(|err| anyhow::anyhow!("orphan strike: failed to derive queue node keys: {err}"))?;
     let mut keys = Vec::new();
     for node in nodes {
@@ -2617,48 +2597,93 @@ struct QueueAddressedResponseCell {
 }
 
 fn queue_addressed_response_cells(response: &str) -> Vec<QueueAddressedResponseCell> {
-    #[derive(Default)]
-    struct Cell {
-        text: String,
-        heading_count: usize,
-        has_prompt_echo: bool,
+    #[derive(Clone, Copy)]
+    struct Line<'a> {
+        start: usize,
+        text: &'a str,
     }
 
-    let mut cells = Vec::new();
-    let mut current = Cell::default();
-    for line in response.split_inclusive('\n') {
-        let trimmed = line.trim();
-        let quoted = line.trim_start().strip_prefix('>').map(str::trim_start);
-        let starts_prompt_echo = quoted.is_some_and(|quoted| {
-            quoted.starts_with("**Queue prompt:**") || quoted.starts_with("**Queue prompts:**")
+    let mut lines = Vec::new();
+    let mut cursor = 0usize;
+    for text in response.split_inclusive('\n') {
+        lines.push(Line {
+            start: cursor,
+            text,
         });
-        let starts_heading = trimmed.starts_with("### ");
-        // Support both canonical heading→echo responses and retained payloads
-        // that carry echo→heading pairs. Once a cell has both anchors, either
-        // the next echo or the next H3 starts a new independently addressable
-        // response. Extra H3 sections without another echo remain part of the
-        // same intentional multi-section cell.
-        if ((starts_prompt_echo && current.heading_count > 0 && current.has_prompt_echo)
-            || (starts_heading && current.heading_count > 0 && current.has_prompt_echo))
-            && !current.text.trim().is_empty()
-        {
-            let completed = std::mem::take(&mut current);
-            cells.push(QueueAddressedResponseCell {
-                body: completed.text,
-                heading_count: completed.heading_count,
-            });
+        cursor += text.len();
+    }
+    if cursor < response.len() {
+        lines.push(Line {
+            start: cursor,
+            text: &response[cursor..],
+        });
+    }
+
+    let prompt_echo_lines = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let quoted = line.text.trim_start().strip_prefix('>')?.trim_start();
+            (quoted.starts_with("**Queue prompt:**") || quoted.starts_with("**Queue prompts:**"))
+                .then_some(index)
+        })
+        .collect::<Vec<_>>();
+
+    // Without explicit prompt anchors the whole turn is one intentional
+    // response cell, including any H3 verification or artifact subsections.
+    if prompt_echo_lines.is_empty() {
+        return (!response.trim().is_empty())
+            .then(|| QueueAddressedResponseCell {
+                body: response.to_string(),
+                heading_count: lines
+                    .iter()
+                    .filter(|line| line.text.trim().starts_with("### "))
+                    .count(),
+            })
+            .into_iter()
+            .collect();
+    }
+
+    // Prompt echoes, not headings, are the durable per-head boundary. A
+    // response may legitimately add `### Verification`, `### Artifacts`, or
+    // other H3 subsections; splitting at every H3 detached those subsections
+    // from their owning head and made their recovery evidence disappear. For
+    // canonical heading→echo responses, pull the immediately preceding H3
+    // across the boundary. Echo→heading retained payloads naturally keep the
+    // following heading in the same cell.
+    let mut starts = Vec::with_capacity(prompt_echo_lines.len());
+    for (echo_ordinal, &echo_line) in prompt_echo_lines.iter().enumerate() {
+        let mut start_line = echo_line;
+        while start_line > 0 && lines[start_line - 1].text.trim().is_empty() {
+            start_line -= 1;
         }
-        current.text.push_str(line);
-        current.heading_count += usize::from(starts_heading);
-        current.has_prompt_echo |= starts_prompt_echo;
+        if start_line > 0 && lines[start_line - 1].text.trim().starts_with("### ") {
+            start_line -= 1;
+        }
+        let start = if echo_ordinal == 0 {
+            0
+        } else {
+            lines[start_line].start
+        };
+        starts.push(start);
     }
-    if !current.text.trim().is_empty() {
-        cells.push(QueueAddressedResponseCell {
-            body: current.text,
-            heading_count: current.heading_count,
-        });
-    }
-    cells
+    starts.dedup();
+
+    starts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(response.len());
+            let body = &response[start..end];
+            (!body.trim().is_empty()).then(|| QueueAddressedResponseCell {
+                body: body.to_string(),
+                heading_count: body
+                    .lines()
+                    .filter(|line| line.trim().starts_with("### "))
+                    .count(),
+            })
+        })
+        .collect()
 }
 
 /// Attach response lookup children to rows resolved by this closeout and to
@@ -3825,6 +3850,86 @@ mod tests {
         assert!(
             document_queue::prompts(&entries).is_empty(),
             "generated response and choice descendants must stay inert:\n{entries:#?}\n{annotated}"
+        );
+    }
+
+    #[test]
+    fn five_head_inline_closeout_keeps_each_response_snippet_and_artifact_with_its_head() {
+        let cases = [
+            ("alpha", "111111111111", "artifacts/alpha.json"),
+            ("beta", "222222222222", "artifacts/beta.json"),
+            ("gamma", "333333333333", "artifacts/gamma.json"),
+            ("delta", "444444444444", "artifacts/delta.json"),
+            ("epsilon", "555555555555", "artifacts/epsilon.json"),
+        ];
+        let mut response = String::new();
+        let mut before_queue = String::new();
+        let mut after_queue = String::new();
+        for (name, response_hash, artifact) in cases {
+            response.push_str(&format!(
+                "### Re: {name} — test\n\n\
+                 > **Queue prompt:** Investigate {name} [#q-{name}]\n\n\
+                 **Outcome:** {name} is fixed and verified.\n\n\
+                 ### Artifacts\n\n\
+                 %% response [#r-{response_hash}] %%\n\
+                 - Artifact: `{artifact}`.\n\n"
+            ));
+            before_queue.push_str(&format!("- Investigate {name} [#q-{name}]\n"));
+            after_queue.push_str(&format!("- ~~Investigate {name} [#q-{name}]~~\n"));
+        }
+        let before = inline_response_queue_doc(&before_queue);
+        let after = inline_response_queue_doc(&after_queue);
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+
+        for (index, (name, response_hash, artifact)) in cases.iter().enumerate() {
+            let row = format!("- ~~Investigate {name} [#q-{name}]~~");
+            let start = queue.find(&row).unwrap();
+            let end = cases
+                .get(index + 1)
+                .and_then(|(next, _, _)| {
+                    queue[start + row.len()..]
+                        .find(&format!("- ~~Investigate {next} [#q-{next}]~~"))
+                        .map(|offset| start + row.len() + offset)
+                })
+                .unwrap_or(queue.len());
+            let owned_projection = &queue[start..end];
+
+            assert!(
+                owned_projection.contains(&format!("**Outcome:** {name} is fixed and verified.")),
+                "missing own summary for {name}:\n{owned_projection}"
+            );
+            assert!(
+                owned_projection.contains(&format!("%% response [#r-{response_hash}] %%")),
+                "missing own response snippet for {name}:\n{owned_projection}"
+            );
+            assert!(
+                owned_projection.contains(artifact),
+                "missing own artifact for {name}:\n{owned_projection}"
+            );
+            for (other, other_hash, other_artifact) in cases {
+                if other == *name {
+                    continue;
+                }
+                assert!(
+                    !owned_projection.contains(&format!("%% response [#r-{other_hash}] %%"))
+                        && !owned_projection.contains(other_artifact),
+                    "{name} inherited {other}'s response evidence:\n{owned_projection}"
+                );
+            }
+        }
+
+        let entries = document_queue::parse(queue).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "inline response descendants must remain inert:\n{entries:#?}\n{queue}"
         );
     }
 
@@ -6420,6 +6525,75 @@ Old.
             "{updated}"
         );
         assert!(updated.contains("- do [#other]\n"), "{updated}");
+    }
+
+    /// `#adnestedclaimedidrow`: ID closeout must inspect every runnable
+    /// component and preserve the tree parent when the claimed row is a child.
+    #[test]
+    fn later_component_nested_claimed_id_row_is_found_and_completed() {
+        let content = concat!(
+            "## Default <!-- agent:run id=default -->\n",
+            "- unrelated default work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=main subagents -->\n",
+            "- https://github.com/example/project/pull/42\n",
+            "  - 🚧 [#subagent:adnestedclaimedidrow#1] ### 🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let parsed_nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+            .unwrap();
+        assert!(
+            parsed_nodes.iter().any(|node| {
+                queue_prompt_done_id(&node.item.text).as_deref()
+                    == Some("adnestedclaimedidrow")
+            }),
+            "the exact projected row retains its done id: {parsed_nodes:#?}"
+        );
+        let projected = parsed_nodes
+            .iter()
+            .find(|node| {
+                queue_prompt_done_id(&node.item.text).as_deref()
+                    == Some("adnestedclaimedidrow")
+            })
+            .unwrap();
+        assert!(
+            !queue_prompt_text_is_free_text(content, &projected.item.text),
+            "the exact row is id-backed after normalization: {projected:#?}; normalized={:?}",
+            normalize_queue_prompt_text(&projected.item.text),
+        );
+        let keys = id_backed_head_node_keys(content, "adnestedclaimedidrow").unwrap();
+        assert_eq!(keys.len(), 1, "the nested row in the later queue is addressable");
+
+        let (completed, count) = mark_queue_prompts_completed_by_done_ids_in_content(
+            content,
+            &["adnestedclaimedidrow".to_string()],
+        )
+        .unwrap();
+        assert_eq!(count, 1, "only the claimed child is completed");
+        assert!(
+            completed.contains("- https://github.com/example/project/pull/42\n"),
+            "the context parent stays live:\n{completed}"
+        );
+        assert!(
+            completed.contains("  - ~~do [#adnestedclaimedidrow]~~\n"),
+            "the lifecycle projection is removed from the struck child:\n{completed}"
+        );
+        assert!(
+            live_queue_prompt_done_ids(&completed, &["adnestedclaimedidrow".to_string()])
+                .unwrap()
+                .is_empty(),
+            "the all-component closeout witness sees no live copy"
+        );
+        assert!(
+            done_ids_have_atomic_queue_completion(
+                content,
+                &completed,
+                &["adnestedclaimedidrow".to_string()],
+            )
+            .unwrap(),
+            "the all-component atomicity witness accepts the child strike"
+        );
     }
 
     #[test]

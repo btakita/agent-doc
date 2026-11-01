@@ -564,6 +564,21 @@ fn strip_owner_annotation_token(trimmed: &str) -> Option<&str> {
     .then_some(after)
 }
 
+/// A Markdown heading token inserted between two copies of binary lifecycle
+/// projection. This is projection corruption, not authored work, only when a
+/// real projection was already stripped and another projection begins after
+/// the heading token. A row whose authored work starts with `###` stays intact.
+fn strip_repeated_projection_heading(trimmed: &str) -> Option<&str> {
+    let after = trimmed.strip_prefix("###")?;
+    if !after.chars().next().is_some_and(char::is_whitespace) {
+        return None;
+    }
+    let candidate = after.trim_start();
+    strip_operator_action_glyph(candidate)
+        .or_else(|| strip_projection_token(candidate))
+        .map(|_| candidate)
+}
+
 fn longest_marker_prefix<'a>(trimmed: &'a str, markers: &[&str]) -> Option<(&'a str, &'a str)> {
     markers
         .iter()
@@ -696,8 +711,20 @@ pub(crate) fn without_child_lifecycle_projection(text: &str) -> Option<String> {
 /// `~~do [#foo]~~` copy are one node.
 pub fn strip_attempt_projection_prefix(text: &str) -> &str {
     let mut t = text.trim_start();
-    while let Some(rest) = strip_operator_action_glyph(t).or_else(|| strip_projection_token(t)) {
-        t = rest.trim_start();
+    let mut stripped_projection = false;
+    loop {
+        if let Some(rest) = strip_operator_action_glyph(t).or_else(|| strip_projection_token(t)) {
+            stripped_projection = true;
+            t = rest.trim_start();
+            continue;
+        }
+        if stripped_projection
+            && let Some(rest) = strip_repeated_projection_heading(t)
+        {
+            t = rest;
+            continue;
+        }
+        break;
     }
     t
 }
@@ -747,9 +774,11 @@ pub fn render_struck_row_body(text: &str) -> String {
 pub fn strip_priority_markers(text: &str) -> String {
     let mut t = text.trim();
     let mut canonical_operator_action = false;
+    let mut stripped_projection = false;
     loop {
         let trimmed = t.trim_start();
         if let Some(after_marker) = strip_operator_action_glyph(trimmed) {
+            stripped_projection = true;
             let after_marker = after_marker.trim_start();
             if let Some(after_open) = after_marker.strip_prefix("[#")
                 && let Some((_, after)) = after_open.split_once(']')
@@ -764,7 +793,14 @@ pub fn strip_priority_markers(text: &str) -> String {
             continue;
         }
         match strip_projection_token(trimmed) {
-            Some(rest) => t = rest.trim_start(),
+            Some(rest) => {
+                stripped_projection = true;
+                t = rest.trim_start();
+            }
+            None if stripped_projection => match strip_repeated_projection_heading(trimmed) {
+                Some(rest) => t = rest,
+                None => break,
+            },
             None => break,
         }
     }
@@ -947,6 +983,44 @@ mod tests {
         assert_eq!(
             super::strip_priority_markers("⟦blocked by sbx do [#stg]"),
             "⟦blocked by sbx do [#stg]"
+        );
+    }
+
+    /// `#adnestedclaimedidrow`: an editor/heading merge duplicated the running
+    /// projection around `###`; the repeated prefix is metadata, not work.
+    #[test]
+    fn repeated_projection_around_heading_token_keeps_the_id_work_identity() {
+        let row = concat!(
+            "🚧 [#subagent:adnestedclaimedidrow#1] ### ",
+            "🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]",
+        );
+        assert_eq!(
+            super::strip_attempt_projection_prefix(row),
+            "do [#adnestedclaimedidrow]"
+        );
+        assert_eq!(super::strip_priority_markers(row), "do [#adnestedclaimedidrow]");
+        assert_eq!(
+            super::queue_head_identity(row),
+            super::QueueItemIdentity::Id("adnestedclaimedidrow".to_string())
+        );
+        assert_eq!(
+            super::render_struck_row_body(row),
+            "~~do [#adnestedclaimedidrow]~~"
+        );
+
+        assert_eq!(
+            super::strip_attempt_projection_prefix(
+                "🚧 [#subagent:x#1] ### authored heading"
+            ),
+            "### authored heading",
+            "an authored heading is not swallowed without a repeated projection"
+        );
+        assert_eq!(
+            super::strip_attempt_projection_prefix(
+                "### 🚧 [#subagent:x#1] do [#adnestedclaimedidrow]"
+            ),
+            "### 🚧 [#subagent:x#1] do [#adnestedclaimedidrow]",
+            "a leading authored heading is not projection by itself"
         );
     }
 

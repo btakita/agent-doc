@@ -467,7 +467,7 @@ fn insert_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<
 }
 
 fn remove_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
-    let nodes = item_nodes(source, &patch.component)?;
+    let nodes = item_nodes_all(source, &patch.component)?;
     let Some(node) = nodes.iter().find(|node| node.node_key == patch.node_key) else {
         return Ok(source.to_string());
     };
@@ -479,7 +479,7 @@ fn remove_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<
 
 fn replace_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
     let content = patch_node_source(patch)?;
-    let nodes = item_nodes(source, &patch.component)?;
+    let nodes = item_nodes_all(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
     ensure_expected_node_content(source, node, patch)?;
     let mut out = source.to_string();
@@ -515,14 +515,14 @@ fn move_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<St
 }
 
 fn strike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
-    let nodes = item_nodes(source, &patch.component)?;
+    let nodes = item_nodes_all(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
     ensure_expected_node_content(source, node, patch)?;
-    consume_node(source, &patch.component, &patch.node_key)
+    consume_nodes_all(source, &patch.component, &[&patch.node_key])
 }
 
 fn unstrike_node_patch(source: &str, patch: &MutationNodePatch) -> MutationResult<String> {
-    let nodes = item_nodes(source, &patch.component)?;
+    let nodes = item_nodes_all(source, &patch.component)?;
     let node = find_node(&nodes, &patch.component, &patch.node_key)?;
     ensure_expected_node_content(source, node, patch)?;
     if !node.item.struck {
@@ -932,6 +932,83 @@ mod tests {
 
         let updated = consume_nodes_all(doc, "queue", &[&nodes[0].node_key]).unwrap();
         assert!(updated.contains("- ~~publish the release~~\n"), "{updated}");
+    }
+
+    /// Structural IPC patches carry all-occurrence node keys. A key from a
+    /// later named run must not be looked up only in the first queue component.
+    #[test]
+    fn node_patches_reach_nested_row_in_later_queue_component() {
+        let doc = concat!(
+            "## Default <!-- agent:run id=default -->\n",
+            "- unrelated default work\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=main subagents -->\n",
+            "- https://github.com/example/project/pull/42\n",
+            "  - do [#nested]\n",
+            "<!-- /agent:run -->\n",
+        );
+        let target = item_nodes_all(doc, "queue")
+            .unwrap()
+            .into_iter()
+            .find(|node| node.item.id == "nested")
+            .unwrap();
+
+        let struck = apply_node_patches(
+            doc,
+            &[node_patch(
+                &target.node_key,
+                MutationNodePatchOp::Strike,
+                None,
+                None,
+                None,
+            )],
+        )
+        .unwrap();
+        assert!(struck.contains("  - ~~do [#nested]~~\n"), "{struck}");
+        assert!(struck.contains("- https://github.com/example/project/pull/42\n"));
+
+        let unstruck = apply_node_patches(
+            &struck,
+            &[node_patch(
+                &target.node_key,
+                MutationNodePatchOp::Unstrike,
+                None,
+                None,
+                None,
+            )],
+        )
+        .unwrap();
+        assert!(unstruck.contains("  - do [#nested]\n"), "{unstruck}");
+
+        let replaced = apply_node_patches(
+            doc,
+            &[node_patch(
+                &target.node_key,
+                MutationNodePatchOp::Replace,
+                Some("  - do [#nested] revised\n"),
+                None,
+                None,
+            )],
+        )
+        .unwrap();
+        assert!(
+            replaced.contains("  - do [#nested] revised\n"),
+            "{replaced}"
+        );
+
+        let removed = apply_node_patches(
+            doc,
+            &[node_patch(
+                &target.node_key,
+                MutationNodePatchOp::Remove,
+                None,
+                None,
+                None,
+            )],
+        )
+        .unwrap();
+        assert!(!removed.contains("do [#nested]"), "{removed}");
+        assert!(removed.contains("- https://github.com/example/project/pull/42\n"));
     }
 
     #[test]

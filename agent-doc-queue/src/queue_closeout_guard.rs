@@ -25,15 +25,18 @@ pub fn done_ids_for_unchanged_queue_revisions(
         return done_ids.to_vec();
     };
     let revisions = |doc: &str| {
-        document_queue::parse(&crate::queue_prompt_drift::queue_component_text(doc))
-            .expect("queue parser is tolerant")
+        agent_doc_markdown_ast::mutations::item_nodes_all(doc, "queue")
+            .unwrap_or_default()
             .into_iter()
-            .filter_map(|entry| match entry {
-                document_queue::QueueEntry::Prompt(prompt) => {
-                    let id = queue_response::queue_prompt_done_id(&prompt.text)?;
-                    Some((id, strip_priority_markers(&prompt.text).trim().to_string()))
+            .filter_map(|node| {
+                if node.item.struck {
+                    return None;
                 }
-                _ => None,
+                let id = queue_response::queue_prompt_done_id(&node.item.text)?;
+                Some((
+                    id,
+                    strip_priority_markers(&node.item.text).trim().to_string(),
+                ))
             })
             .collect::<Vec<_>>()
     };
@@ -228,19 +231,17 @@ pub struct FreeTextQueueHeadProvenanceDecision {
     pub completed_residue: Vec<String>,
 }
 
-/// `do [#id]` target ids present in a committed document's `agent:queue`
-/// component.
+/// `do [#id]` target ids present in every committed runnable queue component.
 pub fn committed_queue_head_ids(content: &str) -> Vec<String> {
     let Ok(components) = element::parse(content) else {
         return Vec::new();
     };
-    let Some(queue) = components
+    let queue_bodies = components
         .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Vec::new();
-    };
-    queue_directive::do_directive_target_ids(&[queue.content(content).to_string()])
+        .filter(|component| component.name == "queue")
+        .map(|queue| queue.content(content).to_string())
+        .collect::<Vec<_>>();
+    queue_directive::do_directive_target_ids(&queue_bodies)
 }
 
 /// Every `#id` referenced on a live (unstruck) `agent:queue` prompt line,
@@ -251,38 +252,31 @@ pub fn live_queue_line_reference_ids(content: &str) -> HashSet<String> {
     let Ok(components) = element::parse(content) else {
         return HashSet::new();
     };
-    let Some(queue) = components
+    components
         .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return HashSet::new();
-    };
-    document_queue::parse(queue.content(content))
-        .unwrap_or_default()
-        .iter()
+        .filter(|component| component.name == "queue")
+        .flat_map(|queue| document_queue::parse(queue.content(content)).unwrap_or_default())
         .filter(|entry| matches!(entry, document_queue::QueueEntry::Prompt(_)))
-        .flat_map(document_queue::queue_entry_reference_ids)
+        .flat_map(|entry| document_queue::queue_entry_reference_ids(&entry))
         .map(|id| normalize_id(&id))
         .filter(|id| !id.is_empty())
         .collect()
 }
 
-/// `do [#id]` target ids for the current live queue head only.
+/// `do [#id]` target ids for the current live head of every runnable queue.
 pub fn committed_current_queue_head_ids(content: &str) -> Vec<String> {
     let Ok(components) = element::parse(content) else {
         return Vec::new();
     };
-    let Some(queue) = components
+    components
         .iter()
-        .find(|component| component.name == "queue")
-    else {
-        return Vec::new();
-    };
-    let entries = document_queue::parse(queue.content(content)).unwrap_or_default();
-    let Some(head) = document_queue::first_prompt(&entries) else {
-        return Vec::new();
-    };
-    queue_directive::do_directive_target_ids(std::slice::from_ref(&head.text))
+        .filter(|component| component.name == "queue")
+        .filter_map(|queue| {
+            let entries = document_queue::parse(queue.content(content)).unwrap_or_default();
+            document_queue::first_prompt(&entries).map(|head| head.text.clone())
+        })
+        .flat_map(|head| queue_directive::do_directive_target_ids(&[head]))
+        .collect()
 }
 
 /// Recorded id-backed queue heads that still represent live unresponded work.
@@ -798,6 +792,50 @@ mod tests {
             committed_current_queue_head_ids(&content),
             vec!["head".to_string()]
         );
+    }
+
+    /// `#adnestedclaimedidrow`: a live id row in a later named queue is not a
+    /// removal merely because the default queue occurs first in the document.
+    #[test]
+    fn committed_queue_witnesses_include_later_named_queue_components() {
+        let content = concat!(
+            "## Default <!-- agent:run id=default -->\n",
+            "- do [#defaulthead]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=main subagents -->\n",
+            "- https://github.com/example/project/pull/42\n",
+            "  - 🚧 [#subagent:adnestedclaimedidrow#1] ### 🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        assert_eq!(
+            committed_queue_head_ids(content),
+            vec![
+                "defaulthead".to_string(),
+                "adnestedclaimedidrow".to_string(),
+            ]
+        );
+        assert!(
+            live_queue_line_reference_ids(content).contains("adnestedclaimedidrow"),
+            "the removal guard sees the later live row"
+        );
+        assert_eq!(
+            committed_current_queue_head_ids(content),
+            vec![
+                "defaulthead".to_string(),
+                "adnestedclaimedidrow".to_string(),
+            ],
+            "each component contributes its first executable head"
+        );
+
+        let decision = queue_head_removal_decision(
+            &["do [#adnestedclaimedidrow]".to_string()],
+            content,
+            &set(&["adnestedclaimedidrow"]),
+            &set(&[]),
+            &set(&[]),
+        );
+        assert!(decision.lost.is_empty(), "{decision:?}");
     }
 
     #[test]

@@ -17949,13 +17949,19 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let (_, claim) =
             agent_doc_queue_io::queue_claim::claim(&doc, "#reported", "subagent:worker", 3600)
                 .unwrap();
-        agent_doc_queue_io::queue_claim::start_attempt(
+        let running = agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
             "#reported",
             "subagent:worker",
             "worker:test",
             3600,
             claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response(
+            &doc,
+            &running,
+            "Completed worker result.",
         )
         .unwrap();
         agent_doc_queue_io::queue_claim::report_attempt(&doc, "#reported", Some(claim.generation))
@@ -20812,11 +20818,14 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             claimed.generation,
         )
         .unwrap();
+        let response = "Implemented and pushed; tests pass.";
+        agent_doc_queue_io::claim_release_receipt::capture_response(doc, &running, response)
+            .unwrap();
         let cell = agent_doc_document::subagent_completion::cell_with_response(
             &running.owner,
             &running.item_text,
             &agent_doc_queue_io::queue_claim::completion_feedback_key(&running).unwrap(),
-            "Implemented and pushed; tests pass.",
+            response,
         )
         .unwrap();
         agent_doc_queue_io::queue_claim::report_attempt(doc, item, Some(running.generation))
@@ -20996,12 +21005,13 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     /// preflight residue strike closes a reported row, but before only
     /// closeout `queue consume` retired the row's completion cell and only
     /// closeout pruned its reported-release receipt, so a later row with the
-    /// same text inherited `☑️` (receipt) or `🔄` (cell). The strike's own
-    /// maintenance successor now retires the cell in the document and the
-    /// snapshot, the receipt ends once it persists, and the re-added row
-    /// projects `📥`. Operator exchange text stays byte for byte.
+    /// same text inherited stale evidence. The strike's own maintenance
+    /// successor now retires the cell in the document and snapshot, while the
+    /// full-response receipt remains an intentional `☑️` fence until
+    /// commit/archive GC proof exists. Operator exchange text stays byte for
+    /// byte.
     #[test]
-    fn residue_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+    fn residue_strike_retains_response_receipt_and_blocks_same_text_readd() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "release + publish";
@@ -21035,6 +21045,17 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             agent_doc_queue_io::claim_release_receipt::ReleaseKind::Reported,
         )
         .unwrap();
+        let released_receipts = agent_doc_queue_io::claim_release_receipt::load(&doc)
+            .unwrap()
+            .receipts;
+        assert_eq!(released_receipts.len(), 1);
+        assert_eq!(
+            released_receipts[0]
+                .response
+                .as_ref()
+                .map(|response| response.body.as_str()),
+            Some("Implemented and pushed; tests pass.")
+        );
         let answer = format!(
             "### Re: release — opus\n\n> **Queue prompt:** {item}\n\nReleased and verified.\n"
         );
@@ -21081,8 +21102,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         assert_eq!(
             receipts(),
-            0,
-            "the strike retires the reported-release receipt"
+            1,
+            "the strike keeps the full response until commit/archive GC proof exists"
         );
 
         // A later operator request with the same text is new work.
@@ -21093,39 +21114,43 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&readded).is_empty()
         );
-        let projection =
-            agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None)
-                .unwrap();
-        assert!(
-            projection
-                .target_content
-                .contains(&format!("- 📥 {item}\n")),
-            "{}",
-            projection.target_content
-        );
-        assert!(
-            !projection.target_content.contains("🔄")
-                && !projection.target_content.contains("- ☑️"),
-            "{}",
-            projection.target_content
-        );
+        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
     }
 
-    /// The re-added row `item` in `readded` projects `📥`, never `☑️`/`🔄`.
-    fn assert_readded_row_projects_pending(doc: &std::path::Path, readded: &str, item: &str) {
+    /// A re-added same-text row remains reported while its exact full-response
+    /// receipt is the only durable recovery authority.
+    fn assert_readded_row_stays_reported_without_gc_proof(
+        doc: &std::path::Path,
+        readded: &str,
+        item: &str,
+    ) {
+        let receipts = agent_doc_queue_io::claim_release_receipt::load(doc)
+            .unwrap()
+            .receipts;
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(
+            receipts[0]
+                .response
+                .as_ref()
+                .map(|response| response.body.as_str()),
+            Some("Implemented and pushed; tests pass.")
+        );
         let projection =
             agent_doc_queue_io::queue_cmd::derive_claim_runtime_projection(doc, readded, None)
                 .unwrap();
         assert!(
             projection
                 .target_content
-                .contains(&format!("- 📥 {item}\n")),
+                .lines()
+                .any(|line| line.contains(item) && line.contains("☑️")),
             "{}",
             projection.target_content
         );
         assert!(
-            !projection.target_content.contains("🔄")
-                && !projection.target_content.contains("- ☑️"),
+            !projection
+                .target_content
+                .lines()
+                .any(|line| line.contains(item) && (line.contains("📥") || line.contains("🔄"))),
             "{}",
             projection.target_content
         );
@@ -21143,10 +21168,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     /// `#strikeretires` (found by the completion-cell retirement fix,
     /// 2026-10-26): the done-id strike (`#qdonestrike`) closed a reported
     /// `do [#alpha]` row, but its `Reported` attempt stayed in the claim
-    /// ledger until the next closeout prune, so a re-added identical row
-    /// projected `☑️`. The strike's maintenance successor now ends it.
+    /// ledger until the next closeout prune. The strike's maintenance
+    /// successor ends the claim, while the full response receipt keeps a
+    /// same-text re-add reported until commit/archive GC proof exists.
     #[test]
-    fn done_id_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+    fn done_id_strike_ends_claim_but_retains_response_receipt() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let item = "do [#alpha]";
@@ -21198,18 +21224,19 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         let readded = updated.replace("- 🚧 do [#beta]\n", &format!("- 🚧 do [#beta]\n- {item}\n"));
         assert_ne!(readded, updated, "{updated}");
-        assert_readded_row_projects_pending(&doc, &readded, item);
+        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
     }
 
     /// `#strikeretires`: the backlog/done strike (`#qftbklgstrike`) bakes its
     /// note inside the strikethrough. Before, that note made the struck row's
     /// identity differ from the live row's, so the strike retired nothing and
-    /// the row's `Reported` attempt outlived it. It now ends with the strike,
-    /// and a re-added identical row projects `📥`. (The row is not yet
+    /// the row's `Reported` attempt outlived it. The claim now ends with the
+    /// strike, while its full response receipt keeps a same-text re-add
+    /// reported until GC proof exists. (The row is not yet
     /// lifecycle-projected: the semantic scorer reads a projected
     /// `[#owner#N]` annotation as an id and leaves the row to the id paths.)
     #[test]
-    fn backlog_strike_ends_a_reported_claim_so_a_readded_row_is_pending() {
+    fn backlog_strike_ends_claim_but_retains_response_receipt() {
         let dir = setup_project();
         std::fs::write(
             dir.path().join("tasks.done.md"),
@@ -21269,7 +21296,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "the strike ends the reported claim"
         );
         let readded = updated.replace(&struck, &format!("{struck}- {item}\n"));
-        assert_readded_row_projects_pending(&doc, &readded, item);
+        assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
     }
 
     /// `#qftbklgclaimed`: a claim is authoritative before its lifecycle marker

@@ -392,20 +392,41 @@ fn canonical_response_details_id(item_content: &str) -> Option<&str> {
     .then_some(response_id)
 }
 
-fn completed_prompt_tree_parent(lines: &[&str], opener_index: usize, child_indent: usize) -> bool {
-    let Some(parent) = opener_index
-        .checked_sub(1)
-        .and_then(|index| lines.get(index))
-    else {
-        return false;
-    };
+fn canonical_bracketed_response_id(value: &str) -> Option<&str> {
+    let hash = value.strip_prefix("[#r-")?.strip_suffix(']')?;
+    (hash.len() >= 12
+        && hash
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character)))
+    .then_some(value)
+}
+
+fn completed_prompt_tree_parent<'a>(
+    lines: &'a [&'a str],
+    opener_index: usize,
+    child_indent: usize,
+) -> Option<&'a str> {
+    let parent = lines[..opener_index].iter().rev().find(|line| {
+        let line = line.trim_end_matches(['\r', '\n']);
+        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+        indent < child_indent
+    })?;
     let parent = parent.trim_end_matches(['\r', '\n']);
     let parent_indent = parent.len() - parent.trim_start_matches([' ', '\t']).len();
-    let Some(payload) = strip_bullet(parent) else {
-        return false;
-    };
+    let payload = strip_bullet(parent)?;
     let payload = payload.trim();
-    child_indent == parent_indent + 2 && payload.starts_with("~~") && payload[2..].contains("~~")
+    (child_indent == parent_indent + 2 && payload.starts_with("~~") && payload[2..].contains("~~"))
+        .then_some(payload)
+}
+
+fn completed_parent_response_id<'a>(
+    lines: &'a [&'a str],
+    opener_index: usize,
+    child_indent: usize,
+) -> Option<&'a str> {
+    let payload = completed_prompt_tree_parent(lines, opener_index, child_indent)?;
+    let response_id = payload.rsplit_once("response: ")?.1.trim();
+    canonical_bracketed_response_id(response_id)
 }
 
 /// Return the exclusive line index of a reserved GFM response-details child.
@@ -420,8 +441,13 @@ pub fn response_details_child_end(
     item_indent: usize,
 ) -> Option<usize> {
     let opener = lines.get(opener_index)?;
-    canonical_response_details_id(strip_bullet(opener)?)?;
-    if !completed_prompt_tree_parent(lines, opener_index, item_indent) {
+    let details_id = canonical_response_details_id(strip_bullet(opener)?)?;
+    let parent_response_id = completed_parent_response_id(lines, opener_index, item_indent)?;
+    if parent_response_id
+        .strip_prefix("[#r-")
+        .and_then(|value| value.strip_suffix(']'))
+        != Some(details_id)
+    {
         return None;
     }
 
@@ -448,11 +474,144 @@ pub fn response_details_child_end(
     None
 }
 
+fn canonical_response_row(item_content: &str) -> Option<(&str, bool)> {
+    let body = item_content.trim().strip_prefix("**Response ")?;
+    if let Some(response_id) = body.strip_suffix("**") {
+        return canonical_bracketed_response_id(response_id).map(|id| (id, false));
+    }
+    let (response_id, summary) = body.split_once(":** ")?;
+    if summary.trim().is_empty() {
+        return None;
+    }
+    canonical_bracketed_response_id(response_id).map(|id| (id, true))
+}
+
+fn canonical_response_choice(item_content: &str) -> bool {
+    let Some(choice) = item_content.trim().strip_prefix("**") else {
+        return false;
+    };
+    let Some((label, effect)) = choice.split_once("**: ") else {
+        return false;
+    };
+    !label.trim().is_empty() && !effect.trim().is_empty()
+}
+
+/// Return the exclusive line index of a reserved visible response row.
+///
+/// The row is inert only as an immediate child of a completed prompt whose
+/// response annotation carries the same canonical id. A summary row may own
+/// one exact `**Choices:**` subtree; a lookup-only row owns no descendants.
+pub fn response_row_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let (response_id, _) = canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
+    if completed_parent_response_id(lines, opener_index, item_indent)? != response_id {
+        return None;
+    }
+    Some(opener_index + 1)
+}
+
+fn nearest_prior_line_with_smaller_indent(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<(usize, usize)> {
+    lines[..opener_index]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, line)| {
+            let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+            (indent < item_indent).then_some((index, indent))
+        })
+}
+
+fn response_choices_label_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    if strip_bullet(lines.get(opener_index)?).map(str::trim) != Some("**Choices:**") {
+        return None;
+    }
+    let (response_index, response_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != response_indent + 2 {
+        return None;
+    }
+    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    has_summary
+        .then(|| response_row_child_end(lines, response_index, response_indent))
+        .flatten()?;
+    Some(opener_index + 1)
+}
+
+fn response_next_actions_label_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    if strip_bullet(lines.get(opener_index)?).map(str::trim) != Some("**Next actions:**") {
+        return None;
+    }
+    let (response_index, response_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != response_indent + 2 {
+        return None;
+    }
+    let (_, has_summary) = canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    has_summary
+        .then(|| response_row_child_end(lines, response_index, response_indent))
+        .flatten()?;
+    Some(opener_index + 1)
+}
+
+fn response_choice_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    if !canonical_response_choice(strip_bullet(lines.get(opener_index)?)?) {
+        return None;
+    }
+    let (choices_index, choices_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != choices_indent + 2
+        || response_choices_label_child_end(lines, choices_index, choices_indent).is_none()
+    {
+        return None;
+    }
+    Some(opener_index + 1)
+}
+
+fn response_action_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let action = strip_bullet(lines.get(opener_index)?)?
+        .trim()
+        .strip_prefix("**Action:** ")?;
+    if action.trim().is_empty() {
+        return None;
+    }
+    let (actions_index, actions_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != actions_indent + 2
+        || response_next_actions_label_child_end(lines, actions_index, actions_indent).is_none()
+    {
+        return None;
+    }
+    Some(opener_index + 1)
+}
+
 /// Return the end of an inert list child.
 ///
 /// Operator-authored multiline Obsidian comments retain their general list
 /// annotation semantics. Generated response projections use only the reserved
-/// response-details representation.
+/// response-details and visible response-row representations.
 pub fn inert_list_child_end(
     lines: &[&str],
     opener_index: usize,
@@ -460,6 +619,11 @@ pub fn inert_list_child_end(
 ) -> Option<usize> {
     multiline_list_comment_end(lines, opener_index, item_indent)
         .or_else(|| response_details_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_row_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_choices_label_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_choice_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_action_child_end(lines, opener_index, item_indent))
 }
 
 /// Byte ranges occupied by balanced indented Obsidian comments represented as
@@ -527,6 +691,34 @@ pub fn response_details_child_ranges(source: &str) -> Vec<(usize, usize)> {
     while index < lines.len() {
         let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
         if let Some(end) = response_details_child_end(&lines, index, item_indent) {
+            ranges.push((offsets[index], offsets[end]));
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    ranges
+}
+
+/// Byte ranges occupied by reserved visible response rows.
+pub fn response_row_child_ranges(source: &str) -> Vec<(usize, usize)> {
+    let lines = source.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
+        if let Some(end) = response_row_child_end(&lines, index, item_indent)
+            .or_else(|| response_choices_label_child_end(&lines, index, item_indent))
+            .or_else(|| response_choice_child_end(&lines, index, item_indent))
+            .or_else(|| response_next_actions_label_child_end(&lines, index, item_indent))
+            .or_else(|| response_action_child_end(&lines, index, item_indent))
+        {
             ranges.push((offsets[index], offsets[end]));
             index = end;
         } else {
@@ -1591,6 +1783,95 @@ mod tests {
         let ranges = response_details_child_ranges(source);
         assert_eq!(ranges.len(), 1);
         assert!(source[ranges[0].0..ranges[0].1].contains("copied task-like row"));
+    }
+
+    #[test]
+    fn reserved_response_row_and_choices_are_inert_but_operator_reply_is_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Deployment is blocked. Which target?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging.\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            texts,
+            vec![
+                "do [#answered]",
+                "Use staging and run the smoke test.",
+                "next task"
+            ]
+        );
+        let ranges = response_row_child_ranges(source);
+        assert_eq!(ranges.len(), 4, "{ranges:?}");
+        assert!(
+            ranges
+                .iter()
+                .any(|&(start, end)| source[start..end].contains("**staging**"))
+        );
+        assert!(
+            ranges
+                .iter()
+                .any(|&(start, end)| source[start..end].contains("**production**"))
+        );
+        assert!(
+            ranges
+                .iter()
+                .all(|&(start, end)| !source[start..end].contains("Use staging"))
+        );
+    }
+
+    #[test]
+    fn response_row_inertness_requires_matching_completed_parent_id() {
+        for source in [
+            concat!(
+                "- live parent\n",
+                "  - **Response [#r-0123456789ab]:** Summary.\n",
+            ),
+            concat!(
+                "- ~~done~~ — auto-struck: response: [#r-fedcba987654]\n",
+                "  - **Response [#r-0123456789ab]:** Summary.\n",
+            ),
+            concat!(
+                "- ~~done~~ — auto-struck: response: [#r-0123456789ab]\n",
+                "  - **Response [#r-NOTCANONICAL]:** Summary.\n",
+            ),
+        ] {
+            assert!(response_row_child_ranges(source).is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn generated_next_action_is_inert_but_operator_child_is_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~done~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** One verification remains.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Open the preview.\n",
+            "        - I opened it; verify the screenshot.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["done", "I opened it; verify the screenshot."]);
+        let ranges = response_row_child_ranges(source);
+        assert_eq!(ranges.len(), 3, "{ranges:?}");
     }
 
     #[test]

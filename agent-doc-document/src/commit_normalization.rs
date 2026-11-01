@@ -299,7 +299,7 @@ mod tests {
             "### Re: lookup\n\nDone.\n",
             "<!-- /agent:exchange -->\n",
         );
-        let annotated = plain.replace("Done.\n", "Done.\n%% response [#r-0123456789ab] %%\n");
+        let annotated = plain.replace("Done.\n", "Done.\n**Response [#r-0123456789ab]**\n");
 
         assert_eq!(
             normalize_committed_exchange_artifacts(&annotated),

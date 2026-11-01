@@ -1955,6 +1955,7 @@ mod tests {
             request: "Run `make deploy` against STG".to_string(),
             queue_item: None,
             choice_labels: Vec::new(),
+            choice_rows: Vec::new(),
         };
         assert_eq!(
             blocking_operator_request_todo_text(&permission, None),
@@ -2022,6 +2023,7 @@ mod tests {
                 "(separate question) reaper for future 504-accepted messages that are never decided"
                     .to_string(),
             ],
+            choice_rows: Vec::new(),
         };
         let text = blocking_operator_request_todo_text(&packet, None);
         assert!(text.contains("word…"), "{text}");

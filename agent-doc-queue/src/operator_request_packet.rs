@@ -12,6 +12,9 @@ pub struct BlockingOperatorRequestPacket {
     pub request: String,
     pub queue_item: Option<String>,
     pub choice_labels: Vec<String>,
+    /// Canonical choice content without its source list marker, preserving the
+    /// exact emphasized label and explanatory text for response projection.
+    pub choice_rows: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +93,7 @@ fn parsed_blocking_operator_request_packets(
         let mut request: Option<String> = None;
         let mut queue_item = None;
         let mut choice_labels = Vec::new();
+        let mut choice_rows = Vec::new();
         let mut field_indent: Option<usize> = None;
         let mut current_key = String::new();
         let mut choice_indent: Option<usize> = None;
@@ -115,6 +119,9 @@ fn parsed_blocking_operator_request_packets(
                             && let Some(label) = operator_request_choice_label(field)
                         {
                             choice_labels.push(label.to_string());
+                            if let Some(row) = canonical_operator_request_choice_row(field, label) {
+                                choice_rows.push(row);
+                            }
                         }
                     }
                     "request" => append_nested_value(request.as_mut(), field),
@@ -158,6 +165,7 @@ fn parsed_blocking_operator_request_packets(
                 request,
                 queue_item: queue_item.filter(|item| !item.is_empty()),
                 choice_labels,
+                choice_rows,
             },
             start_line: marker_index,
             end_line: index,
@@ -202,6 +210,13 @@ fn operator_request_choice_label(field: &str) -> Option<&str> {
         .unwrap_or(label)
         .trim();
     (!label.is_empty()).then_some(label)
+}
+
+fn canonical_operator_request_choice_row(field: &str, label: &str) -> Option<String> {
+    let choice = field.strip_prefix("- ")?.trim();
+    let (_, effect) = choice.split_once(':')?;
+    let effect = effect.trim();
+    (!effect.is_empty()).then(|| format!("**{label}**: {effect}"))
 }
 
 fn operator_request_field(field: &str) -> Option<(&str, &str)> {
@@ -251,6 +266,13 @@ mod tests {
         let packets = blocking_operator_request_packets(response);
         assert_eq!(packets.len(), 1);
         assert_eq!(packets[0].choice_labels, ["staging", "production"]);
+        assert_eq!(
+            packets[0].choice_rows,
+            [
+                "**staging**: Release staging.",
+                "**production**: Release production."
+            ]
+        );
         let blocks = blocking_operator_request_blocks(response);
         assert_eq!(blocks.len(), 1);
         assert!(blocks[0].starts_with("[#subagent-operator-request-release]"));

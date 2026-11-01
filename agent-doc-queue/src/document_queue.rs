@@ -473,6 +473,19 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
         // while the ordered-list projection derives `after=` edges.
         if let Some((indent, ordered_marker, rest)) = split_list_item(item_line) {
             if let Some(end_i) =
+                agent_doc_markdown_ast::overlay::response_row_child_end(&lines, i, indent)
+            {
+                for (row, line) in lines.iter().enumerate().take(end_i).skip(i) {
+                    entries.push((
+                        QueueEntry::Freeform((*line).to_string()),
+                        span(row, row + 1),
+                    ));
+                }
+                bare_prompt_allowed = false;
+                i = end_i;
+                continue;
+            }
+            if let Some(end_i) =
                 agent_doc_markdown_ast::overlay::inert_list_child_end(&lines, i, indent)
             {
                 entries.push((
@@ -3507,6 +3520,37 @@ fn prompt_of(entry: &QueueEntry) -> Option<&QueuePrompt> {
     }
 }
 
+fn response_context_row(entry: &QueueEntry) -> Option<(usize, Option<String>)> {
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    let (indent, _, item_content) = split_list_item(raw)?;
+    let content = item_content.trim();
+    if matches!(content, "**Choices:**" | "**Next actions:**") {
+        return Some((indent, None));
+    }
+    if let Some(body) = content.strip_prefix("**Response ")
+        && let Some((response_id, summary)) = body.split_once(":** ")
+        && agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
+        && !summary.trim().is_empty()
+    {
+        return Some((
+            indent,
+            Some(format!("Response {response_id}: {}", summary.trim())),
+        ));
+    }
+    if content
+        .strip_prefix("**Action:** ")
+        .is_some_and(|action| !action.trim().is_empty())
+    {
+        return Some((indent, Some(content.to_string())));
+    }
+    let choice = content.strip_prefix("**")?;
+    let (label, effect) = choice.split_once("**: ")?;
+    (!label.trim().is_empty() && !effect.trim().is_empty())
+        .then(|| (indent, Some(content.to_string())))
+}
+
 /// Index of the first prompt or completed row whose work text is `prompt_text`.
 pub fn prompt_index_for_text(entries: &[QueueEntry], prompt_text: &str) -> Option<usize> {
     entries.iter().position(|entry| {
@@ -3551,6 +3595,16 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
             continue;
         };
         if indent < depth {
+            if let Some((_, label)) = response_context_row(earlier) {
+                if let Some(label) = label {
+                    labels.push(label);
+                }
+                depth = indent;
+                if depth == 0 {
+                    break;
+                }
+                continue;
+            }
             let Some(prompt) = prompt_of(earlier) else {
                 continue;
             };
@@ -4040,7 +4094,7 @@ pub fn has_nested_or_ordered_list(entries: &[QueueEntry]) -> bool {
 fn entry_indent(entry: &QueueEntry) -> Option<usize> {
     match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
-        _ => None,
+        _ => response_context_row(entry).map(|(indent, _)| indent),
     }
 }
 
@@ -10163,6 +10217,68 @@ mod tests {
 
         assert_eq!(prompts, vec!["completed item", "next task"]);
         assert_eq!(render(&entries), body);
+    }
+
+    #[test]
+    fn response_summary_and_selected_choice_are_context_for_an_operator_reply() {
+        let body = concat!(
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Deployment is blocked. Which target?\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging.\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 1, "{entries:#?}");
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Use staging and run the smoke test."]
+        );
+        let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
+        assert!(
+            submitted.contains(
+                "Response [#r-0123456789ab]: Deployment is blocked. Which target?: **staging**: Deploy to staging.: Use staging and run the smoke test."
+            ),
+            "{submitted}"
+        );
+        assert!(!submitted.contains("**production**"), "{submitted}");
+    }
+
+    #[test]
+    fn response_summary_without_operator_children_is_not_runnable() {
+        let body = concat!(
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** Completed and verified.\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(prompts(&entries).is_empty(), "{entries:#?}");
+        assert!(render(&entries).contains("**Response [#r-0123456789ab]:**"));
+    }
+
+    #[test]
+    fn generated_next_action_is_inert_but_its_operator_child_executes_with_context() {
+        let body = concat!(
+            "- ~~do [#answered]~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** One verification remains.\n",
+            "    - **Next actions:**\n",
+            "      - **Action:** Open the preview.\n",
+            "        - I opened it; verify the screenshot now.\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 1, "{entries:#?}");
+        let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
+        assert!(
+            submitted.contains(
+                "Response [#r-0123456789ab]: One verification remains.: **Action:** Open the preview.: I opened it; verify the screenshot now."
+            ),
+            "{submitted}"
+        );
     }
 
     #[test]

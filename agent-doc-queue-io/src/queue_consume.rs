@@ -3679,15 +3679,19 @@ mod core_tests {
                 "{content}"
             );
             assert!(
-                content.contains(&format!("%% response {response_id} %%")),
+                content.contains(&format!("**Response {response_id}:**")),
                 "{content}"
             );
             assert!(
-                content.contains("  - %% /work/tasks/searchable.md %%"),
+                content.contains("Completed `/work/tasks/searchable.md`."),
                 "{content}"
             );
             assert!(
-                content.contains("  - %% response published on the worker branch %%"),
+                !content.contains("  - %% /work/tasks/searchable.md %%"),
+                "{content}"
+            );
+            assert!(
+                !content.contains("  - %% response published on the worker branch %%"),
                 "{content}"
             );
             assert!(content.contains("- do [#later]\n"), "{content}");

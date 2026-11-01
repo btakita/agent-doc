@@ -448,7 +448,8 @@ built-in informational exceptions. The registry also lists the binary-written
 components that only ever appear nested inside another element and have no
 descriptor of their own (`NESTED_BINARY_COMPONENTS`: `salient-response`, the
 non-final checkpoint node inside `agent:exchange`, and `referral`, the
-`transfer --referral` pointer block). Every marker-level gate, the tagpath
+`transfer --referral` pointer block, plus the binary-owned `decision` and
+`decision-revision` records). Every marker-level gate, the tagpath
 dialect lint above all, must accept every marker the binary itself writes; a
 source-scan test enumerates the `agent:NAME` marker literals in production code
 and fails when the lint gate rejects one that is not a documented in-memory

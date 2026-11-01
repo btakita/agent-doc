@@ -76,12 +76,19 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
 ///   `agent:exchange` and that final response insertion removes.
 /// - `referral` — the pointer block `transfer --referral` inserts into the
 ///   target component.
+/// - `decision` / `decision-revision` — binary-owned mutable decision records
+///   and their append-only revision history.
 ///
 /// The document still contains their open/close markers, so every marker-level
 /// gate (the dialect lint above all) must accept them. A marker the binary
 /// writes but no gate knows turns an in-flight cycle into a "malformed
 /// directive" refusal.
-pub const NESTED_BINARY_COMPONENTS: &[&str] = &["salient-response", "referral"];
+pub const NESTED_BINARY_COMPONENTS: &[&str] = &[
+    "salient-response",
+    "referral",
+    "decision",
+    "decision-revision",
+];
 
 /// Whether `name` (without the `agent:` prefix) is a nested binary-written
 /// component from [`NESTED_BINARY_COMPONENTS`].

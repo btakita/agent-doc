@@ -394,6 +394,9 @@ pub fn free_text_queue_marker_residue_result(file: &str) -> GuardResult {
     ))
 }
 
+pub const FREE_TEXT_QUEUE_COMPLETED_RESIDUE_GUARD_PREFIX: &str =
+    "[session-check] INTERRUPTED: completed free-text agent:queue head(s) ";
+
 pub fn free_text_queue_completed_residue_result(file: &str, heads: &[String]) -> GuardResult {
     let heads_text = heads
         .iter()
@@ -401,7 +404,7 @@ pub fn free_text_queue_completed_residue_result(file: &str, heads: &[String]) ->
         .collect::<Vec<_>>()
         .join("; ");
     GuardResult::Error(format!(
-        "[session-check] INTERRUPTED: completed free-text agent:queue head(s) {heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so no agent action is needed or permitted: `agent-doc preflight {file}` is binary-owned (never invoke it from the model turn), do not resubmit the response, and do not strike the row by hand. The next `agent-doc {file}` admission strikes the answered head itself in preflight's binary-owned queue maintenance (and repair parks a retained replay of an already-committed answer instead of refusing on it). If this check followed a refused admission, report that refusal's reason and stop. Add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint/#qresiduewedge)"
+        "{FREE_TEXT_QUEUE_COMPLETED_RESIDUE_GUARD_PREFIX}{heads_text} are still active in the committed queue even though exchange history contains a `Queue prompt` echo proving they were already answered — completed queue residue would re-run stale work\n[session-check] hint: this cycle is already committed, so no agent action is needed or permitted: `agent-doc preflight {file}` is binary-owned (never invoke it from the model turn), do not resubmit the response, and do not strike the row by hand. The Codex Stop hook performs this terminal maintenance itself; otherwise the next `agent-doc {file}` admission strikes the answered head in preflight's binary-owned queue maintenance (and repair parks a retained replay of an already-committed answer instead of refusing on it). If this check followed a refused admission, report that refusal's reason and stop. Add `<!-- no-free-text-queue-head-guard -->` only if keeping the answered row active is intentional (see #qheadresidue/#qresiduecommittedhint/#qresiduewedge/#qresiduestop)"
     ))
 }
 
@@ -631,8 +634,7 @@ pub fn dropped_exchange_prompt_guard_result(file: &str, still_missing: &[String]
     ))
 }
 
-pub const COMPLETED_PENDING_REAP_GUARD_PREFIX: &str =
-    "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout:";
+pub const COMPLETED_PENDING_REAP_GUARD_PREFIX: &str = "[session-check] INTERRUPTED: document still contains completed tracked item(s) after closeout:";
 
 pub fn completed_pending_reap_guard_message(refs: &str) -> String {
     format!(
@@ -1390,10 +1392,12 @@ mod tests {
         assert!(!residue_message.contains("run `agent-doc commit"));
         assert!(!residue_message.contains("agent-doc write --commit doc.md"));
         assert!(residue_message.contains("do not resubmit the response"));
+        assert!(residue_message.contains("Codex Stop hook performs this terminal maintenance"));
         assert!(residue_message.contains("next `agent-doc doc.md` admission strikes"));
         assert!(residue_message.contains("refused admission, report that refusal's reason"));
         assert!(residue_message.contains("#qresiduecommittedhint"));
         assert!(residue_message.contains("#qresiduewedge"));
+        assert!(residue_message.contains("#qresiduestop"));
     }
 
     #[test]

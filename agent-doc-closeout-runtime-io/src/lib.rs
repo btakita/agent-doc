@@ -1311,6 +1311,19 @@ pub fn complete_required_closeout(file: &Path, force_disk: bool) -> Result<bool>
     })
 }
 
+/// Finish a committed cycle whose exact answered free-text queue strike lagged
+/// behind its response commit (`#qresiduestop`).
+///
+/// This is the same binary-owned queue maintenance the next preflight admission
+/// would run, followed by the ordinary strict closeout. Keeping the operation in
+/// the closeout runtime lets the Codex Stop boundary repair terminal residue
+/// without opening a successor response cycle or capturing predecessor chat
+/// text as a new answer.
+pub fn complete_answered_free_text_queue_residue(file: &Path, force_disk: bool) -> Result<bool> {
+    agent_doc_preflight_io::run_queue_maintenance(file, None)?;
+    complete_required_closeout(file, force_disk)
+}
+
 impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
     fn commit(&self, file: &Path) -> Result<bool> {
         agent_doc_commit_io::commit(file)

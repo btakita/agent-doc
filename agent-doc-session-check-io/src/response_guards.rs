@@ -199,8 +199,16 @@ pub fn check_completed_pending_reap_guard(
 /// human-readable tracked-item list. Stop hooks use this to finish the reap
 /// before considering any assistant-text capture for newer prompt work.
 pub fn is_completed_pending_reap_interruption(message: &str) -> bool {
+    message.starts_with(agent_doc_workflow::session_check::COMPLETED_PENDING_REAP_GUARD_PREFIX)
+}
+
+/// Identifies a committed answered-free-text residue interruption without
+/// parsing its human-readable head list. The Codex Stop hook uses this to run
+/// the existing binary-owned queue catch-up before it considers any assistant
+/// text capture for a successor cycle (`#qresiduestop`).
+pub fn is_completed_free_text_queue_residue_interruption(message: &str) -> bool {
     message.starts_with(
-        agent_doc_workflow::session_check::COMPLETED_PENDING_REAP_GUARD_PREFIX,
+        agent_doc_workflow::session_check::FREE_TEXT_QUEUE_COMPLETED_RESIDUE_GUARD_PREFIX,
     )
 }
 

@@ -1971,8 +1971,8 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
         "~~{}{STRUCK_FREE_TEXT_NOTE}",
         agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
     );
-    let body = queue
-        .content(content)
+    let queue_body = strip_response_multiline_comment_children(queue.content(content));
+    let body = queue_body
         .split_inclusive('\n')
         .filter_map(|line| {
             let (core, newline) = line
@@ -1998,6 +1998,42 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
         .split_inclusive('\n')
         .filter(|line| !is_response_id_lookup_comment(line.trim_end_matches(['\n', '\r'])))
         .collect())
+}
+
+fn strip_response_multiline_comment_children(body: &str) -> String {
+    let lines = body.split_inclusive('\n').collect::<Vec<_>>();
+    let mut out = String::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let opener = lines[index].trim_end_matches(['\n', '\r']);
+        if opener.trim() == "- %%" {
+            let opener_indent = opener.len() - opener.trim_start_matches([' ', '\t']).len();
+            let mut end = index + 1;
+            while end < lines.len() {
+                let line = lines[end].trim_end_matches(['\n', '\r']);
+                let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+                if !line.trim().is_empty() && indent <= opener_indent {
+                    break;
+                }
+                if line.trim() == "%%" {
+                    let next = lines
+                        .get(end + 1)
+                        .map(|line| line.trim_end_matches(['\n', '\r']));
+                    if next.is_some_and(is_response_id_lookup_comment) {
+                        index = end + 1;
+                    }
+                    break;
+                }
+                end += 1;
+            }
+            if index > end {
+                continue;
+            }
+        }
+        out.push_str(lines[index]);
+        index += 1;
+    }
+    out
 }
 
 fn is_response_id_lookup_comment(line: &str) -> bool {
@@ -2556,15 +2592,11 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
         let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
         let owned_scope_end = descendant_end.max(node.item.end_byte);
         let owned_scope = &after[node.item.start_byte..owned_scope_end];
+        let child_indent = " ".repeat(indent + 2);
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
-                !owned_scope.lines().any(|line| {
-                    line.trim()
-                        .strip_prefix("- ")
-                        .unwrap_or_else(|| line.trim())
-                        == child.as_str()
-                })
+                !owned_scope.contains(&render_response_lookup_child(child, &child_indent))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -2593,7 +2625,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id(
             }
             let child_indent = " ".repeat(indent + 2);
             for child in children {
-                replacement.push_str(&format!("{child_indent}- {child}\n"));
+                replacement.push_str(&render_response_lookup_child(&child, &child_indent));
             }
         }
         out.replace_range(start..end, &replacement);
@@ -2652,7 +2684,10 @@ pub fn response_lookup_id_for_document(
 }
 
 fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<String> {
-    let mut children = vec![format!("%% response {response_id} %%")];
+    let mut children = vec![
+        response_multiline_comment(response_body),
+        format!("%% response {response_id} %%"),
+    ];
 
     for (index, code) in response_body.split('`').enumerate() {
         if index % 2 == 1 && artifact_reference(code) {
@@ -2674,6 +2709,23 @@ fn response_lookup_children(response_body: &str, response_id: &str) -> Vec<Strin
         }
     }
     children
+}
+
+fn response_multiline_comment(response_body: &str) -> String {
+    let escaped = response_body.trim_end().replace("%%", "%\\%");
+    format!("%%\n{escaped}\n%%")
+}
+
+fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
+    let mut lines = child.split('\n');
+    let mut rendered = format!("{child_indent}- {}\n", lines.next().unwrap_or_default());
+    let continuation_indent = format!("{child_indent}  ");
+    for line in lines {
+        rendered.push_str(&continuation_indent);
+        rendered.push_str(line);
+        rendered.push('\n');
+    }
+    rendered
 }
 
 fn artifact_reference(code: &str) -> bool {
@@ -2786,6 +2838,17 @@ mod tests {
             "{annotated}"
         );
         assert!(
+            annotated.contains(concat!(
+                "  - %%\n",
+                "    ### Re: fresh — test\n",
+                "    \n",
+                "    Completed `/work/tasks/result.md`.\n",
+                "    %\\% response published locally; coordinator install remains %\\%\n",
+                "    %%\n",
+            )),
+            "{annotated}"
+        );
+        assert!(
             annotated.contains(&format!("  - %% response {response_id} %%\n")),
             "{annotated}"
         );
@@ -2826,7 +2889,7 @@ mod tests {
 
         assert!(
             annotated.contains(&format!(
-                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n"
+                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - %%\n      ### Re: nested\n      \n      Completed `tasks/nested.md`.\n      %%\n    - %% response {response_id} %%\n    - %% tasks/nested.md %%\n"
             )),
             "{annotated}"
         );
@@ -5338,7 +5401,7 @@ Old.
             .response_id()
             .to_string();
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - %%\n    ### Re: upgrade — gpt-6.1-sol\n    \n    > **Queue prompt:** #upgrade\n    \n    Upgraded.\n    %%\n  - %% response {response_id} %%\n<!-- /agent:queue -->"
         )));
     }
 

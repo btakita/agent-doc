@@ -3579,7 +3579,9 @@ Duplicate replay should stay live.
     /// before snapshot convergence advances the cycle from `WriteApplied` to
     /// `Committed`. If the asynchronous answered-free-text projection lands in
     /// that gap, the retry must recognize its exact annotated strike instead of
-    /// reporting the binary's own 53-byte suffix as an unanswered operator edit.
+    /// reporting the binary's own response-link projection as an unanswered
+    /// operator edit. The exact projection includes the full response in its
+    /// balanced inert queue child.
     #[test]
     fn commit_recovers_exact_late_free_text_strike_while_cycle_is_write_applied() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -3637,8 +3639,20 @@ Duplicate replay should stay live.
         .target_content;
         assert_eq!(
             struck.len() - committed.len(),
-            152,
+            281,
             "the production failure was the exact annotated #ftstrike delta"
+        );
+        assert!(
+            struck.contains(concat!(
+                "  - %%\n",
+                "    ### Re: finish the plan — gpt-5\n",
+                "    \n",
+                "    > **Queue prompt:** finish the plan\n",
+                "    \n",
+                "    Finished and verified.\n",
+                "    %%\n",
+            )),
+            "the exact late projection must retain the full response as an inert child:\n{struck}"
         );
         fs::write(&doc, &struck).unwrap();
 

@@ -1001,6 +1001,41 @@ pub fn report_attempt_with_publication_state(
     Ok(claim)
 }
 
+/// Generation-and-worker fenced report transition used after the response
+/// receipt has already been captured durably.
+pub fn report_exact_worker_attempt_with_publication_state(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    worker_id: &str,
+    publication_state: Option<agent_doc_element_queue::QueueReportState>,
+) -> Result<QueueClaim> {
+    let (target, heads) = resolve_live_claim_target(file, item, "queue_claim_report")?;
+    let now = now_secs();
+    let claim = mutate_ledger(file, |ledger| {
+        log_followed(file, &ledger.follow_edits_in_view(now, &heads));
+        ledger
+            .report_exact_worker_with_publication_state(
+                &target,
+                generation,
+                worker_id,
+                publication_state,
+            )
+            .map_err(anyhow::Error::from)
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_state state=reported owner={} worker={} generation={} item_bytes={} fence=generation_worker",
+            claim.owner,
+            worker_id,
+            claim.generation,
+            claim.item_text.len(),
+        ),
+    );
+    Ok(claim)
+}
+
 /// First phase of a reported release. Persist `Reported` on the attempt before
 /// its claim can be removed, so a crash between the claim and receipt writes
 /// cannot expose the live row as bare. `None` preserves release's historical

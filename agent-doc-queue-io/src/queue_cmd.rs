@@ -18,6 +18,7 @@
 
 use anyhow::{Result, bail};
 use parking_lot::Mutex;
+use serde::Serialize;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -27,7 +28,9 @@ use agent_doc_element_backlog::backlog;
 use agent_doc_queue::document_queue::QueueEntry;
 use agent_doc_queue::queue_heads::active_queue_head_text;
 use agent_doc_queue::queue_heads::{ActiveQueueHeadKind, classify_active_queue_head};
-use agent_doc_queue::queue_sync_payload::{QUEUE_SYNC_GUIDANCE, QueueSyncPayload};
+use agent_doc_queue::queue_sync_payload::{
+    QUEUE_SYNC_GUIDANCE, QueueSyncPayload, QueueSyncRecoveryResponse,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConsumeOptions {
@@ -48,6 +51,49 @@ fn queue_sync_reconciliation_payload(
     previous_content: Option<&str>,
 ) -> Result<QueueSyncPayload> {
     crate::sync_payload::build_project_queue_sync_payload(file, content, previous_content)
+}
+
+/// Document-generic declarative sync inventory. Project scanners can call this
+/// same engine with the authoritative document cut they discovered.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueueSyncReconciliationPlan {
+    pub document_path: String,
+    pub editor_authority: &'static str,
+    pub retained_projection_pending: bool,
+    pub payload: QueueSyncPayload,
+    pub recovery_responses: Vec<QueueSyncRecoveryResponse>,
+}
+
+pub fn build_queue_sync_reconciliation_plan(
+    file: &Path,
+    content: &str,
+    previous_content: Option<&str>,
+) -> Result<QueueSyncReconciliationPlan> {
+    let payload = queue_sync_reconciliation_payload(file, content, previous_content)?;
+    let retained_projection_pending = agent_doc_cycle_state_io::load_document_projection(file)?
+        .is_some_and(|projection| {
+            projection.document.pending_write.is_some()
+                || !projection.document.pending_write_journal.is_empty()
+        });
+    let recovery_responses = payload.recovery_responses();
+    Ok(QueueSyncReconciliationPlan {
+        document_path: file.display().to_string(),
+        editor_authority: "current_editor_or_disk_authority_cut",
+        retained_projection_pending,
+        payload,
+        recovery_responses,
+    })
+}
+
+fn print_queue_sync_plan(plan: &QueueSyncReconciliationPlan) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(plan)?);
+    for recovery in &plan.recovery_responses {
+        println!("\n{}", recovery.render_markdown());
+    }
+    if !plan.payload.is_empty() {
+        println!("{QUEUE_SYNC_GUIDANCE}");
+    }
+    Ok(())
 }
 
 pub trait QueueCommandEffects {
@@ -938,6 +984,16 @@ pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()
     Ok(())
 }
 
+/// Read-only declarative sync. It performs no queue/document convergence and
+/// emits the same inventory engine apply mode uses after its proof-complete
+/// repairs.
+pub fn plan_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
+    let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
+    let content = effects.current_document_content(file, "queue_sync_plan")?;
+    let plan = build_queue_sync_reconciliation_plan(file, &content, previous_content.as_deref())?;
+    print_queue_sync_plan(&plan)
+}
+
 pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     let previous_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let answered_count = effects.converge_captured_answered_free_text_projection(file)?;
@@ -987,8 +1043,9 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
 
     let lifecycle_changed = project_all_queue_runtime_state_with_effects(effects, file)?;
     let reconciled = effects.current_document_content(file, "queue_sync_debt")?;
-    let payload =
-        queue_sync_reconciliation_payload(file, &reconciled, previous_content.as_deref())?;
+    let plan =
+        build_queue_sync_reconciliation_plan(file, &reconciled, previous_content.as_deref())?;
+    let payload = &plan.payload;
     let action_debt_remains = !payload.is_empty() || !placement_debt.is_empty();
 
     if !routed_ids.is_empty() {
@@ -1087,6 +1144,9 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         );
         println!("{}", serde_json::to_string(&payload)?);
         println!("{QUEUE_SYNC_GUIDANCE}");
+        for recovery in &plan.recovery_responses {
+            println!("\n{}", recovery.render_markdown());
+        }
     }
     Ok(())
 }
@@ -1493,6 +1553,30 @@ mod tests {
             reconciled.contains("- 📥 unanswered manual prompt"),
             "sync should paint the pending lifecycle projection: {reconciled}"
         );
+    }
+
+    #[test]
+    fn sync_plan_is_read_only_and_uses_shared_document_generic_inventory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("generic.md");
+        let content =
+            "<!-- agent:run id=recovery subagents -->\n- ⚠️ orphan attempt\n<!-- /agent:run -->\n";
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+
+        plan_with_effects(&effects, &doc).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        let plan = build_queue_sync_reconciliation_plan(&doc, content, None).unwrap();
+        assert_eq!(plan.payload.reconcile_unknown.len(), 1);
+        assert_eq!(plan.recovery_responses.len(), 1);
+        assert!(
+            plan.recovery_responses[0]
+                .render_markdown()
+                .starts_with("**Response [#r-")
+        );
+        assert!(plan.recovery_responses[0].choices.is_empty());
     }
 
     #[test]
@@ -2071,6 +2155,13 @@ mod tests {
         assert_eq!(synchronized[0].visible_projection_state, "synchronized");
         assert!(synchronized[0].next_action_argv.is_none());
 
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            "dispatched worker work",
+            1,
+            "worker response",
+        )
+        .unwrap();
         let released = crate::claim_release_receipt::release_attempt(
             &doc,
             "dispatched worker work",
@@ -2143,6 +2234,13 @@ mod tests {
         )
         .unwrap();
         crate::queue_claim::report_attempt(&doc, item, Some(claim.generation)).unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            item,
+            claim.generation,
+            "sdk response",
+        )
+        .unwrap();
         crate::claim_release_receipt::release_attempt(
             &doc,
             item,
@@ -2612,6 +2710,13 @@ mod tests {
             );
             cells.push_str("\n\n");
             crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+            crate::claim_release_receipt::capture_response_for_attempt(
+                &doc,
+                item,
+                running.generation,
+                "Done; tests pass.",
+            )
+            .unwrap();
             crate::claim_release_receipt::release(
                 &doc,
                 item,

@@ -117,6 +117,9 @@ pub fn inspect(
         file: file.to_path_buf(),
         stale_receipts: stale_receipts(&receipts, &kept)
             .into_iter()
+            // Full response captures are not GC candidates until queue
+            // receipts gain commit/archive index proof.
+            .filter(|receipt| receipt.response.is_none())
             .cloned()
             .collect(),
         kept_live_cells: plan.kept_live_cells,
@@ -168,8 +171,12 @@ pub fn repair(
     // Receipts end only once the document successor is accepted, judged
     // against that successor (`#strikeretires` ordering).
     let (kept_after, _) = plan_for(file, &plan.content, &HashSet::new())?;
-    report.stale_receipts =
-        crate::claim_release_receipt::retire_without_live_work(file, &kept_after, SOURCE)?;
+    report.stale_receipts = crate::claim_release_receipt::retire_without_live_work(
+        file,
+        &kept_after,
+        &content,
+        SOURCE,
+    )?;
     report.applied = true;
     agent_doc_ops_log_io::log_op(
         file,
@@ -294,6 +301,13 @@ mod tests {
         )
         .unwrap();
         crate::queue_claim::report_attempt(doc, item, Some(running.generation)).unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            doc,
+            item,
+            running.generation,
+            "Released 0.35.500.",
+        )
+        .unwrap();
         crate::claim_release_receipt::release(
             doc,
             item,
@@ -354,13 +368,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [stale_item]
         );
-        assert_eq!(
-            dry.stale_receipts
-                .iter()
-                .map(|receipt| receipt.item_text.as_str())
-                .collect::<Vec<_>>(),
-            [stale_item]
-        );
+        assert!(dry.stale_receipts.is_empty());
         assert_eq!(dry.kept_live_cells, 1);
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
@@ -372,7 +380,7 @@ mod tests {
         let applied = repair(&doc, true, &none(), &DetachedEffects).unwrap();
         assert!(applied.applied);
         assert_eq!(applied.stale_cells.len(), 1);
-        assert_eq!(applied.stale_receipts.len(), 1);
+        assert!(applied.stale_receipts.is_empty());
         assert_eq!(applied.snapshot_cells_retired, 1);
         let result = fs::read_to_string(&doc).unwrap();
         assert!(!result.contains(&stale_cell), "{result}");
@@ -389,7 +397,7 @@ mod tests {
             result,
             "the snapshot retires the same cell"
         );
-        assert_eq!(receipts(), [live_item]);
+        assert_eq!(receipts(), [stale_item, live_item]);
 
         // A later operator row with the same text inherits nothing.
         let readded = result.replace(
@@ -405,7 +413,7 @@ mod tests {
         assert!(rerun.is_clean(), "{rerun:?}");
         assert!(!rerun.applied);
         assert_eq!(fs::read_to_string(&doc).unwrap(), result);
-        assert_eq!(receipts(), [live_item]);
+        assert_eq!(receipts(), [stale_item, live_item]);
     }
 
     /// The live 2026-10-26 example: a 52-hour-old `release_publish_patch`

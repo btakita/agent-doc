@@ -181,6 +181,8 @@ mod tests {
             execution_evidence: QueueSyncExecutionEvidence::Unknown,
             completion_outbox_recovered: false,
             completion_response_receipt: false,
+            response_id: None,
+            response_capture_sha256: None,
             response_evidence: QueueSyncResponseEvidence::NotApplicable,
             recovered_response: None,
             missing_response_debt: false,

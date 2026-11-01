@@ -78,8 +78,10 @@ pub fn build_project_queue_sync_payload(
                 Vec::new()
             }
         };
+        let mut durable_response_receipts = Vec::new();
         match crate::claim_release_receipt::load(&document) {
             Ok(receipts) => {
+                durable_response_receipts = receipts.receipts.clone();
                 for receipt in receipts.receipts {
                     let cancelled = cancellations.iter().any(|cancelled| {
                         cancelled.cancels_attempt(&receipt.identity, receipt.generation)
@@ -117,7 +119,36 @@ pub fn build_project_queue_sync_payload(
             &claims,
         ) {
             Ok(mut document_payload) => {
-                apply_response_evidence(&mut document_payload, &content, &claims);
+                let retained_capture_targets = agent_doc_cycle_state_io::load_document_projection(
+                    &document,
+                )
+                .ok()
+                .flatten()
+                .map(|projection| {
+                    if projection.document.pending_write_journal.is_empty() {
+                        projection
+                            .document
+                            .pending_write
+                            .into_iter()
+                            .map(|intent| intent.target_content)
+                            .collect::<Vec<_>>()
+                    } else {
+                        projection
+                            .document
+                            .pending_write_journal
+                            .into_iter()
+                            .map(|intent| intent.target_content)
+                            .collect::<Vec<_>>()
+                    }
+                })
+                .unwrap_or_default();
+                apply_response_evidence(
+                    &mut document_payload,
+                    &content,
+                    &claims,
+                    &durable_response_receipts,
+                    &retained_capture_targets,
+                );
                 if let Some(lineage) = lineage.as_ref() {
                     apply_lineage_evidence(&mut document_payload, lineage);
                 }
@@ -145,19 +176,30 @@ fn apply_response_evidence(
     payload: &mut QueueSyncPayload,
     content: &str,
     claims: &[agent_doc_queue::queue_claim::QueueClaim],
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+    retained_capture_targets: &[String],
 ) {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    apply_response_evidence_with(payload, content, claims, |claim| {
+    apply_response_evidence_with(
+        payload,
+        content,
+        claims,
+        durable_receipts,
+        retained_capture_targets,
+        |claim| {
         home.as_deref().map_or(HistoryResponse::Missing, |home| {
             recover_agent_history_response_from(home, claim)
         })
-    });
+        },
+    );
 }
 
 fn apply_response_evidence_with(
     payload: &mut QueueSyncPayload,
     content: &str,
     claims: &[agent_doc_queue::queue_claim::QueueClaim],
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+    retained_capture_targets: &[String],
     mut recover: impl FnMut(&agent_doc_queue::queue_claim::QueueClaim) -> HistoryResponse,
 ) {
     let claims = claims
@@ -178,11 +220,28 @@ fn apply_response_evidence_with(
             continue;
         };
         let key = crate::queue_claim::completion_feedback_key(claim).ok();
-        let has_outbox_receipt = key
-            .as_deref()
-            .is_some_and(|key| completion_cell_has_response(content, key));
+        let outbox_response = key.as_deref().and_then(|key| {
+            durable_completion_response(
+                claim,
+                key,
+                content,
+                durable_receipts,
+                retained_capture_targets,
+            )
+        });
+        item.response_id = key.clone();
+        item.response_capture_sha256 = matching_response_capture(claim, key.as_deref(), durable_receipts);
+        let has_outbox_receipt = outbox_response.is_some()
+            || key
+                .as_deref()
+                .is_some_and(|key| completion_cell_has_response(content, key));
         item.completion_response_receipt = has_outbox_receipt;
-        apply_completed_response_evidence(item, &root_exchange, recover(claim));
+        apply_completed_response_evidence(
+            item,
+            &root_exchange,
+            outbox_response,
+            recover(claim),
+        );
         // Keep any recovery failure as the terminal blocker. The separate
         // receipt bit preserves the valid completion evidence without letting
         // its possibly abbreviated body stand in for the full worker result.
@@ -202,9 +261,21 @@ fn apply_response_evidence_with(
             continue;
         };
         let key = crate::queue_claim::completion_feedback_key(claim).ok();
-        let has_outbox_receipt = key
-            .as_deref()
-            .is_some_and(|key| completion_cell_has_response(content, key));
+        let outbox_response = key.as_deref().and_then(|key| {
+            durable_completion_response(
+                claim,
+                key,
+                content,
+                durable_receipts,
+                retained_capture_targets,
+            )
+        });
+        item.response_id = key.clone();
+        item.response_capture_sha256 = matching_response_capture(claim, key.as_deref(), durable_receipts);
+        let has_outbox_receipt = outbox_response.is_some()
+            || key
+                .as_deref()
+                .is_some_and(|key| completion_cell_has_response(content, key));
         let history = recover(claim);
         let completed = has_outbox_receipt
             || matches!(
@@ -218,7 +289,7 @@ fn apply_response_evidence_with(
         item.lifecycle = agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReportedCheckmark;
         item.operation = QueueSyncOperation::IntegrateClose;
         item.completion_response_receipt = has_outbox_receipt;
-        apply_completed_response_evidence(&mut item, &root_exchange, history);
+        apply_completed_response_evidence(&mut item, &root_exchange, outbox_response, history);
         payload.reported_checkmark.push(item);
     }
     payload.running = waiting;
@@ -227,8 +298,20 @@ fn apply_response_evidence_with(
 fn apply_completed_response_evidence(
     item: &mut agent_doc_queue::queue_sync_payload::QueueSyncItem,
     root_exchange: &str,
+    outbox_response: Option<String>,
     history: HistoryResponse,
 ) {
+    if let Some(response) = outbox_response {
+        if response_is_consolidated(root_exchange, &response) {
+            item.response_evidence = QueueSyncResponseEvidence::ConsolidatedExchange;
+            item.recovered_response = None;
+        } else {
+            item.response_evidence = QueueSyncResponseEvidence::ExchangeOutbox;
+            item.recovered_response = Some(response);
+        }
+        item.missing_response_debt = false;
+        return;
+    }
     match history {
         HistoryResponse::Recovered(response) => {
             if response_is_consolidated(root_exchange, &response) {
@@ -256,6 +339,47 @@ fn apply_completed_response_evidence(
             item.operation = QueueSyncOperation::Reconcile;
         }
     }
+}
+
+fn durable_completion_response(
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    key: &str,
+    _content: &str,
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+    _retained_capture_targets: &[String],
+) -> Option<String> {
+    durable_receipts
+        .iter()
+        .find(|receipt| {
+            receipt.identity == claim.identity
+                && receipt.generation == claim.generation
+                && receipt.worker_id
+                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+                && receipt.completion_key.as_deref() == Some(key)
+        })
+        .and_then(|receipt| receipt.response.as_ref())
+        .filter(|response| response.is_valid() && response.response_id == key)
+        .map(|response| response.body.clone())
+}
+
+fn matching_response_capture(
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    key: Option<&str>,
+    durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
+) -> Option<String> {
+    let key = key?;
+    durable_receipts
+        .iter()
+        .find(|receipt| {
+            receipt.identity == claim.identity
+                && receipt.generation == claim.generation
+                && receipt.worker_id
+                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+                && receipt.completion_key.as_deref() == Some(key)
+        })
+        .and_then(|receipt| receipt.response.as_ref())
+        .filter(|response| response.is_valid() && response.response_id == key)
+        .map(|response| response.response_sha256.clone())
 }
 
 fn root_authored_exchange(content: &str) -> String {
@@ -911,6 +1035,13 @@ mod tests {
             crate::queue_claim::reconcile_completion_evidence(&doc, &cell).unwrap(),
             1
         );
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            "recovered worker task",
+            claimed.generation,
+            "Recovered exact worker response.",
+        )
+        .unwrap();
         crate::claim_release_receipt::release_attempt(
             &doc,
             "recovered worker task",
@@ -935,13 +1066,17 @@ mod tests {
         let item = &payload.lost_reported[0];
         assert!(item.completion_outbox_recovered);
         assert!(!item.retry_safe);
-        assert_eq!(item.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(item.operation, QueueSyncOperation::IntegrateClose);
         assert_eq!(
             item.response_evidence,
-            QueueSyncResponseEvidence::UnsupportedHistory
+            QueueSyncResponseEvidence::ExchangeOutbox
         );
         assert!(item.completion_response_receipt);
-        assert!(item.missing_response_debt);
+        assert_eq!(
+            item.recovered_response.as_deref(),
+            Some("Recovered exact worker response.")
+        );
+        assert!(!item.missing_response_debt);
         assert_eq!(
             item.execution_evidence,
             QueueSyncExecutionEvidence::CompletedOutbox
@@ -1132,7 +1267,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_response_evidence_with(&mut payload, &content, &claims, |claim| {
+        apply_response_evidence_with(&mut payload, &content, &claims, &[], &[], |claim| {
             recover_agent_history_response_from(home.path(), claim)
         });
 
@@ -1203,7 +1338,7 @@ mod tests {
         .unwrap();
         assert_eq!(payload.running.len(), 1);
 
-        apply_response_evidence_with(&mut payload, content, &claims, |claim| {
+        apply_response_evidence_with(&mut payload, content, &claims, &[], &[], |claim| {
             recover_agent_history_response_from(home.path(), claim)
         });
 
@@ -1220,6 +1355,65 @@ mod tests {
             Some("Terminal result retained only in child history.")
         );
         assert!(!item.completion_response_receipt);
+    }
+
+    #[test]
+    fn durable_capture_recovers_reported_projection_interruption_without_history() {
+        let claim = reported_claim(
+            "captured before projection",
+            "subagent:captured",
+            "worker-captured",
+            "parent",
+        );
+        let key = crate::queue_claim::completion_feedback_key(&claim).unwrap();
+        let mut receipts =
+            agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger::default();
+        receipts
+            .record_response_capture(
+                &claim,
+                key.clone(),
+                "Exact full response retained before editor projection.",
+                20,
+                600,
+            )
+            .unwrap();
+        let content = concat!(
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "<!-- agent:run id=run subagents -->\n",
+            "- ☑️ captured before projection\n",
+            "<!-- /agent:run -->\n",
+        );
+        let claims = vec![claim];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/captured.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        apply_response_evidence_with(
+            &mut payload,
+            content,
+            &claims,
+            &receipts.receipts,
+            &[],
+            |_| HistoryResponse::Missing,
+        );
+
+        let item = &payload.reported_checkmark[0];
+        assert_eq!(item.response_id.as_deref(), Some(key.as_str()));
+        assert!(item.response_capture_sha256.is_some());
+        assert_eq!(
+            item.recovered_response.as_deref(),
+            Some("Exact full response retained before editor projection.")
+        );
+        assert_eq!(
+            item.response_evidence,
+            QueueSyncResponseEvidence::ExchangeOutbox
+        );
+        assert!(!item.missing_response_debt);
     }
 
     #[test]
@@ -1254,7 +1448,7 @@ mod tests {
                 &claims,
             )
             .unwrap();
-            apply_response_evidence_with(&mut payload, &content, &claims, |_| match &history {
+            apply_response_evidence_with(&mut payload, &content, &claims, &[], &[], |_| match &history {
                 HistoryResponse::Unsupported => HistoryResponse::Unsupported,
                 HistoryResponse::Ambiguous => HistoryResponse::Ambiguous,
                 _ => unreachable!(),
@@ -1364,7 +1558,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_response_evidence(&mut payload, content, &ledger.claims);
+        apply_response_evidence(&mut payload, content, &ledger.claims, &[], &[]);
         let item = &payload.lost_reported[0];
         assert!(item.missing_response_debt);
         assert_eq!(item.operation, QueueSyncOperation::Reconcile);

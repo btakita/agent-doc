@@ -4969,6 +4969,10 @@ enum QueueAction {
     Sync {
         /// Path to the session document
         file: PathBuf,
+        /// Print the document-generic reconciliation inventory and proposed
+        /// proof-complete repairs without mutating document or queue state.
+        #[arg(long)]
+        plan: bool,
     },
     /// Explicitly strike the leading free-text queue head(s) already answered by
     /// this turn's response(s). Use when a single cycle answered multiple
@@ -8764,9 +8768,13 @@ fn try_main() -> anyhow::Result<()> {
                 max_git_versions,
                 restore_patch,
             } => queue_recovery::run(&file, json, max_git_versions, restore_patch.as_deref()),
-            QueueAction::Sync { file } => {
+            QueueAction::Sync { file, plan } => {
                 let queue_effects = CliQueueCommandEffects;
-                agent_doc_queue_io::queue_cmd::sync_with_effects(&queue_effects, &file)
+                if plan {
+                    agent_doc_queue_io::queue_cmd::plan_with_effects(&queue_effects, &file)
+                } else {
+                    agent_doc_queue_io::queue_cmd::sync_with_effects(&queue_effects, &file)
+                }
             }
             QueueAction::Consume {
                 file,

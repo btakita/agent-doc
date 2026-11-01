@@ -3813,7 +3813,22 @@ fn with_prompt_tree(entries: &[QueueEntry], leaf_idx: usize, lineage: &str) -> S
 /// second prompt target.
 fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
     let mut lines = Vec::new();
+    let bounded_response_branch = entries.iter().enumerate().any(|(idx, entry)| {
+        idx < leaf_idx
+            && entry_is_ancestor_of(entries, idx, leaf_idx)
+            && matches!(
+                entry,
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)
+                    if prompt.text.trim_start().starts_with("**Response [#r-")
+            )
+    });
     for (idx, entry) in entries.iter().enumerate() {
+        if bounded_response_branch
+            && idx != leaf_idx
+            && !entry_is_ancestor_of(entries, idx, leaf_idx)
+        {
+            continue;
+        }
         let (prompt, completed) = match entry {
             QueueEntry::Prompt(prompt) => (prompt, false),
             QueueEntry::Completed(prompt) => (prompt, true),
@@ -10279,6 +10294,38 @@ mod tests {
             ),
             "{submitted}"
         );
+    }
+
+    #[test]
+    fn operator_child_uses_same_bounded_packet_for_sequential_and_subagent_dispatch() {
+        let body = concat!(
+            "- original queue item\n",
+            "  - **Response [#r-0123456789ab]:** Generation 7 from worker:alpha needs a decision.\n",
+            "    - **Choices:**\n",
+            "      - **staging**: Deploy to staging.\n",
+            "        - Use staging and run the smoke test.\n",
+            "      - **production**: Deploy to production.\n",
+            "        - Unrelated production instruction.\n",
+        );
+        let entries = parse(body).unwrap();
+        let leaf = executable_prompt_indexes(&entries)[0];
+        let sequential = submitted_prompt_at(&entries, leaf).unwrap();
+        let document = format!(
+            "<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n"
+        );
+        let subagent = crate::queue_response::submitted_prompts_for_heads(
+            &document,
+            &["Use staging and run the smoke test.".to_string()],
+        )
+        .pop()
+        .unwrap();
+
+        assert_eq!(sequential, subagent);
+        assert!(subagent.contains("original queue item"), "{subagent}");
+        assert!(subagent.contains("Generation 7 from worker:alpha"), "{subagent}");
+        assert!(subagent.contains("**staging**"), "{subagent}");
+        assert!(!subagent.contains("**production**"), "{subagent}");
+        assert!(!subagent.contains("Unrelated production"), "{subagent}");
     }
 
     #[test]

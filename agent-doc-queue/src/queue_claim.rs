@@ -216,6 +216,20 @@ pub struct QueueClaimCancellationReceipt {
     /// means the attempt never reached a keyable worker binding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completion_key: Option<String>,
+    /// Typed proof that this exact terminal attempt intentionally carries no
+    /// response payload. Absence of a response is never terminal evidence by
+    /// itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_free_proof: Option<QueueResponseFreeTerminalProof>,
+}
+
+/// Explicit proof for a terminal queue outcome that has no response body.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueResponseFreeTerminalProof {
+    /// The operator deleted/cancelled the exact fenced attempt.
+    #[default]
+    OperatorCancelled,
 }
 
 impl QueueClaimCancellationReceipt {
@@ -802,6 +816,10 @@ pub enum QueueClaimTransitionRefused {
         expected: u64,
         current: u64,
     },
+    StaleWorker {
+        expected: String,
+        current: Option<String>,
+    },
     NotRunning {
         generation: u64,
     },
@@ -822,6 +840,11 @@ impl std::fmt::Display for QueueClaimTransitionRefused {
             Self::StaleGeneration { expected, current } => write!(
                 f,
                 "stale queue claim generation {expected}; current generation is {current}"
+            ),
+            Self::StaleWorker { expected, current } => write!(
+                f,
+                "stale queue worker {expected:?}; current worker is {}",
+                current.as_deref().unwrap_or("<unbound>")
             ),
             Self::NotRunning { generation } => write!(
                 f,
@@ -1242,6 +1265,7 @@ impl QueueClaimLedger {
             claim,
             cancelled_at_secs,
             completion_key,
+            response_free_proof: Some(QueueResponseFreeTerminalProof::OperatorCancelled),
         };
         self.cancellations.push(receipt.clone());
         receipt
@@ -1481,6 +1505,53 @@ impl QueueClaimLedger {
             });
         }
         if claim.state == QueueClaimState::Claimed || claim.worker.is_none() {
+            return Err(QueueClaimTransitionRefused::NotRunning {
+                generation: claim.generation,
+            });
+        }
+        claim.state = QueueClaimState::Reported;
+        if publication_state.is_some() {
+            claim.publication_state = publication_state;
+        }
+        Ok(claim.clone())
+    }
+
+    /// Compare-and-swap one exact worker attempt into `Reported`. The worker
+    /// fence closes the same-generation replacement/repair gap left by a
+    /// generation-only transition.
+    pub fn report_exact_worker_with_publication_state(
+        &mut self,
+        item: &str,
+        expected_generation: u64,
+        expected_worker_id: &str,
+        publication_state: Option<QueueReportState>,
+    ) -> Result<QueueClaim, QueueClaimTransitionRefused> {
+        let identity = claim_identity(item);
+        let Some(claim) = self
+            .claims
+            .iter_mut()
+            .find(|claim| claim.identity == identity)
+        else {
+            return Err(QueueClaimTransitionRefused::Missing);
+        };
+        validate_generation(claim, Some(expected_generation))?;
+        let current_worker = claim
+            .worker
+            .as_ref()
+            .map(|worker| worker.worker_id.clone());
+        if current_worker.as_deref() != Some(expected_worker_id) {
+            return Err(QueueClaimTransitionRefused::StaleWorker {
+                expected: expected_worker_id.to_string(),
+                current: current_worker,
+            });
+        }
+        if claim.state == QueueClaimState::Lost {
+            return Err(QueueClaimTransitionRefused::Terminal {
+                generation: claim.generation,
+                state: claim.state,
+            });
+        }
+        if claim.state == QueueClaimState::Claimed {
             return Err(QueueClaimTransitionRefused::NotRunning {
                 generation: claim.generation,
             });
@@ -3740,6 +3811,10 @@ mod tests {
         assert_eq!(receipt.claim.state, QueueClaimState::Reported);
         assert_eq!(receipt.cancelled_at_secs, 105);
         assert!(receipt.completion_key.is_some());
+        assert_eq!(
+            receipt.response_free_proof,
+            Some(QueueResponseFreeTerminalProof::OperatorCancelled)
+        );
         assert!(ledger.claims.is_empty());
         assert_eq!(ledger.cancellations, vec![receipt.clone()]);
         assert_eq!(
@@ -4841,5 +4916,42 @@ Add new issues into the backlog + queue except issue #40 + #45.";
         let outcome = legacy.follow_edits_in_view(now + 2, &view_of(&content));
         assert_eq!(outcome, ClaimFollowOutcome::default());
         assert_eq!(legacy.claims[0].identity, claim_identity(GH380));
+    }
+
+    #[test]
+    fn report_completion_is_fenced_by_generation_and_worker() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("work", "subagent:a", 100, 600);
+        ledger
+            .start("work", "subagent:a", "worker:new", 101, 600, Some(1))
+            .unwrap();
+
+        assert_eq!(
+            ledger.report_exact_worker_with_publication_state(
+                "work",
+                1,
+                "worker:stale",
+                None,
+            ),
+            Err(QueueClaimTransitionRefused::StaleWorker {
+                expected: "worker:stale".to_string(),
+                current: Some("worker:new".to_string()),
+            })
+        );
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert_eq!(
+            ledger.report_exact_worker_with_publication_state("work", 2, "worker:new", None),
+            Err(QueueClaimTransitionRefused::StaleGeneration {
+                expected: 2,
+                current: 1,
+            })
+        );
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Running);
+        assert!(
+            ledger
+                .report_exact_worker_with_publication_state("work", 1, "worker:new", None)
+                .is_ok()
+        );
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Reported);
     }
 }

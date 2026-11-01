@@ -2288,7 +2288,13 @@ fn converge_id_backed_head_strike(
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "orphan id head snapshot sync");
     }
-    crate::claim_release_receipt::retire_struck_or_warn(file, &struck_heads, &target, source);
+    crate::claim_release_receipt::retire_struck_with_projection_or_warn(
+        file,
+        &struck_heads,
+        &target,
+        &content,
+        source,
+    );
     Ok(true)
 }
 
@@ -6703,13 +6709,11 @@ mod core_tests {
     }
 
     /// `#strikeretires`: the orphan `queue consume --id` strike closes the
-    /// row's reported work. Before, only closeout `queue consume` retired the
-    /// completion cell and only closeout pruned the reported-release receipt,
-    /// so an operator re-add of the same `[#id]` inherited `☑️` (receipt) and,
-    /// once that was pruned, `🔄` (cell). The strike now retires both, in the
-    /// document and in the snapshot, and the re-added row projects `📥`.
+    /// row's visible completion cell in the document and snapshot. The full
+    /// response receipt intentionally survives: editor convergence alone is
+    /// not the commit/archive proof required to authorize response GC.
     #[test]
-    fn orphan_id_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+    fn orphan_id_strike_retires_cell_but_retains_full_response_receipt() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
@@ -6746,6 +6750,13 @@ mod core_tests {
         )
         .unwrap();
         crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            item,
+            running.generation,
+            "Done; the backlog item was reaped.",
+        )
+        .unwrap();
         crate::claim_release_receipt::release(
             &doc,
             item,
@@ -6787,42 +6798,36 @@ mod core_tests {
             .unwrap()
             .unwrap();
         assert_eq!(snap, result, "the snapshot retires the same cell");
-        assert!(
+        assert_eq!(
             crate::claim_release_receipt::load(&doc)
                 .unwrap()
                 .receipts
-                .is_empty(),
-            "the strike retires the reported-release receipt"
+                .len(),
+            1,
+            "a strike cannot GC the full response without commit/archive proof"
         );
 
         let readded = result.replace("- do [#liveone]\n", &format!("- {item}\n- do [#liveone]\n"));
         assert!(crate::queue_claim::completion_evidence_head_texts(&readded).is_empty());
-        let projection =
-            crate::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None).unwrap();
-        assert!(
-            projection
-                .target_content
-                .contains(&format!("- 📥 {item}\n")),
-            "{}",
-            projection.target_content
-        );
-        assert!(
-            !projection.target_content.contains("🔄")
-                && !projection.target_content.contains("- ☑️"),
-            "{}",
-            projection.target_content
-        );
+        let payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            doc.display().to_string(),
+            agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current,
+            &readded,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert!(payload.pending.iter().any(|row| row.item.contains(item)));
+        assert!(payload.reported_checkmark.is_empty());
     }
 
     /// `#strikeretires`: the controller's answered-head projection
     /// (`answered_free_text_projection`) retires the struck row's completion
-    /// cell in its target, and the accepted target ends the row's
-    /// reported-release receipt (`retire_struck_by_successor_or_warn`, the
-    /// call the binary's projection adapter makes). Before, the receipt
-    /// survived until the next closeout and painted `☑️` onto a later row
-    /// with the same text.
+    /// cell in its target. The accepted editor target does not retire the
+    /// full-response receipt until a future commit/archive receipt proves its
+    /// indexed path and checksum.
     #[test]
-    fn controller_answered_strike_retires_cell_and_receipt_so_a_readded_row_is_pending() {
+    fn controller_answered_strike_retires_cell_but_retains_full_response_receipt() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("s.md");
@@ -6858,6 +6863,13 @@ mod core_tests {
         )
         .unwrap();
         crate::queue_claim::report_attempt(&doc, item, Some(running.generation)).unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &doc,
+            item,
+            running.generation,
+            "Released 0.35.500.",
+        )
+        .unwrap();
         crate::claim_release_receipt::release(
             &doc,
             item,
@@ -6889,33 +6901,30 @@ mod core_tests {
             &projected.target_content,
             "answered_free_text_projection",
         );
-        assert!(
+        assert_eq!(
             crate::claim_release_receipt::load(&doc)
                 .unwrap()
                 .receipts
-                .is_empty(),
-            "the accepted strike target retires the reported-release receipt"
+                .len(),
+            1,
+            "accepted editor projection cannot substitute for a commit/archive GC receipt"
         );
 
         let readded = projected
             .target_content
             .replace("- later work\n", &format!("- later work\n- {item}\n"));
+        std::fs::write(&doc, &readded).unwrap();
         assert!(crate::queue_claim::completion_evidence_head_texts(&readded).is_empty());
-        let projection =
-            crate::queue_cmd::derive_claim_runtime_projection(&doc, &readded, None).unwrap();
-        assert!(
-            projection
-                .target_content
-                .contains(&format!("- 📥 {item}\n")),
-            "{}",
-            projection.target_content
-        );
-        assert!(
-            !projection.target_content.contains("🔄")
-                && !projection.target_content.contains("- ☑️"),
-            "{}",
-            projection.target_content
-        );
+        let payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            doc.display().to_string(),
+            agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current,
+            &readded,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert!(payload.pending.iter().any(|row| row.item.contains(item)));
+        assert!(payload.reported_checkmark.is_empty());
     }
 
     /// Claim `item` for `owner`, bind a worker, and report it without
@@ -6943,21 +6952,17 @@ mod core_tests {
 
     /// `readded` projects `item` as pending `📥`, never `☑️` or `🔄`.
     fn assert_readded_row_projects_pending(doc: &Path, readded: &str, item: &str) {
-        let projection =
-            crate::queue_cmd::derive_claim_runtime_projection(doc, readded, None).unwrap();
-        assert!(
-            projection
-                .target_content
-                .contains(&format!("- 📥 {item}\n")),
-            "{}",
-            projection.target_content
-        );
-        assert!(
-            !projection.target_content.contains("🔄")
-                && !projection.target_content.contains("- ☑️"),
-            "{}",
-            projection.target_content
-        );
+        std::fs::write(doc, readded).unwrap();
+        let payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            doc.display().to_string(),
+            agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current,
+            readded,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert!(payload.pending.iter().any(|row| row.item.contains(item)));
+        assert!(payload.reported_checkmark.is_empty());
     }
 
     /// `#strikeretires` (found by the completion-cell retirement fix,

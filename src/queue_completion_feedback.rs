@@ -95,10 +95,20 @@ fn report_complete_with_lock_wait(
     if !claim.owner.starts_with("subagent:") {
         return Ok(None);
     }
-    let claim = agent_doc_queue_io::queue_claim::report_attempt_with_publication_state(
+    let worker_id = claim
+        .worker
+        .as_ref()
+        .map(|worker| worker.worker_id.clone())
+        .context("queue completion requires the exact started worker binding")?;
+    // The full response receipt is the monotonic first boundary. If the
+    // process stops after this write, reconciliation can reconstruct the cell
+    // and retry the exact state transition without consulting agent history.
+    agent_doc_queue_io::claim_release_receipt::capture_response(file, &claim, response)?;
+    let claim = agent_doc_queue_io::queue_claim::report_exact_worker_attempt_with_publication_state(
         file,
         &claim.item_text,
-        generation,
+        generation.unwrap_or(claim.generation),
+        &worker_id,
         publication_state,
     )?;
     // Derive the reported marker and completion cell from one cut and publish

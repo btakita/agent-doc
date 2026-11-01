@@ -160,6 +160,108 @@ pub enum ReleaseKind {
     Requeue,
 }
 
+/// Durably capture the full worker response for one exact attempt. This must
+/// succeed before the claim may advance to `Reported`.
+pub fn capture_response(
+    file: &Path,
+    claim: &QueueClaim,
+    response: &str,
+) -> Result<ClaimReleaseReceipt> {
+    let completion_key = crate::queue_claim::completion_feedback_key(claim)?;
+    let now = now_secs();
+    let refused = mutate(file, |ledger| {
+        ledger
+            .record_response_capture(
+                claim,
+                completion_key.clone(),
+                response,
+                now,
+                DEFAULT_RELEASE_RECEIPT_TTL_SECS,
+            )
+            .err()
+    })?;
+    if let Some(refused) = refused {
+        return Err(refused.into());
+    }
+    let receipt = load(file)?
+        .receipts
+        .into_iter()
+        .find(|receipt| {
+            receipt.identity == claim.identity
+                && receipt.generation == claim.generation
+                && receipt.worker_id
+                    == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+        })
+        .context("captured queue response receipt was not persisted")?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_response_receipt_captured owner={} worker={} generation={} response_id={} body_bytes={}",
+            claim.owner,
+            receipt.worker_id.as_deref().unwrap_or("<unbound>"),
+            claim.generation,
+            receipt.completion_key.as_deref().unwrap_or("<missing>"),
+            response.trim().len(),
+        ),
+    );
+    Ok(receipt)
+}
+
+/// Resolve and capture the response for the current exact attempt. This is a
+/// convenient boundary for recovery/tests that have attempt coordinates but
+/// not an already-loaded claim; it retains the same generation fence as the
+/// report transition.
+pub fn capture_response_for_attempt(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    response: &str,
+) -> Result<ClaimReleaseReceipt> {
+    let claim = claim_before_release(file, item, Some(generation), true)?
+        .context("queue response capture requires a live exact attempt")?;
+    capture_response(file, &claim, response)
+}
+
+fn claim_before_release(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    enforce_generation: bool,
+) -> Result<Option<QueueClaim>> {
+    let mut ledger = crate::queue_claim::load_ledger(file)?;
+    let claim = ledger.release(item);
+    let Some(claim) = claim else {
+        return Ok(None);
+    };
+    if enforce_generation && claim.generation != generation.unwrap_or_default() {
+        anyhow::bail!(
+            "stale queue claim generation {}; current generation is {}",
+            generation.map_or_else(|| "<missing>".to_string(), |value| value.to_string()),
+            claim.generation,
+        );
+    }
+    Ok(Some(claim))
+}
+
+fn ensure_captured_response(file: &Path, claim: &QueueClaim) -> Result<()> {
+    let receipt = load(file)?.receipts.into_iter().find(|receipt| {
+        receipt.identity == claim.identity
+            && receipt.generation == claim.generation
+            && receipt.worker_id == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+    });
+    anyhow::ensure!(
+        receipt.is_some_and(|receipt| {
+            receipt
+                .response
+                .as_ref()
+                .is_some_and(agent_doc_queue::claim_release_receipt::CapturedQueueResponse::is_valid)
+        }),
+        "refusing reported release for generation {}: no durable response receipt; use `agent-doc queue report-complete` first",
+        claim.generation,
+    );
+    Ok(())
+}
+
 /// `agent-doc queue release`: end the claim on `item` and record (or, for
 /// [`ReleaseKind::Requeue`], forget) its release receipt. A reported release is
 /// deliberately three monotonic phases: mark the claim `Reported`, record the
@@ -168,6 +270,9 @@ pub enum ReleaseKind {
 pub fn release(file: &Path, item: &str, kind: ReleaseKind) -> Result<Option<QueueClaim>> {
     match kind {
         ReleaseKind::Reported => {
+            if let Some(claim) = claim_before_release(file, item, None, false)? {
+                ensure_captured_response(file, &claim)?;
+            }
             let prepared = crate::queue_claim::prepare_reported_release(file, item)?;
             apply_release_receipt(file, item, kind, prepared.clone())?;
             if prepared.is_some() {
@@ -190,6 +295,9 @@ pub fn release_attempt(
 ) -> Result<Option<QueueClaim>> {
     match kind {
         ReleaseKind::Reported => {
+            if let Some(claim) = claim_before_release(file, item, generation, true)? {
+                ensure_captured_response(file, &claim)?;
+            }
             let prepared =
                 crate::queue_claim::prepare_reported_release_attempt(file, item, generation)?;
             apply_release_receipt(file, item, kind, prepared.clone())?;
@@ -385,9 +493,25 @@ pub fn prune_closed(file: &Path, content: &str) -> Result<usize> {
     if load(file)?.receipts.is_empty() {
         return Ok(0);
     }
-    let live = live_queue_head_identities(content);
+    if terminal_projection_pending(file)? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            "queue_claim_release_receipt_prune_deferred reason=retained_projection_pending",
+        );
+        return Ok(0);
+    }
+    let mut live = live_queue_head_identities(content).unwrap_or_default();
+    // A closed row is not enough to retire the last full response authority.
+    // The queue receipt does not yet carry the repository commit + archive
+    // index/path checksum proof needed to authorize GC, so full captures stay
+    // fail-closed even after editor projection converges.
+    for receipt in load(file)?.receipts {
+        if receipt.response.is_some() {
+            live.insert(receipt.identity);
+        }
+    }
     let now = now_secs();
-    let pruned = mutate(file, |ledger| ledger.prune(now, live.as_ref()))?;
+    let pruned = mutate(file, |ledger| ledger.prune(now, Some(&live)))?;
     if pruned > 0 {
         agent_doc_ops_log_io::log_op(
             file,
@@ -407,15 +531,30 @@ pub fn retire_struck(
     file: &Path,
     struck_heads: &[String],
     after: &str,
+    _projection_evidence: &str,
     source: &str,
 ) -> Result<usize> {
     if struck_heads.is_empty() || load(file)?.receipts.is_empty() {
         return Ok(0);
     }
-    let struck = struck_heads
+    if terminal_projection_pending(file)? {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_release_receipt_retire_deferred source={source} reason=retained_projection_pending"
+            ),
+        );
+        return Ok(0);
+    }
+    let mut struck = struck_heads
         .iter()
         .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
         .collect::<std::collections::HashSet<_>>();
+    for receipt in load(file)?.receipts {
+        if receipt.response.is_some() {
+            struck.remove(&receipt.identity);
+        }
+    }
     let live = agent_doc_queue::queue_consume::live_work_identities(after);
     let retired = mutate(file, |ledger| ledger.retire_struck(&struck, Some(&live)))?;
     if retired > 0 {
@@ -427,6 +566,13 @@ pub fn retire_struck(
         );
     }
     Ok(retired)
+}
+
+fn terminal_projection_pending(file: &Path) -> Result<bool> {
+    Ok(agent_doc_cycle_state_io::load_document_projection(file)?.is_some_and(|projection| {
+        projection.document.pending_write.is_some()
+            || !projection.document.pending_write_journal.is_empty()
+    }))
 }
 
 /// End the struck rows' durable finished-work evidence (`#strikeretires`):
@@ -444,7 +590,32 @@ pub fn retire_struck_or_warn(file: &Path, struck_heads: &[String], after: &str, 
             file.display()
         );
     }
-    if let Err(err) = retire_struck(file, struck_heads, after, source) {
+    if let Err(err) = retire_struck(file, struck_heads, after, after, source) {
+        eprintln!(
+            "[queue] WARNING: could not retire the release receipts of struck rows in {} ({source}): {err:#}",
+            file.display()
+        );
+    }
+}
+
+/// Retire struck receipts after an accepted successor while proving that the
+/// exact response was visible in the authority cut from which that successor
+/// was derived. This covers atomic strikes that intentionally remove their
+/// completion cell in the same mutation.
+pub fn retire_struck_with_projection_or_warn(
+    file: &Path,
+    struck_heads: &[String],
+    after: &str,
+    projection_evidence: &str,
+    source: &str,
+) {
+    if let Err(err) = crate::queue_claim::retire_struck_claims(file, struck_heads, after, source) {
+        eprintln!(
+            "[queue] WARNING: could not end the claims of struck rows in {} ({source}): {err:#}",
+            file.display()
+        );
+    }
+    if let Err(err) = retire_struck(file, struck_heads, after, projection_evidence, source) {
         eprintln!(
             "[queue] WARNING: could not retire the release receipts of struck rows in {} ({source}): {err:#}",
             file.display()
@@ -459,7 +630,7 @@ pub fn retire_struck_or_warn(file: &Path, struck_heads: &[String], after: &str, 
 /// [`heads_struck_by_successor`]: agent_doc_queue::queue_consume::heads_struck_by_successor
 pub fn retire_struck_by_successor_or_warn(file: &Path, before: &str, after: &str, source: &str) {
     let struck_heads = agent_doc_queue::queue_consume::heads_struck_by_successor(before, after);
-    retire_struck_or_warn(file, &struck_heads, after, source);
+    retire_struck_with_projection_or_warn(file, &struck_heads, after, before, source);
 }
 
 /// Durably drop every receipt whose work has no live row and no active claim
@@ -470,13 +641,20 @@ pub fn retire_struck_by_successor_or_warn(file: &Path, before: &str, after: &str
 pub fn retire_without_live_work(
     file: &Path,
     kept: &agent_doc_queue::stale_completion_evidence::KeptWork,
+    _converged_content: &str,
     source: &str,
 ) -> Result<Vec<ClaimReleaseReceipt>> {
     if load(file)?.receipts.is_empty() {
         return Ok(Vec::new());
     }
     let retired = mutate(file, |ledger| {
-        agent_doc_queue::stale_completion_evidence::retire_stale_receipts(ledger, kept)
+        let mut protected = kept.clone();
+        for receipt in &ledger.receipts {
+            if receipt.response.is_some() {
+                protected.identities.insert(receipt.identity.clone());
+            }
+        }
+        agent_doc_queue::stale_completion_evidence::retire_stale_receipts(ledger, &protected)
     })?;
     if !retired.is_empty() {
         agent_doc_ops_log_io::log_op(
@@ -552,6 +730,8 @@ mod tests {
         );
         assert!(governing_receipt(&doc, &content, question).is_none());
 
+        capture_response(&doc, &prepared, "exact worker response").unwrap();
+
         let _ = apply_release_receipt(
             &doc,
             question,
@@ -619,11 +799,37 @@ mod tests {
             third.generation,
         )
         .unwrap();
+        let capture =
+            capture_response_for_attempt(&doc, question, third.generation, "third response")
+                .unwrap();
         release(&doc, question, ReleaseKind::Reported).unwrap();
         let struck = content.replace(&format!("- {question}\n"), "");
         assert_eq!(prune_closed(&doc, &content).unwrap(), 0);
-        assert_eq!(prune_closed(&doc, &struck).unwrap(), 1);
-        assert!(load(&doc).unwrap().receipts.is_empty());
+        assert_eq!(
+            prune_closed(&doc, &struck).unwrap(),
+            0,
+            "row closure alone must retain the recovery tombstone"
+        );
+        let projected = format!(
+            "{struck}\n{}\n",
+            agent_doc_document::subagent_completion::cell_with_response(
+                "subagent:third",
+                question,
+                capture.completion_key.as_deref().unwrap(),
+                "third response",
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            prune_closed(&doc, &projected).unwrap(),
+            0,
+            "editor projection is necessary but not sufficient for response GC"
+        );
+        assert_eq!(
+            load(&doc).unwrap().receipts.len(),
+            1,
+            "retain the full response until a future commit/archive receipt proves its durable location"
+        );
     }
 
     #[test]
@@ -642,6 +848,7 @@ mod tests {
             claim.generation,
         )
         .unwrap();
+        capture_response_for_attempt(&doc, item, claim.generation, "sdk response").unwrap();
         release_attempt(&doc, item, ReleaseKind::Reported, Some(claim.generation))
             .unwrap()
             .expect("reported claim");

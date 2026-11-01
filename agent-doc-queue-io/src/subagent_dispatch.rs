@@ -1643,6 +1643,13 @@ queue: go
             1,
         )
         .unwrap();
+        crate::claim_release_receipt::capture_response_for_attempt(
+            &file,
+            question,
+            1,
+            "page status response",
+        )
+        .unwrap();
         release(&file, question, ReleaseKind::Reported).unwrap();
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),

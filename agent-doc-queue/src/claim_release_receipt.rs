@@ -75,8 +75,42 @@ pub struct ClaimReleaseReceipt {
     /// attempt. Missing only on a legacy receipt.
     #[serde(default)]
     pub completion_key: Option<String>,
+    /// Full binary-attested worker response captured before the attempt may
+    /// advance to `Reported`. This is the recovery authority when the editor
+    /// projection is interrupted or overwritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response: Option<CapturedQueueResponse>,
     pub released_at_secs: u64,
     pub expires_at_secs: u64,
+}
+
+/// Durable response receipt for one exact `(generation, worker)` attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturedQueueResponse {
+    /// Attempt-scoped response/backlink id (the completion attestation key).
+    pub response_id: String,
+    pub response_sha256: String,
+    pub body: String,
+}
+
+impl CapturedQueueResponse {
+    pub fn new(response_id: String, body: &str) -> Result<Self, ReceiptRecordRefused> {
+        let body = body.trim();
+        if body.is_empty() {
+            return Err(ReceiptRecordRefused::EmptyResponseBody);
+        }
+        Ok(Self {
+            response_id,
+            response_sha256: agent_doc_hash::content_hash(body),
+            body: body.to_string(),
+        })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        !self.response_id.is_empty()
+            && !self.body.trim().is_empty()
+            && agent_doc_hash::content_hash(self.body.trim()) == self.response_sha256
+    }
 }
 
 impl ClaimReleaseReceipt {
@@ -143,6 +177,12 @@ pub enum ReceiptRecordRefused {
     WorkerUnbound,
     EmptyCompletionKey,
     InvalidCompletionKey,
+    EmptyResponseBody,
+    MissingResponseCapture,
+    StaleAttempt {
+        captured_generation: u64,
+        incoming_generation: u64,
+    },
 }
 
 impl std::fmt::Display for ReceiptRecordRefused {
@@ -157,6 +197,17 @@ impl std::fmt::Display for ReceiptRecordRefused {
                     "completion attestation key does not match the claim attempt"
                 )
             }
+            Self::EmptyResponseBody => write!(f, "captured queue response body is empty"),
+            Self::MissingResponseCapture => {
+                write!(f, "reported release has no durable response capture")
+            }
+            Self::StaleAttempt {
+                captured_generation,
+                incoming_generation,
+            } => write!(
+                f,
+                "stale queue response generation {incoming_generation}; durable generation is {captured_generation}"
+            ),
         }
     }
 }
@@ -171,16 +222,11 @@ pub struct ClaimReleaseReceiptLedger {
 }
 
 impl ClaimReleaseReceiptLedger {
-    /// Record that `claim`'s worker reported and its claim was released. A
-    /// newer receipt for the same line replaces an older one.
-    pub fn record(
-        &mut self,
+    fn validate_attempt(
         claim: &QueueClaim,
-        completion_key: String,
-        now_secs: u64,
-        ttl_secs: u64,
+        completion_key: &str,
     ) -> Result<(), ReceiptRecordRefused> {
-        if claim.state != crate::queue_claim::QueueClaimState::Reported {
+        if claim.state == crate::queue_claim::QueueClaimState::Claimed {
             return Err(ReceiptRecordRefused::NotReported);
         }
         let Some(worker) = claim.worker.as_ref() else {
@@ -200,6 +246,76 @@ impl ClaimReleaseReceiptLedger {
         if completion_key != expected {
             return Err(ReceiptRecordRefused::InvalidCompletionKey);
         }
+        Ok(())
+    }
+
+    /// Capture the full worker response before lifecycle state may advance.
+    /// A stale capture never replaces a newer generation's receipt.
+    pub fn record_response_capture(
+        &mut self,
+        claim: &QueueClaim,
+        completion_key: String,
+        response_body: &str,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Result<(), ReceiptRecordRefused> {
+        Self::validate_attempt(claim, &completion_key)?;
+        if let Some(existing) = self
+            .receipts
+            .iter()
+            .find(|receipt| receipt.identity == claim.identity)
+            && existing.generation > claim.generation
+        {
+            return Err(ReceiptRecordRefused::StaleAttempt {
+                captured_generation: existing.generation,
+                incoming_generation: claim.generation,
+            });
+        }
+        let response = CapturedQueueResponse::new(completion_key.clone(), response_body)?;
+        self.receipts
+            .retain(|receipt| receipt.identity != claim.identity);
+        self.receipts.push(ClaimReleaseReceipt {
+            identity: claim.identity.clone(),
+            item_text: claim.item_text.clone(),
+            owner: claim.owner.clone(),
+            generation: claim.generation,
+            completion_recovered_after_loss: claim.completion_recovered_after_loss,
+            owner_session: claim.owner_session.clone(),
+            publication_state: claim.publication_state,
+            claimed_at_secs: claim.claimed_at_secs,
+            worker_id: claim.worker.as_ref().map(|worker| worker.worker_id.clone()),
+            completion_key: Some(completion_key),
+            response: Some(response),
+            released_at_secs: 0,
+            expires_at_secs: now_secs.saturating_add(ttl_secs),
+        });
+        Ok(())
+    }
+
+    /// Record that `claim`'s worker reported and its claim was released. A
+    /// newer receipt for the same line replaces an older one.
+    pub fn record(
+        &mut self,
+        claim: &QueueClaim,
+        completion_key: String,
+        now_secs: u64,
+        ttl_secs: u64,
+    ) -> Result<(), ReceiptRecordRefused> {
+        if claim.state != crate::queue_claim::QueueClaimState::Reported {
+            return Err(ReceiptRecordRefused::NotReported);
+        }
+        Self::validate_attempt(claim, &completion_key)?;
+        let Some(existing) = self.receipts.iter().find(|receipt| {
+            receipt.identity == claim.identity
+                && receipt.generation == claim.generation
+                && receipt.worker_id == claim.worker.as_ref().map(|worker| worker.worker_id.clone())
+        }) else {
+            return Err(ReceiptRecordRefused::MissingResponseCapture);
+        };
+        let Some(response) = existing.response.clone().filter(CapturedQueueResponse::is_valid) else {
+            return Err(ReceiptRecordRefused::MissingResponseCapture);
+        };
+        let worker = claim.worker.as_ref().expect("validated worker");
         self.receipts
             .retain(|receipt| receipt.identity != claim.identity);
         self.receipts.push(ClaimReleaseReceipt {
@@ -213,6 +329,7 @@ impl ClaimReleaseReceiptLedger {
             claimed_at_secs: claim.claimed_at_secs,
             worker_id: Some(worker.worker_id.clone()),
             completion_key: Some(completion_key),
+            response: Some(response),
             released_at_secs: now_secs,
             expires_at_secs: now_secs.saturating_add(ttl_secs),
         });
@@ -393,21 +510,18 @@ mod tests {
         now_secs: u64,
         ttl_secs: u64,
     ) {
+        let key = crate::queue_claim::completion_attestation_key(
+            &claim.identity,
+            &claim.owner,
+            claim.generation,
+            claim.claimed_at_secs,
+            claim.worker.as_ref().unwrap().worker_id.as_str(),
+        )
+        .unwrap();
         ledger
-            .record(
-                claim,
-                crate::queue_claim::completion_attestation_key(
-                    &claim.identity,
-                    &claim.owner,
-                    claim.generation,
-                    claim.claimed_at_secs,
-                    claim.worker.as_ref().unwrap().worker_id.as_str(),
-                )
-                .unwrap(),
-                now_secs,
-                ttl_secs,
-            )
+            .record_response_capture(claim, key.clone(), "worker response", now_secs, ttl_secs)
             .unwrap();
+        ledger.record(claim, key, now_secs, ttl_secs).unwrap();
     }
 
     #[test]
@@ -623,6 +737,22 @@ mod tests {
                 key.to_string()
             };
             let actual = ledger.record(&candidate, key, 10, 50).err();
+            let actual = if expected.is_none() {
+                let exact = crate::queue_claim::completion_attestation_key(
+                    &candidate.identity,
+                    &candidate.owner,
+                    candidate.generation,
+                    candidate.claimed_at_secs,
+                    &candidate.worker.as_ref().unwrap().worker_id,
+                )
+                .unwrap();
+                ledger
+                    .record_response_capture(&candidate, exact.clone(), "response", 9, 50)
+                    .unwrap();
+                ledger.record(&candidate, exact, 10, 50).err()
+            } else {
+                actual
+            };
             assert_eq!(actual, expected, "case {index}");
             assert_eq!(ledger.receipts.len(), usize::from(expected.is_none()));
             if expected.is_none() {
@@ -645,12 +775,81 @@ mod tests {
             claimed_at_secs: 1,
             worker_id: None,
             completion_key: None,
+            response: None,
             released_at_secs: 1,
             expires_at_secs: 2,
         };
         assert!(
             !legacy.attests_exact_attempt(),
             "owner-only legacy evidence must never authorize a post-baseline strike"
+        );
+    }
+
+    #[test]
+    fn release_is_refused_until_full_response_capture_is_durable() {
+        let candidate = claim("interrupt boundary", "subagent:worker");
+        let key = crate::queue_claim::completion_attestation_key(
+            &candidate.identity,
+            &candidate.owner,
+            candidate.generation,
+            candidate.claimed_at_secs,
+            &candidate.worker.as_ref().unwrap().worker_id,
+        )
+        .unwrap();
+        let mut ledger = ClaimReleaseReceiptLedger::default();
+
+        assert_eq!(
+            ledger.record(&candidate, key.clone(), 10, 50),
+            Err(ReceiptRecordRefused::MissingResponseCapture)
+        );
+        ledger
+            .record_response_capture(&candidate, key.clone(), "complete body", 10, 50)
+            .unwrap();
+        let captured = &ledger.receipts[0];
+        assert_eq!(captured.released_at_secs, 0, "capture is not release proof");
+        assert_eq!(
+            captured.response.as_ref().unwrap().body,
+            "complete body"
+        );
+        assert!(ledger.record(&candidate, key, 11, 50).is_ok());
+    }
+
+    #[test]
+    fn older_generation_cannot_overwrite_newer_durable_capture() {
+        let mut newer = claim("same row", "subagent:new");
+        newer.generation = 2;
+        let newer_key = crate::queue_claim::completion_attestation_key(
+            &newer.identity,
+            &newer.owner,
+            newer.generation,
+            newer.claimed_at_secs,
+            &newer.worker.as_ref().unwrap().worker_id,
+        )
+        .unwrap();
+        let mut ledger = ClaimReleaseReceiptLedger::default();
+        ledger
+            .record_response_capture(&newer, newer_key, "new response", 20, 50)
+            .unwrap();
+
+        let older = claim("same row", "subagent:old");
+        let older_key = crate::queue_claim::completion_attestation_key(
+            &older.identity,
+            &older.owner,
+            older.generation,
+            older.claimed_at_secs,
+            &older.worker.as_ref().unwrap().worker_id,
+        )
+        .unwrap();
+        assert_eq!(
+            ledger.record_response_capture(&older, older_key, "stale response", 21, 50),
+            Err(ReceiptRecordRefused::StaleAttempt {
+                captured_generation: 2,
+                incoming_generation: 1,
+            })
+        );
+        assert_eq!(
+            ledger.receipts[0].response.as_ref().unwrap().body,
+            "new response"
         );
     }
 }

@@ -174,6 +174,12 @@ pub struct QueueSyncItem {
     /// evidence rather than proof of full root-response delivery.
     #[serde(default)]
     pub completion_response_receipt: bool,
+    /// Durable response/completion backlink for this exact attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_id: Option<String>,
+    /// Hash of the full durable response capture, when present in the receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_capture_sha256: Option<String>,
     /// Exact response source for reported-result integration.
     pub response_evidence: QueueSyncResponseEvidence,
     /// Response recovered from exact retained agent history when the exchange
@@ -249,6 +255,40 @@ pub struct QueueSyncPayload {
     pub operator_gated: Vec<QueueSyncItem>,
 }
 
+/// One inert, item-addressed recovery response emitted by declarative sync.
+/// Its id is attempt-stable: new evidence updates the diagnosis instead of
+/// manufacturing a duplicate response for the same queue slot/generation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueSyncRecoveryResponse {
+    pub response_id: String,
+    pub item: String,
+    pub summary: String,
+    pub next_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<String>,
+}
+
+impl QueueSyncRecoveryResponse {
+    pub fn render_markdown(&self) -> String {
+        let mut rendered = format!("**Response [#{}]:** {}", self.response_id, self.summary);
+        if !self.next_actions.is_empty() {
+            rendered.push_str("\n- **Next actions:**");
+            for action in &self.next_actions {
+                rendered.push_str("\n  - **Action:** ");
+                rendered.push_str(action);
+            }
+        }
+        if !self.choices.is_empty() {
+            rendered.push_str("\n- **Choices:**");
+            for choice in &self.choices {
+                rendered.push_str("\n  - ");
+                rendered.push_str(choice);
+            }
+        }
+        rendered
+    }
+}
+
 impl QueueSyncPayload {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -294,6 +334,128 @@ impl QueueSyncPayload {
         self.blocked.extend(other.blocked);
         self.reconcile_unknown.extend(other.reconcile_unknown);
         self.operator_gated.extend(other.operator_gated);
+    }
+
+    /// Evidence-derived recovery surfaces for attempts that cannot be advanced
+    /// automatically. The operation field remains the same-turn coordinator
+    /// dispatch intent; only operator/external decisions are left parked.
+    pub fn recovery_responses(&self) -> Vec<QueueSyncRecoveryResponse> {
+        let mut responses = Vec::new();
+        let mut seen = HashSet::new();
+        for item in self.items().filter(|item| {
+            item.missing_response_debt
+                || item.lifecycle == QueueSyncLifecycle::ReconcileUnknown
+                || (item.lifecycle == QueueSyncLifecycle::Lost && !item.retry_safe)
+        }) {
+            let identity = format!("{:?}", crate::queue_claim::claim_identity(&item.item));
+            let stable_key = format!(
+                "{}\0{}\0{}\0{}\0{}",
+                item.document_path,
+                item.queue_id,
+                item.component_occurrence,
+                identity,
+                item.generation.unwrap_or_default(),
+            );
+            let response_id = format!("r-{}", agent_doc_hash::short_content_hash(&stable_key));
+            if !seen.insert(response_id.clone()) {
+                continue;
+            }
+            let worker = item.worker_id.as_deref().unwrap_or("unbound");
+            let generation = item
+                .generation
+                .map(|generation| generation.to_string())
+                .unwrap_or_else(|| "legacy-0".to_string());
+            let summary = format!(
+                "Nonterminal recovery inventory: lifecycle={:?}; dispatch_intent={:?}; generation={generation}; worker={worker}; response={:?}; receipt={}; effects={}.",
+                item.lifecycle,
+                item.operation,
+                item.response_evidence,
+                item.completion_response_receipt,
+                item.recovered_effects.len(),
+            );
+            let (next_actions, choices) = if item.missing_response_debt {
+                (
+                    vec![format!(
+                        "Blocked on external evidence: recover the exact full response for generation {generation} from worker {worker}; retain the row until capture, receipt, exchange projection, and editor authority agree."
+                    )],
+                    vec![
+                        format!("**recover-worker-{worker}:** Evidence: generation {generation} is completion-proven but its full capture is unavailable. Effect: supply the exact response from this worker lineage and resume integration. Risk: accepting the wrong generation would corrupt attribution. Reversible until closeout. Recommended when worker history or retained output exists."),
+                        format!("**operator-cancel:** Evidence: generation {generation} cannot advance without a response or explicit response-free proof. Effect: record typed operator cancellation and leave no inferred response. Risk: abandons any unrecovered worker result. Reversible only by a new generation. Choose only when recovery is impossible or the result is intentionally discarded."),
+                    ],
+                )
+            } else {
+                (
+                    vec![format!(
+                        "Proposed same-turn coordinator action ({:?}): inspect generation {generation}, worker {worker}, capture and effect receipts; advance only on complete proof.",
+                        item.operation,
+                    )],
+                    Vec::new(),
+                )
+            };
+            responses.push(QueueSyncRecoveryResponse {
+                response_id,
+                item: item.item.clone(),
+                summary,
+                next_actions,
+                choices,
+            });
+        }
+        for debt in &self.placement_reconcile {
+            let stable_key = format!(
+                "{}\0placement\0{}",
+                debt.document_path, debt.item_id
+            );
+            let response_id = format!("r-{}", agent_doc_hash::short_content_hash(&stable_key));
+            if !seen.insert(response_id.clone()) {
+                continue;
+            }
+            let choices = debt
+                .eligible_queue_ids
+                .iter()
+                .map(|queue_id| {
+                    format!(
+                        "**queue-{queue_id}:** Evidence: `{queue_id}` is an eligible queue and the requested placement is {}. Effect: route this exact item to `{queue_id}`. Risk: choosing the wrong coordinator changes execution order/ownership. Reversible by an editor-authoritative move before dispatch. Recommended only when `{queue_id}` matches the item's intended owner.",
+                        debt.requested_queue_id.as_deref().unwrap_or("ambiguous")
+                    )
+                })
+                .collect();
+            responses.push(QueueSyncRecoveryResponse {
+                response_id,
+                item: debt.item_text.clone(),
+                summary: format!(
+                    "Nonterminal placement decision for item #{}; requested={}; eligible={}.",
+                    debt.item_id,
+                    debt.requested_queue_id.as_deref().unwrap_or("ambiguous"),
+                    debt.eligible_queue_ids.join(","),
+                ),
+                next_actions: vec![
+                    "Blocked on operator placement judgment; keep the item open until one eligible queue is selected."
+                        .to_string(),
+                ],
+                choices,
+            });
+        }
+        for error in &self.scan_errors {
+            let stable_key = format!("{}\0scan-error", error.document_path);
+            let response_id = format!("r-{}", agent_doc_hash::short_content_hash(&stable_key));
+            if !seen.insert(response_id.clone()) {
+                continue;
+            }
+            responses.push(QueueSyncRecoveryResponse {
+                response_id,
+                item: error.document_path.clone(),
+                summary: format!(
+                    "Nonterminal document scan debt: operation={:?}; evidence={}",
+                    error.operation, error.detail
+                ),
+                next_actions: vec![
+                    "Blocked on document authority/readability; restore access to the named document and rerun queue sync before advancing any inferred state."
+                        .to_string(),
+                ],
+                choices: Vec::new(),
+            });
+        }
+        responses
     }
 
     fn push(&mut self, item: QueueSyncItem) {
@@ -413,6 +575,8 @@ pub fn project_document_queue_sync(
                         completion_outbox_recovered: claim
                             .is_some_and(|claim| claim.completion_recovered_after_loss),
                         completion_response_receipt: false,
+                        response_id: None,
+                        response_capture_sha256: None,
                         response_evidence: if claim
                             .is_some_and(|claim| claim.completion_recovered_after_loss)
                         {
@@ -455,6 +619,8 @@ pub fn project_document_queue_sync(
                         execution_evidence: QueueSyncExecutionEvidence::Unknown,
                         completion_outbox_recovered: false,
                         completion_response_receipt: false,
+                        response_id: None,
+                        response_capture_sha256: None,
                         response_evidence: QueueSyncResponseEvidence::NotApplicable,
                         recovered_response: None,
                         missing_response_debt: false,
@@ -913,5 +1079,62 @@ mod tests {
 
         assert_eq!(payload.blocked.len(), 1);
         assert_eq!(payload.blocked[0].operation, QueueSyncOperation::Wait);
+    }
+
+    #[test]
+    fn recovery_responses_are_attempt_stable_and_choices_are_evidence_bound() {
+        let content =
+            "<!-- agent:run id=main subagents -->\n- ⚠️☑️ recovered\n<!-- /agent:run -->\n";
+        let mut recovered = claim(
+            "recovered",
+            QueueClaimState::Reported,
+            Some("worker-recovered"),
+        );
+        recovered.completion_recovered_after_loss = true;
+        let mut payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[recovered],
+        )
+        .unwrap();
+
+        let first = payload.recovery_responses().pop().unwrap();
+        assert_eq!(first.choices.len(), 2);
+        assert!(first.render_markdown().contains("**Next actions:**"));
+        assert!(first.render_markdown().contains("**Choices:**"));
+        assert!(first.choices.iter().all(|choice| {
+            choice.contains("Evidence:")
+                && choice.contains("Effect:")
+                && choice.contains("Risk:")
+                && choice.contains("Reversible")
+        }));
+
+        payload.lost_reported[0].response_evidence =
+            QueueSyncResponseEvidence::AmbiguousHistory;
+        let updated = payload.recovery_responses().pop().unwrap();
+        assert_eq!(first.response_id, updated.response_id);
+        assert_ne!(first.summary, updated.summary);
+    }
+
+    #[test]
+    fn safe_reconcile_intent_has_no_operator_choice() {
+        let content = "<!-- agent:run id=main subagents -->\n- ⚠️ orphan\n<!-- /agent:run -->\n";
+        let payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[],
+        )
+        .unwrap();
+        let recovery = payload.recovery_responses().pop().unwrap();
+        assert!(recovery.choices.is_empty());
+        assert!(recovery.next_actions[0].contains("same-turn coordinator action"));
+        assert_eq!(
+            payload.reconcile_unknown[0].operation,
+            QueueSyncOperation::Reconcile
+        );
     }
 }

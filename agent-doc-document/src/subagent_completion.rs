@@ -220,6 +220,42 @@ pub fn completion_evidence(text: &str) -> Vec<CompletionEvidence> {
         .collect()
 }
 
+/// Recover the full hash-attested worker response for one completion id.
+/// Legacy/bodyless cells deliberately return `None`: absence is not response
+/// proof.
+pub fn completion_response(text: &str, expected_key: &str) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    for range in completion_cell_line_ranges(text) {
+        let Some(evidence) = completion_evidence_for_range(&lines, &range) else {
+            continue;
+        };
+        if evidence.key != expected_key {
+            continue;
+        }
+        let digest_line = lines.get(range.start + 1)?;
+        response_digest(digest_line)?;
+        let body = lines.get(range.start + 2..range.end.checked_sub(1)?)?;
+        let first = body.first()?.trim();
+        if first != "> **Subagent response:**" {
+            return None;
+        }
+        let response = body
+            .iter()
+            .skip(1)
+            .map(|line| {
+                line.strip_prefix("> ")
+                    .or_else(|| line.strip_prefix('>'))
+                    .unwrap_or(line)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+        return (!response.is_empty()).then_some(response);
+    }
+    None
+}
+
 fn completion_evidence_for_range(
     lines: &[&str],
     range: &Range<usize>,
@@ -426,12 +462,19 @@ mod tests {
         assert!(current.contains("> - 4 passed"));
         assert_eq!(completion_cell_line_ranges(&current), vec![0..10]);
         assert_eq!(completion_evidence(&current)[0].key, "k1");
+        assert_eq!(
+            completion_response(&current, "k1").as_deref(),
+            Some("Implemented the fix.\n\n### Tests\n\n- 4 passed")
+        );
+        assert!(completion_response(&current, "other-key").is_none());
 
         let edited = current.replace("> - 4 passed", "> - 5 passed");
         assert!(
             completion_cell_line_ranges(&edited).is_empty(),
             "edited worker prose must not retain binary completion authority"
         );
+        assert!(completion_response(&edited, "k1").is_none());
+        assert!(completion_response(&cell("subagent:a", "finish a", "k1"), "k1").is_none());
     }
 
     #[test]

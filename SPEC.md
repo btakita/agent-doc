@@ -35,6 +35,15 @@
 
 - Newly scaffolded and auto-created todo components use `<!-- agent:todo priority -->`; existing todo markers remain operator-owned and unchanged.
 
+- Every normal-cycle preflight projects each open `agent:todo` row as a
+  `todo_sync_required` signal (`#todosyncaudit`). The agent reconciles every
+  signal against current-cycle evidence and includes `--todo-done <selector>`
+  in the same closeout when the action is finished or moot, including
+  standalone rows with no tracked-work link. A row stays open only while a
+  concrete operator action remains; uncertain evidence never completes it.
+  See [Document Format](specs/02-document-format.md#components) and
+  [Closeout Commands](specs/07-closeout-commands.md#write-path-invariants).
+
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming
   ownership (`#tmuxscopesteward`): Rust-test targets prevent new scope creation,
   scheduled and on-demand sweeps reset failed units, and a running orphan is

@@ -271,7 +271,8 @@ pub struct GateVerifyResult {
 pub struct TodoSignal {
     /// `tracked_work_missing_todo_backlink`, `legacy_source_unqualified`,
     /// `operator_done_review_open`, `operator_done_backlog_open`, `operator_done_icebox_open`,
-    /// `linked_work_resolved`, or `cited_work_resolved`.
+    /// `linked_work_resolved`, `cited_work_resolved`, or
+    /// `todo_sync_required`.
     pub kind: String,
     /// The `--todo-*` selector of the item (its own id, else its text).
     pub todo: String,
@@ -279,6 +280,14 @@ pub struct TodoSignal {
     pub ids: Vec<String>,
     /// What the agent does about it.
     pub action: String,
+}
+
+fn shell_quote_todo_selector(selector: &str) -> String {
+    if selector.contains(char::is_whitespace) {
+        format!("'{}'", selector.replace('\'', "'\\''"))
+    } else {
+        selector.to_string()
+    }
 }
 
 /// `#todoids`: render the agent-facing action for one link finding.
@@ -290,11 +299,7 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
         .map(|id| format!("#{id}"))
         .collect::<Vec<_>>()
         .join(", ");
-    let selector = if finding.selector.contains(char::is_whitespace) {
-        format!("'{}'", finding.selector.replace('\'', "'\\''"))
-    } else {
-        finding.selector.clone()
-    };
+    let selector = shell_quote_todo_selector(&finding.selector);
     let action = match finding.kind {
         Kind::TrackedWorkMissingTodoBacklink => format!(
             "Open agent:{component} item {ids} has no backlink to an existing Todo. Add or reuse an operator Todo, then put `(todos: [#todo-id])` on {ids} or put `(source: agent:{component} [#{id}])` on that Todo. Metadata naming a missing Todo does not satisfy the invariant.",
@@ -323,7 +328,7 @@ pub fn todo_signal_from_finding(finding: &agent_doc_element::todo::TodoLinkFindi
             id = finding.ids.first().map(String::as_str).unwrap_or_default(),
         ),
         Kind::LinkedWorkResolved => format!(
-            "Tracked work {ids} is resolved, so todo {label} is finished or moot. The next closeout that carries tracked-work flags checks it off automatically; to do it now: --todo-done {selector}.",
+            "Tracked work {ids} is resolved, so todo {label} is finished or moot. Complete it in this closeout: --todo-done {selector}. A closeout that carries tracked-work flags also checks the linked todo automatically.",
             label = finding.label,
         ),
         Kind::CitedWorkResolved => format!(
@@ -520,9 +525,27 @@ fn run_todo_id_maintenance_with_options(
 
 /// `#todoids`: evaluate the document's `agent:todo` against its tracked work
 /// (including the external done archive). Fail closed: unreadable evidence
-/// yields no signal and a stderr note, never a "nothing to do" that could be
-/// mistaken for a verdict.
+/// yields no link-derived signal and a stderr note, never a "nothing to do"
+/// that could be mistaken for a verdict. The structural `#todosyncaudit`
+/// signals remain available because they do not depend on tracked-work proof.
 pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> {
+    let sync_signals = || {
+        agent_doc_element::todo::open_todo_audit_items(content)
+            .into_iter()
+            .map(|item| {
+                let selector = shell_quote_todo_selector(&item.selector);
+                TodoSignal {
+                    kind: "todo_sync_required".to_string(),
+                    todo: item.selector,
+                    ids: Vec::new(),
+                    action: format!(
+                        "Audit open agent:todo action `{}` against current cycle evidence. If it is finished or moot, complete it now with --todo-done {selector}; leave it open only while a concrete operator action remains.",
+                        item.action
+                    ),
+                }
+            })
+            .collect::<Vec<_>>()
+    };
     let links = match agent_doc_element_backlog_io::backlog_cmd::todo_link_index_in_content(
         file,
         content,
@@ -534,7 +557,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             eprintln!(
                 "[preflight] todo: tracked-work evidence unreadable ({err:#}); todo link checks skipped"
             );
-            return Vec::new();
+            return sync_signals();
         }
     };
     match agent_doc_element::todo::todo_link_findings(content, &links) {
@@ -543,6 +566,10 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
                 .iter()
                 .map(todo_signal_from_finding)
                 .collect::<Vec<_>>();
+            // `#todosyncaudit`: every open operator todo is a reconciliation
+            // obligation, including standalone prose whose completion cannot
+            // be inferred from tracked-work ids.
+            signals.extend(sync_signals());
             // GH #381: project-inherited presets are invocations too; they are
             // never copied into the document, so resolve the effective map here.
             let presets = agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
@@ -559,7 +586,7 @@ pub fn todo_signals_for_document(file: &Path, content: &str) -> Vec<TodoSignal> 
             eprintln!(
                 "[preflight] todo: agent:todo unreadable ({err:#}); todo link checks skipped"
             );
-            Vec::new()
+            sync_signals()
         }
     }
 }
@@ -9774,6 +9801,47 @@ mod tests {
         let authoritative = state.authoritative_content.as_deref().unwrap();
         assert!(authoritative.contains("#upgrade"), "{authoritative}");
         assert!(!authoritative.contains("~~#upgrade~~"), "{authoritative}");
+    }
+
+    /// `#todosyncaudit`: every open operator todo reaches the cycle contract,
+    /// even when it has no tracked-work relationship the binary can resolve.
+    #[test]
+    fn open_todos_emit_sync_obligations_with_closeout_selectors() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#publish] Publish docs/release.md\n",
+            "- [x] [#verified] Verify the old build\n",
+            "- [/] Decide whether the fallback is still needed\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        let signals = todo_signals_for_document(&doc, content);
+        let sync = signals
+            .iter()
+            .filter(|signal| signal.kind == "todo_sync_required")
+            .collect::<Vec<_>>();
+        assert_eq!(sync.len(), 2, "{signals:?}");
+        assert_eq!(sync[0].todo, "publish");
+        assert!(
+            sync[0].action.contains("finished or moot")
+                && sync[0].action.contains("--todo-done publish"),
+            "{signals:?}"
+        );
+        assert_eq!(sync[1].todo, "Decide whether the fallback is still needed");
+        assert!(
+            sync[1]
+                .action
+                .contains("--todo-done 'Decide whether the fallback is still needed'"),
+            "{signals:?}"
+        );
+        assert!(
+            signals.iter().all(|signal| signal.todo != "verified"),
+            "checked todos need no sync obligation: {signals:?}"
+        );
     }
 
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session

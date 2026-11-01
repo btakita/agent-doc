@@ -117,7 +117,13 @@ only the compact routing table that survives context compaction.
 Read [respond.md](respond.md) completely. Reconcile the changed exchange tail
 oldest-first: do not stop at the newest question, and address each unresolved
 prompt and `prompt_target`. Load [pending-ops.md](pending-ops.md) for backlog,
-review, done, icebox, and TODO changes. In template mode use real headings:
+review, done, icebox, and TODO changes. **Proactively reconcile every open
+`agent:todo` item (`#todosyncaudit`)**: consume each `todo_sync_required`
+preflight signal, compare the item with current-cycle evidence, and include
+`--todo-done <selector>` in this closeout whenever the action is finished or
+moot. Leave it open only while a concrete operator action remains; do not wait
+for the operator to notice stale checklist state. In template mode use real
+headings:
 
 `### Re: topic — opus-5 · 2026-09-11T23:45-04:00`
 

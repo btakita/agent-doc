@@ -1917,10 +1917,24 @@ pub struct OpenTodoReference {
     pub selector: String,
 }
 
-/// The action text of every open (`[ ]`/`[/]`) `agent:todo` item, in document
-/// order. Feeds the GH #318 operator-todo response advisory, which treats an
-/// ask an open item already records as recorded.
-pub fn open_todo_actions(content: &str) -> Vec<String> {
+/// One open (`[ ]`/`[/]`) `agent:todo` item that the agent must reconcile at
+/// the next response cycle (`#todosyncaudit`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenTodoAuditItem {
+    /// The `--todo-*` selector: the item's own id, else its action text.
+    pub selector: String,
+    /// The operator-facing action, without the checkbox or own-id prefix.
+    pub action: String,
+}
+
+/// Every open (`[ ]`/`[/]`) `agent:todo` item, in document order.
+///
+/// Preflight projects this list into `todo_sync_required` signals so an agent
+/// cannot overlook a stale checklist entry merely because it has no tracked
+/// work link. The projection is deliberately structural: deciding whether an
+/// action is finished or moot still requires the agent to interpret current
+/// cycle evidence.
+pub fn open_todo_audit_items(content: &str) -> Vec<OpenTodoAuditItem> {
     let Ok(Some(todo)) = find_todo_component(content) else {
         return Vec::new();
     };
@@ -1928,6 +1942,19 @@ pub fn open_todo_actions(content: &str) -> Vec<String> {
         .items
         .into_iter()
         .filter(|item| item.state.is_open())
+        .map(|item| OpenTodoAuditItem {
+            selector: item.own_id.unwrap_or_else(|| item.action.clone()),
+            action: item.action,
+        })
+        .collect()
+}
+
+/// The action text of every open (`[ ]`/`[/]`) `agent:todo` item, in document
+/// order. Feeds the GH #318 operator-todo response advisory, which treats an
+/// ask an open item already records as recorded.
+pub fn open_todo_actions(content: &str) -> Vec<String> {
+    open_todo_audit_items(content)
+        .into_iter()
         .map(|item| item.action)
         .collect()
 }
@@ -3136,7 +3163,21 @@ mod tests {
                 "Decide the merge order (#gate2)".to_string(),
             ]
         );
+        assert_eq!(
+            open_todo_audit_items(&content),
+            vec![
+                OpenTodoAuditItem {
+                    selector: "k3vd".to_string(),
+                    action: "Verify [#gate1] in a live pane".to_string(),
+                },
+                OpenTodoAuditItem {
+                    selector: "Decide the merge order (#gate2)".to_string(),
+                    action: "Decide the merge order (#gate2)".to_string(),
+                },
+            ]
+        );
         assert!(open_todo_actions("no components").is_empty());
+        assert!(open_todo_audit_items("no components").is_empty());
     }
 
     #[test]

@@ -69,6 +69,16 @@ Combine any number of flags in one `agent-doc write` call:
 
 When `--todo-add` creates a missing component, the default opener is `<!-- agent:todo priority -->`. Existing todo markers and their operator-authored attributes remain unchanged.
 
+**Todo synchronization is a mandatory closeout audit (`#todosyncaudit`).**
+Preflight emits `todo_sync_required` for every open `agent:todo` row. Inspect
+each one against current-cycle evidence and pass `--todo-done <selector>` for
+every action that is finished or moot, even when no tracked-work link exists
+and the operator did not mention the stale checkbox this turn. Leave a row open
+only while a concrete operator action remains. Prefer completion for a valid
+historical action; reserve `--todo-remove` for an invalid or cancelled row whose
+checked history would mislead. Never infer completion when evidence is
+uncertain.
+
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

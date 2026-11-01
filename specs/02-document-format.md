@@ -707,16 +707,29 @@ carries an item the document holds `[x]` as `[ ]`/`[/]` keeps it `[x]`
 and the keyed merge keeps an operator check made concurrently with an agent
 write. Only `--todo-reopen` unchecks an item.
 
-**Todo link checks (`#todoids`).** Agents check todos at two opportune events,
-using only deterministic, cheap evidence — the document's tracked-work state
-and its done archive; no network, no clock, no prose heuristics:
+**Todo synchronization (`#todoids`, `#todosyncaudit`).** Agents reconcile todos
+at every response cycle. The binary projects deterministic document evidence;
+the agent decides from current authorized evidence whether a natural-language
+action is finished or moot:
 
 - **Preflight** (read-only) emits `todo_signals` in its JSON and a
-  `[preflight] todo:` stderr line per signal: the two operator-done signals
-  above, `linked_work_resolved` (an OPEN todo whose OWN id, or every source
-  its canonical locator names, is resolved tracked work), and `cited_work_resolved` (an OPEN todo that only CITES
-  tracked work, all of it resolved). Signals are state, not events, so they
-  repeat until the state changes.
+  `[preflight] todo:` stderr line per signal. Every OPEN row emits
+  `todo_sync_required`, with its stable selector and an instruction to compare
+  it with current-cycle evidence and use `--todo-done` when it is finished or
+  moot. Link-derived signals additionally include the two operator-done
+  signals above, `linked_work_resolved` (an OPEN todo whose OWN id, or every
+  source its canonical locator names, is resolved tracked work), and
+  `cited_work_resolved` (an OPEN todo that only CITES tracked work, all of it
+  resolved). Structural sync signals remain available when tracked-work
+  evidence is unreadable; no link verdict is inferred in that case. Signals
+  are state, not events, so they repeat until the state changes.
+- **Agent closeout audit** consumes every `todo_sync_required` signal. It
+  includes `--todo-done <selector>` for every action current evidence proves
+  finished or moot, even when the row has no tracked-work link and the operator
+  did not mention it this turn. It leaves a row open only while a concrete
+  operator action remains. `--todo-remove` is reserved for invalid or cancelled
+  rows whose checked history would mislead, and uncertain evidence never closes
+  a row.
 - **Closeout** (any write that carries tracked-work flags) checks off every
   OPEN todo whose OWN id, or every linked source, is resolved — including ids this closeout resolved with
   `--done` / `--review-resolve`, but never a todo this closeout's own

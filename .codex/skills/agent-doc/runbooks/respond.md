@@ -713,7 +713,7 @@ gated items to `--done` or actionable backlog items rather than letting them
 accumulate. See [pending-ops.md](pending-ops.md) for the full review-discipline
 rule.
 
-## Step 1c — Record operator TODOs (template mode, `#operatortodo`)
+## Step 1c — Reconcile and record operator TODOs (template mode, `#operatortodo`, `#todosyncaudit`)
 
 `agent:todo` records concrete actions that the operator, rather than the agent,
 must perform. When the work creates one, add one brief checklist item
@@ -726,6 +726,19 @@ in the same cycle. Start with the action and keep only the context needed to act
 - A reference does not change ownership or scheduling. Agent-runnable work stays
   in `agent:backlog`; a human gate stays in `agent:review`; `agent:todo` only
   records the operator action.
+
+**Audit every open todo every cycle.** Preflight emits one
+`todo_sync_required` signal per open item, including standalone prose with no
+tracked-work link. Compare each item with the document, this cycle's results,
+and any authoritative external receipt already in scope. If the action is
+finished or moot, include `--todo-done <selector>` in this same closeout. A
+moot item is completed, not silently left open; use `--todo-remove` only when
+the item was invalid or cancelled and preserving it as checked history would be
+misleading. Leave an item open only when a concrete operator action still
+remains. This is proactive reconciliation: do not wait for the operator to
+check the box or mention the stale item, and do not limit the audit to
+`linked_work_resolved` / `cited_work_resolved` signals. When evidence is
+uncertain, preserve the open item rather than guessing.
 
 Record it with the closeout flag `--todo-add "<action>"` (repeatable), for
 example `agent-doc write --commit <FILE> --todo-add "Verify [#gate1] in a live pane"`.
@@ -774,14 +787,16 @@ unchecks). Preflight reconciles it in `todo_signals`:
   checkbox.
 - `linked_work_resolved` — the todo's own id is resolved work; the next
   closeout with tracked-work flags checks it off automatically
-  (`[todo] auto-done`), or run `--todo-done <id>` now.
+  (`[todo] auto-done`); also include `--todo-done <id>` now so this closeout
+  expresses the reconciliation explicitly.
 - `cited_work_resolved` — every tracked item the todo cites is resolved; check
   it off with `--todo-done` only if the operator action itself is finished.
   These are never auto-completed.
 
-**Mark it complete when it is finished (`#tododone`).** When the operator says
-an action is done, or you verify it is (the gate it cites resolved, the draft is
-published), check it off in the SAME closeout:
+**Mark it complete when it is finished or moot (`#tododone`).** When the
+operator says an action is done, you verify it is (the gate it cites resolved,
+the draft is published), or current evidence makes the action unnecessary,
+check it off in the SAME closeout:
 `agent-doc write --commit <FILE> --todo-done <id>`. The selector is the item's
 own `[#id]`, a `#id` the item cites (`... (#gate1)`), or its exact text, so
 operator-written items without an id work too. The binary flips `[ ]` to `[x]`

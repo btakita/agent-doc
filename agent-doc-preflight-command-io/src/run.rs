@@ -1349,6 +1349,22 @@ fn run_with_options_to_writer_in_pass(
         .authoritative_content
         .as_deref()
         .unwrap_or(&diff_result_with_current.current);
+    let queue_relations = agent_doc_queue::prompt_identity::project(
+        queue_authoritative_content,
+        &agent_doc_hash::document_id_for_path(file),
+    )
+    .relations;
+    warnings.extend(
+        queue_relations
+            .diagnostics
+            .iter()
+            .map(|diagnostic| PreflightWarning {
+                code: diagnostic.code.clone(),
+                message: diagnostic.message.clone(),
+                document_agent: None,
+                active_harness: None,
+            }),
+    );
     // `#queuesyncpayload`: queue maintenance above is the deterministic repair
     // pass.  Inspect its settled cut before normal selection/dispatch and retain
     // every unresolved item -- including inactive components and sibling
@@ -1988,11 +2004,26 @@ fn run_with_options_to_writer_in_pass(
     // the closeout gates then release the requirement once every such head is
     // worker-owned. Text that is not a drainable head keeps it armed.
     let (backlog_capture_required, backlog_capture_heads) = {
-        let not_drained = agent_doc_queue_io::queue_claim::claimed_items_for_content(
+        let mut not_drained = agent_doc_queue_io::queue_claim::claimed_items_for_content(
             file,
             queue_authoritative_content,
         )
         .with_heads(&pending_queue_subagent_dispatch);
+        // Stable-id admission happens after the diff cut is captured. When a
+        // legacy head was already claimed, classify both the old source line
+        // in that cut and the admitted q-id line in authority as the same
+        // undrained work for this cycle.
+        let admission_projection = agent_doc_queue::prompt_identity::project(
+            &diff_result_with_current.current,
+            &agent_doc_hash::document_id_for_path(file),
+        );
+        let admission_aliases = admission_projection
+            .assignments
+            .iter()
+            .filter(|assignment| not_drained.claims(&assignment.target_text))
+            .map(|assignment| assignment.source_text.clone())
+            .collect::<Vec<_>>();
+        not_drained = not_drained.with_heads(&admission_aliases);
         // The admitted diff cut and the post-maintenance projection: maintenance
         // may reap a struck line the diff still carries.
         let mut scope = agent_doc_queue::capture_scope::capture_scope(
@@ -2042,7 +2073,7 @@ fn run_with_options_to_writer_in_pass(
         let heads = if scoped {
             // Name each head as the live head a mid-cycle claim will hold: queue
             // maintenance may have promoted a free-text head into `do [#id]`.
-            agent_doc_queue::capture_scope::promoted_head_texts(
+            let heads = agent_doc_queue::capture_scope::promoted_head_texts(
                 &scope.heads_behind_requirement(
                     &prompt_targets,
                     &added_diff_lines,
@@ -2055,7 +2086,21 @@ fn run_with_options_to_writer_in_pass(
                     },
                 ),
                 &queue_state.free_text_promotions,
-            )
+            );
+            heads
+                .into_iter()
+                .map(|head| {
+                    admission_projection
+                        .assignments
+                        .iter()
+                        .find(|assignment| {
+                            agent_doc_queue::queue_claim::claim_identity(&assignment.source_text)
+                                == agent_doc_queue::queue_claim::claim_identity(&head)
+                        })
+                        .map(|assignment| assignment.target_text.clone())
+                        .unwrap_or(head)
+                })
+                .collect()
         } else {
             Vec::new()
         };
@@ -2933,6 +2978,7 @@ fn run_with_options_to_writer_in_pass(
         agent_model: preflight_read_projection.tiers.agent_model.clone(),
         queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts,
+        queue_relations,
         queue_sync_guidance: (!queue_sync.is_empty())
             .then(|| agent_doc_queue::queue_sync_payload::QUEUE_SYNC_GUIDANCE.to_string()),
         queue_sync,
@@ -4507,9 +4553,12 @@ mod tests {
         let baseline = capture_scope_doc(" subagents", "", "");
         let current = capture_scope_doc(" subagents", "- #actionable-review\n", "");
         let (parsed, requires) = capture_scope_preflight(&dir, &baseline, None, &current);
-        assert_eq!(
-            parsed["queue_subagent_dispatch"][0]["item"], "#actionable-review",
-            "the head must reach this cycle as subagent dispatch work: {parsed:#}"
+        let dispatched = parsed["queue_subagent_dispatch"][0]["item"]
+            .as_str()
+            .unwrap();
+        assert!(
+            dispatched.starts_with("#actionable-review [#q-") && dispatched.ends_with(']'),
+            "the admitted head must reach this cycle as stable subagent dispatch work: {parsed:#}"
         );
         assert!(
             !requires,
@@ -4781,10 +4830,15 @@ mod tests {
         assert!(requires, "{parsed:#}");
         let doc = dir.path().join("session.md");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(state.backlog_capture_heads, vec!["#actionable-review"]);
+        assert_eq!(state.backlog_capture_heads.len(), 1);
+        assert!(state.backlog_capture_heads[0].contains("[#q-"));
         assert_capture_gate_armed(&doc);
 
-        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        start_worker_mid_cycle(
+            &doc,
+            &state.backlog_capture_heads[0],
+            "subagent:review",
+        );
         prewrite_capture_gate(&doc).expect("the head behind the requirement is worker-owned");
     }
 
@@ -4806,12 +4860,18 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         // Queue maintenance promoted the free-text head into a `do [#id]` head;
         // the recorded head names the live head a claim holds.
+        assert_eq!(state.backlog_capture_heads.len(), 2);
+        assert!(state.backlog_capture_heads[0].contains("[#q-"));
         assert_eq!(
-            state.backlog_capture_heads,
-            vec!["#actionable-review", "do [#leftovercleanupbacklog]"]
+            state.backlog_capture_heads[1],
+            "do [#leftovercleanupbacklog]"
         );
 
-        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        start_worker_mid_cycle(
+            &doc,
+            &state.backlog_capture_heads[0],
+            "subagent:review",
+        );
         assert_capture_gate_armed(&doc);
         start_worker_mid_cycle(&doc, "do [#leftovercleanupbacklog]", "subagent:cleanup");
         prewrite_capture_gate(&doc).expect("every head behind the requirement is worker-owned");
@@ -4835,7 +4895,14 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert!(state.backlog_capture_heads.is_empty(), "{state:?}");
 
-        start_worker_mid_cycle(&doc, "#actionable-review", "subagent:review");
+        let q_head = std::fs::read_to_string(&doc)
+            .unwrap()
+            .lines()
+            .find(|line| line.contains("#actionable-review [#q-"))
+            .unwrap()
+            .trim_start_matches("- ")
+            .to_string();
+        start_worker_mid_cycle(&doc, &q_head, "subagent:review");
         assert_capture_gate_armed(&doc);
     }
 
@@ -5821,7 +5888,11 @@ mod tests {
         run(&doc).unwrap();
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(state.selected_free_text_queue_heads, vec![head]);
+        assert_eq!(state.selected_free_text_queue_heads.len(), 1);
+        assert!(
+            state.selected_free_text_queue_heads[0].starts_with(&format!("{head} [#q-")),
+            "cycle state must retain the admitted stable identity: {state:?}"
+        );
     }
 
     #[test]

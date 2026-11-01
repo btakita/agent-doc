@@ -1429,6 +1429,31 @@ pub fn transfer_promoted_claims(
     Ok(transferred)
 }
 
+/// Carry live claims across exact binary-owned prompt-id admission receipts.
+pub fn transfer_prompt_identity_admissions(
+    file: &Path,
+    admissions: &[(String, String)],
+) -> Result<Vec<(String, String, String)>> {
+    if admissions.is_empty() || load_ledger(file)?.claims.is_empty() {
+        return Ok(Vec::new());
+    }
+    let now = now_secs();
+    let transferred = mutate_ledger(file, |ledger| {
+        Ok(ledger.transfer_prompt_identity_admissions(now, admissions))
+    })?;
+    for (source, target, owner) in &transferred {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_transferred_on_prompt_identity_admission owner={owner} source_bytes={} target_bytes={}",
+                source.trim().len(),
+                target.trim().len()
+            ),
+        );
+    }
+    Ok(transferred)
+}
+
 /// Active claims for `file` judged against `content`: expired claims and claims
 /// on items no longer in the queue are excluded.
 pub fn active_claims_for_content(file: &Path, content: &str) -> Result<Vec<QueueClaim>> {

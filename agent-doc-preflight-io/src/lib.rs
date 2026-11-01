@@ -1347,6 +1347,14 @@ pub struct PreflightOutput {
     /// Realtime-selected active queue prompts for this cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_queue_prompts: Vec<String>,
+    /// Non-ordering document-local queue relations and their computed
+    /// backlinks. This is navigation metadata only; `after=` remains the sole
+    /// queue dependency/order edge.
+    #[serde(
+        default,
+        skip_serializing_if = "agent_doc_queue::prompt_identity::QueueRelationGraph::is_empty"
+    )]
+    pub queue_relations: agent_doc_queue::prompt_identity::QueueRelationGraph,
     /// Beginning-of-turn reconciliation debt across every queue component in
     /// this and related session documents.  Derived repairs have already run;
     /// every remaining entry names the main-agent operation that must follow.
@@ -6824,6 +6832,54 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     }
     let struck_heads_this_pass = struck_retirement.struck_heads;
 
+    // Every executable queue row needs a durable identity before halt/defer,
+    // claims, lifecycle projection, selection, and response lineage read it.
+    // The pure projector runs on the editor-authoritative cut; persistence is
+    // still routed through queue-maintenance CAS. A concurrent editor edit
+    // therefore rebases/refuses instead of accepting a heuristic disk rewrite.
+    let prompt_identity_projection =
+        agent_doc_queue::prompt_identity::project(&current_content, &document_id);
+    let prompt_identity_admitted = !prompt_identity_projection.assignments.is_empty();
+    if prompt_identity_admitted {
+        let admitted_count = prompt_identity_projection.assignments.len();
+        let claim_admissions = prompt_identity_projection
+            .assignments
+            .iter()
+            .map(|assignment| {
+                (
+                    assignment.source_text.clone(),
+                    assignment.target_text.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if let Err(err) =
+            agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
+                file,
+                &claim_admissions,
+            )
+        {
+            eprintln!(
+                "[preflight] queue: WARNING: could not carry claims across stable-id admission: {err:#}"
+            );
+        }
+        current_content = prompt_identity_projection.content;
+        let comps = agent_doc_element::element::parse(&current_content)?;
+        if let Some(queue) = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &comps,
+            &selected_queue_id,
+        )? {
+            activation.entries_after = agent_doc_queue::document_queue::parse(
+                &current_content[queue.open_end..queue.close_start],
+            )?;
+        }
+        mutated = true;
+        eprintln!(
+            "[preflight] queue: admitted stable ids for {} executable prompt(s) through editor authority",
+            admitted_count
+        );
+    }
+
     // Phase 3: halt detection — stop fences and item modification
     if activation.active {
         // Stop fence at head → halt the queue
@@ -6927,6 +6983,15 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             agent_doc_queue::document_queue::time_gate_at_head(&activation.entries_after)
         {
             eprintln!("[preflight] queue: deferred — time gate at head: {}", dt);
+            if prompt_identity_admitted {
+                current_content = persist_queue_maintenance_doc(
+                    file,
+                    &current_content,
+                    &authority_baseline,
+                    project_root.as_deref(),
+                    "queue_prompt_identity_deferred",
+                )?;
+            }
             record_queue_worklist_state(file, &current_content, &activation.entries_after, false)?;
             if let Some(head) =
                 agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
@@ -6950,8 +7015,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 queue_continuation_required: false,
                 queue_supervisor_drainable: false,
                 queue_supervisor_continuation_head: None,
-                // `#qmaintorphan`: read-only / pre-persist path — no plane split to commit.
-                maintenance_mutated: false,
+                maintenance_mutated: prompt_identity_admitted,
                 claimed_queue_heads: vec![],
                 synced_queue_ids,
                 free_text_promotions: free_text_promotions.clone(),
@@ -12033,7 +12097,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     }
 
     #[test]
-    fn run_queue_maintenance_keeps_non_actionable_free_text_queue_head() {
+    fn run_queue_maintenance_admits_stable_id_to_legacy_free_text_head() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -12061,19 +12125,46 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "do something", "subagent:legacy", 3600)
+            .unwrap();
 
-        let state = run_queue_maintenance(&doc, None).unwrap();
+        run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
         let queue = component_body(&updated, "queue");
         let backlog = component_body(&updated, "backlog");
 
-        assert!(queue.contains("do something"), "{updated}");
+        assert!(queue.contains("do something [#q-"), "{updated}");
         assert!(!queue.contains("/goal"), "{updated}");
         assert!(
             !backlog.contains("do something"),
             "non-actionable existing queue text should not be lifted into backlog:\n{updated}"
         );
-        assert_eq!(state.selected_queue_prompts, vec!["do something"]);
+        let admitted = queue
+            .lines()
+            .find(|line| line.contains("do something"))
+            .unwrap()
+            .trim_start_matches("- ");
+        let id = agent_doc_queue::queue_continuation::extract_head_id(admitted).unwrap();
+        assert!(id.starts_with("q-"), "{admitted}");
+        assert!(
+            agent_doc_queue_io::queue_claim::claimed_items_for_content(&doc, &updated)
+                .claims(admitted),
+            "the legacy text claim must follow its admitted stable id: {updated}"
+        );
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let retried = std::fs::read_to_string(&doc).unwrap();
+        let retried_queue = component_body(&retried, "queue");
+        let retried_head = retried_queue
+            .lines()
+            .find(|line| line.contains("do something"))
+            .unwrap()
+            .trim_start_matches("- ");
+        assert_eq!(
+            agent_doc_queue::queue_continuation::extract_head_id(retried_head).as_deref(),
+            Some(id.as_str()),
+            "a retry must not reassign the admitted id"
+        );
     }
 
     #[test]

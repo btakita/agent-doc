@@ -14,7 +14,7 @@
 //!
 //! # Identity
 //!
-//! A claim keys on [`queue_head_identity`], the queue head's **work
+//! A claim keys on [`queue_prompt_stable_identity`], the queue head's **work
 //! identity** that dispatch, mid-turn steering, drainability and preflight
 //! selection share (`#claimdispatchidentity`): `#id` for id-backed heads,
 //! otherwise the normalized text left after lifecycle markers (`🚧`, `⏭️`,
@@ -105,7 +105,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use agent_doc_element_queue::{QueueItemIdentity, QueueReportState, queue_head_identity};
+use agent_doc_element_queue::{
+    QueueItemIdentity, QueueReportState, queue_prompt_stable_identity,
+};
 use serde::{Deserialize, Serialize};
 
 /// Default claim TTL: two hours. Long enough for a background subagent to fix
@@ -2218,6 +2220,56 @@ impl QueueClaimLedger {
         transferred
     }
 
+    /// Carry live claims across binary-owned stable-id admission. Each pair is
+    /// an exact `(before, after)` receipt from the prompt identity projector.
+    /// Unlike ordinary edit following, this transition is allowed to change a
+    /// legacy text key into its admitted `q-` identity in the same preflight
+    /// pass, before dispatch membership is computed.
+    pub fn transfer_prompt_identity_admissions(
+        &mut self,
+        now_secs: u64,
+        admissions: &[(String, String)],
+    ) -> Vec<(String, String, String)> {
+        let mut transferred = Vec::new();
+        for (source, target) in admissions {
+            let source_identity = claim_identity(source);
+            let target_identity = claim_identity(target);
+            if source_identity == target_identity {
+                continue;
+            }
+            let Some(mut source_index) = self.claims.iter().position(|claim| {
+                claim.identity == source_identity && claim.blocks_dispatch(now_secs)
+            }) else {
+                continue;
+            };
+            if let Some(target_index) = self
+                .claims
+                .iter()
+                .position(|claim| claim.identity == target_identity)
+            {
+                if self.claims[target_index].blocks_dispatch(now_secs) {
+                    continue;
+                }
+                self.claims.remove(target_index);
+                source_index = self
+                    .claims
+                    .iter()
+                    .position(|claim| claim.identity == source_identity)
+                    .expect("source claim remains after removing a distinct target");
+            }
+            let claim = &mut self.claims[source_index];
+            if !claim.followed_from.contains(&claim.item_text) {
+                claim.followed_from.push(claim.item_text.clone());
+            }
+            claim.followed_generation = claim.generation;
+            claim.identity = target_identity;
+            claim.item_text = target.clone();
+            claim.anchor = None;
+            transferred.push((source.clone(), target.clone(), claim.owner.clone()));
+        }
+        transferred
+    }
+
     /// Owner of every active claim, by identity (after any
     /// [`Self::follow_edits`] the caller applied).
     pub fn owners(
@@ -2313,14 +2365,15 @@ impl QueueClaimLedger {
 }
 
 /// The identity a claim on `item` keys on: the shared queue-head work
-/// identity ([`queue_head_identity`]). Every claim comparison — the ledger,
+/// identity ([`queue_prompt_stable_identity`]). Every claim comparison — the ledger,
 /// [`ClaimedQueueItems::claims`], live-head closure, dispatch membership —
 /// goes through this one function.
 ///
 /// A nest vector (`root: …: item`, `#nestlistlineage`) is one free-text key.
 /// The same bare `#tag` under two parents is two claims. A leading intent tag
-/// whose remainder is the work (`#subagents: #gh-fix <url>`) stays on
-/// [`queue_head_identity`].
+/// whose remainder is the work (`#subagents: #gh-fix <url>`) stays on the
+/// authored semantic identity. A binary-admitted trailing `[#q-…]` becomes
+/// the identity for otherwise free-text work.
 pub fn claim_identity(item: &str) -> QueueItemIdentity {
     // Publication state is binary-owned attempt metadata. Normalize both the
     // canonical `effect state` form and the historical `state effect state`
@@ -2332,7 +2385,7 @@ pub fn claim_identity(item: &str) -> QueueItemIdentity {
     if let Some(identity) = nest_vector_claim_identity(trimmed) {
         return identity;
     }
-    queue_head_identity(trimmed)
+    queue_prompt_stable_identity(trimmed)
 }
 
 /// Free-text identity of a nest vector, when `text` is one.
@@ -3187,6 +3240,33 @@ mod tests {
         ledger.transfer_promoted(200, &[(head.to_string(), "runfrontendcrashed".to_string())]);
         assert_eq!(ledger, before);
         assert!(!ledger.rekey());
+    }
+
+    #[test]
+    fn prompt_identity_admission_carries_a_legacy_claim_to_the_q_id() {
+        let source = "review the release";
+        let target = "review the release [#q-stable]";
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(source, "subagent:review", 100, 600);
+
+        let moved = ledger.transfer_prompt_identity_admissions(
+            200,
+            &[(source.to_string(), target.to_string())],
+        );
+        assert_eq!(
+            moved,
+            vec![(
+                source.to_string(),
+                target.to_string(),
+                "subagent:review".to_string()
+            )]
+        );
+        assert_eq!(ledger.claims[0].identity, claim_identity(target));
+        assert!(
+            ledger
+                .claimed_items(200, None)
+                .claims("🚧 review the release [#q-stable]")
+        );
     }
 
     #[test]

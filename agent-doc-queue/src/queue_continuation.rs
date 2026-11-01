@@ -2249,6 +2249,12 @@ pub(crate) fn mask_inline_code(text: &str) -> String {
 
 /// Extract the backlog id from a queue prompt like `do [#id]` or `#id`.
 pub fn extract_head_id(prompt: &str) -> Option<String> {
+    if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(prompt) {
+        return Some(id);
+    }
+    // Compatibility: legacy callers accepted an id reference anywhere in the
+    // prompt. Keep that read path for pre-admission documents, after preferring
+    // the canonical work identity (including a trailing binary-owned q-id).
     let scan = mask_inline_code(prompt);
     let scan = scan.as_str();
     if let Some(start) = scan.find("[#")

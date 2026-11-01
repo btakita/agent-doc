@@ -390,6 +390,21 @@ fn extract_head_id(prompt: &str) -> Option<String> {
     }
 }
 
+/// A binary-admitted queue prompt id is a trailing annotation on the first
+/// work line. Keeping it at the tail preserves the row's free-text grammar:
+/// response matching, prompt admission, and wrapped continuation lines still
+/// see prose rather than an artificial leading `do` directive.
+fn trailing_generated_prompt_id(text: &str) -> Option<&str> {
+    let first = text.lines().next()?.trim_end();
+    let without_report = strip_queue_report_state_annotation(first).trim_end();
+    let (work, annotation) = without_report.rsplit_once(" [#")?;
+    if work.trim().is_empty() {
+        return None;
+    }
+    let id = annotation.strip_suffix(']')?;
+    id.starts_with("q-").then_some(id)
+}
+
 fn id_prefix(text: &str) -> &str {
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
         .next()
@@ -814,6 +829,31 @@ pub fn queue_head_identity(text: &str) -> QueueItemIdentity {
     QueueItemIdentity::from_prompt(&strip_intent_tags(subprompts::head_without_subprompts(
         text,
     )))
+}
+
+/// Durable identity for an executable queue prompt. Authored semantic ids keep
+/// their existing meaning; otherwise an admitted trailing `[#q-…]` is the
+/// correlation identity. Legacy no-id rows retain the historical text key.
+pub fn queue_prompt_stable_identity(text: &str) -> QueueItemIdentity {
+    let semantic = queue_head_identity(text);
+    if semantic.is_id_backed() {
+        return semantic;
+    }
+    queue_prompt_stable_id(text)
+        .map(|id| QueueItemIdentity::FreeText(format!("queue-id:{id}")))
+        .unwrap_or(semantic)
+}
+
+/// Authored semantic id or binary-admitted q-id for correlation/navigation.
+/// Unlike [`queue_head_identity`], this does not make a q-id a tracked-work id.
+pub fn queue_prompt_stable_id(text: &str) -> Option<String> {
+    match queue_head_identity(text) {
+        QueueItemIdentity::Id(id) => Some(id),
+        QueueItemIdentity::FreeText(_) => {
+            let work = strip_intent_tags(subprompts::head_without_subprompts(text));
+            trailing_generated_prompt_id(&work).map(str::to_ascii_lowercase)
+        }
+    }
 }
 
 /// `text` with leading markers and leading `#tag` / `#tag:` intent tokens

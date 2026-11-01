@@ -607,6 +607,23 @@ fn response_action_child_end(
     Some(opener_index + 1)
 }
 
+/// Reserved, inert relation metadata for one queue prompt. Relations are
+/// navigation edges, never executable queue work and never ordering edges.
+/// Only the declaration row is reserved: an operator-authored child beneath it
+/// remains an ordinary list row and therefore follows normal promptability.
+fn related_row_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    _item_indent: usize,
+) -> Option<usize> {
+    let body = strip_bullet(lines.get(opener_index)?)?.trim();
+    body.strip_prefix("**Related:**")?;
+    // The reserved declaration row stays inert even when malformed so a bad
+    // relation never turns into executable queue work. Its children are not
+    // swallowed: an explicitly authored nested bullet remains promptable.
+    Some(opener_index + 1)
+}
+
 /// Return the end of an inert list child.
 ///
 /// Operator-authored multiline Obsidian comments retain their general list
@@ -624,6 +641,7 @@ pub fn inert_list_child_end(
         .or_else(|| response_choice_child_end(lines, opener_index, item_indent))
         .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
+        .or_else(|| related_row_child_end(lines, opener_index, item_indent))
 }
 
 /// Byte ranges occupied by balanced indented Obsidian comments represented as
@@ -1193,9 +1211,15 @@ fn extract_bracket_id(text: &str) -> Option<String> {
 /// before: the remainder IS the text.
 fn work_item_id(text: &str) -> (String, bool) {
     let work = agent_doc_element_queue::strip_attempt_projection_prefix(text);
-    match extract_bracket_id(work) {
-        Some(id) => (id, true),
-        None => (content_item_id(&classify(work), work), false),
+    if let Some(id) = agent_doc_element_queue::queue_prompt_stable_id(work)
+        && id.starts_with("q-")
+    {
+        return (id, true);
+    }
+    if let Some(id) = extract_bracket_id(work) {
+        (id, true)
+    } else {
+        (content_item_id(&classify(work), work), false)
     }
 }
 

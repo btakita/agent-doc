@@ -4167,6 +4167,13 @@ mod tests {
             claim.generation,
         )
         .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &file,
+            head,
+            claim.generation,
+            "sdk-demo worker completed the queue fix",
+        )
+        .unwrap();
         let reported = agent_doc_queue_io::claim_release_receipt::release_attempt(
             &file,
             head,
@@ -4294,6 +4301,13 @@ mod tests {
             "/root/reported",
             3600,
             claim.generation,
+        )
+        .unwrap();
+        agent_doc_queue_io::claim_release_receipt::capture_response_for_attempt(
+            &file,
+            head,
+            claim.generation,
+            "reported worker completed the queue work",
         )
         .unwrap();
         agent_doc_queue_io::claim_release_receipt::release_attempt(

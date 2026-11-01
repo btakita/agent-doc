@@ -925,6 +925,136 @@ fn inline_response_summaries(content: &str, response_id: &str) -> Vec<String> {
             summaries.push(summary.to_string());
         }
     }
+    summaries.extend(structured_inline_response_summaries(content, response_id));
+    summaries
+}
+
+#[derive(Debug)]
+struct StructuredInlineResponse {
+    indent: usize,
+    timestamp_seen: bool,
+    summary: Option<String>,
+    invalid: bool,
+}
+
+fn finish_structured_inline_response(
+    candidate: StructuredInlineResponse,
+    summaries: &mut BTreeSet<String>,
+) {
+    if candidate.timestamp_seen
+        && !candidate.invalid
+        && let Some(summary) = candidate.summary
+    {
+        summaries.insert(summary);
+    }
+}
+
+/// Recover the current binary-owned response projection shape:
+///
+/// ```text
+/// - **Response [#r-…]**
+///   - **Timestamp:** …
+///   - **Summary:** …
+/// ```
+///
+/// The timestamp is deliberately not response identity. Only one non-empty,
+/// direct `Summary` child proves content. Identical copies in several prompt
+/// trees collapse to one value; conflicting summaries remain multiple values
+/// and are rejected by the caller's exact-one compatibility gate.
+fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTreeSet<String> {
+    let response_item = format!("**Response {response_id}**");
+    let mut summaries = BTreeSet::new();
+    let mut candidate: Option<StructuredInlineResponse> = None;
+    let mut fence: Option<String> = None;
+
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim_start();
+        let fence_marker = trimmed
+            .strip_prefix("```")
+            .map(|_| "```")
+            .or_else(|| trimmed.strip_prefix("~~~").map(|_| "~~~"));
+        if let Some(marker) = fence_marker {
+            if fence.is_none()
+                && let Some(active) = candidate.as_mut()
+            {
+                let space_trimmed = raw_line.trim_start_matches(' ');
+                let indent = raw_line.len() - space_trimmed.len();
+                if indent > active.indent {
+                    active.invalid = true;
+                }
+                finish_structured_inline_response(
+                    candidate.take().expect("candidate is present"),
+                    &mut summaries,
+                );
+            }
+            if fence.as_deref() == Some(marker) {
+                fence = None;
+            } else if fence.is_none() {
+                fence = Some(marker.to_string());
+            }
+            continue;
+        }
+        if fence.is_some() {
+            continue;
+        }
+
+        // Binary projections use space indentation. Tabs and non-list
+        // continuations never prove a structured response child.
+        let space_trimmed = raw_line.trim_start_matches(' ');
+        let indent = raw_line.len() - space_trimmed.len();
+        let item = space_trimmed.strip_prefix("- ");
+
+        if let Some(active) = candidate.as_mut() {
+            if !raw_line.trim().is_empty() && indent <= active.indent {
+                finish_structured_inline_response(
+                    candidate.take().expect("candidate is present"),
+                    &mut summaries,
+                );
+            } else if let Some(item) = item {
+                if indent == active.indent + 2 {
+                    if let Some(summary) = item.strip_prefix("**Summary:**") {
+                        let summary = summary.trim();
+                        if !active.timestamp_seen || summary.is_empty() || active.summary.is_some()
+                        {
+                            active.invalid = true;
+                        } else {
+                            active.summary = Some(summary.to_string());
+                        }
+                    } else if let Some(timestamp) = item.strip_prefix("**Timestamp:**") {
+                        if active.timestamp_seen
+                            || active.summary.is_some()
+                            || timestamp.trim().is_empty()
+                        {
+                            active.invalid = true;
+                        } else {
+                            active.timestamp_seen = true;
+                        }
+                    } else {
+                        active.invalid = true;
+                    }
+                } else if !raw_line.trim().is_empty() {
+                    active.invalid = true;
+                }
+                continue;
+            } else if !raw_line.trim().is_empty() {
+                active.invalid = true;
+                continue;
+            }
+        }
+
+        if item == Some(response_item.as_str()) {
+            candidate = Some(StructuredInlineResponse {
+                indent,
+                timestamp_seen: false,
+                summary: None,
+                invalid: false,
+            });
+        }
+    }
+
+    if let Some(candidate) = candidate {
+        finish_structured_inline_response(candidate, &mut summaries);
+    }
     summaries
 }
 
@@ -953,10 +1083,11 @@ fn inline_summary_response_cell(response_id: &str, summary: &str) -> String {
 
 /// Restore canonical inline response summaries that were committed before the
 /// sibling response index existed. Recovery is deliberately narrow: only a
-/// single newly introduced `**Response [#r-…]:**` row in one of the bounded Git
-/// candidates is eligible. Aggregate exchange reconstruction remains lookup
-/// compatibility only because splitting it into indexed per-section evidence
-/// would invent ownership.
+/// single newly introduced legacy `**Response [#r-…]:**` row or current
+/// `**Response [#r-…]**` projection with exact `Timestamp` and `Summary` children
+/// in one of the bounded Git candidates is eligible. Aggregate exchange
+/// reconstruction remains lookup compatibility only because splitting it into
+/// indexed per-section evidence would invent ownership.
 pub fn restore_inline_response_references_from_git(
     doc: &Path,
     content: &str,
@@ -1676,6 +1807,169 @@ mod tests {
         };
         assert_eq!(recovered.source, RecoverySource::GitHistoryCompatibility);
         assert_eq!(recovered.content, captured);
+        assert!(
+            dangling_response_references(&doc, &historical)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn structured_inline_response_summary_parsing_is_exact_and_fail_closed() {
+        const RESPONSE_ID: &str = "[#r-f656df4698e6]";
+        const SUMMARY: &str = "Recovered nested response evidence.";
+        let mirrored = format!(
+            concat!(
+                "- first prompt\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "- second prompt\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:02:30.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "```md\n",
+                "- **Response {id}**\n",
+                "  - **Summary:** fenced example only\n",
+                "```\n",
+            ),
+            id = RESPONSE_ID,
+            summary = SUMMARY,
+        );
+        assert_eq!(
+            inline_response_summaries(&mirrored, RESPONSE_ID),
+            [SUMMARY.to_string()],
+            "timestamps do not split identical cross-tree evidence"
+        );
+
+        let conflicting = format!(
+            concat!(
+                "- **Response {id}**\n",
+                "  - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "  - **Summary:** alpha\n",
+                "- **Response {id}**\n",
+                "  - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "  - **Summary:** beta\n",
+            ),
+            id = RESPONSE_ID,
+        );
+        assert_eq!(
+            inline_response_summaries(&conflicting, RESPONSE_ID).len(),
+            2,
+            "different summaries must remain ambiguous"
+        );
+
+        let malformed = [
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n- **Summary:** sibling\n"
+            ),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n    - **Summary:** too deep\n"
+            ),
+            format!("- **Response {RESPONSE_ID}**\n  - **Summary:** missing timestamp\n"),
+            format!("- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n  - **Summary:**\n"),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n\t- **Summary:** tabbed\n"
+            ),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n  - **Summary:** first\n  - **Summary:** second\n"
+            ),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n  - **Timestamp:** later\n  - **Summary:** duplicate timestamp\n"
+            ),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Summary:** wrong order\n  - **Timestamp:** now\n"
+            ),
+            concat!(
+                "- **Response [#r-deadbeefcafe]**\n",
+                "  - **Timestamp:** now\n",
+                "  - **Summary:** wrong id\n",
+            )
+            .to_string(),
+        ];
+        for content in malformed {
+            assert!(
+                inline_response_summaries(&content, RESPONSE_ID).is_empty(),
+                "malformed projection was accepted:\n{content}"
+            );
+        }
+
+        let legacy = format!("- **Response {RESPONSE_ID}:** legacy summary\n");
+        assert_eq!(
+            inline_response_summaries(&legacy, RESPONSE_ID),
+            ["legacy summary".to_string()],
+            "legacy one-line evidence remains readable"
+        );
+        let legacy_ambiguous =
+            format!("- **Response {RESPONSE_ID}:** same\n- **Response {RESPONSE_ID}:** same\n");
+        assert_eq!(
+            inline_response_summaries(&legacy_ambiguous, RESPONSE_ID).len(),
+            2,
+            "legacy duplicate evidence keeps its existing ambiguity semantics"
+        );
+    }
+
+    #[test]
+    fn committed_structured_response_summary_is_restored_to_the_tracked_index() {
+        const RESPONSE_ID: &str = "[#r-a1b9cb2aef83]";
+        const SUMMARY: &str = "Use semantic child roles, not a blanket parent exception.";
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let initial = concat!(
+            "<!-- agent:queue -->\n",
+            "- first prompt\n",
+            "- second prompt\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, initial).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "initial"]);
+
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~first prompt~~ — auto-struck: response: {id}\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "- ~~second prompt~~ — auto-struck: response: {id}\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "<!-- /agent:queue -->\n",
+                "~~~md\n",
+                "- **Response {id}**\n",
+                "  - **Summary:** conflicting fenced example\n",
+                "~~~\n",
+            ),
+            id = RESPONSE_ID,
+            summary = SUMMARY,
+        );
+        std::fs::write(&doc, &historical).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(
+            dir.path(),
+            &["commit", "-q", "-m", "committed structured response"],
+        );
+
+        let recovered = recover_response(&doc, RESPONSE_ID, None).unwrap();
+        let ResponseRecovery::Found(recovered) = recovered else {
+            panic!("committed structured response should be recoverable")
+        };
+        assert_eq!(recovered.source, RecoverySource::GitHistoryCompatibility);
+        assert!(recovered.content.contains(SUMMARY), "{}", recovered.content);
+
+        assert_eq!(
+            restore_inline_response_references_from_git(&doc, &historical).unwrap(),
+            [RESPONSE_ID.to_string()]
+        );
+        let index = parse_response_index_file(&response_index_path(&doc)).unwrap();
+        assert_eq!(index[RESPONSE_ID].action, "restored");
+        let archive = std::fs::read_to_string(exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains(SUMMARY), "{archive}");
+        assert!(archive.contains(&format!("**Response {RESPONSE_ID}**")));
         assert!(
             dangling_response_references(&doc, &historical)
                 .unwrap()

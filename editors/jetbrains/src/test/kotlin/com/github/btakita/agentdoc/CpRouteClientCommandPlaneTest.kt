@@ -22,6 +22,12 @@ class CpRouteClientCommandPlaneTest {
         assertTrue(CpRouteClient.SYNC_TMUX_LAYOUT_COMMAND_TIMEOUT_MS > 35_000L)
     }
 
+    @Test
+    fun `editor route terminal await outlives readiness and congested closeout`() {
+        assertEquals(240_000L, CpRouteClient.editorRouteCommandAwaitTimeoutMs(120))
+        assertEquals(Long.MAX_VALUE, CpRouteClient.editorRouteCommandAwaitTimeoutMs(Long.MAX_VALUE))
+    }
+
     private fun inlinePayload(submit: com.google.gson.JsonObject): com.google.gson.JsonObject {
         val bytes = submit.getAsJsonObject("payload").getAsJsonArray("Inline")
             .map { it.asInt.toByte() }

@@ -2260,7 +2260,9 @@ pub fn set_prompt_operator_actions(
             let subtree = render(&entries[index..end]);
             Some(
                 agent_doc_document::queue_projection::operator_request_origin_item(
-                    strip_queue_bullet(subtree.trim_end()),
+                    // Navigation headings are binary-owned presentation, not
+                    // part of the parent work identity captured by a request.
+                    strip_top_level_queue_heading(strip_queue_bullet(subtree.trim_end())),
                 ),
             )
         } else {
@@ -10257,7 +10259,7 @@ mod tests {
             agent_doc_markdown_ast::mutations::consume_node(&doc, "queue", &nodes[0].node_key)
                 .unwrap();
         let struck_block = concat!(
-            "- ~~Sync PR and Jira state into this document.~~\n",
+            "- ### ~~Sync PR and Jira state into this document.~~\n",
             "  - So this is the first subtask.\n",
             "  - This is the second subtask.\n",
             "    wrapped onto a second line\n",
@@ -10270,7 +10272,10 @@ mod tests {
             "{entries:?}"
         );
         assert_eq!(entries.len(), 4, "{entries:?}");
-        assert_eq!(render(&entries), body);
+        assert_eq!(
+            super::render(&entries),
+            format!("{struck_block}- ### separate flat head\n")
+        );
         assert_eq!(
             prompts(&entries)
                 .iter()
@@ -10305,8 +10310,8 @@ mod tests {
         assert_eq!(
             restored,
             struck.replace(
-                "- ~~Sync PR and Jira state into this document.~~",
-                "- Sync PR and Jira state into this document."
+                "- ### ~~Sync PR and Jira state into this document.~~",
+                "- ### Sync PR and Jira state into this document."
             )
         );
         let restored_body =
@@ -10475,7 +10480,7 @@ mod tests {
             .0;
         assert_eq!(
             projected,
-            format!("- {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n")
+            format!("- ### {STRUCK_PARENT_ID}\n  - {ANSWERED_CHILD}\n")
         );
         assert_eq!(prompts(&entries)[0].text, ANSWERED_CHILD);
         let added = format!("{legacy}  - {NEW_CHILD}\n");
@@ -10528,7 +10533,7 @@ mod tests {
             .expect("reported leaves make the parent incomplete")
             .0;
         assert!(
-            projected.starts_with(&format!("- {PARENT}\n")),
+            projected.starts_with(&format!("- ### {PARENT}\n")),
             "{projected}"
         );
         assert_eq!(projected.matches("☑️").count(), REPORTED.len());
@@ -10543,7 +10548,7 @@ mod tests {
             .0;
         assert_eq!(
             closed,
-            "- ~~parent~~\n  - ~~child group~~\n    - ~~one~~\n    - ~~two~~\n"
+            "- ### ~~parent~~\n  - ~~child group~~\n    - ~~one~~\n    - ~~two~~\n"
         );
 
         let with_new_leaf = format!("{closed}    - three\n");
@@ -10553,7 +10558,7 @@ mod tests {
             .0;
         assert_eq!(
             reopened,
-            "- parent\n  - child group\n    - ~~one~~\n    - ~~two~~\n    - three\n"
+            "- ### parent\n  - child group\n    - ~~one~~\n    - ~~two~~\n    - three\n"
         );
     }
 
@@ -12596,7 +12601,7 @@ mod tests {
             .expect("annotation added");
         assert_eq!(
             projected,
-            "- 🙋🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+            "- ### 🙋🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
         );
         let (cleared, _) =
             project_prompt_operator_actions(&projected, &[], &std::collections::HashSet::new())
@@ -12604,7 +12609,7 @@ mod tests {
                 .expect("completed todo clears annotation");
         assert_eq!(
             cleared,
-            "- 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+            "- ### 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
         );
     }
 
@@ -12776,7 +12781,7 @@ mod tests {
             .unwrap()
             .expect("the nested run item keeps its operator-request id");
         let expected = concat!(
-            "- 🙋☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
+            "- ### 🙋☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
             "  - #fix-ci https://example.com/pull/759\n",
             "  - Why do we need the PR?\n",
             "- another task\n",
@@ -12795,7 +12800,7 @@ mod tests {
         assert_eq!(
             cleared,
             concat!(
-                "- ☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
+                "- ### ☑️ [#subagent:pr759-fix-ci#2] https://example.com/pull/759 [#subagent-operator-request-pr759-fix-ci-push]\n",
                 "  - #fix-ci https://example.com/pull/759\n",
                 "  - Why do we need the PR?\n",
                 "- another task\n",

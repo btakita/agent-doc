@@ -195,13 +195,14 @@ mod tests {
     #[test]
     fn appended_siblings_render_back_to_the_same_body() {
         let body = "- Parent\n  - alpha\n  - beta\n";
+        let rendered = "- ### Parent\n  - alpha\n  - beta\n";
         let entries = document_queue::parse(body).unwrap();
         let expanded = expand_entries(entries.clone(), &[parent_snapshot("Parent")]);
         assert_eq!(
             document_queue::render(&expanded),
             document_queue::render(&entries)
         );
-        assert_eq!(document_queue::render(&expanded), body);
+        assert_eq!(document_queue::render(&expanded), rendered);
         let prompts = document_queue::prompts(&expanded);
         assert_eq!(prompts.len(), 2);
         assert!(!has_subprompts(&prompts[0].text));
@@ -222,7 +223,10 @@ mod tests {
         let body = "- Parent\n  1. alpha\n  2. beta\n";
         let entries = document_queue::parse(body).unwrap();
         let expanded = expand_entries(entries.clone(), &[parent_snapshot("Parent")]);
-        assert_eq!(document_queue::render(&expanded), body);
+        assert_eq!(
+            document_queue::render(&expanded),
+            "- ### Parent\n  1. alpha\n  2. beta\n"
+        );
         let prompts = document_queue::prompts(&expanded);
         assert_eq!(prompts[0].ordered_marker.as_deref(), Some("1."));
         assert_eq!(prompts[1].ordered_marker.as_deref(), Some("2."));

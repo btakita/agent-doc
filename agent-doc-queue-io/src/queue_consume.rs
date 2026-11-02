@@ -1136,6 +1136,22 @@ fn consume_queue_prompts_with_options_fenced(
     )
     .0;
 
+    // `#operatorrequesttodoterminal`: consuming an exact request/decision row
+    // terminalizes its same-id operator receipt in the very same document
+    // target. This also covers queue policies which clear struck rows, while a
+    // still-live duplicate keeps the todo open.
+    let todo_reconciliation =
+        agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+            &plan.new_document,
+            &plan.consumed_texts,
+        )?;
+    plan.new_document = todo_reconciliation.content;
+    plan.new_snapshot = agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+        &plan.new_snapshot,
+        &plan.consumed_texts,
+    )?
+    .content;
+
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 
     // `#fcc0`: converge the queue-consume write through the editor IPC when a JB
@@ -1174,6 +1190,18 @@ fn consume_queue_prompts_with_options_fenced(
     // successful mutation boundary so a Reported attempt cannot survive the
     // strike and attach to a later operator re-add of the same `#id`.
     release_claims_on_struck_heads(file, &content, &plan.consumed_texts);
+
+    for id in &todo_reconciliation.completed_ids {
+        eprintln!("[todo] auto-done: #{id} (its operator-request queue row is terminal)");
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "todo_auto_done file={} id={} trigger=operator_request_queue_row_terminal",
+                file.display(),
+                id
+            ),
+        );
+    }
 
     let outcome = QueueConsumptionOutcome {
         consumed_text: plan.consumed_text.clone(),
@@ -5269,6 +5297,65 @@ mod core_tests {
         );
         assert_eq!(effects.awaited.load(Ordering::SeqCst), 1);
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn consuming_operator_request_row_closes_same_id_todo_in_one_write() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let request_id = "subagent-operator-request-consolidate-choice-receipt";
+        let content = format!(
+            concat!(
+                "---\nqueue: go\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: consolidate choice — test\n\n",
+                "> **Queue prompt:** [#{request_id}]\n\n",
+                "The decision and integration receipt are complete.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:todo -->\n",
+                "- [ ] [#{request_id}] Decide whether the committed response may close the attempt\n",
+                "- [ ] [#unrelated] Keep this open\n",
+                "<!-- /agent:todo -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- [#{request_id}]\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            request_id = request_id,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        // Exercise the post-selection write seam directly: request todos are a
+        // pre-selection hold, while this regression is specifically about the
+        // atomic mutation after closeout has already selected the row.
+        let outcome = consume_queue_prompts_with_options_fenced(
+            &doc,
+            &[request_id.to_string()],
+            0,
+            false,
+            None,
+            &[],
+            None,
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the selected request row is consumed");
+        assert_eq!(outcome.consumed_text, format!("[#{request_id}]"));
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!("- [x] [#{request_id}]")),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("- [ ] [#unrelated] Keep this open"),
+            "{updated}"
+        );
     }
 
     #[test]

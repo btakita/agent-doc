@@ -137,6 +137,92 @@ fn queue_rows(content: &str) -> Vec<(bool, String)> {
         .collect()
 }
 
+/// The document-level result of reconciling terminal operator-request rows
+/// with their same-id `agent:todo` receipts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalOperatorRequestTodoReconciliation {
+    pub content: String,
+    pub completed_ids: Vec<String>,
+}
+
+/// Check off operator-request todos whose exact request/decision queue row has
+/// reached a terminal strike.
+///
+/// `terminal_heads` carries rows a projection just consumed, including queues
+/// which clear completed rows instead of retaining their strike. Already
+/// materialized struck rows are also inspected so preflight can repair stale
+/// residue from an older binary. A live duplicate of the same request id wins:
+/// the todo stays open until every projected copy is terminal. Only a todo's
+/// own reserved request id is eligible; cited ids and unrelated todos are never
+/// changed.
+pub fn reconcile_terminal_operator_request_todos(
+    content: &str,
+    terminal_heads: &[String],
+) -> Result<TerminalOperatorRequestTodoReconciliation> {
+    let rows = queue_rows(content);
+    let mut terminal_ids = BTreeSet::new();
+    let mut live_ids = HashSet::new();
+
+    for head in terminal_heads {
+        if let Some(id) = exact_operator_request_row_id(head) {
+            terminal_ids.insert(id);
+        }
+    }
+    for (struck, text) in rows {
+        let Some(id) = exact_operator_request_row_id(&text) else {
+            continue;
+        };
+        if struck {
+            terminal_ids.insert(id);
+        } else {
+            live_ids.insert(id);
+        }
+    }
+
+    let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    let actionable_ids = terminal_ids
+        .into_iter()
+        .filter(|id| !live_ids.contains(id) && open_todo_ids.contains(id))
+        .collect::<Vec<_>>();
+    let mut reconciled = if actionable_ids.is_empty() {
+        content.to_string()
+    } else {
+        // A prior interrupted cycle can leave duplicate todo receipts carrying
+        // the same own id. Fold them before selecting the id so the ordinary
+        // mutation API remains fail-closed for genuinely ambiguous selectors.
+        agent_doc_element::todo::reconcile_todo_in_document(content)?.0
+    };
+    let mut completed_ids = Vec::new();
+    for id in actionable_ids {
+        let outcome = agent_doc_element::todo::set_todo_item_state_in_document(
+            &reconciled,
+            &id,
+            agent_doc_element::todo::TodoTransition::Done,
+        )?;
+        reconciled = outcome.content;
+        completed_ids.push(id);
+    }
+
+    Ok(TerminalOperatorRequestTodoReconciliation {
+        content: reconciled,
+        completed_ids,
+    })
+}
+
+/// A request/decision row is deliberately narrower than an arbitrary row
+/// which merely cites a request id. Accept only the reserved id as the row's
+/// complete head, optionally followed by the canonical `: answer` form.
+fn exact_operator_request_row_id(text: &str) -> Option<String> {
+    let head = agent_doc_element_queue::subprompts::head_without_subprompts(text);
+    let head = agent_doc_element_queue::strip_attempt_projection_prefix(head).trim();
+    let (id, after) = head.strip_prefix("[#")?.split_once(']')?;
+    if !agent_doc_document::queue_projection::is_reserved_operator_action_id(id) {
+        return None;
+    }
+    let after = after.trim_start();
+    (after.is_empty() || after.starts_with(':')).then(|| id.to_ascii_lowercase())
+}
+
 fn row_work_text(text: &str) -> String {
     strip_in_progress_marker(&strip_priority_markers(text.trim()))
         .trim()
@@ -2058,6 +2144,11 @@ fn project_free_text_strike_of_node_keys(
     // boundary just like queue consume. Retire its completion cell in the same
     // derived target so stale evidence cannot attach to a later same-text row.
     let annotated = retire_consumed_completion_feedback(&annotated, &consumed_heads).0;
+    // A terminal request/decision row and its operator-owned receipt are one
+    // lifecycle fact. Reconcile them in this same derived target so the async
+    // strike effect cannot publish a struck request beside an open todo.
+    let annotated =
+        reconcile_terminal_operator_request_todos(&annotated, &consumed_heads)?.content;
     let remaining = crate::queue_heads::active_queue_heads(&annotated).len();
     let mut target_content = annotated;
     if remaining == 0 {
@@ -4976,6 +5067,89 @@ mod tests {
              <!-- agent:todo -->\n{todo_body}<!-- /agent:todo -->\n\
              <!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n"
         )
+    }
+
+    #[test]
+    fn struck_consolidate_choice_request_closes_its_todo_and_only_its_todo() {
+        let request_id = "subagent-operator-request-consolidate-choice-receipt";
+        let document = format!(
+            "<!-- agent:queue -->\n- ~~[#{request_id}]~~\n<!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n\
+             - [ ] [#{request_id}] Decide whether the committed exchange response and integration receipt may close the lost consolidate-choice attempt\n\
+             - [ ] [#unrelated-decision] Keep this independent decision open\n\
+             <!-- /agent:todo -->\n"
+        );
+
+        let outcome = reconcile_terminal_operator_request_todos(&document, &[]).unwrap();
+
+        assert_eq!(outcome.completed_ids, vec![request_id]);
+        assert!(
+            outcome.content.contains(&format!("- [x] [#{request_id}]")),
+            "{}",
+            outcome.content
+        );
+        assert!(
+            outcome
+                .content
+                .contains("- [ ] [#unrelated-decision] Keep this independent decision open"),
+            "{}",
+            outcome.content
+        );
+    }
+
+    #[test]
+    fn duplicate_terminal_request_rows_and_todos_reconcile_once() {
+        let request_id = "subagent-operator-request-duplicate-choice";
+        let document = format!(
+            "<!-- agent:queue -->\n\
+             - ~~[#{request_id}]~~\n\
+             - ~~[#{request_id}]: integrate~~\n\
+             <!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n\
+             - [x] [#{request_id}] Choose the integration sink\n\
+             - [ ] [#{request_id}] Choose the integration sink\n\
+             <!-- /agent:todo -->\n"
+        );
+
+        let outcome = reconcile_terminal_operator_request_todos(&document, &[]).unwrap();
+
+        assert_eq!(outcome.completed_ids, vec![request_id]);
+        assert_eq!(
+            outcome
+                .content
+                .matches(&format!("- [x] [#{request_id}]"))
+                .count(),
+            1,
+            "duplicate todo copies should fold to one terminal receipt:\n{}",
+            outcome.content
+        );
+        assert!(!outcome.content.contains(&format!("- [ ] [#{request_id}]")));
+    }
+
+    #[test]
+    fn live_duplicate_request_keeps_todo_open_and_citations_are_not_identity() {
+        let request_id = "subagent-operator-request-still-open";
+        let document = format!(
+            "<!-- agent:queue -->\n\
+             - ~~[#{request_id}]~~\n\
+             - [#{request_id}]\n\
+             <!-- /agent:queue -->\n\
+             <!-- agent:todo -->\n\
+             - [ ] [#{request_id}] Await the remaining decision copy\n\
+             - [ ] [#citation-only] Follow up on [#{request_id}] later\n\
+             <!-- /agent:todo -->\n"
+        );
+
+        let outcome = reconcile_terminal_operator_request_todos(&document, &[]).unwrap();
+
+        assert!(outcome.completed_ids.is_empty());
+        assert_eq!(outcome.content, document);
+
+        let without_live_duplicate = document.replacen(&format!("- [#{request_id}]\n"), "", 1);
+        let outcome =
+            reconcile_terminal_operator_request_todos(&without_live_duplicate, &[]).unwrap();
+        assert!(outcome.content.contains("- [ ] [#citation-only]"));
+        assert!(outcome.content.contains(&format!("- [x] [#{request_id}]")));
     }
 
     #[test]

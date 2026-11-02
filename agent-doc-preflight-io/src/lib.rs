@@ -5292,6 +5292,34 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     .context("queue maintenance: selected queue component vanished")?
     .clone();
 
+    // `#operatorrequesttodoterminal`: repair residue produced by older
+    // binaries which terminally struck an exact request/decision row without
+    // closing its same-id operator receipt. The pure reconciliation refuses to
+    // close when any duplicate request row is still live and ignores todos
+    // which only cite the id.
+    let todo_reconciliation =
+        agent_doc_queue::queue_consume::reconcile_terminal_operator_request_todos(
+            &current_content,
+            &[],
+        )?;
+    if !todo_reconciliation.completed_ids.is_empty() {
+        current_content = todo_reconciliation.content;
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after terminal todo reconciliation")?
+        .clone();
+        mutated = true;
+        eprintln!(
+            "[preflight] todo: completed operator-request receipt(s) for terminal queue row(s): {:?}",
+            todo_reconciliation.completed_ids
+        );
+    }
+
     let body = &current_content[comp.open_end..comp.close_start];
     let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(e) => e,

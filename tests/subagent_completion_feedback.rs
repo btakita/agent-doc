@@ -820,7 +820,7 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
             let named = rows_naming(&rows, id);
             assert_eq!(named.len(), 1, "{stage}: one row for #{id}: {rows:#?}");
             if let Some(marker) = marker {
-                let expected = format!("- {marker} [#subagent:{id}#1] do [#{id}]");
+                let expected = format!("- ### {marker} [#subagent:{id}#1] do [#{id}]");
                 assert_eq!(named[0], expected, "{stage}: {rows:#?}");
             }
         }

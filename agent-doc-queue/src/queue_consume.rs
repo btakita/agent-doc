@@ -3058,8 +3058,20 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // projected below several queue rows. Render its choices only on the first
     // row that owns the request; unrelated or duplicate rows receive nothing.
     let mut rendered_choice_packet_ids = HashSet::<String>::new();
+    // A response is likewise one document node even when it closes several
+    // queue rows. The first row in document order owns the full response tree;
+    // later rows retain only a searchable, inert backlink. Repeating the full
+    // tree gave one public response id several apparent definitions and let a
+    // later response become nested inside an arbitrary duplicate.
+    let mut canonical_response_owners = HashMap::<String, String>::new();
+    let mut response_projection_counts = HashMap::<String, usize>::new();
+    for (_, response_id, _, _) in projection_by_node_key.values() {
+        *response_projection_counts
+            .entry(response_id.clone())
+            .or_default() += 1;
+    }
     for node in &nodes {
-        let Some((response_body, response_id, annotate_inline_id, shared_batch)) =
+        let Some((projected_response_body, response_id, annotate_inline_id, shared_batch)) =
             projection_by_node_key.get(&node.node_key)
         else {
             continue;
@@ -3074,18 +3086,41 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .iter()
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
             .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
-        let lookup_children = response_lookup_children(
-            ResponseLookupContext {
-                source_document: before,
-                queue_item: &node.item.text,
-                response_body,
-                response_id,
-                addressed_at,
-                shared_batch: *shared_batch,
-            },
-            response_mode,
-            &mut rendered_choice_packet_ids,
-        );
+        let canonical_owner = canonical_response_owners
+            .entry(response_id.clone())
+            .or_insert_with(|| node.node_key.clone());
+        let lookup_children = if canonical_owner == &node.node_key {
+            let repeated_response = response_projection_counts
+                .get(response_id)
+                .is_some_and(|count| *count > 1);
+            response_lookup_children(
+                ResponseLookupContext {
+                    source_document: before,
+                    queue_item: &node.item.text,
+                    // Distinct addressed cells can inherit one heading and
+                    // therefore one response id. Once their projection is
+                    // canonicalized, the owner must retain the complete turn,
+                    // including any request packet that appeared in a later
+                    // addressed cell.
+                    response_body: if repeated_response {
+                        response_body
+                    } else {
+                        projected_response_body
+                    },
+                    response_id,
+                    addressed_at,
+                    shared_batch: if repeated_response {
+                        false
+                    } else {
+                        *shared_batch
+                    },
+                },
+                response_mode,
+                &mut rendered_choice_packet_ids,
+            )
+        } else {
+            vec![response_back_reference_child(response_id)]
+        };
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
@@ -3126,6 +3161,11 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         out.replace_range(start..end, &replacement);
     }
     Ok(out)
+}
+
+fn response_back_reference_child(response_id: &str) -> String {
+    debug_assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id));
+    format!("**Closed by:** {response_id}")
 }
 
 fn annotate_exchange_response_with_lookup_id(
@@ -4116,7 +4156,7 @@ mod tests {
     }
 
     #[test]
-    fn one_heading_batch_scopes_each_echo_and_leaves_delete_or_continue_guidance() {
+    fn one_heading_batch_has_one_canonical_response_and_row_backlinks() {
         let response = concat!(
             "### Re: batch closeout — test\n\n",
             "> **Queue prompt:** Publish alpha [#q-alpha] ⟦published⟧\n\n",
@@ -4147,21 +4187,25 @@ mod tests {
         let alpha = &queue[alpha_start..beta_start];
         let beta = &queue[beta_start..];
 
-        assert!(alpha.contains("**Summary:** **Outcome:** Alpha shipped"), "{alpha}");
         assert!(
-            alpha.contains("**Guidance:** Safe to delete this completed tree"),
+            alpha.contains("**Summary:** **Outcome:** Alpha shipped"),
             "{alpha}"
         );
-        assert!(!alpha.contains("Beta is fixed"), "{alpha}");
         assert!(
-            beta.contains("**Summary:** **Current state:** Beta is fixed and published."),
-            "{beta}"
+            alpha.contains(
+                "**Guidance:** More work remains. Keep this tree and follow the next actions below."
+            ),
+            "{alpha}"
         );
         assert!(
-            beta.contains("**Guidance:** More work remains. Keep this tree and follow the next actions below."),
-            "{beta}"
+            alpha.contains("**Action:** Verify beta in production."),
+            "the canonical node retains material from the complete response turn: {alpha}"
         );
-        assert!(!beta.contains("Alpha shipped"), "{beta}");
+        assert!(beta.contains("**Closed by:** [#r-"), "{beta}");
+        assert!(!beta.contains("**Summary:**"), "{beta}");
+        assert!(!beta.contains("**Guidance:**"), "{beta}");
+        assert_eq!(queue.matches("- **Response [#r-").count(), 1, "{queue}");
+        assert_eq!(queue.matches("- **Closed by:** [#r-").count(), 1, "{queue}");
         let entries = document_queue::parse(queue).unwrap();
         assert!(
             document_queue::prompts(&entries).is_empty(),
@@ -4281,15 +4325,20 @@ mod tests {
             annotated
                 .matches("**Summary:** **Outcome:** The canonical work is complete and verified.")
                 .count(),
-            2,
-            "both projections must follow the canonical item:\n{annotated}"
+            1,
+            "the response must have one canonical projection:\n{annotated}"
         );
         assert_eq!(
             annotated
                 .matches("**Guidance:** Safe to delete this completed tree")
                 .count(),
-            2,
-            "both terminal leaves need explicit deletion guidance:\n{annotated}"
+            1,
+            "canonical guidance must not be duplicated:\n{annotated}"
+        );
+        assert_eq!(
+            annotated.matches("- **Closed by:** [#r-").count(),
+            1,
+            "the duplicate row must point to the canonical response:\n{annotated}"
         );
     }
 
@@ -4992,6 +5041,36 @@ mod tests {
                 .matches("**keep local**: Keep the repair local.")
                 .count(),
             1
+        );
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .response_id()
+            .to_string();
+        assert_eq!(
+            annotated
+                .matches(&format!("- **Response {response_id}**"))
+                .count(),
+            1,
+            "one response id must have one canonical response node:\n{annotated}"
+        );
+        assert_eq!(
+            annotated
+                .matches(&format!("- **Closed by:** {response_id}"))
+                .count(),
+            2,
+            "the other completed rows must retain one-line backlinks:\n{annotated}"
+        );
+        assert_eq!(
+            annotated.matches("- **Timestamp:**").count(),
+            1,
+            "canonical response metadata must not be copied:\n{annotated}"
+        );
+        assert_eq!(
+            annotated.matches("- **Summary:**").count(),
+            1,
+            "canonical response metadata must not be copied:\n{annotated}"
         );
 
         let queue = element::parse(&annotated)

@@ -455,6 +455,11 @@ fn canonical_response_row(item_content: &str) -> Option<(&str, bool)> {
     canonical_bracketed_response_id(response_id).map(|id| (id, false))
 }
 
+fn canonical_response_back_reference(item_content: &str) -> Option<&str> {
+    let response_id = item_content.trim().strip_prefix("**Closed by:** ")?;
+    canonical_bracketed_response_id(response_id)
+}
+
 fn canonical_response_choice(item_content: &str) -> bool {
     let Some(choice) = item_content.trim().strip_prefix("**") else {
         return false;
@@ -479,6 +484,15 @@ pub fn response_row_child_end(
     _item_indent: usize,
 ) -> Option<usize> {
     canonical_response_row(strip_bullet(lines.get(opener_index)?)?)?;
+    Some(opener_index + 1)
+}
+
+fn response_back_reference_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    _item_indent: usize,
+) -> Option<usize> {
+    canonical_response_back_reference(strip_bullet(lines.get(opener_index)?)?)?;
     Some(opener_index + 1)
 }
 
@@ -700,6 +714,7 @@ pub fn inert_list_child_end(
     multiline_list_comment_end(lines, opener_index, item_indent)
         .or_else(|| response_details_child_end(lines, opener_index, item_indent))
         .or_else(|| response_row_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_back_reference_child_end(lines, opener_index, item_indent))
         .or_else(|| response_timestamp_child_end(lines, opener_index, item_indent))
         .or_else(|| response_summary_child_end(lines, opener_index, item_indent))
         .or_else(|| response_state_metadata_child_end(lines, opener_index, item_indent))
@@ -743,6 +758,7 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
         let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
         let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_back_reference_child_end(&normalized_lines, index, item_indent).is_some()
             || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
             || response_summary_child_end(&normalized_lines, index, item_indent).is_some()
             || response_state_metadata_child_end(&normalized_lines, index, item_indent).is_some()
@@ -857,6 +873,7 @@ pub fn response_row_child_ranges(source: &str) -> Vec<(usize, usize)> {
     while index < lines.len() {
         let item_indent = lines[index].len() - lines[index].trim_start_matches([' ', '\t']).len();
         if let Some(end) = response_row_child_end(&lines, index, item_indent)
+            .or_else(|| response_back_reference_child_end(&lines, index, item_indent))
             .or_else(|| response_timestamp_child_end(&lines, index, item_indent))
             .or_else(|| response_summary_child_end(&lines, index, item_indent))
             .or_else(|| response_state_metadata_child_end(&lines, index, item_indent))
@@ -1983,6 +2000,35 @@ mod tests {
             ranges
                 .iter()
                 .all(|&(start, end)| !source[start..end].contains("Use staging"))
+        );
+    }
+
+    #[test]
+    fn canonical_response_back_reference_is_inert() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~canonical owner~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]**\n",
+            "    - **Timestamp:** 2026-11-01T14:43:00.000Z\n",
+            "    - **Summary:** Completed.\n",
+            "- ~~another row~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Closed by:** [#r-0123456789ab]\n",
+            "- next task\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["canonical owner", "another row", "next task"]);
+        assert!(
+            response_row_child_ranges(source)
+                .iter()
+                .any(|&(start, end)| source[start..end].contains("**Closed by:**")),
+            "the visible backlink must remain binary-owned inert metadata"
         );
     }
 

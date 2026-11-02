@@ -2605,6 +2605,60 @@ mod tests {
     }
 
     #[test]
+    fn recovered_response_prose_is_not_redispatched_as_exchange_prompts() {
+        let owned = BTreeSet::new();
+        let marker = "<!-- agent:exchange subagents -->";
+        let resolved_exchange = "Earlier prompt.\n\n### Re: Earlier prompt\n\nAnswer.\n";
+        let baseline = doc("", resolved_exchange).replace("<!-- agent:exchange -->", marker);
+        let response = concat!(
+            "\n### Re: recovered response\n\n",
+            "Implemented, integrated, pushed, and installed.\n\n",
+            "Focused tests pass. The full suite encountered one unrelated, pre-existing nested-prompt test failure, reproduced on the baseline commit.\n\n",
+            "The document response was committed. Its final session check found a binary closeout bookkeeping mismatch and explicitly directed the final-message hook to recover it; I did not duplicate the response or modify the document manually.\n",
+        );
+        let current = doc("", &format!("{resolved_exchange}{response}"))
+            .replace("<!-- agent:exchange -->", marker);
+
+        let obs = observe_with_mode(
+            &seeded(&baseline, None),
+            &current,
+            &quiet_ctx(&owned),
+            ObserveMode::Boundary,
+        );
+        assert!(
+            obs.ready.is_empty() && obs.pending == 0,
+            "recovered assistant prose was redispatched: {:#?}",
+            obs.ready
+        );
+        assert!(
+            !crate::baseline_comparison::realtime_steering_all_between(&baseline, &current)
+                .is_present(),
+            "closed-cycle steering redispatched recovered assistant prose"
+        );
+    }
+
+    #[test]
+    fn explicit_operator_prompt_after_recovered_response_still_dispatches() {
+        let resolved_exchange = "Earlier prompt.\n\n### Re: Earlier prompt\n\nAnswer.\n";
+        let baseline = doc("", resolved_exchange);
+        let current = doc(
+            "",
+            &format!(
+                "{resolved_exchange}\n### Re: recovered response\n\nImplemented, integrated, pushed, and installed.\n\n❯ Audit the remaining install state.\n"
+            ),
+        );
+
+        let steering =
+            crate::baseline_comparison::realtime_steering_all_between(&baseline, &current);
+        assert_eq!(steering.len(), 1, "{steering:#?}");
+        assert!(
+            steering.directives()[0]
+                .verbatim()
+                .is_some_and(|text| text.contains("Audit the remaining install state."))
+        );
+    }
+
+    #[test]
     fn exchange_component_attrs_dispatch_subagent_with_scoped_preset() {
         let owned = BTreeSet::new();
         let baseline = doc("", EX).replace(

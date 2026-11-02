@@ -1311,8 +1311,25 @@ fn contextual_prompt_bearing_changes_from_diff(
     let mut skip_answered_response_run = false;
     for (idx, change) in changes.iter().enumerate() {
         match change.kind {
-            PromptBearingChangeKind::RecoveryArtifact
-            | PromptBearingChangeKind::BoundaryArtifact => {
+            PromptBearingChangeKind::RecoveryArtifact => {
+                // A closeout/recovery response is emitted as several blank-separated
+                // added blocks: the `### Re:` heading is classified as an artifact,
+                // while its ordinary prose paragraphs otherwise look like independent
+                // prompt targets. Keep the response run armed until an explicitly
+                // prompt-shaped line appears, just as we do for a response that follows
+                // an answered prompt. This preserves real operator prompts appended
+                // after the response while keeping agent-authored response prose inert.
+                if change
+                    .text
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .is_some_and(|line| is_exchange_response_heading(line.trim()))
+                {
+                    skip_answered_response_run = true;
+                }
+                continue;
+            }
+            PromptBearingChangeKind::BoundaryArtifact => {
                 continue;
             }
             PromptBearingChangeKind::PromptTarget => {
@@ -5255,6 +5272,42 @@ Done.\n\
         // The single-change accessor is the first of the aggregate.
         let first = first_unstarted_prompt_bearing_change_from_diff(&diff, current).expect("first");
         assert_eq!(first.text, all[0].text);
+    }
+
+    #[test]
+    fn recovered_response_body_is_inert_but_later_explicit_prompt_remains_actionable() {
+        let snapshot = concat!(
+            "<!-- agent:exchange subagents -->\n",
+            "### Re: earlier\n\n",
+            "Done.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "\n### Re: recovered response\n\n",
+            "Implemented, integrated, pushed, and installed.\n\n",
+            "Focused tests pass. The full suite encountered one unrelated, pre-existing nested-prompt test failure, reproduced on the baseline commit.\n\n",
+            "The document response was committed. Its final session check found a binary closeout bookkeeping mismatch and explicitly directed the final-message hook to recover it; I did not duplicate the response or modify the document manually.\n",
+        );
+        let current = snapshot.replace(
+            "<!-- /agent:exchange -->",
+            &format!("{response}<!-- /agent:exchange -->"),
+        );
+        let diff = unified_diff_from_contents(snapshot, &current).expect("diff");
+
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, &current);
+        assert!(
+            changes.is_empty(),
+            "assistant response paragraphs must stay inert: {changes:#?}"
+        );
+
+        let with_prompt = current.replace(
+            "<!-- /agent:exchange -->",
+            "\n❯ Audit the remaining install state.\n<!-- /agent:exchange -->",
+        );
+        let diff = unified_diff_from_contents(snapshot, &with_prompt).expect("diff");
+        let changes = all_unstarted_prompt_bearing_changes_from_diff(&diff, &with_prompt);
+        assert_eq!(changes.len(), 1, "{changes:#?}");
+        assert!(changes[0].text.contains("Audit the remaining install state."));
     }
 
     #[test]

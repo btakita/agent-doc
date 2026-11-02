@@ -853,7 +853,12 @@ fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<Strin
         }
         let trimmed = line.trim();
         if is_direct_response_patchback_heading(trimmed) {
-            *counts.entry(trimmed.to_string()).or_insert(0) += 1;
+            let marker = if trimmed.starts_with("### Re:") {
+                agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(trimmed)
+            } else {
+                trimmed.to_string()
+            };
+            *counts.entry(marker).or_insert(0) += 1;
         }
     }
     counts

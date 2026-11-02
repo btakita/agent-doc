@@ -270,6 +270,32 @@ mod tests {
     }
 
     #[test]
+    fn bypassed_response_write_ignores_identity_neutral_response_heading_id() {
+        let snapshot = session_doc("### Re: task — gpt-5\n\nDone.\n");
+        let current = session_doc("### Re: task — gpt-5 [#r-0123456789ab]\n\nDone.\n");
+
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current),
+            None
+        );
+    }
+
+    #[test]
+    fn bypassed_response_write_still_reports_new_heading_with_response_id() {
+        let snapshot = session_doc("### Re: earlier — gpt-5\n\nDone.\n");
+        let current = session_doc(concat!(
+            "### Re: earlier — gpt-5\n\nDone.\n\n",
+            "### Re: bypassed — gpt-5 [#r-0123456789ab]\n\n",
+            "This response bypassed the write boundary.\n",
+        ));
+
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current).as_deref(),
+            Some("### Re: bypassed — gpt-5 [#r-0123456789ab]")
+        );
+    }
+
+    #[test]
     fn bypassed_response_write_ignores_non_response_local_drift() {
         let snapshot = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",

@@ -3366,7 +3366,12 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
             // epic/group LABEL and is never executable, so it must not surface
             // as a runnable head.
-            QueueEntry::Prompt(_) if !entry_is_group_parent(entries, idx) => Some(idx),
+            QueueEntry::Prompt(_)
+                if !entry_is_group_parent(entries, idx)
+                    && !entry_has_nested_parked_comment(entries, idx) =>
+            {
+                Some(idx)
+            }
             _ => None,
         })
         .collect()
@@ -3411,8 +3416,10 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
 
 /// Whether an executable row has a deeper list-comment annotation in its tree.
 ///
-/// Comment-only children deliberately do not make the row a context-only group:
-/// the parent remains dispatchable. They do, however, carry operator context
+/// Ordinary comment-only children deliberately do not make the row a
+/// context-only group: the parent remains dispatchable. The reserved
+/// `%% parked %%` child is handled separately by
+/// `entry_has_nested_parked_comment`. Comments still carry operator context
 /// that a heuristic completion matcher cannot prove resolved. Callers that
 /// perform semantic auto-strike use this predicate to fail closed while normal
 /// explicit queue consumption keeps its existing runnable-parent semantics.
@@ -3444,6 +3451,51 @@ pub fn entry_has_nested_list_comment(entries: &[QueueEntry], idx: usize) -> bool
         }
     }
     false
+}
+
+/// Whether a live row is explicitly held by a nested `%% parked %%` comment.
+///
+/// Ordinary list comments annotate a runnable parent. The exact `parked`
+/// sentinel is different: it is an operator-authored pause control that keeps
+/// the parent out of every executable-head projection until the comment is
+/// removed. Keeping this separate from `entry_is_group_parent` also prevents
+/// inert-group settlement from striking a deliberately parked row.
+pub fn entry_has_nested_parked_comment(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
+        return false;
+    };
+    for later in entries.iter().skip(idx + 1) {
+        match later {
+            QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                if prompt.indent <= own_indent {
+                    return false;
+                }
+            }
+            QueueEntry::Freeform(raw) => {
+                for line in raw.lines() {
+                    let Some((indent, _, rest)) = split_list_item(line) else {
+                        continue;
+                    };
+                    if indent <= own_indent {
+                        return false;
+                    }
+                    if is_parked_list_comment(rest) {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn is_parked_list_comment(content: &str) -> bool {
+    let trimmed = content.trim();
+    trimmed
+        .strip_prefix("%%")
+        .and_then(|body| body.strip_suffix("%%"))
+        .is_some_and(|body| body.trim() == "parked")
 }
 
 /// Work text of a queue row for nest-vector display and identity compare.
@@ -10670,7 +10722,7 @@ mod tests {
     }
 
     #[test]
-    fn parent_with_only_comment_children_remains_runnable() {
+    fn parent_with_only_non_parked_comment_children_remains_runnable() {
         for body in [
             "- parent task\n  - %%one note%%\n",
             concat!(
@@ -10694,6 +10746,34 @@ mod tests {
                 "the runnable parent still exposes its unresolved annotation to heuristic consumers"
             );
         }
+    }
+
+    #[test]
+    fn parked_comment_child_holds_parent_until_removed() {
+        for body in [
+            "- https://github.com/haiven-dev/haiven-docs/pull/39\n  - %% parked %%\n",
+            concat!(
+                "- https://github.com/haiven-dev/haiven-docs/pull/39\n",
+                "  - %%context only%%\n",
+                "  - %%parked%%\n"
+            ),
+        ] {
+            let entries = parse(body).unwrap();
+            assert!(prompts(&entries).is_empty(), "parked parent ran: {body}");
+            assert!(entry_has_nested_parked_comment(&entries, 0));
+            assert_eq!(render(&entries), body);
+        }
+
+        let unparked = "- https://github.com/haiven-dev/haiven-docs/pull/39\n  - %% resumed %%\n";
+        let entries = parse(unparked).unwrap();
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["https://github.com/haiven-dev/haiven-docs/pull/39"]
+        );
+        assert!(!entry_has_nested_parked_comment(&entries, 0));
     }
 
     /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`

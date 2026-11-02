@@ -1365,6 +1365,30 @@ queue: go
         );
     }
 
+    #[test]
+    fn queue_attr_does_not_dispatch_parents_with_parked_comment_children() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## haiven-docs PRs\n\n",
+            "<!-- agent:run id=haiven-docs-prs subagents presets=\"#auth\" keep go -->\n",
+            "- https://github.com/haiven-dev/haiven-docs/pull/39\n",
+            "  - %% parked %%\n",
+            "- https://github.com/haiven-dev/haiven-docs/pull/40\n",
+            "  - %% parked %%\n",
+            "<!-- /agent:run -->\n"
+        );
+        std::fs::write(&file, content).unwrap();
+
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, content).unwrap(),
+            Vec::<String>::new(),
+            "the explicit parked sentinel must hold its parent out of dispatch"
+        );
+    }
+
     fn two_runs(main_attr: &str, main_body: &str, prs_attr: &str, prs_body: &str) -> String {
         format!(
             "---\nsession: sid\nagent_doc_format: template\n---\n\n\

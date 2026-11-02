@@ -1521,7 +1521,7 @@ mod tests {
         );
         assert_eq!(
             queues.block("build").unwrap().component.content(&projected),
-            "- do [#compile]\n"
+            "- ### do [#compile]\n"
         );
         assert!(collect_backlog_queue_sync(&components, content).is_none());
     }
@@ -1554,7 +1554,7 @@ mod tests {
                 .unwrap()
                 .component
                 .content(&projected),
-            "- do [#audit]\n"
+            "- ### do [#audit]\n"
         );
     }
 

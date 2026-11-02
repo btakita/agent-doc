@@ -1369,7 +1369,7 @@ mod tests {
             assert_eq!(reconciled.backlog_edits[0].text, revised);
             assert_eq!(
                 crate::document_queue::render(&reconciled.queue_entries),
-                "- do [#crossplatformmise]\n- do [#neighbor]\n"
+                "- ### do [#crossplatformmise]\n- ### do [#neighbor]\n"
             );
             assert!(
                 reconcile_materialized_free_text_projection(
@@ -1592,7 +1592,7 @@ mod tests {
         );
         assert_eq!(
             crate::document_queue::render(&queue_entries),
-            format!("- do [#before]\n- do [#{id}]\n- do [#after]\n")
+            format!("- ### do [#before]\n- ### do [#{id}]\n- ### do [#after]\n")
         );
     }
 
@@ -1933,7 +1933,7 @@ mod tests {
         assert!(
             admission
                 .content
-                .contains(&format!("- do [#{admitted_id}]"))
+                .contains(&format!("- ### do [#{admitted_id}]"))
         );
     }
 

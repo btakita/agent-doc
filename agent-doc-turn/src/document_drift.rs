@@ -365,13 +365,21 @@ mod tests {
             "Old worker result.",
         )
         .unwrap();
+        let new_item = "new delegated work";
         let new_cell = agent_doc_document::subagent_completion::cell_with_response(
             "subagent:new",
-            "new delegated work",
+            new_item,
             "new-key",
             "New worker result.",
         )
-        .unwrap();
+        .unwrap()
+        .replacen(
+            "\n<!-- agent-doc-subagent-response",
+            &format!(
+                "\n\n> **Queue prompt:**\n>\n> {new_item} ⟦local⟧\n\n<!-- agent-doc-subagent-response"
+            ),
+            1,
+        );
         let durable = "### Re: recovered response — gpt-5\n\nThe cycle is committed.\n";
         let snapshot = session_doc(&format!("{durable}\n{old_cell}\n"));
         let current = session_doc(&format!("{new_cell}\n\n{durable}"));

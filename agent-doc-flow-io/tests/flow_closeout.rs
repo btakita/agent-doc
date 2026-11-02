@@ -1907,9 +1907,9 @@ mod tests {
     /// `#committed-cycle-completion-heading-drift`: reproduces the three-command
     /// contradiction from `game-sessions.md`. A committed response is present in
     /// HEAD (so `write --commit` has nothing to replay), while the saved baseline
-    /// is stale and the visible document replaces one binary completion cell with
-    /// another. Session-check used to prescribe `write --commit`, and
-    /// `repair --apply-recovery` repeated that impossible prescription.
+    /// is a newer completion projection whose binary cell contains the historic
+    /// canonicalized queue-prompt echo. Session-check used to call that heading a
+    /// direct patchback, and repair then rewound the forward snapshot to HEAD.
     #[test]
     fn committed_response_with_completion_replacement_repairs_without_replay() {
         let response = concat!(
@@ -1929,32 +1929,38 @@ mod tests {
             "Old worker result.",
         )
         .unwrap();
+        let new_item = "new delegated work";
         let new_cell = agent_doc_document::subagent_completion::cell_with_response(
             "subagent:new",
-            "new delegated work",
+            new_item,
             "new-key",
             "New worker result.",
         )
-        .unwrap();
+        .unwrap()
+        .replacen(
+            "\n<!-- agent-doc-subagent-response",
+            &format!(
+                "\n\n> **Queue prompt:**\n>\n> {new_item} ⟦local⟧\n\n<!-- agent-doc-subagent-response"
+            ),
+            1,
+        );
         let prefix = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
             "<!-- agent:exchange patch=append -->\n",
         );
-        let stale_snapshot =
-            format!("{prefix}{response_turn}\n{old_cell}\n<!-- /agent:exchange -->\n");
-        // HEAD contains exactly the captured response, but the old completion
-        // projection moved across it during the committed closeout.
+        // HEAD contains exactly the captured response plus the older completion.
         let committed_head =
             format!("{prefix}{old_cell}\n{response_turn}\n<!-- /agent:exchange -->\n");
-        // The live projection replaces the old completion evidence with the
-        // newer worker result. The durable response itself is unchanged.
-        let visible = format!("{prefix}{new_cell}\n{response_turn}\n<!-- /agent:exchange -->\n");
+        // Completion reporting checkpointed this forward projection before its
+        // commit landed. It is baseline/current, not a stale predecessor to HEAD.
+        let forward_snapshot =
+            format!("{prefix}{response_turn}{new_cell}\n<!-- /agent:exchange -->\n");
 
         let (_dir, doc) = setup_git_project_with_doc(&committed_head);
         agent_doc_cycle_state_io::start_preflight(
             &doc,
-            Some(&stale_snapshot),
+            Some(&committed_head),
             Some(&committed_head),
         )
         .unwrap();
@@ -1963,18 +1969,18 @@ mod tests {
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
             "commit_success",
-            Some(&stale_snapshot),
+            Some(&committed_head),
             Some(&committed_head),
         )
         .unwrap();
         agent_doc_capture_io::mark_committed(&doc).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
-            &stale_snapshot,
+            &forward_snapshot,
             agent_doc_ops_log_io::log_op,
         )
         .unwrap();
-        std::fs::write(&doc, &visible).unwrap();
+        std::fs::write(&doc, &forward_snapshot).unwrap();
 
         assert!(
             agent_doc_turn::response_replay::response_materialized_in_content(
@@ -1986,7 +1992,7 @@ mod tests {
         assert_eq!(
             agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
                 &committed_head,
-                &visible,
+                &forward_snapshot,
             ),
             None,
             "completion replacement must not masquerade as a response patchback",
@@ -2012,7 +2018,7 @@ mod tests {
 
         match apply_closeout_recovery(&doc).unwrap() {
             RecoveryApplication::Applied { state, .. } => {
-                assert_eq!(state, CloseoutRecoveryState::RecoveryProjectionVisibleDrift,)
+                assert_eq!(state, CloseoutRecoveryState::QueueMetadataDrift,)
             }
             other => {
                 panic!("completion projection should be recoverable without replay: {other:?}")

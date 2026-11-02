@@ -142,6 +142,7 @@ dependencies = [
  "agent-doc-turn-status-io",
  "agent-doc-watch-io",
  "agent-doc-work-graph",
+ "agent-doc-work-projection",
  "agent-doc-workflow",
  "agent-doc-workflow-io",
  "agent-doc-write-command-io",
@@ -453,7 +454,7 @@ dependencies = [
  "agent-doc-test-support",
  "agent-doc-turn",
  "agent-doc-turn-scope-io",
- "agent-doc-work-graph",
+ "agent-doc-work-projection",
  "agent-doc-workflow",
  "agent-doc-write-command-io",
  "agent-doc-write-converge-io",
@@ -1637,7 +1638,7 @@ dependencies = [
  "agent-doc-tmux-io",
  "agent-doc-turn",
  "agent-doc-turn-status-io",
- "agent-doc-work-graph",
+ "agent-doc-work-projection",
  "agent-doc-workflow",
  "anyhow",
  "indexmap",
@@ -2309,7 +2310,7 @@ dependencies = [
  "agent-doc-test-support",
  "agent-doc-turn",
  "agent-doc-turn-status-io",
- "agent-doc-work-graph",
+ "agent-doc-work-projection",
  "agent-doc-workflow",
  "anyhow",
  "lazily 0.61.0",
@@ -3007,16 +3008,25 @@ dependencies = [
 name = "agent-doc-work-graph"
 version = "0.35.565"
 dependencies = [
+ "agent-doc-element",
+ "agent-doc-element-backlog",
+ "agent-doc-flow",
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "agent-doc-work-projection"
+version = "0.35.565"
+dependencies = [
  "agent-doc-document",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-queue",
- "agent-doc-flow",
  "agent-doc-hash",
  "agent-doc-queue",
  "anyhow",
- "serde",
- "serde_json",
 ]
 
 [[package]]

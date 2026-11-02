@@ -945,7 +945,7 @@ fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> 
         // state that this closeout may have changed. Reconcile it before the
         // closeout commit even when no legacy tracked-work maintenance is due,
         // so status never lands in a second recovery commit.
-        || agent_doc_work_graph::reconcile_managed_status_open_items(content)?.is_some())
+        || agent_doc_work_projection::reconcile_managed_status_open_items(content)?.is_some())
 }
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
     let detail = err
@@ -1004,7 +1004,7 @@ mod precommit_pending_capture_tests {
         );
 
         assert!(super::content_requires_closeout_pending_maintenance(content).unwrap());
-        let reconciled = agent_doc_work_graph::reconcile_managed_status_open_items(content)
+        let reconciled = agent_doc_work_projection::reconcile_managed_status_open_items(content)
             .unwrap()
             .expect("status projection should be added");
         assert!(!super::content_requires_closeout_pending_maintenance(&reconciled).unwrap());

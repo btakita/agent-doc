@@ -57,6 +57,28 @@ and the pending granular-flags-only rule. This runbook carries the rest.
 - Reconcile the changed exchange tail oldest-first. Do not stop at the newest
   question; answer or group each unresolved prompt in that tail and each
   unresolved `prompt_target`; treat `content_edit` items as user corrections.
+- **Canonical cross-tree authorization choices (`#canonical-cross-tree-choice`).**
+  When the same authorization question gates two or more prompt trees, represent
+  it once, as one top-level structured choice response with one stable request
+  id. The canonical block must name the complete shared scope and contain exactly
+  two canned choices:
+
+  ```markdown
+  - **Request [#authorization-request]**: Authorize <exact action> for <affected prompt trees>?
+    - **Choices:**
+      - **Yes, I authorize <exact action for affected prompt trees>**: Proceed only within that scope.
+      - **No, I do not authorize <exact action for affected prompt trees>**: Do not perform that action.
+  ```
+
+  Operator freeform input is always available, so do not add `Other`, `Custom`,
+  a blank third choice, or another canned option merely to expose it. Under
+  every affected prompt tree, write only
+  `**Reference**: [#authorization-request]`. That reference is inert metadata:
+  it carries no independent Yes/No state and does not become an executable child
+  or authorize anything by itself. Never duplicate the canonical `**Choices:**` block
+  beneath a referenced tree. If scopes differ in any action, target,
+  repository, or outward effect, they are not one choice: emit separate
+  canonical requests with separately scoped labels.
 - **Chat-originated prompts are session turns (`#chatprompt`, GH #125).** When the
   operator types the prompt into the harness chat (Claude Code, Codex, OpenCode)
   instead of editing the document — including a bare `prompt_presets` key such

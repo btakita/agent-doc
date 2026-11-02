@@ -18109,6 +18109,44 @@ fn test_response_header_timestamp_contract_is_documented_and_singly_owned() {
     }
 }
 
+/// `#canonical-cross-tree-choice`: model-authored authorization UI is an
+/// instruction surface. Pin both the hot-path rule and the detailed canonical
+/// shape so one shared decision does not regress into repeated per-tree blocks.
+#[test]
+fn test_cross_tree_authorization_choice_contract_is_documented() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let skill = fs::read_to_string(manifest_dir.join("SKILL.md")).unwrap();
+    let respond = fs::read_to_string(manifest_dir.join("runbooks/respond.md")).unwrap();
+
+    for (name, surface) in [
+        ("SKILL.md", skill.as_str()),
+        ("respond.md", respond.as_str()),
+    ] {
+        for required in [
+            "#canonical-cross-tree-choice",
+            "top-level structured choice",
+            "Yes, I authorize <",
+            "No, I do not authorize <",
+            "freeform",
+            "**Reference**: [#",
+        ] {
+            assert!(surface.contains(required), "{name} missing {required:?}");
+        }
+    }
+
+    let example = respond
+        .split_once("```markdown\n")
+        .and_then(|(_, rest)| rest.split_once("\n  ```"))
+        .map(|(example, _)| example)
+        .expect("respond runbook must include the canonical choice example");
+    assert_eq!(example.matches("**Choices:**").count(), 1);
+    assert_eq!(example.matches("**Yes, I authorize").count(), 1);
+    assert_eq!(example.matches("**No, I do not authorize").count(), 1);
+    assert!(!example.contains("Other"));
+    assert!(respond.contains("That reference is inert metadata"));
+    assert!(respond.contains("Never duplicate the canonical `**Choices:**` block"));
+}
+
 #[test]
 fn test_agent_doc_controller_owns_handoff_staleness_policy() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));

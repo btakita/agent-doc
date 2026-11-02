@@ -33,4 +33,10 @@ This file is a routing table, not the workflow manual. For every normal turn, re
 | Responding, steering, queue/subagent work, backlog, review, done, TODO, or mutable-decision work | [respond.md](runbooks/respond.md), [pending-ops.md](runbooks/pending-ops.md), [decisions.md](runbooks/decisions.md), [streaming-checkpoints.md](runbooks/streaming-checkpoints.md) |
 | Verification/persistence, recovery, compaction/extraction, format, images, remote/tmux/manual jobs, or instruction authoring | [persist-closeout.md](runbooks/persist-closeout.md), [commit.md](runbooks/commit.md), [baseline-drift.md](runbooks/baseline-drift.md), [jb-cache-conflict.md](runbooks/jb-cache-conflict.md), [compact-exchange.md](runbooks/compact-exchange.md), [transfer-extract.md](runbooks/transfer-extract.md), [document-format.md](runbooks/document-format.md), [code-enforced-directives.md](runbooks/code-enforced-directives.md), [describe-image.md](runbooks/describe-image.md), [coder-workspace.md](runbooks/coder-workspace.md), [multi-tmux-sessions.md](runbooks/multi-tmux-sessions.md), [manual-job-packets.md](runbooks/manual-job-packets.md), [dynamic-context.md](runbooks/dynamic-context.md), [split-spec-files.md](runbooks/split-spec-files.md), [okf/index.md](okf/index.md) |
 
+Canonical cross-tree authorization choices (`#canonical-cross-tree-choice`) use
+one top-level structured choice with `Yes, I authorize <scope>` and
+`No, I do not authorize <scope>`; freeform remains available, and each affected
+tree carries only an inert `**Reference**: [#<canonical-request-id>]`. See
+`respond.md`.
+
 Read a required runbook once per session and re-read it only after compaction or a content change. Trust the binary's current cycle contract and emitted commands over remembered prose.

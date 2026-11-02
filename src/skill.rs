@@ -4397,6 +4397,49 @@ mod tests {
         assert!(bundled_instruction_text().contains("There is no `split` alias"));
     }
 
+    #[test]
+    fn bundled_surfaces_define_one_canonical_cross_tree_authorization_choice() {
+        let respond = BUNDLED_RUNBOOKS
+            .iter()
+            .find(|(name, _)| *name == "respond.md")
+            .map(|(_, body)| *body)
+            .expect("respond.md missing from BUNDLED_RUNBOOKS");
+        for surface in [SKILL_TEMPLATE, respond] {
+            for required in [
+                "#canonical-cross-tree-choice",
+                "top-level structured choice",
+                "Yes, I authorize <",
+                "No, I do not authorize <",
+                "freeform",
+                "**Reference**: [#",
+            ] {
+                assert!(surface.contains(required), "missing {required:?}");
+            }
+        }
+
+        let example = respond
+            .split_once("```markdown\n")
+            .and_then(|(_, rest)| rest.split_once("\n  ```"))
+            .map(|(example, _)| example)
+            .expect("respond runbook must include the canonical choice example");
+        assert_eq!(example.matches("**Choices:**").count(), 1);
+        assert_eq!(example.matches("**Yes, I authorize").count(), 1);
+        assert_eq!(example.matches("**No, I do not authorize").count(), 1);
+        assert!(!example.contains("Other"));
+
+        for env in [
+            Environment::ClaudeCode,
+            Environment::Codex,
+            Environment::OpenCode,
+            Environment::Generic,
+        ] {
+            assert!(
+                content_for_env(env).contains("#canonical-cross-tree-choice"),
+                "{env:?} skill omits the canonical authorization-choice rule"
+            );
+        }
+    }
+
     /// qsubattr4: the queue-level `subagents` attribute makes the in-session
     /// agent a coordinator. The hot path names the contract and links it; the
     /// respond and planning-dispatch runbooks own the full procedure.

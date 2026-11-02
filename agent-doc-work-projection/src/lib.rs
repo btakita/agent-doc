@@ -7,6 +7,14 @@ use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
+/// One operator-authored resolution command attached to a projected active item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveResolutionCommand {
+    pub identity: String,
+    pub state: String,
+    pub command: String,
+}
+
 /// One authoritative location contributing to the active-work index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedActiveItemSource {
@@ -263,22 +271,186 @@ pub fn render_managed_active_items(items: &[ManagedActiveItem]) -> String {
                 .map(|id| format!("[#{id}]"))
                 .unwrap_or_else(|| item.identity.clone());
             out.push_str(&format!("  - `{identity}` — {}\n", item.summary));
+            if let Some(primary) = item
+                .sources
+                .iter()
+                .find(|source| source.component == item.group)
+            {
+                out.push_str(&format!("    - **Status:** {}\n", primary.state));
+            }
             let sources = item
                 .sources
                 .iter()
+                .filter(|source| source.component != item.group)
                 .map(|source| format!("{} ({})", source.component, source.state))
                 .collect::<Vec<_>>()
                 .join("; ");
-            out.push_str(&format!("    - **Sources:** {sources}\n"));
+            if !sources.is_empty() {
+                out.push_str(&format!("    - **Sources:** {sources}\n"));
+            }
         }
     }
     out
 }
 
+fn active_item_identity(line: &str) -> Option<(usize, String)> {
+    let indent = line.len().saturating_sub(line.trim_start().len());
+    let rest = line.trim_start().strip_prefix("- `[#")?;
+    let (identity, _) = rest.split_once("]` — ")?;
+    (!identity.trim().is_empty()).then(|| (indent, identity.trim().to_ascii_lowercase()))
+}
+
+fn active_status(line: &str) -> Option<String> {
+    line.trim()
+        .strip_prefix("- **Status:**")
+        .map(|state| state.trim().to_string())
+}
+
+fn is_binary_active_child(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("- **Status:**") || trimmed.starts_with("- **Sources:**")
+}
+
+/// Preserve operator-authored descendants while regenerating binary metadata.
+///
+/// `Status` and `Sources` are owned projection rows. Every other descendant of
+/// an active item is operator input, so replacing the projection must carry it
+/// forward until the command is promoted or otherwise resolved.
+fn merge_active_operator_children(existing: &str, rendered: &str) -> String {
+    let mut children: HashMap<String, Vec<String>> = HashMap::new();
+    let mut current: Option<(usize, String)> = None;
+    for line in existing.lines() {
+        if let Some(item) = active_item_identity(line) {
+            current = Some(item);
+            continue;
+        }
+        let Some((item_indent, identity)) = current.as_ref() else {
+            continue;
+        };
+        let indent = line.len().saturating_sub(line.trim_start().len());
+        if line.trim().is_empty() {
+            continue;
+        }
+        if indent <= *item_indent {
+            current = None;
+            continue;
+        }
+        if !is_binary_active_child(line) {
+            children
+                .entry(identity.clone())
+                .or_default()
+                .push(line.to_string());
+        }
+    }
+    if children.is_empty() {
+        return rendered.to_string();
+    }
+
+    let lines = rendered.lines().collect::<Vec<_>>();
+    let mut out = String::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        out.push_str(line);
+        out.push('\n');
+        let Some((item_indent, identity)) = active_item_identity(line) else {
+            index += 1;
+            continue;
+        };
+        index += 1;
+        while index < lines.len() {
+            let child = lines[index];
+            let indent = child.len().saturating_sub(child.trim_start().len());
+            if child.trim().is_empty() || indent <= item_indent {
+                break;
+            }
+            out.push_str(child);
+            out.push('\n');
+            index += 1;
+        }
+        if let Some(preserved) = children.get(&identity) {
+            for child in preserved {
+                out.push_str(child);
+                out.push('\n');
+            }
+        }
+    }
+    out.trim_end_matches('\n').to_string()
+}
+
+/// Promote leaf resolution commands from `agent:active` into ordinary queue
+/// prompts, returning the document with those commands consumed.
+///
+/// The active row remains a derived observer of its authoritative source. The
+/// promoted prompt is deliberately free text (it names the stable identity
+/// without `#`) so it cannot alias or steal the claim identity of the work it
+/// asks the coordinator to resolve.
+pub fn promote_active_resolution_commands(
+    content: &str,
+) -> Result<Option<(String, Vec<ActiveResolutionCommand>)>> {
+    use agent_doc_element::element;
+
+    let components =
+        element::parse(content).context("active command promotion: parse components")?;
+    let Some(active) = components.iter().find(|component| {
+        element::canonical_component_name(&component.name) == element::ACTIVE_COMPONENT
+    }) else {
+        return Ok(None);
+    };
+    let body = active.content(content);
+    let lines = body.lines().collect::<Vec<_>>();
+    let mut commands = Vec::new();
+    let mut kept = Vec::new();
+    let mut current: Option<(usize, String, String)> = None;
+    for line in lines {
+        if let Some((indent, identity)) = active_item_identity(line) {
+            current = Some((indent, identity, String::new()));
+            kept.push(line);
+            continue;
+        }
+        if let Some((item_indent, identity, state)) = current.as_mut() {
+            let indent = line.len().saturating_sub(line.trim_start().len());
+            if !line.trim().is_empty() && indent <= *item_indent {
+                current = None;
+            } else if let Some(found) = active_status(line) {
+                *state = found;
+            } else if indent > *item_indent
+                && line
+                    .trim()
+                    .strip_prefix("- ")
+                    .is_some_and(|command| command.trim().eq_ignore_ascii_case("close"))
+            {
+                let identity = identity.clone();
+                let state = state.clone();
+                commands.push(ActiveResolutionCommand {
+                    identity,
+                    state,
+                    command: "close".to_string(),
+                });
+                continue;
+            }
+        }
+        kept.push(line);
+    }
+    if commands.is_empty() {
+        return Ok(None);
+    }
+    let mut new_body = kept.join("\n");
+    new_body.push('\n');
+    Ok(Some((active.replace_content(content, &new_body), commands)))
+}
+
 /// Re-derive and reconcile the binary-owned `agent:active` projection.
 pub fn reconcile_managed_active_items(content: &str) -> Result<Option<String>> {
     let items = managed_active_items(content)?;
-    let rendered = render_managed_active_items(&items);
+    let mut rendered = render_managed_active_items(&items);
+    let components = agent_doc_element::element::parse(content)?;
+    if let Some(active) = components.iter().find(|component| {
+        agent_doc_element::element::canonical_component_name(&component.name)
+            == agent_doc_element::element::ACTIVE_COMPONENT
+    }) {
+        rendered = merge_active_operator_children(active.content(content), &rendered);
+    }
     agent_doc_document::status_projection::reconcile_active_component_content(content, &rendered)
 }
 
@@ -345,7 +517,12 @@ mod tests {
         assert!(rendered.contains("- **Review** (1)\n"));
         assert!(!rendered.contains("- **Icebox**"));
         assert!(rendered.contains("`[#shared]` — authoritative tracked summary"));
-        assert!(rendered.contains("**Sources:** queue (running); backlog (open)"));
+        assert!(rendered.contains("`[#q-child]` — child"));
+        assert!(rendered.contains("**Status:** claimed"));
+        assert!(rendered.contains("**Status:** open"));
+        assert!(rendered.contains("**Sources:** queue (running)"));
+        assert!(!rendered.contains("**Sources:** backlog"));
+        assert!(!rendered.contains("**Sources:** queue (claimed)"));
         assert!(!rendered.contains("`[#todo-gated]` — waiting action"));
         assert!(!rendered.contains("**Sources:** todo"));
     }
@@ -381,6 +558,65 @@ mod tests {
         assert!(!updated.contains("- **Queue**"));
         assert!(!updated.contains("- **Backlog**"));
         assert!(!updated.contains("`[#live]`"));
+    }
+
+    #[test]
+    fn active_projection_preserves_then_promotes_operator_close_command() {
+        let content = concat!(
+            "## Status <!-- agent:status -->\n<!-- /agent:status -->\n",
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (1)\n",
+            "  - `[#lost-work]` — repair the lost attempt\n",
+            "    - **Status:** lost\n",
+            "    - close\n",
+            "<!-- /agent:active -->\n",
+            "## Run <!-- agent:run go -->\n",
+            "- ⚠️ do [#lost-work]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let reconciled = reconcile_managed_active_items(content)
+            .unwrap()
+            .expect("source summary changes while the operator command survives");
+        assert!(reconciled.contains("    - **Status:** lost\n    - close\n"));
+
+        let (promoted, commands) = promote_active_resolution_commands(&reconciled)
+            .unwrap()
+            .expect("close command is promoted");
+        assert_eq!(
+            commands,
+            vec![ActiveResolutionCommand {
+                identity: "lost-work".into(),
+                state: "lost".into(),
+                command: "close".into(),
+            }]
+        );
+        assert!(!promoted.contains("    - close\n"));
+        assert!(promoted.contains("    - **Status:** lost\n"));
+    }
+
+    #[test]
+    fn reported_queue_row_refreshes_stale_active_lifecycle() {
+        let content = concat!(
+            "## Active <!-- agent:active priority -->\n",
+            "- **Backlog** (1)\n",
+            "  - `[#work]` — the work\n",
+            "    - **Status:** open\n",
+            "    - **Sources:** queue (running)\n",
+            "<!-- /agent:active -->\n",
+            "<!-- agent:run subagents -->\n",
+            "- ### ☑️ [#subagent:work#1] do [#work]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#work] the work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let reconciled = reconcile_managed_active_items(content)
+            .unwrap()
+            .expect("reported lifecycle replaces stale running metadata");
+        assert!(reconciled.contains("    - **Sources:** queue (reported)\n"));
+        assert!(!reconciled.contains("queue (running)"));
     }
 
     #[test]

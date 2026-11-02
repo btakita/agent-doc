@@ -2606,6 +2606,59 @@ fn commit_current_document_content(file: &Path, source: &str) -> Result<String> 
     }
 }
 
+fn adopt_pending_completion_cells_from_disk(file: &Path, current: &mut String, stage: &str) {
+    let Ok(disk_content) = std::fs::read_to_string(file) else {
+        return;
+    };
+    let stripped = agent_doc_document::subagent_completion::strip_completion_cells_absent_from(
+        &disk_content,
+        current,
+    );
+    let normalized_nonblank = |content: &str| {
+        agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(content)
+            .lines()
+            .filter(|line| {
+                !line.trim().is_empty()
+                    && !line.trim().starts_with("<!-- agent:boundary:")
+            })
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    };
+    let pending_cells_only =
+        agent_doc_document::subagent_completion::only_pending_completion_cells_between(
+            current,
+            &disk_content,
+        ) || (stripped != disk_content
+            && normalized_nonblank(current) == normalized_nonblank(&stripped));
+    let pending_cells_plus_active = stripped != disk_content
+        && agent_doc_work_projection::reconcile_managed_active_items(&stripped)
+            .ok()
+            .flatten()
+            .is_some_and(|reconciled| {
+                normalized_nonblank(&reconciled) == normalized_nonblank(current)
+            });
+    if !pending_cells_only && !pending_cells_plus_active {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "commit_adopted_pending_completion_cells file={} stage={} basis=binary_attested_disk_delta active_projection={}",
+            file.display(),
+            stage,
+            pending_cells_plus_active,
+        ),
+    );
+    if let Some(merged) =
+        agent_doc_document::subagent_completion::merge_missing_attested_completion_cells(
+            current,
+            &disk_content,
+        )
+    {
+        *current = merged;
+    }
+}
+
 fn guard_committable_document_content(file: &Path, content: &str, stage: &str) -> Result<()> {
     if let Some(reason) = agent_doc_element::element::structural_corruption_reason(content) {
         anyhow::bail!(
@@ -2790,6 +2843,13 @@ where
                 file.display()
             )
         })?;
+    // `queue report-complete` can durably publish its binary-attested cell to
+    // disk one controller edge before the relay's current cut observes it.
+    // A following status-only commit must not stage a relay cut that silently
+    // drops the worker's only in-document handoff. Import only completion cells
+    // whose response digest and keyed marker prove binary ownership; every
+    // unrelated authority byte remains untouched.
+    adopt_pending_completion_cells_from_disk(file, &mut file_content, "initial_authority");
     guard_committable_document_content(file, &file_content, "initial_authority")?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     let rebased_snapshot = match snapshot_content.as_deref() {
@@ -3764,12 +3824,40 @@ where
     }
     file_content = commit_current_document_content(file, "commit_after_boundary_reposition")
         .unwrap_or_default();
+    // Boundary reposition performs a second authority read. Preserve the same
+    // attested handoff across that cut as well; otherwise the first adoption is
+    // silently discarded immediately before staging.
+    adopt_pending_completion_cells_from_disk(file, &mut file_content, "after_boundary_reposition");
     agent_doc_git_io::pre_stage_repair::dedupe_snapshot_and_worktree_before_commit(
         ports.pre_stage_repair,
         file,
         &mut snapshot_content,
         &mut file_content,
     )?;
+    if let Some(snapshot) = snapshot_content.as_mut() {
+        adopt_pending_completion_cells_from_disk(file, snapshot, "snapshot_before_stage");
+    }
+    // `agent:active` is a derived index. A snapshot captured before
+    // `report-complete` can already contain the reported queue row and newly
+    // merged completion cell while retaining the older `running` active
+    // metadata. Re-derive only that binary-owned component from the snapshot's
+    // own sources before staging; operator descendants (for example `- close`)
+    // are preserved by the projection reconciler.
+    if let Some(reconciled) = snapshot_content
+        .as_deref()
+        .map(agent_doc_work_projection::reconcile_managed_active_items)
+        .transpose()?
+        .flatten()
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "commit_snapshot_reconciled_active_projection file={} basis=snapshot_sources",
+                file.display()
+            ),
+        );
+        snapshot_content = Some(reconciled);
+    }
     agent_doc_git_io::live_buffer_guard::ensure_no_live_editor_buffer_ahead_of_disk(
         ports.live_buffer_guard,
         file,
@@ -4082,7 +4170,6 @@ where
     if elapsed_total > 0 {
         eprintln!("[perf] commit total: {}ms", elapsed_total);
     }
-
     Ok(CommitOutcome {
         did_commit,
         vcs_refresh_signaled,

@@ -535,7 +535,19 @@ fn compact_exchange_for_compare(body: &str) -> Vec<String> {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .filter(|line| !line.starts_with("<!-- agent:boundary:"))
-        .map(ToOwned::to_owned)
+        // The response-id annotation is binary lookup metadata. During
+        // closeout the visible editor cut can receive it before the committed
+        // canonical exchange is shaped with its queue-proof block. Treating
+        // that annotation as authored prose prevented an otherwise exact
+        // stale-prompt reconciliation and left the visible document behind
+        // HEAD after a successful commit.
+        .map(|line| {
+            if line.starts_with("### Re:") {
+                agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(line)
+            } else {
+                line.to_string()
+            }
+        })
         .collect()
 }
 
@@ -1079,6 +1091,24 @@ mod tests {
             reconciled.contains("- ~~do #fix1~~"),
             "queue mutation outside exchange must be preserved:\n{reconciled}"
         );
+    }
+
+    #[test]
+    fn reconcile_postcommit_exchange_ignores_visible_response_id_metadata() {
+        let head = doc_with_queue_and_exchange(
+            "- ~~do #fix1~~\n- do #fix2\n",
+            "❯ describe the project\n\n### Re: do #fix1 — gpt-5\n\n> **Queue prompt:**\n>\n> do #fix1\n\nImplemented and verified.",
+        );
+        let working = doc_with_queue_and_exchange(
+            "- ~~do #fix1~~\n- do #fix2\n",
+            "❯ describe the project\n❯ do #fix1\n\n### Re: do #fix1 — gpt-5 [#r-7c41951b8a79]\nImplemented and verified.",
+        );
+
+        let reconciled = reconcile_postcommit_exchange_to_head(&working, &head)
+            .expect("response-id metadata must not hide the exact consumed queue prompt");
+        assert!(!reconciled.contains("❯ do #fix1"), "{reconciled}");
+        assert!(reconciled.contains("> do #fix1"), "{reconciled}");
+        assert!(!reconciled.contains("[#r-7c41951b8a79]"), "{reconciled}");
     }
 
     #[test]

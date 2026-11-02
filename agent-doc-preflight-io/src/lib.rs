@@ -1059,9 +1059,8 @@ pub fn queue_subagent_dispatch_entries(
     // build entries before persisting their fixture/document; absence or an
     // unreadable ledger must retain the pre-existing dispatch contract rather
     // than fail a newly eligible item closed.
-    let claim_reports =
-        agent_doc_queue_io::queue_claim::claim_reports_for_content(file, content)
-            .unwrap_or_default();
+    let claim_reports = agent_doc_queue_io::queue_claim::claim_reports_for_content(file, content)
+        .unwrap_or_default();
     let submitted_prompts =
         agent_doc_queue::queue_response::submitted_prompts_for_heads(content, items);
     items
@@ -3822,8 +3821,7 @@ fn entries_without_out_of_loop_heads(
                 let display = agent_doc_document::queue_projection::strip_in_progress_marker(
                     prompt.text.trim(),
                 );
-                let lineage =
-                    agent_doc_queue::document_queue::lineage_claim_text(entries, index);
+                let lineage = agent_doc_queue::document_queue::lineage_claim_text(entries, index);
                 claimed.claims_at(entries, index)
                     || dispatch.iter().any(|item| {
                         item == &display
@@ -3869,10 +3867,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let queue_control = agent_doc_queue::queue_continuation::document_queue_control(&content);
     let comp = match agent_doc_queue::queue_set::QueueSet::parse(&content, &components) {
         Ok(queues) => match queues
-            .selected_reaching_inline_work_with_control(
-                &owner_selection,
-                queue_control.as_deref(),
-            )
+            .selected_reaching_inline_work_with_control(&owner_selection, queue_control.as_deref())
             // When every queue is held, keep exposing the ordinary selected
             // queue's blocked facts instead of degrading to an empty probe.
             .or_else(|| queues.selected())
@@ -5356,6 +5351,84 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         );
     }
 
+    // `agent:active` is an observer, but its item descendants are an operator
+    // control surface. Promote an explicit leaf command into the selected
+    // queue before regenerating the projection. The prompt intentionally
+    // names the stable identity without `#`, so it cannot alias the work
+    // claim it asks the coordinator to resolve.
+    let active_resolution_commands =
+        agent_doc_work_projection::promote_active_resolution_commands(&current_content)?;
+    if let Some((without_commands, commands)) = active_resolution_commands {
+        current_content = without_commands;
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after active command promotion")?
+        .clone();
+        let body = comp.content(&current_content);
+        let mut promoted_entries = agent_doc_queue::document_queue::parse(body)?;
+        let mut existing = promoted_entries
+            .iter()
+            .filter_map(|entry| match entry {
+                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
+                    Some(prompt.text.trim().to_string())
+                }
+                _ => None,
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let insert_at = promoted_entries
+            .iter()
+            .take_while(|entry| {
+                matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Preset(_)
+                        | agent_doc_queue::document_queue::QueueEntry::Dispatch(_)
+                )
+            })
+            .count();
+        let mut inserted = 0usize;
+        for command in commands {
+            let state = if command.state.is_empty() {
+                "unknown"
+            } else {
+                command.state.as_str()
+            };
+            let prompt = format!(
+                "Resolve agent:active item identity `{}` (status: {}): {}",
+                command.identity, state, command.command
+            );
+            if existing.contains(&prompt) {
+                continue;
+            }
+            existing.insert(prompt.clone());
+            promoted_entries.insert(
+                insert_at + inserted,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(
+                    agent_doc_queue::document_queue::QueuePrompt::new(prompt),
+                ),
+            );
+            inserted += 1;
+        }
+        let new_body = agent_doc_queue::document_queue::render(&promoted_entries);
+        current_content = comp.replace_content(&current_content, &new_body);
+        content = current_content.clone();
+        components = agent_doc_element::element::parse(&current_content)?;
+        comp = agent_doc_queue::queue_set::component_for_id(
+            &current_content,
+            &components,
+            &selected_queue_id,
+        )?
+        .context("queue maintenance: queue component vanished after active prompt insertion")?
+        .clone();
+        mutated = true;
+        eprintln!(
+            "[preflight] active: promoted {inserted} operator resolution command(s) into the selected queue"
+        );
+    }
+
     let body = &current_content[comp.open_end..comp.close_start];
     let entries = match agent_doc_queue::document_queue::parse(body) {
         Ok(e) => e,
@@ -5922,12 +5995,14 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             &current_content,
             sync_target.open_start,
         )?;
-        if let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue_with_external_ids(
-            &entries,
-            &backlog_ids,
-            mode,
-            &sibling_ids,
-        ) {
+        if let Some(synced) =
+            agent_doc_queue::document_queue::sync_backlog_into_queue_with_external_ids(
+                &entries,
+                &backlog_ids,
+                mode,
+                &sibling_ids,
+            )
+        {
             let pre_sync_ids = entries
                 .iter()
                 .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
@@ -6324,13 +6399,11 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // removes stale annotations from EVERY queue block instead of relying only
     // on the closeout command path or updating only the selected run.
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(&current_content);
-    if let Some(projected) =
-        agent_doc_queue::document_queue::project_all_prompt_operator_actions(
-            &current_content,
-            &[],
-            &open_todo_ids,
-        )?
-    {
+    if let Some(projected) = agent_doc_queue::document_queue::project_all_prompt_operator_actions(
+        &current_content,
+        &[],
+        &open_todo_ids,
+    )? {
         current_content = projected;
         activation.entries_after = queue_entries_for_id(&current_content, &selected_queue_id);
         mutated = true;
@@ -6581,8 +6654,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
         // `#goalpresetterminal`: project-inherited goal presets gate this catch-up.
-        let _goal_presets =
-            agent_doc_queue_io::goal_terminal_presets_guard(file, &current_content);
+        let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(file, &current_content);
         // `#subagentinlineveto`: a head the queue's `subagents` attribute owns
         // for dispatch, with no worker attempt behind it, is dispatch work even
         // when an earlier response answered it inline. Never catch it up here;
@@ -7007,12 +7079,10 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                 )
             })
             .collect::<Vec<_>>();
-        if let Err(err) =
-            agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
-                file,
-                &claim_admissions,
-            )
-        {
+        if let Err(err) = agent_doc_queue_io::queue_claim::transfer_prompt_identity_admissions(
+            file,
+            &claim_admissions,
+        ) {
             eprintln!(
                 "[preflight] queue: WARNING: could not carry claims across stable-id admission: {err:#}"
             );
@@ -7950,11 +8020,10 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     // or move unresolved lifecycle/operator evidence to one executable child.
     // Never leave a blocked/lost/operator-gated parent as an inert queue end.
     if !selected_queue_retains_struck
-        && let Some(settled_entries) =
-            agent_doc_queue::document_queue::settle_inert_group_parents(
-                &activation.entries_after,
-                &open_todo_ids,
-            )
+        && let Some(settled_entries) = agent_doc_queue::document_queue::settle_inert_group_parents(
+            &activation.entries_after,
+            &open_todo_ids,
+        )
     {
         let new_body = agent_doc_queue::document_queue::render(&settled_entries);
         current_content = {
@@ -8130,8 +8199,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             let new_body = if need_clear_drained_body
                 && agent_doc_queue::document_queue::is_public_run_opening_tag(
                     &new_snap[snap_q.open_start..snap_q.open_end],
-                )
-            {
+                ) {
                 agent_doc_queue_io::queue_consume::drained_run_receipt_for_current_cycle(file)
             } else if need_clear_drained_body {
                 String::new()
@@ -9753,9 +9821,7 @@ mod tests {
             let end = id_start + relative_end;
             let id = &normalized[id_start..end];
             if !id.starts_with("q-")
-                || !id
-                    .chars()
-                    .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+                || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
             {
                 break;
             }
@@ -10023,21 +10089,18 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(queue_work_texts(&state.queue_prompts), vec!["#upgrade"]);
         let authoritative = state.authoritative_content.as_deref().unwrap();
-        assert!(authoritative.contains("- ### 📥 #upgrade"), "{authoritative}");
-        let pending =
-            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
-                &doc,
-                authoritative,
-            )
-            .unwrap();
-        assert_eq!(queue_work_texts(&pending), vec!["#upgrade"]);
-        agent_doc_queue_io::queue_claim::claim(
+        assert!(
+            authoritative.contains("- ### 📥 #upgrade"),
+            "{authoritative}"
+        );
+        let pending = agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
             &doc,
-            &state.queue_prompts[0],
-            "subagent:test",
-            600,
+            authoritative,
         )
         .unwrap();
+        assert_eq!(queue_work_texts(&pending), vec!["#upgrade"]);
+        agent_doc_queue_io::queue_claim::claim(&doc, &state.queue_prompts[0], "subagent:test", 600)
+            .unwrap();
     }
 
     #[test]
@@ -10177,9 +10240,7 @@ mod tests {
         let signals = todo_signals_for_document(&doc, &orphan);
         assert!(
             signals.iter().any(|signal| {
-                without_admitted_queue_ids(&signal.todo)
-                    .trim_start_matches('#')
-                    == "ghostid"
+                without_admitted_queue_ids(&signal.todo).trim_start_matches('#') == "ghostid"
             }),
             "an orphan id head keeps its Todo-backlink signal: {signals:?}\n{orphan}"
         );
@@ -11482,18 +11543,21 @@ mod tests {
         let queue = components.iter().find(|c| c.name == "queue").unwrap();
         let entries = agent_doc_queue::document_queue::parse(queue.content(updated)).unwrap();
 
-        assert!(entries.iter().any(|entry| {
-            matches!(
-                entry,
-                agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
-                    if prompt.indent == 2
-                        && without_admitted_queue_ids(
-                            &agent_doc_document::queue_projection::strip_priority_markers(
-                                &prompt.text,
-                            ),
-                        ) == "#review"
-            )
-        }), "nested #review leaf was deleted on first maintenance:\n{updated}");
+        assert!(
+            entries.iter().any(|entry| {
+                matches!(
+                    entry,
+                    agent_doc_queue::document_queue::QueueEntry::Prompt(prompt)
+                        if prompt.indent == 2
+                            && without_admitted_queue_ids(
+                                &agent_doc_document::queue_projection::strip_priority_markers(
+                                    &prompt.text,
+                                ),
+                            ) == "#review"
+                )
+            }),
+            "nested #review leaf was deleted on first maintenance:\n{updated}"
+        );
         assert!(
             queue.content(updated).contains("do [#active]"),
             "active backlog mirror row was not added:\n{updated}"
@@ -12006,17 +12070,9 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("Never treat a chat answer"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("run its `start_command`"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("🟡 dispatching to 🚧 running"));
-        assert!(
-            QUEUE_SUBAGENT_DISPATCH_GUIDANCE
-                .contains("before calling the harness spawn tool")
-        );
-        assert!(
-            QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("failed or skipped claim forbids spawn")
-        );
-        assert_eq!(
-            entries[0].lifecycle.sequence,
-            ["claim", "spawn", "start"]
-        );
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("before calling the harness spawn tool"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("failed or skipped claim forbids spawn"));
+        assert_eq!(entries[0].lifecycle.sequence, ["claim", "spawn", "start"]);
         assert!(entries[0].lifecycle.claim_must_succeed_before_spawn);
         assert_eq!(entries[0].lifecycle.claimed_state, "claimed");
         assert_eq!(entries[0].lifecycle.running_state, "running");
@@ -12107,13 +12163,9 @@ mod tests {
             1,
         )
         .unwrap();
-        let (_, prior) = agent_doc_queue_io::queue_claim::claim(
-            &doc,
-            item,
-            "subagent:rtsteeringparity",
-            600,
-        )
-        .unwrap();
+        let (_, prior) =
+            agent_doc_queue_io::queue_claim::claim(&doc, item, "subagent:rtsteeringparity", 600)
+                .unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
             item,
@@ -12542,9 +12594,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         assert!(
             // `#queueblocked`: the dependent waits on its open prerequisite.
-            queue.contains(
-                "- ### 🚧 do [#setup]\n- ### ⛔ ⟦blocked by setup⟧ do [#ship]"
-            ),
+            queue.contains("- ### 🚧 do [#setup]\n- ### ⛔ ⟦blocked by setup⟧ do [#ship]"),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -16791,11 +16841,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            updated.contains(
-                "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 📥 do [#d]"
-            )
-        );
+        assert!(updated.contains(
+            "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 📥 do [#d]"
+        ));
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
 
@@ -16883,9 +16931,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_drainable_head_count, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(
-                "- ### ⏳ do [#verify]\n- ### 📥 do [#focused]\n- ### 🚧 do [#ready]"
-            ),
+            updated.contains("- ### ⏳ do [#verify]\n- ### 📥 do [#focused]\n- ### 🚧 do [#ready]"),
             "in-progress marker must project the first in-session drainable head \
              (`#queueawaitop`: the operator-verify head shows ⏳, `[focused-cycle]` none):\n{updated}"
         );
@@ -16974,9 +17020,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             without_admitted_queue_ids(&updated)
-                .contains(
-                    "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### 📥 release + publish\n"
-                ),
+                .contains("- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### 📥 release + publish\n"),
             "a stale binary-projected marker must move to the operator's first head:\n{updated}"
         );
     }
@@ -17031,9 +17075,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(
-                "- ### 🚧 do [#setup]\n- ### 🚧 do [#ship]\n- ### 📥 do [#ops]"
-            ),
+            updated.contains("- ### 🚧 do [#setup]\n- ### 🚧 do [#ship]\n- ### 📥 do [#ops]"),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
@@ -17168,9 +17210,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(
-                "- ### 🚧 📌 do [#slow]\n- ### 📥 do [#fast]\n- ### 📥 do [#medium]"
-            ),
+            updated.contains("- ### 🚧 📌 do [#slow]\n- ### 📥 do [#fast]\n- ### 📥 do [#medium]"),
             "operator-moved queue prompt should become sticky with an operator pin (📌):\n{updated}"
         );
     }
@@ -18171,9 +18211,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let first_id = agent_doc_markdown_ast::mutations::all_item_nodes(&admitted)
             .into_iter()
             .find(|node| node.item.work_text().contains("#adversarial-pr"))
-            .and_then(|node| {
-                agent_doc_element_queue::queue_prompt_stable_id(node.item.work_text())
-            })
+            .and_then(|node| agent_doc_element_queue::queue_prompt_stable_id(node.item.work_text()))
             .expect("the first leaf receives an admitted prompt id");
 
         let mut updated = admitted;
@@ -18199,9 +18237,20 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 agent_doc_element_queue::queue_prompt_stable_id(node.item.work_text())
             })
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(leaves.len(), 4, "all requested effects stay live:\n{updated}");
-        assert_eq!(ids.len(), 4, "each repeated leaf has a unique q-id:\n{updated}");
-        assert!(ids.contains(&first_id), "the first q-id must not drift:\n{updated}");
+        assert_eq!(
+            leaves.len(),
+            4,
+            "all requested effects stay live:\n{updated}"
+        );
+        assert_eq!(
+            ids.len(),
+            4,
+            "each repeated leaf has a unique q-id:\n{updated}"
+        );
+        assert!(
+            ids.contains(&first_id),
+            "the first q-id must not drift:\n{updated}"
+        );
         assert_eq!(
             agent_doc_queue::prompt_identity::project(&updated, &doc.to_string_lossy()).content,
             updated,
@@ -18374,9 +18423,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(file_after.contains(expected), "{file_after}");
         assert_eq!(
-            file_after
-                .matches("<!-- agent:active priority -->")
-                .count(),
+            file_after.matches("<!-- agent:active priority -->").count(),
             1,
             "document must contain one managed active projection: {file_after}"
         );
@@ -18392,7 +18439,62 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap()
             .unwrap();
         assert!(snapshot_after.contains(expected), "{snapshot_after}");
-        assert!(!snapshot_after.contains("`[#reported]` —"), "{snapshot_after}");
+        assert!(
+            !snapshot_after.contains("`[#reported]` —"),
+            "{snapshot_after}"
+        );
+    }
+
+    #[test]
+    fn active_close_child_is_promoted_to_a_distinct_resolution_prompt() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: start\n---\n\n",
+            "## Status <!-- agent:status -->\n<!-- /agent:status -->\n\n",
+            "## Active <!-- agent:active priority -->\n",
+            "- **Queue** (1)\n",
+            "  - `[#lost-work]` — repair the lost attempt\n",
+            "    - **Status:** lost\n",
+            "    - close\n",
+            "<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run go -->\n",
+            "- ⚠️ do [#lost-work]\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(
+                "Resolve agent:active item identity `lost-work` (status: lost): close"
+            ),
+            "{updated}"
+        );
+        assert!(
+            !updated.lines().any(|line| line.trim() == "- close"),
+            "the operator command is consumed only after its queue prompt is materialized: {updated}"
+        );
+        let queue = updated
+            .split_once("<!-- agent:run go -->")
+            .and_then(|(_, rest)| rest.split_once("<!-- /agent:run -->"))
+            .map(|(body, _)| body)
+            .expect("run queue remains present");
+        assert_eq!(
+            queue
+                .matches("Resolve agent:active item identity `lost-work`")
+                .count(),
+            1,
+            "one operator command creates one non-aliasing queue prompt: {updated}"
+        );
     }
 
     #[test]
@@ -18419,13 +18521,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "<!-- agent:backlog -->\n",
             "<!-- /agent:backlog -->\n",
         );
-        let direct_reconcile =
-            agent_doc_work_projection::reconcile_managed_active_items(content)
-                .unwrap()
-                .expect("the stale queue-free projection must require reconciliation");
+        let direct_reconcile = agent_doc_work_projection::reconcile_managed_active_items(content)
+            .unwrap()
+            .expect("the stale queue-free projection must require reconciliation");
         assert!(
-            !direct_reconcile.contains("- **Queue**")
-                && !direct_reconcile.contains("queue-free:"),
+            !direct_reconcile.contains("- **Queue**") && !direct_reconcile.contains("queue-free:"),
             "{direct_reconcile}"
         );
         assert!(
@@ -18449,17 +18549,20 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(!file_after.contains("- **Queue**"), "{file_after}");
-        assert!(file_after.contains("<!-- agent:active priority -->"), "{file_after}");
-        assert!(!file_after.contains("<!-- status:open-items -->"), "{file_after}");
+        assert!(
+            file_after.contains("<!-- agent:active priority -->"),
+            "{file_after}"
+        );
+        assert!(
+            !file_after.contains("<!-- status:open-items -->"),
+            "{file_after}"
+        );
         assert!(!file_after.contains("queue-free:"), "{file_after}");
 
         let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
-        assert!(
-            !snapshot_after.contains("- **Queue**"),
-            "{snapshot_after}"
-        );
+        assert!(!snapshot_after.contains("- **Queue**"), "{snapshot_after}");
         assert!(!snapshot_after.contains("queue-free:"), "{snapshot_after}");
     }
 
@@ -21083,7 +21186,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let state = inspect_queue_state(&doc, None).unwrap();
 
-        assert_eq!(queue_work_texts(&state.queue_prompts), vec![LOOP_SCOPE_HEAD]);
+        assert_eq!(
+            queue_work_texts(&state.queue_prompts),
+            vec![LOOP_SCOPE_HEAD]
+        );
         assert_eq!(
             state
                 .queue_supervisor_continuation_head
@@ -21833,9 +21939,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        let struck = format!(
-            "- ### ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n"
-        );
+        let struck =
+            format!("- ### ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n");
         assert!(
             updated.contains(&struck),
             "the backlog/done strike closes the reported row:\n{updated}"
@@ -22025,8 +22130,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 "{marker}: a claim-projected row is not struck by the backlog/done strike:\n{updated}"
             );
             assert!(
-                without_admitted_queue_ids(&updated)
-                    .contains(&format!("[#{owner}#1] {item}\n")),
+                without_admitted_queue_ids(&updated).contains(&format!("[#{owner}#1] {item}\n")),
                 "{marker}: the claimed row stays live with its owner:\n{updated}"
             );
             assert_eq!(

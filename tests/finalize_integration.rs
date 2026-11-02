@@ -382,6 +382,12 @@ fn status_sync_checkpoint_commit_lands_status_beside_pending_completion_cells() 
 
     // 3. The final status-sync checkpoint: `status set`, then `commit`.
     run(&["status", "set", file, "--text", "Published: v9"]);
+    assert!(
+        fs::read_to_string(&doc)
+            .unwrap()
+            .contains(completion_marker),
+        "status projection must preserve the pending binary completion cell"
+    );
     let first = run(&["commit", file]);
     let first_stdout = String::from_utf8_lossy(&first.get_output().stdout).into_owned();
     assert!(

@@ -627,10 +627,13 @@ pub fn record_claim_runtime_projection(
         // mutation. Otherwise a later exchange update can make the unrelated
         // queue diff block the document-only auto-commit boundary.
         if let Ok(Some(snapshot)) = agent_doc_snapshot_io::load_document_baseline(file) {
-            let synced = agent_doc_document::queue_projection::sync_in_progress_marker_regions(
-                &snapshot,
-                &projection.target_content,
-            );
+            let queue_synced =
+                agent_doc_document::queue_projection::sync_in_progress_marker_regions(
+                    &snapshot,
+                    &projection.target_content,
+                );
+            let synced = agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
+                .unwrap_or(queue_synced);
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                     file,
@@ -744,10 +747,13 @@ fn project_runtime_state_with_effects(
                 derive_blocker_runtime_projection(file, &current)?
             }
         };
-        if projection.changed {
+        let target_content =
+            agent_doc_work_projection::reconcile_managed_active_items(&projection.target_content)?
+                .unwrap_or(projection.target_content);
+        if target_content != current {
             effects.converge_document_or_disk(
                 file,
-                &projection.target_content,
+                &target_content,
                 &current,
                 "queue_claim_runtime_projection",
             )?;
@@ -773,7 +779,9 @@ fn project_runtime_state_with_effects(
                 derive_blocker_runtime_projection(file, &authoritative)?
             }
         };
-        if !settled.changed {
+        let active_settled =
+            agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
+        if !settled.changed && active_settled {
             let accepted = ClaimRuntimeProjection {
                 target_content: authoritative,
                 persisted_heads: settled.persisted_heads,
@@ -2491,6 +2499,54 @@ mod tests {
             "{released_snapshot}"
         );
         assert_eq!(released.item_text, "dispatched worker work");
+    }
+
+    #[test]
+    fn claim_and_start_project_an_active_counterpart_with_a_dedicated_status() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("claim-active.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "## Status <!-- agent:status -->\n<!-- /agent:status -->\n\n",
+            "## Active <!-- agent:active priority -->\n<!-- /agent:active -->\n\n",
+            "## Run <!-- agent:run id=\"main\" subagents go -->\n",
+            "- dispatched worker work\n",
+            "<!-- /agent:run -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        crate::queue_claim::claim(&doc, "dispatched worker work", "subagent:worker", 600).unwrap();
+        let effects = FakeEffects::default();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(claimed.contains("- **Queue** (1)"), "{claimed}");
+        assert!(claimed.contains("- **Status:** claimed"), "{claimed}");
+        assert!(!claimed.contains("**Sources:** queue"), "{claimed}");
+
+        crate::queue_claim::start_attempt(
+            &doc,
+            "dispatched worker work",
+            "subagent:worker",
+            "worker:active-projection",
+            600,
+            1,
+        )
+        .unwrap();
+        assert!(project_claim_runtime_state_with_effects(&effects, &doc, None).unwrap());
+        let running = std::fs::read_to_string(&doc).unwrap();
+        assert!(running.contains("- **Status:** running"), "{running}");
+        assert!(!running.contains("- **Status:** claimed"), "{running}");
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(snapshot.contains("- **Status:** running"), "{snapshot}");
     }
 
     /// `#queueprojectiondrift`: text-identical review leaves under different

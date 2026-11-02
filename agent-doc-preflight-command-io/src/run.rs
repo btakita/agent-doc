@@ -4159,7 +4159,9 @@ mod tests {
         );
         assert!(
             maintained.contains("`[#runctrlclaude]` — Fix background supervisor thrash")
-                && maintained.contains("**Sources:** queue (claimed); backlog (claimed)"),
+                && maintained.contains("**Status:** claimed")
+                && maintained.contains("**Sources:** queue (claimed)")
+                && !maintained.contains("**Sources:** backlog"),
             "the active projection must retain stale-claim reconciliation and its tracked source: {maintained}"
         );
         let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];

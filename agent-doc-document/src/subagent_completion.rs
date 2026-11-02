@@ -444,6 +444,72 @@ pub fn only_pending_completion_cells_between(baseline: &str, current: &str) -> b
     non_blank(&stripped) == non_blank(baseline)
 }
 
+/// Copy binary-attested completion cells present in `source` but absent from
+/// `base` into `base`'s exchange component.
+///
+/// This is deliberately narrower than a document merge: only cells whose
+/// heading, response digest, and keyed marker pass
+/// [`completion_cell_line_ranges`] are eligible. Operator prose and every
+/// other component remain byte-for-byte owned by `base`. The cells are
+/// inserted before the exchange boundary when one exists, matching
+/// `queue report-complete` projection semantics.
+pub fn merge_missing_attested_completion_cells(base: &str, source: &str) -> Option<String> {
+    merge_missing_attested_completion_cells_matching(base, source, |_| true)
+}
+
+/// Predicate-filtered form of [`merge_missing_attested_completion_cells`].
+///
+/// Callers that own queue lifecycle use this to avoid resurrecting a feedback
+/// cell after its matching work row was deliberately closed in `base`.
+pub fn merge_missing_attested_completion_cells_matching(
+    base: &str,
+    source: &str,
+    mut should_merge: impl FnMut(&CompletionEvidence) -> bool,
+) -> Option<String> {
+    let base_components = agent_doc_element::element::parse(base).ok()?;
+    let source_components = agent_doc_element::element::parse(source).ok()?;
+    let mut base_exchanges = base_components
+        .iter()
+        .filter(|component| component.name == "exchange");
+    let base_exchange = base_exchanges.next()?;
+    if base_exchanges.next().is_some() {
+        return None;
+    }
+    let mut source_exchanges = source_components
+        .iter()
+        .filter(|component| component.name == "exchange");
+    let source_exchange = source_exchanges.next()?;
+    if source_exchanges.next().is_some() {
+        return None;
+    }
+
+    let base_body = base_exchange.content(base);
+    let source_body = source_exchange.content(source);
+    let source_lines = source_body.lines().collect::<Vec<_>>();
+    let additions = completion_cell_line_ranges(source_body)
+        .into_iter()
+        .filter_map(|range| {
+            let evidence = completion_evidence_for_range(&source_lines, &range)?;
+            (should_merge(&evidence) && !base_body.contains(&marker(&evidence.key)))
+                .then(|| source_lines[range].join("\n"))
+        })
+        .collect::<Vec<_>>();
+    if additions.is_empty() {
+        return None;
+    }
+    let additions = additions.join("\n\n");
+    let boundary_id = base_body.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("<!-- agent:boundary:")?
+            .strip_suffix(" -->")
+            .filter(|id| !id.is_empty())
+    });
+    Some(match boundary_id {
+        Some(boundary_id) => base_exchange.append_with_boundary(base, &additions, boundary_id),
+        None => base_exchange.append_with_caret(base, &additions, None),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -664,5 +730,35 @@ mod tests {
         assert!(!only_pending_completion_cells_between(&baseline, &edited));
         // A cell the baseline already carries is not pending.
         assert!(!only_pending_completion_cells_between(&current, &baseline));
+    }
+
+    #[test]
+    fn merges_only_missing_attested_cells_across_unrelated_snapshot_drift() {
+        let cell = cell_with_response("subagent:a", "do [#a]", "ka", "Done a.").unwrap();
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: status — agent-doc\n\nSnapshot text.\n",
+            "<!-- agent:boundary:keep -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:status -->\nSnapshot status.\n<!-- /agent:status -->\n",
+        );
+        let source = format!(
+            "<!-- agent:exchange -->\n### Re: status — agent-doc\n\nLive text.\n\n{cell}\n<!-- agent:boundary:other -->\n<!-- /agent:exchange -->\n<!-- agent:status -->\nLive status.\n<!-- /agent:status -->\n"
+        );
+
+        let merged = merge_missing_attested_completion_cells(base, &source).unwrap();
+
+        assert!(merged.contains("Snapshot text."));
+        assert!(merged.contains("Snapshot status."));
+        assert!(!merged.contains("Live text."));
+        assert!(!merged.contains("Live status."));
+        assert!(merged.contains("key=ka"));
+        assert!(merged.find("key=ka").unwrap() < merged.find("boundary:keep").unwrap());
+        assert!(merge_missing_attested_completion_cells(&merged, &source).is_none());
+
+        let filtered = merge_missing_attested_completion_cells_matching(base, &source, |evidence| {
+            evidence.item != "do [#a]"
+        });
+        assert!(filtered.is_none(), "a closed row can veto cell recovery");
     }
 }

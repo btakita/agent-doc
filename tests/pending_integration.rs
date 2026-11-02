@@ -1527,7 +1527,7 @@ fn write_done_naming_a_todo_own_id_checks_it_off_and_strikes_its_queue_head() {
     );
     let queue = component_body(&content, "queue");
     assert!(
-        queue.contains("- ~~[#tdrename]: rename to sdk-dev~~"),
+        queue.contains("- ### ~~[#tdrename]: rename to sdk-dev~~"),
         "queue head struck in the same transaction: {queue}"
     );
     assert!(
@@ -3251,8 +3251,8 @@ fn write_blocking_operator_request_projects_and_clears_queue_indicator() {
     );
 
     let answered = content.replace(
-        "- 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]\n",
-        "- 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]: withdraw\n",
+        "- ### 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]\n",
+        "- ### 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]: withdraw\n",
     );
     fs::write(&doc, answered).unwrap();
     let stderr = write_packet_closeout(

@@ -794,6 +794,43 @@ pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<Strin
     crate::document_queue::nest_vector_at(&entries, index, prompt_text)
 }
 
+/// Exact submitted heads for concrete document rows, grouped by normalized own
+/// work text and retained in queue order.
+///
+/// A bare nested leaf can occur under several parents. Callers that already
+/// walk concrete rows use the matching occurrence rather than asking
+/// [`nest_vector_in_document`] for the first matching leaf every time
+/// (`#queueprojectiondrift`). Each grouped value is the parent vector for a
+/// nested row and the row's own work text for a top-level row.
+pub fn queue_heads_by_normalized_prompt_text(
+    content: &str,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut heads = std::collections::HashMap::<String, Vec<String>>::new();
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return heads;
+    };
+    for entries in components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .filter_map(|component| crate::document_queue::parse(component.content(content)).ok())
+        .map(crate::nested_claim_steer::expand_if_installed)
+    {
+        for (index, entry) in entries.iter().enumerate() {
+            let prompt = match entry {
+                crate::document_queue::QueueEntry::Prompt(prompt)
+                | crate::document_queue::QueueEntry::Completed(prompt) => prompt,
+                _ => continue,
+            };
+            let key = normalize_queue_prompt_text(prompt.text.trim());
+            let own_work = strip_priority_markers(prompt.text.trim());
+            let head = crate::document_queue::nest_vector_at(&entries, index, &own_work)
+                .unwrap_or(own_work);
+            heads.entry(key).or_default().push(head);
+        }
+    }
+    heads
+}
+
 fn parsed_queue_bodies(content: &str) -> Vec<Vec<crate::document_queue::QueueEntry>> {
     queue_bodies_for_nest(content)
         .into_iter()
@@ -1145,6 +1182,31 @@ pub fn response_explicitly_echoes_nest_vector(
 ) -> bool {
     nest_vector_in_document(content, head_text)
         .is_some_and(|vector| free_text_head_has_explicit_answer_evidence(response_body, &vector))
+}
+
+/// True when one labeled queue-prompt block quotes both the ancestor path and
+/// leaf of an exact nested-row head.
+///
+/// Older response scaffolds rendered a prompt tree on separate quoted lines
+/// instead of the canonical one-line `parent: leaf` vector. Requiring both
+/// parts in the same block preserves that exact-row proof without allowing a
+/// bare shared leaf elsewhere in the response to stand for every sibling.
+pub fn response_explicitly_echoes_nested_row_tree(
+    response_body: &str,
+    head_vector: &str,
+) -> bool {
+    let Some((ancestors, leaf)) = head_vector.rsplit_once(": ") else {
+        return false;
+    };
+    if ancestors.trim().is_empty() || leaf.trim().is_empty() {
+        return false;
+    }
+    direct_response_text(response_body)
+        .split("\n\n")
+        .any(|block| {
+            response_explicit_queue_prompt_echoes_head(block, ancestors)
+                && response_explicit_queue_prompt_echoes_head(block, leaf)
+        })
 }
 
 /// A descendant's nest-vector quote is that descendant's echo. It starts with

@@ -191,6 +191,11 @@ pub fn reported_writeback_pending_for_content(file: &Path, content: &str) -> Res
 }
 
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
+    // A reported attempt is integration debt for that exact row, not a
+    // document-wide dispatch lock. `subagent_dispatch_candidates_for_content`
+    // already excludes rows held by active claims and durable reported
+    // receipts, so unrelated ready siblings remain safe to start while the
+    // coordinator reconciles the handback (`#queueprojectiondrift`).
     subagent_dispatch_candidates_for_content(file, content)
 }
 
@@ -1272,6 +1277,47 @@ queue: go
         );
     }
 
+    /// `#queueprojectiondrift` (haiven-dev `tasks/cli.md`, 2026-11-01): one
+    /// REVIEW-CLEAN worker was reported while another PR row was still ready.
+    /// The reported handback remains visible integration debt, but it must not
+    /// make the ready sibling disappear from the dispatch plan.
+    #[test]
+    fn reported_handoff_does_not_hide_an_unrelated_ready_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("cli.md");
+        let reported = "https://github.com/haiven-dev/haiven-cli/pull/10: #adversarial-pr";
+        let ready = "https://github.com/haiven-dev/haiven-cli/pull/11: #adversarial-pr";
+        let content = attr_doc(
+            "subagents=2",
+            &[
+                "https://github.com/haiven-dev/haiven-cli/pull/10\n  - #adversarial-pr",
+                "https://github.com/haiven-dev/haiven-cli/pull/11\n  - #adversarial-pr",
+            ],
+        );
+        std::fs::write(&file, &content).unwrap();
+
+        let owner = "subagent:adversarial-pr-cli10";
+        let (_, claim) = crate::queue_claim::claim(&file, reported, owner, 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &file,
+            reported,
+            owner,
+            "/root/adversarial-pr-cli10",
+            600,
+            claim.generation,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&file, reported, Some(claim.generation)).unwrap();
+
+        assert!(reported_writeback_pending_for_content(&file, &content).unwrap());
+        assert_eq!(
+            pending_subagent_dispatch_for_content(&file, &content).unwrap(),
+            vec![ready.to_string()],
+            "the exact reported vector stays excluded while its ready sibling dispatches"
+        );
+    }
+
     /// `#queueblocked` (haiven-dev `tasks/sdk/sdk-demo.md`, 2026-10-27):
     /// `queue_subagent_dispatch` re-offered every blocked head each cycle. A
     /// head whose tracked item waits on an open blocker is neither dispatched
@@ -1657,8 +1703,8 @@ queue: go
     /// queue `subagents` attribute, releasing a reported worker's claim put
     /// the answered line straight back into the dispatch set, and the
     /// coordinator dispatched a second worker for it. A reported release
-    /// keeps the line out of dispatch (the coordinator persists it); a
-    /// `--requeue` release returns it to dispatch.
+    /// keeps that exact line out of dispatch while unrelated work remains
+    /// eligible; a `--requeue` release returns the reported line too.
     #[test]
     fn reported_release_is_not_redispatched_but_a_requeue_is() {
         use crate::claim_release_receipt::{ReleaseKind, release};

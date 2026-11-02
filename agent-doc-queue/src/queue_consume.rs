@@ -1186,16 +1186,29 @@ pub fn answered_free_text_strike_decision(
     // now than in the baseline has already had its answer applied.
     let struck_counts = |doc: &str| -> std::collections::HashMap<String, usize> {
         let mut counts = std::collections::HashMap::new();
+        let mut occurrences = std::collections::HashMap::<String, usize>::new();
+        let row_heads = crate::queue_response::queue_heads_by_normalized_prompt_text(doc);
         let loop_prefixes = loop_queue_node_prefixes(doc);
         if let Ok(nodes) = agent_doc_markdown_ast::mutations::item_nodes_all(doc, "queue") {
             for node in nodes.into_iter().filter(|node| {
-                node.item.struck
-                    && !loop_prefixes
-                        .iter()
-                        .any(|prefix| node.node_key.starts_with(prefix))
+                !loop_prefixes
+                    .iter()
+                    .any(|prefix| node.node_key.starts_with(prefix))
             }) {
+                let text = node.item.text.trim();
+                let normalized = normalize_queue_prompt_text(text);
+                let occurrence = occurrences.entry(normalized.clone()).or_default();
+                let head = row_heads
+                    .get(&normalized)
+                    .and_then(|heads| heads.get(*occurrence))
+                    .cloned()
+                    .unwrap_or_else(|| text.to_string());
+                *occurrence += 1;
+                if !node.item.struck {
+                    continue;
+                }
                 *counts
-                    .entry(normalize_queue_prompt_text(node.item.text.trim()))
+                    .entry(normalize_queue_prompt_text(&head))
                     .or_insert(0) += 1;
             }
         }
@@ -1214,8 +1227,22 @@ pub fn answered_free_text_strike_decision(
     };
     let mut struck_texts = already_applied;
     let open_todo_ids = agent_doc_element::todo::open_todo_ids(content);
+    let mut occurrences = std::collections::HashMap::<String, usize>::new();
+    let row_heads = crate::queue_response::queue_heads_by_normalized_prompt_text(content);
     for (node_index, node) in nodes.iter().enumerate() {
-        if node.item.struck || is_loop_queue_node(&node.node_key) {
+        if is_loop_queue_node(&node.node_key) {
+            continue;
+        }
+        let text = node.item.text.trim();
+        let normalized = normalize_queue_prompt_text(text);
+        let occurrence = occurrences.entry(normalized.clone()).or_default();
+        let head = row_heads
+            .get(&normalized)
+            .and_then(|heads| heads.get(*occurrence))
+            .cloned()
+            .unwrap_or_else(|| text.to_string());
+        *occurrence += 1;
+        if node.item.struck {
             continue;
         }
         // A row with descendants is their context, not executable work.  Its
@@ -1224,8 +1251,7 @@ pub fn answered_free_text_strike_decision(
         if mutation_node_is_group_parent(content, &nodes, node_index) {
             continue;
         }
-        let text = node.item.text.trim();
-        if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, text)
+        if text.is_empty() || !crate::queue_response::queue_prompt_text_is_free_text(content, &head)
         {
             continue;
         }
@@ -1241,43 +1267,81 @@ pub fn answered_free_text_strike_decision(
         if agent_doc_document::queue_projection::operator_action_holds_row(text, &open_todo_ids) {
             continue;
         }
-        if struck_texts.contains(&normalize_queue_prompt_text(text)) {
+        if struck_texts.contains(&normalize_queue_prompt_text(&head)) {
             continue;
         }
         // `#bugautostruck`: the in-progress marker proves only which queue head
         // was selected for this cycle. It is not evidence that the response
         // addressed that head. Require exact quoted-prompt proof for ordinary
         // free text, or resolved-expansion proof for a prompt-preset head.
-        let has_explicit_answer_evidence =
-            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text)
-                || crate::queue_response::response_explicitly_echoes_nest_vector(
-                    content,
-                    response_body,
-                    text,
-                );
+        let exact_vector_claimed = claimed.claims(&head);
+        let legacy_bare_claimed = !exact_vector_claimed && claimed.claims(text);
+        let head_has_explicit_answer_evidence =
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(
+                response_body,
+                &head,
+            ) || crate::queue_response::response_explicitly_echoes_nest_vector(
+                content,
+                response_body,
+                &head,
+            ) || crate::queue_response::response_explicitly_echoes_nested_row_tree(
+                response_body,
+                &head,
+            );
+        let bare_has_explicit_answer_evidence =
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(
+                response_body,
+                text,
+            ) || crate::queue_response::response_explicitly_echoes_nest_vector(
+                content,
+                response_body,
+                text,
+            );
+        let has_explicit_answer_evidence = head_has_explicit_answer_evidence
+            || (!exact_vector_claimed && bare_has_explicit_answer_evidence);
+        let row_claimed = exact_vector_claimed || legacy_bare_claimed;
+        let row_selected = selected.claims(&head) || selected.claims(text);
+        let head_answered = crate::queue_response::queue_head_answered_by_response_with_claim(
+            content,
+            response_body,
+            &head,
+            exact_vector_claimed,
+        ) || (exact_vector_claimed
+            && crate::queue_response::response_explicitly_echoes_nested_row_tree(
+                response_body,
+                &head,
+            ));
+        let bare_answered = !exact_vector_claimed
+            && crate::queue_response::queue_head_answered_by_response_with_claim(
+                content,
+                response_body,
+                text,
+                legacy_bare_claimed,
+            );
         // `#adresponsechildlive`: this projection scans every queue row. Do
         // not let a later row close merely because closeout prose, a `### Re:`
         // heading, or an unlabeled quote names it. Claimed work remains on the
         // stricter exact-echo contract; unclaimed registered presets may still
         // use their resolved-expansion proof.
-        let has_conservative_strike_evidence = if claimed.claims(text) {
+        let has_conservative_strike_evidence = if row_claimed {
             has_explicit_answer_evidence
         } else {
-            crate::queue_response::free_text_head_has_conservative_strike_evidence(
-                content,
-                response_body,
-                text,
-            )
+            has_explicit_answer_evidence
+                || crate::queue_response::free_text_head_has_conservative_strike_evidence(
+                    content,
+                    response_body,
+                    &head,
+                )
+                || crate::queue_response::free_text_head_has_conservative_strike_evidence(
+                    content,
+                    response_body,
+                    text,
+                )
         };
         if !has_conservative_strike_evidence {
             continue;
         }
-        if !crate::queue_response::queue_head_answered_by_response_with_claim(
-            content,
-            response_body,
-            text,
-            claimed.claims(text),
-        ) {
+        if !head_answered && !bare_answered {
             continue;
         }
         // `#ftstrikedefer`: the quoted echo is the responding agent's assertion
@@ -1285,7 +1349,26 @@ pub fn answered_free_text_strike_decision(
         // that quote that the head is still outstanding, believe the sentence
         // over the echo and leave it queued. A nest-vector quote is that leaf's
         // echo (`#nestvector`).
-        if crate::queue_response::response_defers_queue_head(content, response_body, text) {
+        let nested_tree_evidence =
+            crate::queue_response::response_explicitly_echoes_nested_row_tree(response_body, &head);
+        let deferred = crate::queue_response::response_defers_queue_head(
+            content,
+            response_body,
+            &head,
+        ) || (!exact_vector_claimed
+            && crate::queue_response::response_defers_queue_head(
+                content,
+                response_body,
+                text,
+            ))
+            || (exact_vector_claimed
+                && nested_tree_evidence
+                && crate::queue_response::response_defers_queue_head(
+                    content,
+                    response_body,
+                    text,
+                ));
+        if deferred {
             continue;
         }
         // Formal post-baseline closeout rule:
@@ -1302,8 +1385,9 @@ pub fn answered_free_text_strike_decision(
         // operator work, while rejecting binary-recorded selection made an
         // exactly answered projected head survive its own atomic closeout.
         if let Some(baseline) = baseline
+            && !crate::queue_response::free_text_head_present_in_baseline(baseline, &head)
             && !crate::queue_response::free_text_head_present_in_baseline(baseline, text)
-            && !((claimed.claims(text) || selected.claims(text)) && has_explicit_answer_evidence)
+            && !((row_claimed || row_selected) && has_explicit_answer_evidence)
         {
             continue;
         }
@@ -1311,7 +1395,7 @@ pub fn answered_free_text_strike_decision(
         // owns, with no worker attempt behind it, was run inline. The answer
         // is real but the lifecycle is not: keep the row queued for dispatch
         // and report it, never close it as if a subagent had run it.
-        if dispatch_owned.claims(text) && !claimed.claims(text) {
+        if dispatch_owned.claims(text) && !row_claimed {
             decision.inline_vetoed_heads.push(
                 agent_doc_document::queue_projection::strip_priority_markers(text)
                     .trim()
@@ -1319,7 +1403,7 @@ pub fn answered_free_text_strike_decision(
             );
             continue;
         }
-        struck_texts.insert(normalize_queue_prompt_text(text));
+        struck_texts.insert(normalize_queue_prompt_text(&head));
         decision.node_keys.push(node.node_key.clone());
     }
     Ok(decision)
@@ -6729,6 +6813,75 @@ mod tests {
             keys(deferred).is_empty(),
             "a deferred nested echo stays queued"
         );
+    }
+
+    /// `#queueprojectiondrift` (haiven-dev `tasks/cli.md`, 2026-11-01): five
+    /// PR parents shared the same `#adversarial-pr` leaf. Exact REVIEW-CLEAN
+    /// vector echoes close only pulls 10-12; vector deferrals keep 8-9. A later
+    /// bare shared-leaf deferral must not veto the already-finished siblings.
+    #[test]
+    fn repeated_leaf_closeout_is_scoped_to_each_exact_parent_vector() {
+        let _project = crate::goal_preset_terminal::InheritedPresetsGuard::install(
+            &goal_loop_project_presets(),
+        );
+        let doc = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:run subagents go -->\n",
+            "- https://github.com/haiven-dev/haiven-cli/pull/8\n",
+            "  - #adversarial-pr\n",
+            "- https://github.com/haiven-dev/haiven-cli/pull/9\n",
+            "  - #adversarial-pr\n",
+            "- https://github.com/haiven-dev/haiven-cli/pull/10\n",
+            "  - #adversarial-pr\n",
+            "- https://github.com/haiven-dev/haiven-cli/pull/11\n",
+            "  - #adversarial-pr\n",
+            "- https://github.com/haiven-dev/haiven-cli/pull/12\n",
+            "  - #adversarial-pr\n",
+            "<!-- /agent:run -->\n",
+        );
+        let vectors = (8..=12)
+            .map(|pull| {
+                format!("https://github.com/haiven-dev/haiven-cli/pull/{pull}: #adversarial-pr")
+            })
+            .collect::<Vec<_>>();
+        let response = concat!(
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/10: #adversarial-pr\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/10#pullrequestreview-10 base=aaaa head=bbbb cycles=1\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/11: #adversarial-pr\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/11#pullrequestreview-11 base=aaaa head=bbbb cycles=1\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/12: #adversarial-pr\n\n",
+            "REVIEW-CLEAN https://github.com/haiven-dev/haiven-cli/pull/12#pullrequestreview-12 base=aaaa head=bbbb cycles=1\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/8: #adversarial-pr\n\n",
+            "**Deferred:** pull 8 changed after review.\n\n",
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-cli/pull/9: #adversarial-pr\n\n",
+            "**Deferred:** pull 9 still needs a fresh review.\n\n",
+            "> **Queue prompt:** #adversarial-pr\n\n",
+            "**Deferred:** this shared leaf is not a substitute for a parent vector.\n",
+        );
+
+        let keys =
+            answered_free_text_head_node_keys_with_claims(doc, response, Some(doc), &vectors)
+                .unwrap();
+        assert_eq!(keys.len(), 3, "only the three REVIEW-CLEAN vectors close");
+
+        let projected =
+            project_answered_free_text_strike_with_claims(doc, response, Some(doc), &vectors)
+                .unwrap()
+                .expect("the three finished vectors project strikes");
+        assert_eq!(
+            projected
+                .target_content
+                .matches("~~#adversarial-pr~~")
+                .count(),
+            3,
+            "the shared bare deferral does not keep or close every sibling"
+        );
+        for pull in [8, 9] {
+            let open = format!(
+                "- https://github.com/haiven-dev/haiven-cli/pull/{pull}\n  - #adversarial-pr\n"
+            );
+            assert!(projected.target_content.contains(&open));
+        }
     }
 
     /// Live shape (agent-doc-bugs.md 2026-10-28): `release + publish` names the

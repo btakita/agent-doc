@@ -96,7 +96,9 @@ pub fn plan_queue_followups_targeted(
             })?;
         let target = crate::queue_graph::component_for_id(content, &components, &target_id)?
             .ok_or_else(|| anyhow::anyhow!("agent:queue id `{target_id}` not found"))?;
-        let insertion_at = match live_origin_line_ends(target.content(content), origin).as_slice() {
+        let insertion_at = match live_origin_subtree_ends(target.content(content), origin)
+            .as_slice()
+        {
             [offset] => target.open_end + offset,
             _ => {
                 let body = target.content(content);
@@ -119,7 +121,7 @@ pub fn plan_queue_followups_targeted(
         });
     }
     let queue = named;
-    let matches = live_origin_line_ends(queue.content(content), origin);
+    let matches = live_origin_subtree_ends(queue.content(content), origin);
     let insertion_at = match matches.as_slice() {
         [offset] => queue.open_end + offset,
         [] => bail!("queue follow-up origin {origin:?} not found in queue id `{queue_id}`"),
@@ -152,26 +154,56 @@ fn splice_followups(
     Ok(updated)
 }
 
-/// Body-relative end offsets of every live (unstruck) line whose head text is
-/// `origin`.
-fn live_origin_line_ends(body: &str, origin: &str) -> Vec<usize> {
+/// Body-relative end offsets of every live (unstruck) row whose head text is
+/// `origin`, including that row's nested subtree.
+///
+/// Follow-ups are siblings of the originating work. Inserting immediately
+/// after only the parent line makes its pre-existing children appear beneath
+/// the new follow-up in Markdown, silently changing both rows' lineage
+/// (`#queueprojectiondrift`).
+fn live_origin_subtree_ends(body: &str, origin: &str) -> Vec<usize> {
     let wanted = crate::queue_head_alignment::normalize_queue_head_text(origin);
+    let lines = body
+        .split_inclusive('\n')
+        .scan(0usize, |offset, line| {
+            *offset += line.len();
+            Some((*offset, line))
+        })
+        .collect::<Vec<_>>();
     let mut matches = Vec::new();
-    let mut offset = 0usize;
-    for line in body.split_inclusive('\n') {
+    for (index, (line_end, line)) in lines.iter().enumerate() {
         let line_text = line.trim_end_matches(['\r', '\n']);
+        let indent = line_text.len() - line_text.trim_start().len();
         let Some(prompt) = line_text
             .trim_start()
             .strip_prefix("- ")
             .filter(|text| !text.trim_start().starts_with("~~"))
         else {
-            offset += line.len();
             continue;
         };
         if crate::queue_head_alignment::normalize_queue_head_text(prompt) == wanted {
-            matches.push(offset + line.len());
+            let mut subtree_end = *line_end;
+            for (descendant_end, descendant) in lines.iter().skip(index + 1) {
+                let descendant = descendant.trim_end_matches(['\r', '\n']);
+                if descendant.trim().is_empty() {
+                    continue;
+                }
+                let descendant_indent = descendant.len() - descendant.trim_start().len();
+                if descendant.trim_start().starts_with("- ") {
+                    if descendant_indent <= indent {
+                        break;
+                    }
+                    subtree_end = *descendant_end;
+                    continue;
+                }
+                if descendant_indent > indent {
+                    subtree_end = *descendant_end;
+                    continue;
+                }
+                break;
+            }
+            matches.push(subtree_end);
         }
-        offset += line.len();
     }
     matches
 }
@@ -430,6 +462,32 @@ mod tests {
                 "<!-- /agent:queue -->\n",
             )
         );
+    }
+
+    /// `#queueprojectiondrift`: pull 9 already had a reported child when its
+    /// worker returned a follow-up. The new row is a sibling after the whole
+    /// origin subtree; it must not steal the reported child. Operator-authored
+    /// URLs also round-trip byte-for-byte.
+    #[test]
+    fn followup_lands_after_origin_subtree_without_reparenting_or_rewriting_urls() {
+        let origin = "https://github.com/haiven-dev/haiven-cli/pull/9";
+        let reported = "☑️ [#subagent:adversarial-pr-cli9#1] #adversarial-pr [#q-123]";
+        let followup = "#gh-fix https://github.com/haiven-dev/haiven-cli/pull/9#discussion_r123";
+        let doc = format!(
+            "<!-- agent:run id=haiven-cli-prs subagents -->\n- {origin}\n  - {reported}\n- https://github.com/haiven-dev/haiven-cli/pull/10\n  - #adversarial-pr\n<!-- /agent:run -->\n"
+        );
+
+        let updated =
+            plan_queue_followups(&doc, "haiven-cli-prs", origin, &[followup.to_string()]).unwrap();
+
+        assert_eq!(
+            updated,
+            format!(
+                "<!-- agent:run id=haiven-cli-prs subagents -->\n- {origin}\n  - {reported}\n- {followup}\n- https://github.com/haiven-dev/haiven-cli/pull/10\n  - #adversarial-pr\n<!-- /agent:run -->\n"
+            )
+        );
+        assert!(updated.contains("https://github.com/"));
+        assert!(!updated.contains("gi44hub.com"));
     }
 
     /// `#loopnoinsert` on this repository's `agent-doc-bugs.md` shape: the

@@ -2362,6 +2362,83 @@ mod tests {
         assert_eq!(released.item_text, "dispatched worker work");
     }
 
+    /// `#queueprojectiondrift`: text-identical review leaves under different
+    /// pull-request parents retain their own worker bindings. Projection must
+    /// never show pull 11 with pull 10's owner merely because their leaf text
+    /// is shared.
+    #[test]
+    fn repeated_nested_leaf_projects_the_owner_of_its_exact_parent_vector() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            concat!(
+                "- https://github.com/haiven-dev/haiven-cli/pull/10\n",
+                "  - #adversarial-pr\n",
+                "- https://github.com/haiven-dev/haiven-cli/pull/11\n",
+                "  - #adversarial-pr\n",
+            ),
+        );
+        let pull10 = "https://github.com/haiven-dev/haiven-cli/pull/10: #adversarial-pr";
+        let pull11 = "https://github.com/haiven-dev/haiven-cli/pull/11: #adversarial-pr";
+        let owner10 = "subagent:adversarial-pr-cli10";
+        let owner11 = "subagent:adversarial-pr-cli11";
+        crate::queue_claim::claim(&doc, pull10, owner10, 600).unwrap();
+        crate::queue_claim::claim(&doc, pull11, owner11, 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            pull10,
+            owner10,
+            "/root/adversarial-pr-cli10",
+            600,
+            1,
+        )
+        .unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            pull11,
+            owner11,
+            "/root/adversarial-pr-cli11",
+            600,
+            1,
+        )
+        .unwrap();
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(projection.target_content.contains(&format!(
+            "- https://github.com/haiven-dev/haiven-cli/pull/10\n  - 🚧 [#{owner10}#1] #adversarial-pr\n"
+        )));
+        assert!(projection.target_content.contains(&format!(
+            "- https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
+        )));
+        assert!(!projection.target_content.contains(&format!(
+            "pull/11\n  - 🚧 [#{owner10}#1]"
+        )));
+    }
+
+    /// A parked parent has no executable child and no claim. A stale running
+    /// glyph is presentation drift, not worker liveness, and projection clears
+    /// it without disturbing the operator's parked comment.
+    #[test]
+    fn parked_parent_without_a_claim_never_projects_as_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            "- 🚧 https://github.com/haiven-dev/haiven-cli/pull/7\n  - %% parked %%\n",
+        );
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert!(projection.changed);
+        assert!(!projection.target_content.contains("🚧"));
+        assert!(
+            projection.target_content.contains(
+                "- 📥 https://github.com/haiven-dev/haiven-cli/pull/7\n  - %% parked %%\n"
+            ),
+            "{}",
+            projection.target_content
+        );
+    }
+
     /// `#claimprojectiontypingresidue` (api.md, 2026-10-29): repeated claim
     /// refreshes raced an operator typing `- Is this done?`. A refresh painted
     /// the unrelated intermediate row `- IS this ` as pending, and the later

@@ -3063,13 +3063,35 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // later rows retain only a searchable, inert backlink. Repeating the full
     // tree gave one public response id several apparent definitions and let a
     // later response become nested inside an arbitrary duplicate.
-    let mut canonical_response_owners = HashMap::<String, String>::new();
     let mut response_projection_counts = HashMap::<String, usize>::new();
     for (_, response_id, _, _) in projection_by_node_key.values() {
         *response_projection_counts
             .entry(response_id.clone())
             .or_default() += 1;
     }
+    let mut canonical_response_owners = HashMap::<String, String>::new();
+    let mut request_response_owners = HashMap::<String, String>::new();
+    for node in &nodes {
+        let Some((_, response_id, _, _)) = projection_by_node_key.get(&node.node_key) else {
+            continue;
+        };
+        canonical_response_owners
+            .entry(response_id.clone())
+            .or_insert_with(|| node.node_key.clone());
+        if operator_request_packets
+            .iter()
+            .any(|packet| operator_request_packet_belongs_to_row(packet, &node.item.text))
+        {
+            request_response_owners
+                .entry(response_id.clone())
+                .or_insert_with(|| node.node_key.clone());
+        }
+    }
+    // When one of the rows owns an operator request, put the canonical response
+    // there so the full response tree and its decision stay together. If more
+    // than one row owns a distinct request, later owners keep only their scoped
+    // choices beneath the response backlink.
+    canonical_response_owners.extend(request_response_owners);
     for node in &nodes {
         let Some((projected_response_body, response_id, annotate_inline_id, shared_batch)) =
             projection_by_node_key.get(&node.node_key)
@@ -3087,9 +3109,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
             .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
         let canonical_owner = canonical_response_owners
-            .entry(response_id.clone())
-            .or_insert_with(|| node.node_key.clone());
-        let lookup_children = if canonical_owner == &node.node_key {
+            .get(response_id)
+            .is_some_and(|owner| owner == &node.node_key);
+        let lookup_children = if canonical_owner {
             let repeated_response = response_projection_counts
                 .get(response_id)
                 .is_some_and(|count| *count > 1);
@@ -3119,7 +3141,13 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 &mut rendered_choice_packet_ids,
             )
         } else {
-            vec![response_back_reference_child(response_id)]
+            vec![response_back_reference_child(
+                before,
+                &node.item.text,
+                projected_response_body,
+                response_id,
+                &mut rendered_choice_packet_ids,
+            )]
         };
         let missing_children = lookup_children
             .iter()
@@ -3163,9 +3191,37 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     Ok(out)
 }
 
-fn response_back_reference_child(response_id: &str) -> String {
+fn response_back_reference_child(
+    source_document: &str,
+    queue_item: &str,
+    response_body: &str,
+    response_id: &str,
+    rendered_choice_packet_ids: &mut HashSet<String>,
+) -> String {
     debug_assert!(agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id));
-    format!("**Closed by:** {response_id}")
+    let mut child = format!("**Closed by:** {response_id}");
+    let decision_choices = structured_choice_projection(source_document, queue_item, response_body)
+        .map(|projection| projection.choices);
+    for (index, packet) in
+        crate::operator_request_packet::blocking_operator_request_packets(response_body)
+            .into_iter()
+            .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
+            .filter(|packet| rendered_choice_packet_ids.insert(packet.id.clone()))
+            .enumerate()
+    {
+        child.push_str("\n- **Choices:**");
+        child.push_str(&format!("\n  - **Request**: [#{}]", packet.id));
+        let choices = if index == 0 {
+            decision_choices.clone().unwrap_or(packet.choice_rows)
+        } else {
+            packet.choice_rows
+        };
+        for choice in choices {
+            child.push_str("\n  - ");
+            child.push_str(&choice);
+        }
+    }
+    child
 }
 
 fn annotate_exchange_response_with_lookup_id(

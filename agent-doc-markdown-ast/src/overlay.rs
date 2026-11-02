@@ -577,7 +577,12 @@ fn response_choices_label_child_end(
     if item_indent != response_indent + 2 {
         return None;
     }
-    canonical_response_row(strip_bullet(lines.get(response_index)?)?)?;
+    let parent = strip_bullet(lines.get(response_index)?)?;
+    if canonical_response_row(parent).is_none()
+        && canonical_response_back_reference(parent).is_none()
+    {
+        return None;
+    }
     Some(opener_index + 1)
 }
 

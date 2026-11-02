@@ -17,8 +17,8 @@ use agent_doc_frontmatter::frontmatter;
 use agent_doc_queue::{
     document_queue::{QueueEntry, QueuePrompt},
     queue_consume::{
-        ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, RESPONSE_ID_NOTE_PREFIX,
-        approved_queue_head_matches, consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
+        ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, approved_queue_head_matches,
+        consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
         first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
         project_committed_heading_replay_free_text_strike_with_claims,
@@ -764,7 +764,8 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
     if fm.queue_active == Some(true) {
         anyhow::bail!(
             "{}: --ack-text did not exactly match a unique executable queue leaf or nest-vector; \
-             no change was applied. Active queues require that exact proof.", file.display()
+             no change was applied. Active queues require that exact proof.",
+            file.display()
         );
     }
 
@@ -1389,31 +1390,40 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         return Ok(0);
     }
 
-    let mut response_ids = target
-        .lines()
-        .filter_map(|line| {
-            let (_, tail) = line.rsplit_once(RESPONSE_ID_NOTE_PREFIX)?;
-            let response_id = tail.split_whitespace().next()?.trim_end_matches([';', ',']);
-            agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id)
-                .then_some(response_id.to_string())
-        })
+    let target_response_ids = projected_queue_response_ids(&target)?;
+    let current_response_ids = projected_queue_response_ids(&current)?;
+    let mut response_ids = target_response_ids
+        .iter()
         .filter(|response_id| {
-            let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
-            target.matches(&needle).count() > current.matches(&needle).count()
+            target_response_ids
+                .iter()
+                .filter(|candidate| *candidate == *response_id)
+                .count()
+                > current_response_ids
+                    .iter()
+                    .filter(|candidate| *candidate == *response_id)
+                    .count()
         })
+        .cloned()
         .collect::<Vec<_>>();
     response_ids.sort();
     response_ids.dedup();
-    let annotated = response_ids
+    let newly_projected = response_ids
         .iter()
         .map(|response_id| {
-            let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
-            target
-                .matches(&needle)
+            target_response_ids
+                .iter()
+                .filter(|candidate| *candidate == response_id)
                 .count()
-                .saturating_sub(current.matches(&needle).count())
+                .saturating_sub(
+                    current_response_ids
+                        .iter()
+                        .filter(|candidate| *candidate == response_id)
+                        .count(),
+                )
         })
         .sum::<usize>();
+    let annotated = newly_struck_queue_prompt_count(before, &current).min(newly_projected);
 
     if skip_visible_guard {
         effects.atomic_write(file, &target)?;
@@ -1450,6 +1460,88 @@ pub fn annotate_newly_completed_queue_prompts_with_response_id(
         ),
     );
     Ok(annotated)
+}
+
+fn projected_queue_response_ids(content: &str) -> Result<Vec<String>> {
+    let mut response_ids = Vec::new();
+    for queue in element::parse(content)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        for line in queue.content(content).lines() {
+            let marker = line
+                .trim()
+                .strip_prefix("- ")
+                .unwrap_or_else(|| line.trim());
+            let response_id = if let Some(rest) = marker.strip_prefix("**Response ") {
+                let Some((response_id, _)) = rest.split_once("**") else {
+                    continue;
+                };
+                response_id.trim_end_matches(':')
+            } else if let Some(response_id) = marker.strip_prefix("**Closed by:** ") {
+                response_id
+            } else {
+                continue;
+            };
+            if agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
+                response_ids.push(response_id.to_string());
+            }
+        }
+    }
+    Ok(response_ids)
+}
+
+fn newly_struck_queue_prompt_count(before: &str, after: &str) -> usize {
+    let struck_before = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+        .map(|nodes| {
+            nodes
+                .into_iter()
+                .filter(|node| node.item.struck)
+                .map(|node| node.node_key)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+
+    agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue")
+        .map(|nodes| {
+            nodes
+                .into_iter()
+                .filter(|node| {
+                    node.item.struck
+                        && !struck_before.contains(&node.node_key)
+                        && node.item.surface
+                            != agent_doc_markdown_ast::overlay::ItemSurface::MultilinePrompt
+                })
+                .count()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod response_projection_id_tests {
+    use super::projected_queue_response_ids;
+
+    #[test]
+    fn reads_summary_and_lookup_response_children() {
+        let content = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~summary~~\n",
+            "  - **Response [#r-0123456789ab]:** Done.\n",
+            "- ~~lookup~~\n",
+            "  - **Response [#r-abcdef012345]**\n",
+            "- ~~backlink~~\n",
+            "  - **Closed by:** [#r-0123456789ab]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        assert_eq!(
+            projected_queue_response_ids(content).unwrap(),
+            [
+                "[#r-0123456789ab]",
+                "[#r-abcdef012345]",
+                "[#r-0123456789ab]"
+            ]
+        );
+    }
 }
 
 /// The turn start is a stable, durable timestamp source for every recomputation
@@ -1646,7 +1738,7 @@ fn strike_free_text_queue_heads_with_proof(
     // agent-authored echo, never on a mention or preset-body quote.
     let addressed_at = addressed_at_for_current_cycle(file);
     let project = |doc: &str| match proof {
-        AnswerPresenceProof::Materialized =>
+        AnswerPresenceProof::Materialized => {
             agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                 doc,
                 response_body,
@@ -1655,7 +1747,8 @@ fn strike_free_text_queue_heads_with_proof(
                 &selected_heads,
                 &dispatch_owned_heads,
                 &addressed_at,
-            ),
+            )
+        }
         AnswerPresenceProof::CommittedHeadingReplay => {
             project_committed_heading_replay_free_text_strike_with_claims(
                 doc,
@@ -2637,8 +2730,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
                 .into_iter()
                 .filter(|node| !node.item.struck)
                 .filter(|node| {
-                    queue_prompt_done_id(&node.item.text)
-                        .is_some_and(|id| wanted.contains(&id))
+                    queue_prompt_done_id(&node.item.text).is_some_and(|id| wanted.contains(&id))
                 })
                 .map(|node| node.item.text)
                 .collect(),
@@ -2665,37 +2757,36 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         )?;
     debug_assert_eq!(marked_count, marked_texts.len());
 
-    let new_snapshot = if let Some(snapshot_content) =
-        load_snapshot_recovery_only(file, "queue done-id mark")
-    {
-        match (|| -> Result<Option<String>> {
-            let (snapshot_document, snapshot_marked_count) =
+    let new_snapshot =
+        if let Some(snapshot_content) = load_snapshot_recovery_only(file, "queue done-id mark") {
+            match (|| -> Result<Option<String>> {
+                let (snapshot_document, snapshot_marked_count) =
                 agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
                     &snapshot_content,
                     done_ids,
                 )?;
-            if snapshot_marked_count != marked_texts.len() {
-                log_snapshot_recovery_warning(
-                    file,
-                    "queue done-id mark",
-                    format!(
-                        "snapshot matched {} queue item(s) but document matched {}",
-                        snapshot_marked_count,
-                        marked_texts.len()
-                    ),
-                );
+                if snapshot_marked_count != marked_texts.len() {
+                    log_snapshot_recovery_warning(
+                        file,
+                        "queue done-id mark",
+                        format!(
+                            "snapshot matched {} queue item(s) but document matched {}",
+                            snapshot_marked_count,
+                            marked_texts.len()
+                        ),
+                    );
+                }
+                Ok(Some(snapshot_document))
+            })() {
+                Ok(snapshot) => snapshot,
+                Err(err) => {
+                    log_snapshot_recovery_warning(file, "queue done-id mark", err);
+                    None
+                }
             }
-            Ok(Some(snapshot_document))
-        })() {
-            Ok(snapshot) => snapshot,
-            Err(err) => {
-                log_snapshot_recovery_warning(file, "queue done-id mark", err);
-                None
-            }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     // `#crdtstructops` node-only path: when the done-id heads are AST-addressable,
     // converge via structural mark_done ops (the per-node strike-through is
@@ -3745,7 +3836,7 @@ mod core_tests {
             .expect("snapshot");
         for content in [&updated, &snapshot] {
             assert!(
-                content.contains(&format!("response: {response_id}")),
+                !content.contains(&format!("response: {response_id}")),
                 "{content}"
             );
             assert!(
@@ -3907,10 +3998,7 @@ mod core_tests {
 
         assert_eq!(count, 2);
         let updated = fs::read_to_string(&doc).unwrap();
-        let response_ids = updated
-            .lines()
-            .filter_map(|line| line.split_once("auto-struck: response: ").map(|(_, id)| id))
-            .collect::<Vec<_>>();
+        let response_ids = projected_queue_response_ids(&updated).unwrap();
         assert_eq!(response_ids.len(), 2, "{updated}");
         assert_ne!(response_ids[0], response_ids[1]);
         for (topic, response_id) in ["alpha", "beta"].into_iter().zip(response_ids) {
@@ -3920,7 +4008,12 @@ mod core_tests {
                 "{updated}"
             );
         }
-        assert_eq!(updated.matches("    - **Timestamp:** ").count(), 2, "{updated}");
+        assert_eq!(
+            updated.matches("    - **Timestamp:** ").count(),
+            2,
+            "{updated}"
+        );
+        assert!(!updated.contains("auto-struck: response:"), "{updated}");
     }
 
     #[derive(Default)]
@@ -4135,13 +4228,10 @@ mod core_tests {
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), content);
 
-        let outcome = super::acknowledge_paused_free_text_queue_head_with_outcome(
-            &doc,
-            first,
-            &TEST_EFFECTS,
-        )
-        .unwrap()
-        .expect("exact active nest vector should be acknowledged");
+        let outcome =
+            super::acknowledge_paused_free_text_queue_head_with_outcome(&doc, first, &TEST_EFFECTS)
+                .unwrap()
+                .expect("exact active nest vector should be acknowledged");
 
         let updated = fs::read_to_string(&doc).unwrap();
         assert_eq!(outcome.consumed_text, first);
@@ -5447,7 +5537,10 @@ mod core_tests {
         let resumed = first
             .new_document
             .replacen("---\n", "---\nqueue: go\n", 1)
-            .replace("<!-- agent:run id=main -->", "<!-- agent:run id=main go -->")
+            .replace(
+                "<!-- agent:run id=main -->",
+                "<!-- agent:run id=main go -->",
+            )
             .replace(
                 "<!-- /agent:run -->",
                 "- verify publication\n<!-- /agent:run -->",
@@ -5502,8 +5595,7 @@ mod core_tests {
             ("snapshot", &first.new_snapshot),
         ] {
             assert_eq!(
-                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
-                    .unwrap(),
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues").unwrap(),
                 vec!["poll alpha".to_string()],
                 "{label}: the completed item stays visibly struck for this pass"
             );
@@ -5532,8 +5624,7 @@ mod core_tests {
             ("snapshot", &second.new_snapshot),
         ] {
             assert_eq!(
-                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues")
-                    .unwrap(),
+                agent_doc_queue::queue_schedule::completed_heads_for_queue(text, "issues").unwrap(),
                 roster,
                 "{label}: the complete pass remains struck until the reset"
             );
@@ -5550,8 +5641,7 @@ mod core_tests {
             .unwrap()
             .expect("the complete pass resets atomically");
             assert_eq!(
-                agent_doc_queue::queue_schedule::live_heads_for_queue(&restored, "issues")
-                    .unwrap(),
+                agent_doc_queue::queue_schedule::live_heads_for_queue(&restored, "issues").unwrap(),
                 roster,
                 "{label}: every item is live for the next interval"
             );
@@ -9335,7 +9425,10 @@ Old.
             "do [#adnestedclaimedidrow]",
             "🚧 [#subagent:adnestedclaimedidrow#1] ### 🚧 [#subagent:adnestedclaimedidrow#1] do [#adnestedclaimedidrow]",
         );
-        assert_ne!(exact_live_shape, reported, "reported projection shape changed");
+        assert_ne!(
+            exact_live_shape, reported,
+            "reported projection shape changed"
+        );
         std::fs::write(&doc, &exact_live_shape).unwrap();
         agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,

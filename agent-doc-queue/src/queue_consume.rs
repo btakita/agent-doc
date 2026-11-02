@@ -1289,14 +1289,12 @@ pub fn answered_free_text_strike_decision(
                 &head,
             );
         let bare_has_explicit_answer_evidence =
-            crate::queue_response::free_text_head_has_explicit_answer_evidence(
-                response_body,
-                text,
-            ) || crate::queue_response::response_explicitly_echoes_nest_vector(
-                content,
-                response_body,
-                text,
-            );
+            crate::queue_response::free_text_head_has_explicit_answer_evidence(response_body, text)
+                || crate::queue_response::response_explicitly_echoes_nest_vector(
+                    content,
+                    response_body,
+                    text,
+                );
         let has_explicit_answer_evidence = head_has_explicit_answer_evidence
             || (!exact_vector_claimed && bare_has_explicit_answer_evidence);
         let row_claimed = exact_vector_claimed || legacy_bare_claimed;
@@ -1351,23 +1349,21 @@ pub fn answered_free_text_strike_decision(
         // echo (`#nestvector`).
         let nested_tree_evidence =
             crate::queue_response::response_explicitly_echoes_nested_row_tree(response_body, &head);
-        let deferred = crate::queue_response::response_defers_queue_head(
-            content,
-            response_body,
-            &head,
-        ) || (!exact_vector_claimed
-            && crate::queue_response::response_defers_queue_head(
-                content,
-                response_body,
-                text,
-            ))
-            || (exact_vector_claimed
-                && nested_tree_evidence
-                && crate::queue_response::response_defers_queue_head(
-                    content,
-                    response_body,
-                    text,
-                ));
+        let deferred =
+            crate::queue_response::response_defers_queue_head(content, response_body, &head)
+                || (!exact_vector_claimed
+                    && crate::queue_response::response_defers_queue_head(
+                        content,
+                        response_body,
+                        text,
+                    ))
+                || (exact_vector_claimed
+                    && nested_tree_evidence
+                    && crate::queue_response::response_defers_queue_head(
+                        content,
+                        response_body,
+                        text,
+                    ));
         if deferred {
             continue;
         }
@@ -2287,9 +2283,7 @@ fn canonicalize_duplicate_response_projections_in_queue(
         agent_doc_markdown_ast::exchange_tree::response_id_from_lookup_marker(item)
             .map(str::to_string)
     };
-    let response_ids = (0..lines.len())
-        .map(response_id_at)
-        .collect::<Vec<_>>();
+    let response_ids = (0..lines.len()).map(response_id_at).collect::<Vec<_>>();
     let mut duplicate_markers = HashMap::<usize, String>::new();
     for (index, response_id) in response_ids.iter().enumerate() {
         let Some(response_id) = response_id else {
@@ -2425,10 +2419,12 @@ fn response_lookup_projection_ranges(
     let mut index = 0usize;
     while index < lines.len() {
         let line = lines[index];
-        let trimmed = line.trim().strip_prefix("- ").unwrap_or_else(|| line.trim());
+        let trimmed = line
+            .trim()
+            .strip_prefix("- ")
+            .unwrap_or_else(|| line.trim());
         let owns_target = response_ids.iter().any(|response_id| {
-            agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
-                .as_deref()
+            agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id).as_deref()
                 == Some(trimmed)
         });
         if !owns_target {
@@ -2467,7 +2463,9 @@ fn generated_projection_owns_response_id(projection: &str, response_id: &str) ->
     if lookup.as_deref() == Some(first) {
         return true;
     }
-    let Some(attribute_id) = response_id.strip_prefix("[#").and_then(|id| id.strip_suffix(']'))
+    let Some(attribute_id) = response_id
+        .strip_prefix("[#")
+        .and_then(|id| id.strip_suffix(']'))
     else {
         return false;
     };
@@ -3539,7 +3537,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // choices beneath the response backlink.
     canonical_response_owners.extend(request_response_owners);
     for node in &nodes {
-        let Some((projected_response_body, response_id, annotate_inline_id, shared_batch)) =
+        let Some((projected_response_body, response_id, _annotate_inline_id, shared_batch)) =
             projection_by_node_key.get(&node.node_key)
         else {
             continue;
@@ -3602,14 +3600,13 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             })
             .cloned()
             .collect::<Vec<_>>();
-        let needs_inline_id = *annotate_inline_id
-            && !raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
-        if needs_inline_id || !missing_children.is_empty() {
+        let has_inline_id = raw.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"));
+        if has_inline_id || !missing_children.is_empty() {
             edits.push((
                 node.item.start_byte,
                 node.item.end_byte,
                 indent,
-                needs_inline_id,
+                has_inline_id,
                 response_id.clone(),
                 missing_children,
             ));
@@ -3617,9 +3614,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     }
 
     let mut out = after;
-    for (start, end, indent, needs_inline_id, response_id, children) in edits.into_iter().rev() {
-        let mut replacement = if needs_inline_id {
-            annotate_struck_line_with_response_id(&out[start..end], &response_id)
+    for (start, end, indent, has_inline_id, response_id, children) in edits.into_iter().rev() {
+        let mut replacement = if has_inline_id {
+            remove_inline_response_id(&out[start..end], &response_id)
         } else {
             out[start..end].to_string()
         };
@@ -3772,9 +3769,10 @@ fn response_lookup_children(
             .expect("response lookup ids are canonical response ids"),
         ),
         QueueResponseMode::Inline => {
-            let marker =
-                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(context.response_id)
-                    .expect("response lookup ids are canonical response ids");
+            let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(
+                context.response_id,
+            )
+            .expect("response lookup ids are canonical response ids");
             let details = response_details_child(response_body, context.response_id)
                 .expect("response lookup ids are canonical response ids");
             children.push(format!(
@@ -3784,9 +3782,10 @@ fn response_lookup_children(
             ));
         }
         QueueResponseMode::Lookup => {
-            let marker =
-                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(context.response_id)
-                    .expect("response lookup ids are canonical response ids");
+            let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(
+                context.response_id,
+            )
+            .expect("response lookup ids are canonical response ids");
             children.push(format!(
                 "{marker}\n- **Timestamp:** {}",
                 context.addressed_at.trim()
@@ -4200,10 +4199,9 @@ fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjectio
                 if !detailed[index].actions.contains(&action) {
                     detailed[index].actions.push(action);
                 }
-            } else if !detailed
-                .iter()
-                .any(|candidate| candidate.decision.is_none() && candidate.actions.contains(&action))
-            {
+            } else if !detailed.iter().any(|candidate| {
+                candidate.decision.is_none() && candidate.actions.contains(&action)
+            }) {
                 detailed.push(ResponseNextActionProjection {
                     decision: None,
                     actions: vec![action],
@@ -4222,7 +4220,9 @@ fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjectio
         if let Some(action) = trimmed.strip_prefix("**Next action:**") {
             let action = normalize(action);
             if !action.is_empty()
-                && !actions.iter().any(|candidate| candidate.actions.contains(&action))
+                && !actions
+                    .iter()
+                    .any(|candidate| candidate.actions.contains(&action))
             {
                 actions.push(ResponseNextActionProjection {
                     decision: None,
@@ -4241,7 +4241,9 @@ fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjectio
                 };
                 let action = normalize(action);
                 if !action.is_empty()
-                    && !actions.iter().any(|candidate| candidate.actions.contains(&action))
+                    && !actions
+                        .iter()
+                        .any(|candidate| candidate.actions.contains(&action))
                 {
                     actions.push(ResponseNextActionProjection {
                         decision: None,
@@ -4461,30 +4463,21 @@ fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) 
     document.len()
 }
 
-fn annotate_struck_line_with_response_id(line: &str, response_id: &str) -> String {
-    let (core, newline) = match line.strip_suffix('\n') {
-        Some(rest) => (rest, "\n"),
-        None => (line, ""),
-    };
-    let trimmed_end = core.trim_end();
-    let trailing_ws = &core[trimmed_end.len()..];
-    if core.contains('\n')
-        || trimmed_end.trim_start().starts_with("~~~")
-        || !trimmed_end.contains("~~")
-        || trimmed_end.contains(&format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}"))
-    {
-        return line.to_string();
+fn remove_inline_response_id(line: &str, response_id: &str) -> String {
+    let semicolon_note = format!("; {RESPONSE_ID_NOTE_PREFIX}{response_id}");
+    if line.contains(&semicolon_note) {
+        return line.replacen(&semicolon_note, "", 1);
     }
-    let separator = agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR;
-    if trimmed_end.contains(separator) {
-        format!("{trimmed_end}; {RESPONSE_ID_NOTE_PREFIX}{response_id}{trailing_ws}{newline}")
-    } else if trimmed_end.ends_with("~~") {
-        format!(
-            "{trimmed_end}{separator}{RESPONSE_ID_NOTE_PREFIX}{response_id}{trailing_ws}{newline}"
-        )
-    } else {
-        line.to_string()
+
+    let direct_note = format!(
+        "{}{RESPONSE_ID_NOTE_PREFIX}{response_id}",
+        agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR
+    );
+    if line.contains(&direct_note) {
+        return line.replacen(&direct_note, "", 1);
     }
+
+    line.to_string()
 }
 
 #[cfg(test)]
@@ -4594,12 +4587,8 @@ mod tests {
         let annotated =
             annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
 
-        assert!(
-            annotated.contains(&format!(
-                "- ~~do [#fresh]~~ — auto-struck: response: {response_id}\n"
-            )),
-            "{annotated}"
-        );
+        assert!(annotated.contains("- ~~do [#fresh]~~\n"), "{annotated}");
+        assert!(!annotated.contains(&format!("response: {response_id}")));
         assert!(
             annotated.contains(&format!(
                 "  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Completed `/work/tasks/result.md`.\n"
@@ -4622,6 +4611,34 @@ mod tests {
             annotated,
             "replaying the projection must not duplicate the response id"
         );
+    }
+
+    #[test]
+    fn response_child_removes_duplicate_inline_response_note() {
+        let response = "### Re: fresh — test\n\nCompleted.\n";
+        let response_id =
+            agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
+                response,
+            ))
+            .response_id()
+            .to_string();
+        let before = queue_doc("- do [#fresh]\n");
+        let after = queue_doc(&format!(
+            "- ~~do [#fresh]~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n"
+        ));
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+
+        assert!(annotated.contains(&format!("  - **Response {response_id}**\n")));
+        assert!(annotated.contains("    - **Summary:** Completed.\n"));
+        assert_eq!(
+            annotated
+                .matches(&format!("**Response {response_id}**"))
+                .count(),
+            1
+        );
+        assert!(!annotated.contains(&format!("response: {response_id}")));
     }
 
     #[test]
@@ -4673,15 +4690,15 @@ mod tests {
         assert_ne!(ids[0], ids[1], "each response section needs its own id");
         assert!(
             annotated.contains(&format!(
-                "- ~~Investigate alpha [#q-alpha]~~ — auto-struck: response: {}\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Alpha is fixed and verified.\n",
-                ids[0], ids[0],
+                "- ~~Investigate alpha [#q-alpha]~~\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Alpha is fixed and verified.\n",
+                ids[0]
             )),
             "{annotated}"
         );
         assert!(
             annotated.contains(&format!(
-                "- ~~Investigate beta [#q-beta]~~ — auto-struck: response: {}\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Beta needs the operator to choose a deployment target.",
-                ids[1], ids[1],
+                "- ~~Investigate beta [#q-beta]~~\n  - **Response {}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - **Summary:** Beta needs the operator to choose a deployment target.",
+                ids[1]
             )),
             "{annotated}"
         );
@@ -4693,6 +4710,7 @@ mod tests {
             annotated.contains(&format!("### Re: beta — test {}\n", ids[1])),
             "{annotated}"
         );
+        assert!(!annotated.contains("auto-struck: response:"), "{annotated}");
         assert_eq!(
             annotated
                 .matches(&format!("**Response {}**", ids[0]))
@@ -4836,9 +4854,7 @@ mod tests {
             "{queue}"
         );
         assert!(
-            queue.contains(
-                "      - **Decision:** choose whether to defer the retention workshop."
-            ),
+            queue.contains("      - **Decision:** choose whether to defer the retention workshop."),
             "a decision without an action still needs its own visible subitem:\n{queue}"
         );
         assert!(
@@ -4867,9 +4883,15 @@ mod tests {
         let error = annotate_newly_struck_queue_items_with_response_id(&before, &after, response)
             .expect_err("a dirty isolated worktree is not terminal completion");
         let error = error.to_string();
-        assert!(error.contains("Keep the row live until it has a scoped commit"), "{error}");
+        assert!(
+            error.contains("Keep the row live until it has a scoped commit"),
+            "{error}"
+        );
         assert!(error.contains("blocking operator request"), "{error}");
-        assert!(error.contains("PR or named integration-branch receipt"), "{error}");
+        assert!(
+            error.contains("PR or named integration-branch receipt"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5243,19 +5265,15 @@ mod tests {
 
         assert_ne!(ids[0], ids[2]);
         assert!(
-            annotated.contains(&format!("~~{todo}~~ — auto-struck: response: {}", ids[0])),
+            annotated.contains(&format!("~~{todo}~~\n    - **Response {}**", ids[0])),
             "{annotated}"
         );
         assert!(
-            annotated.contains(&format!(
-                "~~{PER_ITEM}~~ — auto-struck: response: {}",
-                ids[2]
-            )),
+            annotated.contains(&format!("~~{PER_ITEM}~~\n    - **Response {}**", ids[2])),
             "the old sdk-dev lineage must bind the reparented row to its own section: {annotated}"
         );
-        assert!(!annotated.contains(&format!(
-            "~~{PER_ITEM}~~ — auto-struck: response: {aggregate}"
-        )));
+        assert!(!annotated.contains(&format!("**Response {aggregate}**")));
+        assert!(!annotated.contains("auto-struck: response:"), "{annotated}");
         assert!(annotated.contains(&format!("**Response {}**", ids[2])));
         assert!(annotated.contains(&format!(
             "**Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n      - **Summary:** Per-item response projection is installed and verified."
@@ -5395,11 +5413,8 @@ mod tests {
         let annotated =
             annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
 
-        assert!(
-            annotated
-                .contains("- ~~do [#subagent-response-exchange-gap]~~ — auto-struck: response: "),
-            "{annotated}"
-        );
+        assert!(annotated.contains("- ~~do [#subagent-response-exchange-gap]~~\n"));
+        assert!(!annotated.contains("auto-struck: response:"), "{annotated}");
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(
             annotated.contains(&format!(
@@ -6046,11 +6061,12 @@ mod tests {
 
         assert!(
             annotated.contains(&format!(
-                "  - ~~do [#nested]~~ — auto-struck: response: {response_id}\n    - **Response {response_id}**\n      - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n      - <details data-agent-doc-response-id=\"{}\">\n        <summary>Response</summary>\n        \n        ### Re: nested\n        \n        Completed `tasks/nested.md`.\n        </details>\n",
+                "  - ~~do [#nested]~~\n    - **Response {response_id}**\n      - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n      - <details data-agent-doc-response-id=\"{}\">\n        <summary>Response</summary>\n        \n        ### Re: nested\n        \n        Completed `tasks/nested.md`.\n        </details>\n",
                 response_id.trim_start_matches("[#").trim_end_matches(']'),
             )),
             "{annotated}"
         );
+        assert!(!annotated.contains(&format!("response: {response_id}")));
         assert!(annotated.contains("- later\n"), "{annotated}");
     }
 
@@ -6101,7 +6117,7 @@ mod tests {
             "{queue}"
         );
         assert!(
-            queue.contains(&format!("response: {response_id}")),
+            !queue.contains(&format!("response: {response_id}")),
             "{queue}"
         );
         assert!(exchange.contains(response_id) && queue.contains(response_id));
@@ -6109,7 +6125,7 @@ mod tests {
     }
 
     #[test]
-    fn answered_free_text_projection_appends_its_response_id() {
+    fn answered_free_text_projection_uses_only_its_response_child() {
         let document = active_queue_doc(
             "- explain the searchable response backlink behavior\n- do [#later]\n",
         );
@@ -6133,9 +6149,17 @@ mod tests {
         assert!(
             projected
                 .target_content
-                .contains(&format!("response: {response_id}")),
-            "{}",
-            projected.target_content
+                .contains(&format!("  - **Response {response_id}**\n"))
+        );
+        assert!(
+            projected
+                .target_content
+                .contains("    - **Summary:** The completed prompt now links to this response.")
+        );
+        assert!(
+            !projected
+                .target_content
+                .contains(&format!("response: {response_id}"))
         );
         assert!(
             projected.target_content.contains("- do [#later]\n"),
@@ -8194,20 +8218,18 @@ Old.
             "<!-- /agent:run -->\n",
         );
 
-        let parsed_nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
-            .unwrap();
+        let parsed_nodes =
+            agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue").unwrap();
         assert!(
             parsed_nodes.iter().any(|node| {
-                queue_prompt_done_id(&node.item.text).as_deref()
-                    == Some("adnestedclaimedidrow")
+                queue_prompt_done_id(&node.item.text).as_deref() == Some("adnestedclaimedidrow")
             }),
             "the exact projected row retains its done id: {parsed_nodes:#?}"
         );
         let projected = parsed_nodes
             .iter()
             .find(|node| {
-                queue_prompt_done_id(&node.item.text).as_deref()
-                    == Some("adnestedclaimedidrow")
+                queue_prompt_done_id(&node.item.text).as_deref() == Some("adnestedclaimedidrow")
             })
             .unwrap();
         assert!(
@@ -8216,7 +8238,11 @@ Old.
             normalize_queue_prompt_text(&projected.item.text),
         );
         let keys = id_backed_head_node_keys(content, "adnestedclaimedidrow").unwrap();
-        assert_eq!(keys.len(), 1, "the nested row in the later queue is addressable");
+        assert_eq!(
+            keys.len(),
+            1,
+            "the nested row in the later queue is addressable"
+        );
 
         let (completed, count) = mark_queue_prompts_completed_by_done_ids_in_content(
             content,
@@ -9029,7 +9055,7 @@ Old.
             .to_string();
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike); response: {response_id}\n  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: upgrade — gpt-6.1-sol\n      \n      > **Queue prompt:** #upgrade\n      \n      Upgraded.\n      </details>\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: upgrade — gpt-6.1-sol\n      \n      > **Queue prompt:** #upgrade\n      \n      Upgraded.\n      </details>\n<!-- /agent:queue -->"
         )));
     }
 

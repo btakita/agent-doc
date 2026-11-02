@@ -482,10 +482,12 @@ internal enum class VisibleRollForwardDecision(val token: String) {
 /**
  * What the synchronous socket receipt may claim about a visible roll-forward.
  *
- * `Applied` means the serialized document lane either published the exact
- * visible cut or proved it was already canonical. `Deferred` means the request
- * was safe to retry but did not cross that boundary. In particular, merely
- * scheduling work is never `Applied`: the controller spends its bounded
+ * `Applied` means the serialized document lane proved the exact visible cut is
+ * canonical and projected. Publishing the cut into a local replica is not that
+ * proof: the controller can still retain the older canonical while the remote
+ * drain is pending. `Deferred` means the request was safe to retry but did not
+ * cross that boundary. In particular, merely scheduling work or publishing a
+ * local CRDT update is never `Applied`: the controller spends its bounded
  * per-content attempt only after the editor has completed the decision.
  */
 internal enum class VisibleRollForwardResult {
@@ -511,7 +513,8 @@ internal fun visibleRollForwardDecisionUtil(
     remoteApplyInFlight: Boolean,
 ): VisibleRollForwardDecision = when {
     visibleHash == null -> VisibleRollForwardDecision.VisibleUnavailable
-    canonicalHash == visibleHash -> VisibleRollForwardDecision.AlreadyConverged
+    canonicalHash == visibleHash && replicaHash == visibleHash -> VisibleRollForwardDecision.AlreadyConverged
+    canonicalHash == visibleHash -> VisibleRollForwardDecision.ReplicaBehind
     canonicalHash == null || !canonicalHash.equals(expectedCanonicalHash, ignoreCase = true) ->
         VisibleRollForwardDecision.CanonicalMoved
     remoteApplyInFlight -> VisibleRollForwardDecision.RemoteApplyInFlight
@@ -5095,7 +5098,15 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "canonical_hash=${canonicalAfter?.let(::contentHash) ?: "unavailable"} published=$published " +
                 "settled=$settled reason=$reason recovery=editor_visible_roll_forward (#jetbrainsreplicaloops)",
         )
-        return VisibleRollForwardResult.Applied
+        // A socket `applied` receipt is a convergence proof, not a receipt for
+        // having queued the local publication.  The measured Hook-stop wedge
+        // returned Applied here with `settled=false`, canonical still equal to
+        // the retained response, and the visible buffer already ahead.  That
+        // false proof let closeout resume while every native save continued to
+        // answer projection_changed.  Keep the request retryable until the
+        // canonical/visible projection itself is settled; the controller owns
+        // the bounded retry and terminal operator recovery.
+        return if (settled) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred
     }
 
     /**

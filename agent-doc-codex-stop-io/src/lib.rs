@@ -3571,6 +3571,22 @@ fn retained_write_queue_recovery_response(
     verdict: agent_doc_turn::write_ownership::RetainedWriteVerdict,
     stop_hook_active: bool,
 ) -> StopResponse {
+    // This is an operator-owned terminal recovery, not another same-turn agent
+    // action. The first Stop continuation exists so the model reports the
+    // durable response and exact next step. On the recursive Stop, refusing
+    // exit cannot add evidence or make progress; it only renders an endless
+    // "Hook stopped" loop. The retained write remains durable and the queue
+    // remains paused, so allow the already-guided turn to end.
+    if stop_hook_active {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "codex_stop_retained_recovery_already_reported intent_id={retry_key} verdict={} action=allow_final_answer queue_advanced=false capture_created=false",
+                verdict.as_str(),
+            ),
+        );
+        return StopResponse::AllowExit;
+    }
     let display = file.display().to_string();
     let ownership = match verdict {
         agent_doc_turn::write_ownership::RetainedWriteVerdict::DeliveryRejected => {
@@ -3599,7 +3615,7 @@ fn retained_write_queue_recovery_response(
         verdict.as_str(),
         agent_doc_turn::write_ownership::retained_write_remedy(ownership, &display),
     );
-    retained_queue_stop_response(message, stop_hook_active)
+    retained_queue_stop_response(message, false)
 }
 
 fn retained_queue_stop_response(message: String, stop_hook_active: bool) -> StopResponse {
@@ -6317,7 +6333,7 @@ Done.\n\
             file,
             "intent-1",
             RetainedWriteVerdict::DeliveryRejected,
-            true,
+            false,
         ))
         .unwrap();
         assert!(rejected.contains("intent_id=intent-1"), "{rejected}");
@@ -6362,6 +6378,16 @@ Done.\n\
         assert!(
             unmerged.contains("operator_action=reconcile_editor_buffer_with_retained_write"),
             "{unmerged}"
+        );
+        assert_eq!(
+            retained_write_queue_recovery_response(
+                file,
+                "intent-4",
+                RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
+                true,
+            ),
+            StopResponse::AllowExit,
+            "after the model has reported the stable operator recovery, a recursive Stop must not become an endless Hook-stopped refusal",
         );
 
         // The gate consults the shared predicate before rendering a wait.

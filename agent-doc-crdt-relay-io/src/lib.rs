@@ -6712,6 +6712,29 @@ pub struct ReplicaSignalOutcome {
     pub endpoint_unregistered: bool,
 }
 
+/// Result of one native-editor save request.
+///
+/// A `projection_changed` receipt is deliberately not a definitive endpoint
+/// refusal: the editor is alive and is protecting a newer visible cut.  It is
+/// nevertheless a different recovery state from a timeout or transport fault.
+/// Keep that typed fact beside the ordinary signal counts so the retained
+/// persistence Effect can bound its visible-buffer reconciliation without
+/// parsing an ops-log line or treating every delivery failure as operator
+/// text drift.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeSaveOutcome {
+    pub signal: ReplicaSignalOutcome,
+    pub projection_unconverged: usize,
+}
+
+impl std::ops::Deref for NativeSaveOutcome {
+    type Target = ReplicaSignalOutcome;
+
+    fn deref(&self) -> &Self::Target {
+        &self.signal
+    }
+}
+
 /// Fold one completed replica/native-save delivery attempt into the shared
 /// editor transport-health machine. The network loop itself never retries:
 /// this is one bounded effect after the attempt, so health accounting adds no
@@ -6719,6 +6742,13 @@ pub struct ReplicaSignalOutcome {
 /// Health label of the native-save transport; its success is the only
 /// replica-side signal that proves the requested revision reached disk.
 const NATIVE_EDITOR_SAVE_TRANSPORT: &str = "native_editor_save_request";
+
+fn native_save_projection_unconverged(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        agent_doc_ipc_protocol::classify_socket_delivery_failure(cause.to_string())
+            == Some(agent_doc_ipc_protocol::SocketDeliveryFailure::ProjectionUnconverged)
+    })
+}
 
 /// Classify the aggregate relay result for transport-health accounting.
 ///
@@ -6906,7 +6936,7 @@ pub fn request_native_save_for_current_projection(
     file: &Path,
     expected_content_hash: &str,
     expected_content_len: usize,
-) -> Result<ReplicaSignalOutcome> {
+) -> Result<NativeSaveOutcome> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
     // A supervisor can outlive the editor backend that was current when its
@@ -6969,10 +6999,14 @@ pub fn request_native_save_for_current_projection(
                 agent_doc_ipc_protocol::EDITOR_ENDPOINT_UNREGISTER_REFUSAL_THRESHOLD,
             ),
         );
-        return Ok(outcome);
+        return Ok(NativeSaveOutcome {
+            signal: outcome,
+            projection_unconverged: 0,
+        });
     }
     let mut notified = 0usize;
     let mut native_save_definitive_refusals = 0usize;
+    let mut projection_unconverged = 0usize;
     let mut build_mismatches = Vec::new();
     for mismatch in &generation_mismatches {
         agent_doc_ops_log_io::log_op(
@@ -7017,6 +7051,9 @@ pub fn request_native_save_for_current_projection(
                 );
             }
             Err(error) => {
+                if native_save_projection_unconverged(&error) {
+                    projection_unconverged += 1;
+                }
                 if agent_doc_ipc_io::is_ipc_build_mismatch_error(&error) {
                     build_mismatches.push(route.clone());
                 }
@@ -7051,7 +7088,10 @@ pub fn request_native_save_for_current_projection(
         NATIVE_EDITOR_SAVE_TRANSPORT,
         &outcome,
     )?;
-    Ok(outcome)
+    Ok(NativeSaveOutcome {
+        signal: outcome,
+        projection_unconverged,
+    })
 }
 
 /// How a signal outcome classifies, independent of its printed token.
@@ -7923,6 +7963,20 @@ mod tests {
             suppressed_native_save_outcome(false, 1, 0).is_none(),
             "an expired window admits exactly the ordinary native-save path"
         );
+    }
+
+    #[test]
+    fn projection_changed_native_save_receipt_survives_the_relay_as_typed_drift() {
+        let drift = anyhow::anyhow!(
+            "IPC receipt deferred: {}",
+            agent_doc_ipc_protocol::PROJECTION_CHANGED_RECEIPT_LINE
+        );
+        assert!(native_save_projection_unconverged(&drift));
+
+        let timeout = anyhow::anyhow!("timed out waiting for IPC receipt");
+        assert!(!native_save_projection_unconverged(&timeout));
+        let rejected = anyhow::anyhow!("IPC receipt rejected: nope");
+        assert!(!native_save_projection_unconverged(&rejected));
     }
 
     /// `#missingreplicanoise`: the defect was that a benign probe miss and a

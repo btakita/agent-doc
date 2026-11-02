@@ -19,6 +19,16 @@ use std::path::Path;
 pub trait CloseoutEffects {
     fn commit(&self, file: &Path) -> Result<bool>;
 
+    /// Reconcile a committed cycle's durable merge baseline to HEAD before
+    /// classifying visible recovery drift. Runtime implementations use the
+    /// binary-owned repair proof; pure/test adapters may leave the default.
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        _file: &Path,
+    ) -> Result<Option<&'static str>> {
+        Ok(None)
+    }
+
     fn commit_for_authority(&self, file: &Path, _force_disk: bool) -> Result<bool> {
         self.commit(file)
     }
@@ -1830,6 +1840,12 @@ pub fn apply_closeout_recovery(
         });
     }
 
+    // `#committed-cycle-completion-heading-drift`: classify from the durable
+    // HEAD baseline, not a pre-commit snapshot. Without this pass, a response
+    // already present in HEAD plus a later binary completion cell was reported
+    // as a direct patchback; `repair --apply-recovery` then prescribed the same
+    // `write --commit` that correctly refused to replay the committed response.
+    let _ = effects.repair_committed_historical_snapshot_drift(file)?;
     let state = classify_closeout_recovery_state_for_file(file, effects);
     // `#admissionsteeringagree` (GH #118): every metadata recovery below either
     // rebuilds the baseline from the visible file and commits it, or restores the

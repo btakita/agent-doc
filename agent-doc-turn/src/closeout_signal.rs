@@ -841,13 +841,24 @@ pub fn has_new_response_heading_marker(snapshot_doc: &str, current_doc: &str) ->
 fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<String, usize> {
     let mut counts = std::collections::BTreeMap::new();
     let comment_ranges = agent_doc_markdown_ast::overlay::inert_list_child_ranges(doc);
+    // `#committed-cycle-completion-heading-drift`: queue completion feedback is
+    // binary-owned evidence, not an assistant response. The downstream
+    // direct-patchback detector already skips these headings by line number;
+    // this prerequisite count must use the same domain. Otherwise a newly
+    // reported completion opens the global "new response" gate and an
+    // unrelated, unchanged `### Re:` heading that merely moved during
+    // component projection can be selected from the line diff as the alleged
+    // patchback.
+    let completion_headings =
+        agent_doc_document::subagent_completion::completion_cell_heading_lines(doc);
     let mut offset = 0usize;
-    for line in doc.split_inclusive('\n') {
+    for (line_index, line) in doc.split_inclusive('\n').enumerate() {
         let line_start = offset;
         offset += line.len();
         if comment_ranges
             .iter()
             .any(|&(start, end)| line_start >= start && line_start < end)
+            || completion_headings.contains(&line_index)
         {
             continue;
         }
@@ -2237,6 +2248,24 @@ Closes #lostid.
         ));
         assert!(has_new_response_heading_marker(before, after));
         assert!(!has_new_response_heading_marker(after, before));
+    }
+
+    #[test]
+    fn direct_response_patchback_heading_policy_ignores_binary_completion_cells() {
+        let before = "## Exchange\n\n### Re: durable answer — gpt-5\n\nDone.\n";
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:worker",
+            "finish the delegated work",
+            "completion-key",
+            "Implemented and verified.",
+        )
+        .unwrap();
+        let after = format!("{before}\n{cell}\n");
+
+        assert!(
+            !has_new_response_heading_marker(before, &after),
+            "binary completion feedback must not open the direct-response gate"
+        );
     }
 
     #[test]

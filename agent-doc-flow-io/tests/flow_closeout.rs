@@ -1904,6 +1904,140 @@ mod tests {
         );
     }
 
+    /// `#committed-cycle-completion-heading-drift`: reproduces the three-command
+    /// contradiction from `game-sessions.md`. A committed response is present in
+    /// HEAD (so `write --commit` has nothing to replay), while the saved baseline
+    /// is stale and the visible document replaces one binary completion cell with
+    /// another. Session-check used to prescribe `write --commit`, and
+    /// `repair --apply-recovery` repeated that impossible prescription.
+    #[test]
+    fn committed_response_with_completion_replacement_repairs_without_replay() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: recovered response — gpt-5\n\n",
+            "The cycle is committed.\n",
+            "<!-- /patch:exchange -->",
+        );
+        let response_turn = concat!(
+            "### Re: recovered response — gpt-5\n\n",
+            "The cycle is committed.\n",
+        );
+        let old_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:old",
+            "old delegated work",
+            "old-key",
+            "Old worker result.",
+        )
+        .unwrap();
+        let new_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:new",
+            "new delegated work",
+            "new-key",
+            "New worker result.",
+        )
+        .unwrap();
+        let prefix = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+        );
+        let stale_snapshot =
+            format!("{prefix}{response_turn}\n{old_cell}\n<!-- /agent:exchange -->\n");
+        // HEAD contains exactly the captured response, but the old completion
+        // projection moved across it during the committed closeout.
+        let committed_head =
+            format!("{prefix}{old_cell}\n{response_turn}\n<!-- /agent:exchange -->\n");
+        // The live projection replaces the old completion evidence with the
+        // newer worker result. The durable response itself is unchanged.
+        let visible = format!("{prefix}{new_cell}\n{response_turn}\n<!-- /agent:exchange -->\n");
+
+        let (_dir, doc) = setup_git_project_with_doc(&committed_head);
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(&stale_snapshot),
+            Some(&committed_head),
+        )
+        .unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&stale_snapshot),
+            Some(&committed_head),
+        )
+        .unwrap();
+        agent_doc_capture_io::mark_committed(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(&doc, &visible).unwrap();
+
+        assert!(
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                response,
+                &committed_head,
+            ),
+            "write --commit must refuse replay because HEAD already contains the response",
+        );
+        assert_eq!(
+            agent_doc_document_realtime::baseline_comparison::detect_bypassed_response_write_between(
+                &committed_head,
+                &visible,
+            ),
+            None,
+            "completion replacement must not masquerade as a response patchback",
+        );
+
+        // The installed `session-check` command uses this same runtime path. It
+        // may stop on the still-uncommitted completion projection, but it must
+        // never prescribe replay of the already-committed response.
+        let session_status = agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap();
+        let session_message = match session_status {
+            agent_doc_session_check_io::SessionCheckStatus::Ok(message)
+            | agent_doc_session_check_io::SessionCheckStatus::SteeringPending(message)
+            | agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => message,
+        };
+        assert!(
+            !session_message.contains("write --commit"),
+            "{session_message}"
+        );
+
+        match apply_closeout_recovery(&doc).unwrap() {
+            RecoveryApplication::Applied { state, .. } => {
+                assert_eq!(state, CloseoutRecoveryState::RecoveryProjectionVisibleDrift,)
+            }
+            other => {
+                panic!("completion projection should be recoverable without replay: {other:?}")
+            }
+        }
+
+        let working = std::fs::read_to_string(&doc).unwrap();
+        let head = agent_doc_git_io::revision::show_head(&doc)
+            .unwrap()
+            .unwrap();
+        assert_eq!(working, head);
+        assert!(head.contains("New worker result."), "{head}");
+        assert!(!head.contains("Old worker result."), "{head}");
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(head.as_str()),
+        );
+        assert_eq!(
+            classify_closeout_recovery_state_for_file(&doc),
+            CloseoutRecoveryState::Clean,
+        );
+    }
+
     /// `#admissionsteeringagree` (GH #118): the same shape as
     /// `apply_recovery_commits_recovery_projection_visible_drift_through_mutation`,
     /// except the visible "metadata" drift is an operator revision of a queue

@@ -352,6 +352,36 @@ mod tests {
         );
     }
 
+    /// `#committed-cycle-completion-heading-drift`: replacing a binary completion
+    /// cell can make an unchanged durable response look inserted to a line diff
+    /// when projection ordering moves it. The completion cell must not open the
+    /// response-heading gate in the first place.
+    #[test]
+    fn bypassed_response_write_ignores_moved_durable_response_during_completion_replacement() {
+        let old_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:old",
+            "old delegated work",
+            "old-key",
+            "Old worker result.",
+        )
+        .unwrap();
+        let new_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:new",
+            "new delegated work",
+            "new-key",
+            "New worker result.",
+        )
+        .unwrap();
+        let durable = "### Re: recovered response — gpt-5\n\nThe cycle is committed.\n";
+        let snapshot = session_doc(&format!("{durable}\n{old_cell}\n"));
+        let current = session_doc(&format!("{new_cell}\n\n{durable}"));
+
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current),
+            None
+        );
+    }
+
     fn session_doc(exchange_body: &str) -> String {
         format!(
             concat!(

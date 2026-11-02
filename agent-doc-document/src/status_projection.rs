@@ -1163,6 +1163,17 @@ pub fn reconcile_active_component_content(
         let open_marker = element::set_open_marker_attr(&open_marker, "priority", None)
             .context("failed to normalize agent:active priority marker")?;
         normalized.replace_range(component.open_start..component.open_end, &open_marker);
+        // The exact legacy scaffold heading is binary-owned template state,
+        // just like its adjacent component marker. Migrate that pair together
+        // so an installed repair cannot leave `## Open items` wrapped around a
+        // canonical `agent:active` component. Any other heading is operator
+        // prose and remains byte-for-byte unchanged.
+        let heading_start = normalized[..component.open_start]
+            .rfind('\n')
+            .map_or(0, |newline| newline + 1);
+        if &normalized[heading_start..component.open_start] == "## Open items " {
+            normalized.replace_range(heading_start..component.open_start, "## Active ");
+        }
         let normalized_components =
             element::parse(&normalized).context("failed to parse normalized components")?;
         let component = normalized_components
@@ -1291,11 +1302,13 @@ mod tests {
     fn active_projection_migrates_legacy_marker_and_preserves_attrs() {
         let doc = concat!(
             "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
-            "<!-- agent:open-items broken -->\nlegacy\n<!-- /agent:open-items -->\n",
+            "## Open items <!-- agent:open-items broken -->\nlegacy\n<!-- /agent:open-items -->\n",
         );
         let updated = reconcile_active_component_content(doc, "")
             .unwrap()
             .expect("binary-owned marker migrated");
+        assert!(updated.contains("## Active <!-- agent:active broken priority -->"));
+        assert!(!updated.contains("## Open items"));
         assert!(updated.contains("<!-- agent:active broken priority -->"));
         assert!(updated.contains("<!-- /agent:active -->"));
         assert!(!updated.contains("agent:open-items"));
@@ -1305,6 +1318,39 @@ mod tests {
                 .is_none(),
             "canonical active priority marker must be a fixed point"
         );
+    }
+
+    #[test]
+    fn active_projection_preserves_operator_authored_heading_during_marker_migration() {
+        let doc = concat!(
+            "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
+            "## Work I am watching <!-- agent:open-items -->\n",
+            "legacy\n",
+            "<!-- /agent:open-items -->\n",
+        );
+
+        let updated = reconcile_active_component_content(doc, "")
+            .unwrap()
+            .expect("legacy marker migrated");
+
+        assert!(updated.contains("## Work I am watching <!-- agent:active priority -->"));
+        assert!(!updated.contains("agent:open-items"));
+    }
+
+    #[test]
+    fn active_projection_repairs_legacy_heading_around_canonical_marker() {
+        let doc = concat!(
+            "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
+            "## Open items <!-- agent:active priority -->\n",
+            "<!-- /agent:active -->\n",
+        );
+
+        let updated = reconcile_active_component_content(doc, "")
+            .unwrap()
+            .expect("legacy scaffold heading repaired");
+
+        assert!(updated.contains("## Active <!-- agent:active priority -->"));
+        assert!(!updated.contains("## Open items"));
     }
 
     #[test]

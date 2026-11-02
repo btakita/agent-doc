@@ -147,6 +147,23 @@ pub fn is_committed_prompt_diff_interruption(reason: &str) -> bool {
             || reason.contains("without reopening the binary-owned write/commit path"))
 }
 
+/// Whether `message` is the fail-closed post-commit drift report emitted when
+/// an active harness session changed the document but editor-op provenance did
+/// not prove a realtime steering marker.
+///
+/// Unlike [`is_committed_prompt_diff_interruption`], this shape deliberately
+/// has no `prompt_target:`/`content_edit:` marker. The Codex Stop hook still
+/// has to recognize it on its recursive invocation so the final assistant
+/// response can cross the binary-owned closeout boundary instead of ending in
+/// an `already continued once` loop.
+pub fn is_active_session_post_commit_drift_interruption(reason: &str) -> bool {
+    reason.contains("is `committed`")
+        && reason.contains(
+            "active harness session changed this document after the last committed closeout",
+        )
+        && reason.contains("without reopening the binary-owned write/commit path")
+}
+
 pub fn prompt_target_from_interruption_reason(reason: &str) -> Option<String> {
     let (at, marker) = first_steering_marker(reason)?;
     let tail = reason[at + marker.len()..].trim();
@@ -1610,6 +1627,15 @@ mod tests {
         let reason = "session-check: cycle is `committed`; active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path; prompt_target: do #repair";
 
         assert!(is_committed_prompt_diff_interruption(reason));
+        assert!(is_active_session_post_commit_drift_interruption(reason));
+    }
+
+    #[test]
+    fn active_session_post_commit_drift_does_not_require_a_steering_marker() {
+        let reason = "[session-check] INTERRUPTED: cycle `cycle-1` is `committed` (commit_success), but the active harness session changed this document after the last committed closeout without reopening the binary-owned write/commit path: active_session=sid turn=turn-1 prompt=chat prompt. Reopen closeout for this turn or let the hook recover it from the final assistant message.";
+
+        assert!(is_active_session_post_commit_drift_interruption(reason));
+        assert!(!is_committed_prompt_diff_interruption(reason));
     }
 
     #[test]

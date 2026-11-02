@@ -976,11 +976,11 @@ fn content_closeout_pending_maintenance_need(
     {
         return Ok(CloseoutPendingMaintenanceNeed::Required);
     }
-    // The managed open-items component is derived from queue and tracked-work
+    // The managed active component is derived from queue and tracked-work
     // state that this closeout may have changed. Reconcile it before the
     // closeout commit when possible, while retaining its weaker housekeeping
     // classification for an unavailable editor replica.
-    if agent_doc_work_projection::reconcile_managed_open_items(content)?.is_some() {
+    if agent_doc_work_projection::reconcile_managed_active_items(content)?.is_some() {
         return Ok(CloseoutPendingMaintenanceNeed::StatusOnly);
     }
     Ok(CloseoutPendingMaintenanceNeed::None)
@@ -1049,7 +1049,7 @@ mod precommit_pending_capture_tests {
         );
 
         assert!(super::content_requires_closeout_pending_maintenance(content).unwrap());
-        let reconciled = agent_doc_work_projection::reconcile_managed_open_items(content)
+        let reconciled = agent_doc_work_projection::reconcile_managed_active_items(content)
             .unwrap()
             .expect("status projection should be added");
         assert!(!super::content_requires_closeout_pending_maintenance(&reconciled).unwrap());

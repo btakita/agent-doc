@@ -2541,7 +2541,7 @@ fn run_pending_maintenance_with_options(
     // Status-only maintenance must defer as one unit when the editor authority
     // cannot be reached. Capture the pre-status cut before either derived
     // projection so the legacy stale-marker recovery below does not strand a
-    // newly introduced open-items block behind an unavailable editor.
+    // newly introduced active block behind an unavailable editor.
     let stale_marker_before = (
         current_content.clone(),
         snapshot_content.clone(),
@@ -2549,27 +2549,27 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated,
     );
 
-    // `agent:open-items` is a derived observer: keep its managed nested list in
-    // lockstep with the authoritative open queue/todo/tracked-work sources,
-    // migrating the legacy nested status cell when present.
+    // `agent:active` is a derived observer: keep its managed nested list in
+    // lockstep with started, unclosed queue/tracked-work sources, migrating
+    // legacy `agent:open-items` and nested status cells when present.
     // Derive each document independently so snapshot maintenance never copies
     // current-file work across an ownership boundary.
-    let mut open_items_status_mutated = false;
+    let mut active_status_mutated = false;
     if let Some(reconciled) =
-        agent_doc_work_projection::reconcile_managed_open_items(&current_content)?
+        agent_doc_work_projection::reconcile_managed_active_items(&current_content)?
     {
-        eprintln!("[preflight] open-items: reconciled managed list");
+        eprintln!("[preflight] active: reconciled managed list");
         current_content = reconciled;
         mutated = true;
-        open_items_status_mutated = true;
+        active_status_mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            agent_doc_work_projection::reconcile_managed_open_items(snap_content)?
+            agent_doc_work_projection::reconcile_managed_active_items(snap_content)?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
-        open_items_status_mutated = true;
+        active_status_mutated = true;
     }
 
     let mut stale_supervisor_marker_mutated = false;
@@ -2684,7 +2684,7 @@ fn run_pending_maintenance_with_options(
                 agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(
                     &err_message,
                 );
-            if (stale_supervisor_marker_mutated || open_items_status_mutated)
+            if (stale_supervisor_marker_mutated || active_status_mutated)
                 && !stale_marker_before.2
                 && deferable_status_error
             {
@@ -4094,7 +4094,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     // the row pending explicit adopt/release. It is reconcile evidence, not an
     // active execution selector. Report the queue inactive when every visible
     // prompt is held only by such ended-owner claims; otherwise callers and
-    // derived open-items maintenance can misread the retained row as fresh
+    // derived active maintenance can misread the retained row as fresh
     // pending work even though claim resolution exposes no runnable head.
     let stale_claim_only = queue_is_held_only_by_ended_owner_claims(
         activation.active,
@@ -8024,6 +8024,18 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         false
     };
 
+    // Queue lifecycle is durable outside the markdown row and is painted onto
+    // the document during this pass. Reconcile `agent:active` only after that
+    // paint so newly claimed/reported work appears immediately instead of one
+    // preflight later, and released/closed work disappears in the same pass.
+    if let Some(reconciled) =
+        agent_doc_work_projection::reconcile_managed_active_items(&current_content)?
+    {
+        current_content = reconciled;
+        mutated = true;
+        eprintln!("[preflight] active: reconciled after queue lifecycle projection");
+    }
+
     // Persist file mutations.
     if mutated {
         current_content = persist_queue_maintenance_doc(
@@ -8174,6 +8186,12 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             }
         {
             new_snap = merged;
+        }
+
+        if let Some(reconciled) =
+            agent_doc_work_projection::reconcile_managed_active_items(&new_snap)?
+        {
+            new_snap = reconciled;
         }
 
         if new_snap != snap_content
@@ -18357,16 +18375,14 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(file_after.contains(expected), "{file_after}");
         assert_eq!(
             file_after
-                .matches("<!-- agent:open-items -->")
+                .matches("<!-- agent:active priority -->")
                 .count(),
             1,
-            "document must contain one managed open-items projection: {file_after}"
+            "document must contain one managed active projection: {file_after}"
         );
         assert!(
-            file_after.contains("- **Open items** (1)")
-                && file_after.contains("`[#reported]` — integrate the completed worker result")
-                && file_after.contains("**Sources:** queue (open); backlog (open)"),
-            "the queue projection and tracked owner must fold into one open-items row: {file_after}"
+            !file_after.contains("`[#reported]` — integrate the completed worker result"),
+            "pending maintenance runs before durable queue lifecycle is painted; queue maintenance adds the active row later in the same preflight: {file_after}"
         );
         assert!(
             file_after.contains("Session ready."),
@@ -18376,10 +18392,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap()
             .unwrap();
         assert!(snapshot_after.contains(expected), "{snapshot_after}");
-        assert!(
-            snapshot_after.contains("`[#reported]` — integrate the completed worker result"),
-            "snapshot must carry the independently derived open-items projection: {snapshot_after}"
-        );
+        assert!(!snapshot_after.contains("`[#reported]` —"), "{snapshot_after}");
     }
 
     #[test]
@@ -18407,15 +18420,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "<!-- /agent:backlog -->\n",
         );
         let direct_reconcile =
-            agent_doc_work_projection::reconcile_managed_open_items(content)
+            agent_doc_work_projection::reconcile_managed_active_items(content)
                 .unwrap()
                 .expect("the stale queue-free projection must require reconciliation");
         assert!(
-            direct_reconcile.contains("- **Open items** (0)"),
+            !direct_reconcile.contains("- **Queue**")
+                && !direct_reconcile.contains("queue-free:"),
             "{direct_reconcile}"
         );
         assert!(
-            direct_reconcile.contains("<!-- agent:open-items -->"),
+            direct_reconcile.contains("<!-- agent:active priority -->"),
             "{direct_reconcile}"
         );
         assert!(
@@ -18434,8 +18448,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap();
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
-        assert!(file_after.contains("- **Open items** (0)"), "{file_after}");
-        assert!(file_after.contains("<!-- agent:open-items -->"), "{file_after}");
+        assert!(!file_after.contains("- **Queue**"), "{file_after}");
+        assert!(file_after.contains("<!-- agent:active priority -->"), "{file_after}");
         assert!(!file_after.contains("<!-- status:open-items -->"), "{file_after}");
         assert!(!file_after.contains("queue-free:"), "{file_after}");
 
@@ -18443,7 +18457,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap()
             .unwrap();
         assert!(
-            snapshot_after.contains("- **Open items** (0)"),
+            !snapshot_after.contains("- **Queue**"),
             "{snapshot_after}"
         );
         assert!(!snapshot_after.contains("queue-free:"), "{snapshot_after}");

@@ -61,9 +61,11 @@ The body contains named components delimited by HTML comment markers:
 ```
 
 New scaffolds use this queue-centric order:
-status, open-items, run, review, todo, backlog,
-icebox, notes, done, then exchange last. `open-items` is a
-binary-owned informational projection; it is never an executable work source.
+status, active, run, review, todo, backlog,
+icebox, notes, done, then exchange last. `active` is a binary-owned
+informational projection of started, unclosed work grouped by authoritative
+source; it is never an executable work source. Legacy `agent:open-items`
+markers are migrated to `agent:active`.
 Missing-component repairs use the same relative slots without moving
 established components; valid documents in the previous order are not silently reordered.
 

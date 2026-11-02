@@ -93,12 +93,23 @@ pub fn is_queue_marker_component(component: &str) -> bool {
 ///
 /// Tracked-work lists (`backlog` / legacy `pending`, `icebox`, `review`) and
 /// operator todos accept priority ordering; `queue` sorts its `do [#id]`
-/// prompts by source-item rank. Preflight's attribute warning and the lint
-/// adapter both consult this one vocabulary.
+/// prompts by source-item rank. The binary-owned `active` projection carries
+/// the flag to declare source-group order; legacy `open-items` accepts it for
+/// migration. Preflight's attribute warning and the lint adapter both consult
+/// this one vocabulary.
 pub fn is_priority_component(name: &str) -> bool {
     matches!(
         name,
-        "backlog" | "icebox" | "pending" | "review" | "todo" | "queue" | "run" | "loop"
+        "active"
+            | "open-items"
+            | "backlog"
+            | "icebox"
+            | "pending"
+            | "review"
+            | "todo"
+            | "queue"
+            | "run"
+            | "loop"
     )
 }
 
@@ -451,6 +462,8 @@ mod tests {
             "<!-- agent:icebox priority -->\n- [ ] [#a] x\n<!-- /agent:icebox -->\n",
             "<!-- agent:review priority -->\n- [/] [#a] x\n<!-- /agent:review -->\n",
             "<!-- agent:todo priority -->\n- [ ] [#a] x\n<!-- /agent:todo -->\n",
+            "<!-- agent:active priority -->\n<!-- /agent:active -->\n",
+            "<!-- agent:open-items priority -->\n<!-- /agent:open-items -->\n",
         ] {
             assert!(
                 component_attr_warning(content).is_none(),
@@ -610,6 +623,8 @@ mod tests {
             "agent:queue",
             "agent:run",
             "agent:loop",
+            "agent:active",
+            "agent:open-items",
         ] {
             assert!(
                 is_recognized_bare_flag_attr(component, "priority"),

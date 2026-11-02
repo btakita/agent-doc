@@ -19,7 +19,7 @@ pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
 const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 
 /// Legacy delimiters for the binary-owned open-work projection formerly nested
-/// in `agent:status`. Preflight migrates this block into `agent:open-items`.
+/// in `agent:status`. Preflight migrates this block into `agent:active`.
 pub const STATUS_OPEN_ITEMS_OPEN_MARKER: &str = "<!-- status:open-items -->";
 pub const STATUS_OPEN_ITEMS_CLOSE_MARKER: &str = "<!-- /status:open-items -->";
 
@@ -1096,24 +1096,26 @@ fn managed_open_items_block(status_body: &str) -> Result<Option<ManagedOpenItems
     Ok(found)
 }
 
-/// Reconcile the binary-owned `agent:open-items` component.
+/// Reconcile the binary-owned `agent:active` component.
 ///
 /// The full component body is derived observer state. Authoritative queue,
-/// todo, backlog, review, and icebox components retain lifecycle ownership.
+/// backlog, review, and icebox components retain lifecycle ownership.
 /// A legacy `status:open-items` block is removed while every byte outside that
 /// bounded block remains untouched. Duplicate owned components and malformed
 /// legacy ownership markers fail closed.
-pub fn reconcile_open_items_component_content(
+pub fn reconcile_active_component_content(
     content: &str,
     nested_list: &str,
 ) -> Result<Option<String>> {
     let components = element::parse(content).context("failed to parse components")?;
-    let open_items = components
+    let active_components = components
         .iter()
-        .filter(|component| component.name == element::OPEN_ITEMS_COMPONENT)
+        .filter(|component| {
+            element::canonical_component_name(&component.name) == element::ACTIVE_COMPONENT
+        })
         .collect::<Vec<_>>();
-    if open_items.len() > 1 {
-        bail!("document contains duplicate agent:open-items components");
+    if active_components.len() > 1 {
+        bail!("document contains duplicate agent:active/open-items components");
     }
 
     let mut migrated = content.to_string();
@@ -1137,23 +1139,44 @@ pub fn reconcile_open_items_component_content(
 
     let migrated_components =
         element::parse(&migrated).context("failed to parse migrated components")?;
-    let mut migrated_open_items = migrated_components
-        .iter()
-        .filter(|component| component.name == element::OPEN_ITEMS_COMPONENT);
-    let existing = migrated_open_items.next();
-    if migrated_open_items.next().is_some() {
-        bail!("document contains duplicate agent:open-items components");
+    let mut migrated_active = migrated_components.iter().filter(|component| {
+        element::canonical_component_name(&component.name) == element::ACTIVE_COMPONENT
+    });
+    let existing = migrated_active.next().cloned();
+    if migrated_active.next().is_some() {
+        bail!("document contains duplicate agent:active/open-items components");
     }
     let expected_body = format!("{}\n", nested_list.trim_end());
     if let Some(component) = existing {
-        if component.content(&migrated) != expected_body {
-            return Ok(Some(component.replace_content(&migrated, &expected_body)));
+        let mut normalized = migrated;
+        let close_marker = normalized[component.close_start..component.close_end].replacen(
+            "/agent:open-items",
+            "/agent:active",
+            1,
+        );
+        normalized.replace_range(component.close_start..component.close_end, &close_marker);
+        let open_marker = normalized[component.open_start..component.open_end].replacen(
+            "agent:open-items",
+            "agent:active",
+            1,
+        );
+        let open_marker = element::set_open_marker_attr(&open_marker, "priority", None)
+            .context("failed to normalize agent:active priority marker")?;
+        normalized.replace_range(component.open_start..component.open_end, &open_marker);
+        let normalized_components =
+            element::parse(&normalized).context("failed to parse normalized components")?;
+        let component = normalized_components
+            .iter()
+            .find(|component| component.name == element::ACTIVE_COMPONENT)
+            .context("normalized agent:active component disappeared")?;
+        if component.content(&normalized) != expected_body {
+            return Ok(Some(component.replace_content(&normalized, &expected_body)));
         }
-        return Ok((migrated != content).then_some(migrated));
+        return Ok((normalized != content).then_some(normalized));
     }
 
     // Preserve the historical compatibility boundary: documents with neither
-    // status nor an established open-items component do not gain a new shell.
+    // status nor an established active/open-items component do not gain a new shell.
     if !migrated_components
         .iter()
         .any(|component| component.name == "status")
@@ -1164,10 +1187,10 @@ pub fn reconcile_open_items_component_content(
     let insert_at = element::canonical_managed_component_insertion_offset(
         &migrated,
         &migrated_components,
-        element::OPEN_ITEMS_COMPONENT,
+        element::ACTIVE_COMPONENT,
     );
     let component = format!(
-        "\n## Open items <!-- agent:open-items -->\n{expected_body}<!-- /agent:open-items -->\n"
+        "\n## Active <!-- agent:active priority -->\n{expected_body}<!-- /agent:active -->\n"
     );
     let mut out = String::with_capacity(migrated.len() + component.len());
     out.push_str(&migrated[..insert_at]);
@@ -1194,7 +1217,7 @@ mod tests {
     }
 
     #[test]
-    fn open_items_projection_migrates_out_of_status_and_is_idempotent() {
+    fn active_projection_migrates_legacy_sources_and_is_idempotent() {
         let doc = concat!(
             "## Status <!-- agent:status sync=\"release\" -->\n",
             "operator prose\n",
@@ -1203,14 +1226,13 @@ mod tests {
             "Queue markers: retained legend\n",
             "<!-- /agent:status -->\n",
         );
-        let one =
-            reconcile_open_items_component_content(doc, "- **Open items** (1)\n  - `[#a]` — first")
-                .unwrap()
-                .expect("projection inserted");
+        let one = reconcile_active_component_content(doc, "- **Queue** (1)\n  - `[#a]` — first")
+            .unwrap()
+            .expect("projection inserted");
         assert!(one.contains("operator prose"));
         assert!(one.contains("<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->"));
         assert!(one.contains("Queue markers: retained legend"));
-        assert!(one.contains("## Open items <!-- agent:open-items -->\n- **Open items** (1)"));
+        assert!(one.contains("## Active <!-- agent:active priority -->\n- **Queue** (1)"));
         assert!(!one.contains(STATUS_OPEN_ITEMS_OPEN_MARKER));
         let status = element::parse(&one)
             .unwrap()
@@ -1227,19 +1249,16 @@ mod tests {
             "migration must preserve every status byte outside the owned legacy cell"
         );
         assert!(
-            reconcile_open_items_component_content(
-                &one,
-                "- **Open items** (1)\n  - `[#a]` — first",
-            )
-            .unwrap()
-            .is_none()
+            reconcile_active_component_content(&one, "- **Queue** (1)\n  - `[#a]` — first",)
+                .unwrap()
+                .is_none()
         );
 
-        let two = reconcile_open_items_component_content(&one, "- **Open items** (0)")
+        let two = reconcile_active_component_content(&one, "")
             .unwrap()
             .expect("projection updated");
         assert!(!two.contains("`[#a]`"));
-        assert_eq!(two.matches("<!-- agent:open-items -->").count(), 1);
+        assert_eq!(two.matches("<!-- agent:active priority -->").count(), 1);
     }
 
     #[test]
@@ -1249,8 +1268,7 @@ mod tests {
             "<!-- status:open-items -->\nold\n",
             "<!-- /agent:status -->\n",
         );
-        let err =
-            reconcile_open_items_component_content(malformed, "- **Open items** (0)").unwrap_err();
+        let err = reconcile_active_component_content(malformed, "").unwrap_err();
         assert!(err.to_string().contains("unclosed status:open-items"));
     }
 
@@ -1261,12 +1279,32 @@ mod tests {
             "```md\n<!-- status:open-items -->\n<!-- /status:open-items -->\n```\n",
             "<!-- /agent:status -->\n",
         );
-        let updated = reconcile_open_items_component_content(doc, "- **Open items** (0)")
+        let updated = reconcile_active_component_content(doc, "")
             .unwrap()
             .expect("real projection inserted");
         assert_eq!(updated.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 1);
         assert!(updated.contains("```md\n<!-- status:open-items -->"));
-        assert!(updated.contains("<!-- agent:open-items -->"));
+        assert!(updated.contains("<!-- agent:active priority -->"));
+    }
+
+    #[test]
+    fn active_projection_migrates_legacy_marker_and_preserves_attrs() {
+        let doc = concat!(
+            "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
+            "<!-- agent:open-items broken -->\nlegacy\n<!-- /agent:open-items -->\n",
+        );
+        let updated = reconcile_active_component_content(doc, "")
+            .unwrap()
+            .expect("binary-owned marker migrated");
+        assert!(updated.contains("<!-- agent:active broken priority -->"));
+        assert!(updated.contains("<!-- /agent:active -->"));
+        assert!(!updated.contains("agent:open-items"));
+        assert!(
+            reconcile_active_component_content(&updated, "")
+                .unwrap()
+                .is_none(),
+            "canonical active priority marker must be a fixed point"
+        );
     }
 
     #[test]
@@ -1276,7 +1314,7 @@ mod tests {
             "<div>\n<!-- status:open-items -->\n</div>\n",
             "<!-- /agent:status -->\n",
         );
-        let err = reconcile_open_items_component_content(doc, "- **Open items** (0)").unwrap_err();
+        let err = reconcile_active_component_content(doc, "").unwrap_err();
         assert!(err.to_string().contains("inside an HTML block"));
     }
 
@@ -1285,17 +1323,20 @@ mod tests {
         let doc = concat!(
             "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
             "<!-- agent:open-items -->\nold one\n<!-- /agent:open-items -->\n",
-            "<!-- agent:open-items -->\nold two\n<!-- /agent:open-items -->\n",
+            "<!-- agent:active priority -->\nold two\n<!-- /agent:active -->\n",
         );
-        let err = reconcile_open_items_component_content(doc, "- **Open items** (0)").unwrap_err();
-        assert!(err.to_string().contains("duplicate agent:open-items"));
+        let err = reconcile_active_component_content(doc, "").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate agent:active/open-items")
+        );
     }
 
     #[test]
     fn open_items_projection_preserves_documents_without_status_or_component() {
         let doc = "<!-- agent:run -->\n- work\n<!-- /agent:run -->\n";
         assert!(
-            reconcile_open_items_component_content(doc, "- **Open items** (1)")
+            reconcile_active_component_content(doc, "- **Queue** (1)")
                 .unwrap()
                 .is_none()
         );

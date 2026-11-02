@@ -27651,26 +27651,26 @@ mod retained_persistence_retry_tests {
     }
 
     /// cycle-1793634471546 combined a ~300 KiB document (about 252 KiB of
-    /// unrelated exchange history) with queue/open-item churn and a stable
+    /// unrelated exchange history) with queue/active-item churn and a stable
     /// `projection_changed` receipt. Size amplified every retry, but did not
     /// create the stale expected hash. Pin the scaling property: the retained
     /// Effect keeps only hash/length bookkeeping and stops scheduling full
     /// projection work after a content-size-independent recovery frontier.
     #[test]
-    fn large_exchange_with_queue_and_open_item_churn_has_a_bounded_effect_frontier() {
+    fn large_exchange_with_queue_and_active_item_churn_has_a_bounded_effect_frontier() {
         let mut large = String::with_capacity(300_500);
         large.push_str("<!-- agent:exchange -->\n");
         large.extend(std::iter::repeat_n('e', 252_510));
         large.push_str("\n<!-- agent:queue -->\n");
         large.extend(std::iter::repeat_n('q', 22_477));
-        large.push_str("\n<!-- agent:open-items -->\n");
-        let open_items_start = large.len();
+        large.push_str("\n<!-- agent:active priority -->\n");
+        let active_items_start = large.len();
         for item in 0..44 {
             large.push_str(&format!("- [#open-{item}] retained item {item}\n"));
         }
         large.extend(std::iter::repeat_n(
             'o',
-            7_680usize.saturating_sub(large.len() - open_items_start),
+            7_680usize.saturating_sub(large.len() - active_items_start),
         ));
         large.extend(std::iter::repeat_n(
             'x',

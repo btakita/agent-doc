@@ -503,19 +503,19 @@ fn late_composed_binary_owned_projection(
     {
         bases.push((with_count, vec!["reported_queue_status"]));
     }
-    // The open-items component is another deterministic binary-owned
+    // The active component is another deterministic binary-owned
     // projection. Compose it with every status/handoff candidate as well as
     // HEAD itself so a late maintenance pass cannot be mistaken for an
     // operator status edit.
-    let open_item_bases = std::iter::once((committed_content.to_string(), Vec::new()))
+    let active_item_bases = std::iter::once((committed_content.to_string(), Vec::new()))
         .chain(bases.clone())
         .collect::<Vec<_>>();
-    for (base, mut parts) in open_item_bases {
-        if let Some(with_open_items) =
-            agent_doc_work_projection::reconcile_managed_open_items(&base)?
+    for (base, mut parts) in active_item_bases {
+        if let Some(with_active_items) =
+            agent_doc_work_projection::reconcile_managed_active_items(&base)?
         {
-            parts.push("open_items_component");
-            bases.push((with_open_items, parts));
+            parts.push("active_component");
+            bases.push((with_active_items, parts));
         }
     }
     for (base, parts) in bases {

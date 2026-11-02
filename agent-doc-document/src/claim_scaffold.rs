@@ -4,10 +4,9 @@ use agent_doc_frontmatter::{frontmatter, project_config};
 
 const DEFAULT_TEMPLATE_STATUS_OPEN: &str = "\n\n## Status <!-- agent:status patch=replace -->\n";
 const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
-const DEFAULT_TEMPLATE_OPEN_ITEMS: &str = concat!(
-    "\n## Open items <!-- agent:open-items -->\n",
-    "- **Open items** (0)\n",
-    "<!-- /agent:open-items -->\n",
+const DEFAULT_TEMPLATE_ACTIVE: &str = concat!(
+    "\n## Active <!-- agent:active priority -->\n",
+    "<!-- /agent:active -->\n",
 );
 const DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE: &str = concat!(
     // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
@@ -42,7 +41,7 @@ pub fn render_default_template_components(exchange_content: &str) -> String {
         format!("{exchange_body}\n")
     };
     format!(
-        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_OPEN_ITEMS}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_ACTIVE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
         status_body.trim_start_matches('\n'),
     )
 }
@@ -157,7 +156,7 @@ mod tests {
             section_headers,
             [
                 "## Status <!-- agent:status patch=replace -->",
-                "## Open items <!-- agent:open-items -->",
+                "## Active <!-- agent:active priority -->",
                 "## Run <!-- agent:run priority subagents clear -->",
                 "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
@@ -197,16 +196,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status",
-                "open-items",
-                "queue",
-                "review",
-                "todo",
-                "backlog",
-                "icebox",
-                "notes",
-                "done",
-                "exchange",
+                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
+                "done", "exchange",
             ],
             "claim scaffolds every canonical component in stable document order"
         );
@@ -253,7 +244,7 @@ mod tests {
                 .all(|component| component.content(&scaffold).is_empty()),
             "newly scaffolded work components must start empty"
         );
-        assert_eq!(components[1].content(&scaffold), "- **Open items** (0)\n");
+        assert_eq!(components[1].content(&scaffold), "");
         // `#queuemarkerlegend`: status starts with exactly the legend line.
         assert_eq!(
             components[0].content(&scaffold),
@@ -325,16 +316,8 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status",
-                "open-items",
-                "queue",
-                "review",
-                "todo",
-                "backlog",
-                "icebox",
-                "notes",
-                "done",
-                "exchange",
+                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
+                "done", "exchange",
             ],
             "claim must use the same canonical component sequence for non-empty templates"
         );

@@ -101,6 +101,27 @@ pub fn repair_clean_head_if_only_transient_worktree_drift(
         );
         return Ok(Some((Some(head_doc.clone()), repaired)));
     }
+    // `agent:active` is a binary-derived index. A late editor flush can retain
+    // its pre-commit lifecycle metadata even though the authoritative queue
+    // row in the same document has already reached HEAD (for example,
+    // `running` beside a `reported` row). Re-derive from the worktree and only
+    // restore HEAD when that exact projection proves the active component is
+    // the sole drift. Operator descendants prevent equality and are preserved.
+    if agent_doc_work_projection::reconcile_managed_active_items(file_content)?
+        .as_deref()
+        == Some(head_doc.as_str())
+    {
+        effects.atomic_write(file, &head_doc)?;
+        signal_live_closeout_refresh(effects, file, true)?;
+        effects.log_op(
+            file,
+            &format!(
+                "postcommit_active_projection_reconcile_to_head file={} basis=exact_rederive",
+                file.display()
+            ),
+        );
+        return Ok(Some((Some(head_doc.clone()), head_doc)));
+    }
     if normalize_transient_agent_doc_markers(file_content)
         != normalize_transient_agent_doc_markers(&head_doc)
         && normalize_post_commit_re_heading_drift(file_content)

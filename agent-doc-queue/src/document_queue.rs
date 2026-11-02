@@ -4146,13 +4146,32 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     if entry_is_group_parent(entries, index) || row_is_tracked_directive(&bare) {
         return Some(bare);
     }
-    let work = nest_row_work_text(&bare);
+    // A generated q-id normally remains part of a leaf's durable identity. It
+    // identifies the physical markdown node, however, when another nested row
+    // projects the same canonical effect. Canonicalize only that alias set so
+    // its rows share lifecycle without changing singleton nested-head policy.
+    // Explicit effect ids remain in `canonical`, keeping intentional repeats
+    // distinct.
+    let alias_identity = generated_prompt_alias_identity(entries, index);
+    let is_projection_alias = alias_identity.as_ref().is_some_and(|identity| {
+        entries.iter().enumerate().any(|(other_index, _)| {
+            other_index != index
+                && generated_prompt_alias_identity(entries, other_index).as_ref()
+                    == Some(identity)
+        })
+    });
+    let canonical = if is_projection_alias {
+        agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&bare)
+    } else {
+        bare.clone()
+    };
+    let work = nest_row_work_text(&canonical);
     let head = agent_doc_element_queue::subprompts::head_without_subprompts(&work);
     let head = head.trim();
     if head.is_empty() {
         return Some(bare);
     }
-    Some(nest_vector_claim_at(entries, index, &bare).unwrap_or(bare))
+    Some(nest_vector_claim_at(entries, index, &canonical).unwrap_or(canonical))
 }
 
 /// Whether row `index` is the live head named by `head_text`.
@@ -5538,6 +5557,62 @@ pub fn annotate_duplicate_queue_effects(entries: &[QueueEntry]) -> Option<Vec<Qu
     changed.then_some(annotated)
 }
 
+/// Collapse nested live leaves that are duplicate projections of one canonical
+/// prompt, keeping the first row.
+///
+/// Stable `q-` ids identify physical markdown nodes. A merge/hoist can therefore
+/// leave two text-identical leaves under the same parent with different generated
+/// ids even though they represent one work item. Those aliases must not become
+/// independent queue effects. Explicit `⟦effect:N⟧` annotations remain the
+/// authority for genuinely repeated authored work and are never collapsed here.
+/// Group parents are also excluded so removing an alias cannot orphan authored
+/// descendants.
+pub fn collapse_generated_prompt_aliases(entries: &[QueueEntry]) -> Option<Vec<QueueEntry>> {
+    let mut seen = std::collections::HashSet::new();
+    let mut collapsed = Vec::with_capacity(entries.len());
+    let mut changed = false;
+
+    for (index, entry) in entries.iter().enumerate() {
+        let alias_key = generated_prompt_alias_identity(entries, index);
+
+        if alias_key.is_some_and(|key| !seen.insert(key)) {
+            changed = true;
+            continue;
+        }
+        collapsed.push(entry.clone());
+    }
+
+    changed.then_some(collapsed)
+}
+
+/// Canonical lifecycle identity for a generated-id nested projection alias.
+/// Explicit repeated effects and parent/group rows intentionally return `None`.
+pub fn generated_prompt_alias_identity(
+    entries: &[QueueEntry],
+    index: usize,
+) -> Option<agent_doc_element_queue::QueueItemIdentity> {
+    let QueueEntry::Prompt(prompt) = entries.get(index)? else {
+        return None;
+    };
+    if !prompt.is_nested()
+        || prompt.multiline
+        || entry_is_group_parent(entries, index)
+        || split_queue_effect_annotation(&prompt.text).1.is_some()
+        || agent_doc_element_queue::queue_prompt_stable_id(&prompt.text).is_none()
+    {
+        return None;
+    }
+    let bare = strip_in_progress_marker(prompt.text.trim());
+    let semantic = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&bare);
+    if semantic == bare {
+        return None;
+    }
+    let lineage = nest_vector_claim_at(entries, index, &semantic)?;
+    Some(agent_doc_element_queue::QueueItemIdentity::FreeText(
+        agent_doc_element_queue::normalize_multiline_dedup_text(&lineage),
+    ))
+}
+
 /// Full convergence key: durable identity, head shape, and visible lifecycle.
 ///
 /// - **Identity** is exactly [`QueueItemIdentity::from_prompt`] (id-backed heads
@@ -6262,6 +6337,11 @@ pub fn converge_queue_via_lifecycle_with_operator_evidence(
             }
             _ => converged.push(entry.clone()),
         }
+    }
+
+    if let Some(without_projection_aliases) = collapse_generated_prompt_aliases(&converged) {
+        converged = without_projection_aliases;
+        changed = true;
     }
 
     if let Some(with_effects) = annotate_duplicate_queue_effects(&converged) {
@@ -11368,6 +11448,64 @@ mod tests {
             multiline,
             "q-id canonicalization keeps a multiline prompt id on its first work line"
         );
+    }
+
+    #[test]
+    fn convergence_collapses_nested_generated_id_aliases_from_one_response_tree() {
+        let body = concat!(
+            "- Fastest path for the tester today\n",
+            "  - do [#approved-handoff] [#operator-request-access]\n",
+            "    - **Response [#r-shared]:** completed batch\n",
+            "      - **State:** Complete.\n",
+            "    - **Response [#r-shared]:** completed batch\n",
+            "      - **State:** Complete.\n",
+            "    - Is there anything left in this tree? [#q-111111111111]\n",
+            "    - Is there anything left in this tree? [#q-222222222222]\n",
+        );
+        let entries = parse(body).unwrap();
+        let collapsed = converge(&entries, &entries);
+        let rendered = render(&collapsed);
+
+        assert_eq!(
+            rendered.matches("Is there anything left in this tree?").count(),
+            1,
+            "one canonical leaf remains actionable:\n{rendered}"
+        );
+        assert!(rendered.contains("[#q-111111111111]"));
+        assert!(!rendered.contains("[#q-222222222222]"));
+        assert_eq!(
+            rendered.matches("**Response [#r-shared]:**").count(),
+            2,
+            "alias repair does not rewrite existing response evidence"
+        );
+    }
+
+    #[test]
+    fn convergence_preserves_explicit_repeated_effects_and_distinct_parent_lineage() {
+        let repeated_effects = parse(concat!(
+            "- parent\n",
+            "  - repeat work ⟦effect:1⟧ [#q-111111111111]\n",
+            "  - repeat work ⟦effect:2⟧ [#q-222222222222]\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            converge(&repeated_effects, &repeated_effects),
+            repeated_effects,
+            "explicit effect identities are authored multiplicity"
+        );
+
+        let distinct_parents = parse(concat!(
+            "- do [#first-parent]\n",
+            "  - same leaf [#q-333333333333]\n",
+            "- do [#second-parent]\n",
+            "  - same leaf [#q-444444444444]\n",
+        ))
+        .unwrap();
+        let distinct = converge(&distinct_parents, &distinct_parents);
+        let rendered = render(&distinct);
+        assert_eq!(rendered.matches("same leaf").count(), 2, "{rendered}");
+        assert!(rendered.contains("[#q-333333333333]"), "{rendered}");
+        assert!(rendered.contains("[#q-444444444444]"), "{rendered}");
     }
 
     /// A completed occurrence is historical evidence, not permission to answer

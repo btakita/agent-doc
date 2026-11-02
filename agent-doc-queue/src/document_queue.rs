@@ -2017,7 +2017,13 @@ fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
         .iter()
         .map(|entry| match entry {
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
-                do_prompt_id(&prompt.text)
+                let operator_action_ids =
+                    agent_doc_document::queue_projection::operator_action_ids(&prompt.text);
+                let text = agent_doc_document::queue_projection::remove_operator_action_ids(
+                    &prompt.text,
+                    &operator_action_ids,
+                );
+                do_prompt_id(&text)
             }
             _ => None,
         })
@@ -2201,15 +2207,28 @@ pub fn project_prompt_operator_actions(
         .iter()
         .map(|(entry, _)| entry.clone())
         .collect::<Vec<_>>();
-    let Some(marked_entries) = set_prompt_operator_actions(&entries, actions, open_todo_ids) else {
+    let Some(mut marked_entries) = set_prompt_operator_actions(&entries, actions, open_todo_ids)
+    else {
         return Ok(None);
     };
+    for ((before, range), after) in spans.iter().zip(&mut marked_entries) {
+        let source = &body[range.clone()];
+        if before == after || source_has_queue_bullet(source) {
+            continue;
+        }
+        let (QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)) = after else {
+            continue;
+        };
+        prompt.text = clear_leading_operator_action_marker(&prompt.text);
+    }
     validate_in_progress_marker_projection(&entries, &marked_entries)?;
 
     let mut projected = body.to_string();
     for ((before, range), after) in spans.iter().zip(&marked_entries).rev() {
         if before != after {
-            projected.replace_range(range.clone(), &render(std::slice::from_ref(after)));
+            let source = &body[range.clone()];
+            let replacement = operator_action_projection_replacement(source, before, after);
+            projected.replace_range(range.clone(), &replacement);
         }
     }
     let reparsed = parse(&projected)?;
@@ -2218,7 +2237,73 @@ pub fn project_prompt_operator_actions(
         reparsed == marked_entries,
         "queue operator-action projection changed non-marker row structure"
     );
+    if projected == body {
+        return Ok(None);
+    }
     Ok(Some((projected, reparsed)))
+}
+
+fn source_has_queue_bullet(source: &str) -> bool {
+    let first = source.trim_start();
+    if ["- ", "* ", "+ "]
+        .iter()
+        .any(|marker| first.starts_with(marker))
+    {
+        return true;
+    }
+    let digits = first.bytes().take_while(u8::is_ascii_digit).count();
+    digits > 0
+        && first
+            .get(digits..)
+            .is_some_and(|rest| rest.starts_with(". ") || rest.starts_with(") "))
+}
+
+fn clear_leading_operator_action_marker(text: &str) -> String {
+    let leading_len = text.len() - text.trim_start().len();
+    let (leading, rest) = text.split_at(leading_len);
+    let marker = agent_doc_document::queue_projection::operator_action_marker();
+    match rest
+        .strip_prefix(marker)
+        .or_else(|| rest.strip_prefix("🙋"))
+    {
+        Some(after) => format!("{leading}{}", after.trim_start()),
+        None => text.to_string(),
+    }
+}
+
+/// Preserve a legacy inferred prompt's exact source wrapper while projecting
+/// its operator-action annotation. Some pasted transcript lines are actionable
+/// queue rows even though they have no Markdown list bullet. Canonically
+/// rendering one of those rows creates a new list item and can absorb the
+/// following indented transcript lines into it, changing queue cardinality.
+fn operator_action_projection_replacement(
+    source: &str,
+    before: &QueueEntry,
+    after: &QueueEntry,
+) -> String {
+    if source_has_queue_bullet(source) {
+        return render(std::slice::from_ref(after));
+    }
+
+    match (before, after) {
+        (QueueEntry::Prompt(before_prompt), QueueEntry::Prompt(after_prompt))
+        | (QueueEntry::Completed(before_prompt), QueueEntry::Completed(after_prompt))
+            if before_prompt.text != after_prompt.text =>
+        {
+            source
+                .find(&before_prompt.text)
+                .map(|offset| {
+                    let mut preserved = source.to_string();
+                    preserved.replace_range(
+                        offset..offset + before_prompt.text.len(),
+                        &after_prompt.text,
+                    );
+                    preserved
+                })
+                .unwrap_or_else(|| render(std::slice::from_ref(after)))
+        }
+        _ => render(std::slice::from_ref(after)),
+    }
 }
 
 /// Project request-linked operator actions in every queue block in `content`.
@@ -13069,6 +13154,84 @@ mod tests {
         assert_eq!(
             cleared,
             "- ### 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+        );
+    }
+
+    #[test]
+    fn operator_action_projection_preserves_multiline_transcript_and_following_rows() {
+        let body = concat!(
+            "- ### ☑️ [#subagent:release#9] release + publish [#q-release] ⟦published⟧\n",
+            "- agent-doc issues in sdk-release.md\n",
+            "  - 🚧 [#subagent:intro#1] >-\n",
+            "    > /agent-doc with no file uses the claimed document. I'll admit that session and follow its 4:59 PM\n",
+            "     cycle.\n",
+            "\n",
+            "     ◈ Explored 4 files, 3 searches, called 3 tools, ran 4 commands\n",
+            "\n",
+            "     /agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM\n",
+            "     read or updated.\n",
+            "\n",
+            "     agent_doc_admit returned ok: false each time: the document actor did not answer within 5\n",
+            "     seconds.\n",
+            "\n",
+            "     Rerun /agent-doc after that handoff finishes.\n",
+            "- agent-doc issues in sdk-dev.md\n",
+            "  - 🚧 [#subagent:timeout#1] timed out waiting for project controller response\n",
+        );
+        let entries = parse(body).unwrap();
+        let QueueEntry::Prompt(transcript) = &entries[2] else {
+            panic!("expected the transcript to remain one multiline queue row: {entries:?}");
+        };
+        let queue_item =
+            agent_doc_document::queue_projection::operator_request_origin_item(&transcript.text);
+        let id = "subagent-operator-request-sdk-intro-commit".to_string();
+        let failure_id = "subagent-operator-request-connected-admission-persist".to_string();
+        let actions = vec![
+            (queue_item, id.clone()),
+            (
+                "/agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM".to_string(),
+                failure_id.clone(),
+            ),
+        ];
+        let open = std::collections::HashSet::from([id.clone(), failure_id.clone()]);
+
+        let (projected, reparsed) = project_prompt_operator_actions(body, &actions, &open)
+            .unwrap()
+            .expect("the transcript row receives the operator-action link");
+
+        assert_eq!(reparsed.len(), entries.len());
+        assert!(
+            projected.contains(&format!("cycle. [#{id}]")),
+            "{projected}"
+        );
+        assert!(
+            projected.contains(&format!(
+                "     /agent-doc did not start a session cycle. Connected admission failed three times, so no document was 5:01 PM [#{failure_id}]\n"
+            )),
+            "the inferred prompt must keep its source indentation and avoid a synthetic bullet or lifecycle marker: {projected}"
+        );
+        assert!(projected.contains("- agent-doc issues in sdk-dev.md\n"));
+        assert!(projected.contains(
+            "  - 🚧 [#subagent:timeout#1] timed out waiting for project controller response\n"
+        ));
+        assert!(
+            project_prompt_operator_actions(&projected, &actions, &open)
+                .unwrap()
+                .is_none(),
+            "the source-preserving inferred-row projection must be idempotent"
+        );
+    }
+
+    #[test]
+    fn marker_projection_still_rejects_real_tracked_id_movement() {
+        let before = parse("- do [#alpha]\n").unwrap();
+        let after = parse("- do [#beta]\n").unwrap();
+        let error = validate_in_progress_marker_projection(&before, &after).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("moved or buried a tracked [#id] row"),
+            "{error:#}"
         );
     }
 

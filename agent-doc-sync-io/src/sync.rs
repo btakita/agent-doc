@@ -10932,26 +10932,34 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "status",
+                "open-items",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
                 "exchange",
             ],
             "sync must render the same complete scaffold as claim"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
-        assert_eq!(components[8].patch_mode(), Some("append"));
+        assert_eq!(components[9].patch_mode(), Some("append"));
         assert_eq!(
-            components[1].attrs.get("priority").map(String::as_str),
+            components[2].attrs.get("priority").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[1].attrs.get("subagents").map(String::as_str),
+            components[2].attrs.get("subagents").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[1].attrs.get("clear").map(String::as_str),
+            components[2].attrs.get("clear").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[1].attrs.len(), 3);
+        assert_eq!(components[2].attrs.len(), 3);
         let todo = components
             .iter()
             .find(|component| component.name == "todo")
@@ -10964,12 +10972,13 @@ mod tests {
         assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert!(
-            components[2..]
+            components[3..]
                 .iter()
                 .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .filter(|component| component.name != "exchange")
                 .all(|component| component.attrs.is_empty())
         );
+        assert_eq!(components[1].content(&content), "- **Open items** (0)\n");
     }
     /// Non-.md files should never be scaffolded even if empty.
     #[test]

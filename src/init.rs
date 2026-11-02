@@ -281,7 +281,15 @@ mod tests {
                 .map(|component| component.name.as_str())
                 .collect::<Vec<_>>(),
             [
-                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "status",
+                "open-items",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
                 "exchange",
             ]
         );

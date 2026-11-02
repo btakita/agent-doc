@@ -4,6 +4,11 @@ use agent_doc_frontmatter::{frontmatter, project_config};
 
 const DEFAULT_TEMPLATE_STATUS_OPEN: &str = "\n\n## Status <!-- agent:status patch=replace -->\n";
 const DEFAULT_TEMPLATE_STATUS_CLOSE: &str = "<!-- /agent:status -->\n";
+const DEFAULT_TEMPLATE_OPEN_ITEMS: &str = concat!(
+    "\n## Open items <!-- agent:open-items -->\n",
+    "- **Open items** (0)\n",
+    "<!-- /agent:open-items -->\n",
+);
 const DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE: &str = concat!(
     // No `go`: a queue with no control already runs in go-mode (`#queuegodefault`).
     "\n## Run <!-- agent:run priority subagents clear -->\n",
@@ -37,7 +42,7 @@ pub fn render_default_template_components(exchange_content: &str) -> String {
         format!("{exchange_body}\n")
     };
     format!(
-        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
+        "{DEFAULT_TEMPLATE_STATUS_OPEN}{}{DEFAULT_TEMPLATE_STATUS_CLOSE}{DEFAULT_TEMPLATE_OPEN_ITEMS}{DEFAULT_TEMPLATE_COMPONENTS_BEFORE_EXCHANGE}{DEFAULT_TEMPLATE_EXCHANGE_OPEN}{exchange_body}{DEFAULT_TEMPLATE_EXCHANGE_CLOSE}",
         status_body.trim_start_matches('\n'),
     )
 }
@@ -152,6 +157,7 @@ mod tests {
             section_headers,
             [
                 "## Status <!-- agent:status patch=replace -->",
+                "## Open items <!-- agent:open-items -->",
                 "## Run <!-- agent:run priority subagents clear -->",
                 "## Review <!-- agent:review -->",
                 "## Todo <!-- agent:todo priority -->",
@@ -191,13 +197,21 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "status",
+                "open-items",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
                 "exchange",
             ],
             "claim scaffolds every canonical component in stable document order"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
-        assert_eq!(components[8].patch_mode(), Some("append"));
+        assert_eq!(components[9].patch_mode(), Some("append"));
         let backlog = components
             .iter()
             .find(|component| component.name == "backlog")
@@ -205,19 +219,19 @@ mod tests {
         assert_eq!(backlog.attrs.get("priority").map(String::as_str), Some(""));
         assert_eq!(backlog.attrs.get("queue").map(String::as_str), Some(""));
         assert_eq!(
-            components[1].attrs.get("priority").map(String::as_str),
+            components[2].attrs.get("priority").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[1].attrs.get("subagents").map(String::as_str),
+            components[2].attrs.get("subagents").map(String::as_str),
             Some("")
         );
         assert_eq!(
-            components[1].attrs.get("clear").map(String::as_str),
+            components[2].attrs.get("clear").map(String::as_str),
             Some("")
         );
-        assert_eq!(components[1].attrs.len(), 3);
-        assert_default_run_omits_queue_control(&components[1]);
+        assert_eq!(components[2].attrs.len(), 3);
+        assert_default_run_omits_queue_control(&components[2]);
         assert!(
             !scaffold.contains("\nqueue:"),
             "the scaffold must not write queue: go; absence is already go-mode"
@@ -228,17 +242,18 @@ mod tests {
             .expect("default scaffold includes todo");
         assert_eq!(todo.attrs.get("priority").map(String::as_str), Some(""));
         assert!(
-            components[2..8]
+            components[3..9]
                 .iter()
                 .filter(|component| { component.name != "todo" && component.name != "backlog" })
                 .all(|component| component.attrs.is_empty())
         );
         assert!(
-            components[1..]
+            components[2..]
                 .iter()
                 .all(|component| component.content(&scaffold).is_empty()),
-            "newly scaffolded components other than status must start empty"
+            "newly scaffolded work components must start empty"
         );
+        assert_eq!(components[1].content(&scaffold), "- **Open items** (0)\n");
         // `#queuemarkerlegend`: status starts with exactly the legend line.
         assert_eq!(
             components[0].content(&scaffold),
@@ -310,7 +325,15 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "status",
+                "open-items",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
                 "exchange",
             ],
             "claim must use the same canonical component sequence for non-empty templates"

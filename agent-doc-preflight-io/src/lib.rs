@@ -2549,22 +2549,23 @@ fn run_pending_maintenance_with_options(
         snapshot_mutated,
     );
 
-    // `agent:status` is a derived observer: keep its managed nested list in
-    // lockstep with the authoritative open queue/todo/tracked-work sources.
+    // `agent:open-items` is a derived observer: keep its managed nested list in
+    // lockstep with the authoritative open queue/todo/tracked-work sources,
+    // migrating the legacy nested status cell when present.
     // Derive each document independently so snapshot maintenance never copies
     // current-file work across an ownership boundary.
     let mut open_items_status_mutated = false;
     if let Some(reconciled) =
-        agent_doc_work_projection::reconcile_managed_status_open_items(&current_content)?
+        agent_doc_work_projection::reconcile_managed_open_items(&current_content)?
     {
-        eprintln!("[preflight] status: reconciled managed open-items list");
+        eprintln!("[preflight] open-items: reconciled managed list");
         current_content = reconciled;
         mutated = true;
         open_items_status_mutated = true;
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            agent_doc_work_projection::reconcile_managed_status_open_items(snap_content)?
+            agent_doc_work_projection::reconcile_managed_open_items(snap_content)?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;
@@ -18312,16 +18313,16 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(file_after.contains(expected), "{file_after}");
         assert_eq!(
             file_after
-                .matches(agent_doc_document::status_projection::STATUS_OPEN_ITEMS_OPEN_MARKER)
+                .matches("<!-- agent:open-items -->")
                 .count(),
             1,
-            "status must contain one managed nested-list projection: {file_after}"
+            "document must contain one managed open-items projection: {file_after}"
         );
         assert!(
             file_after.contains("- **Open items** (1)")
                 && file_after.contains("`[#reported]` — integrate the completed worker result")
                 && file_after.contains("**Sources:** queue (open); backlog (open)"),
-            "the queue projection and tracked owner must fold into one status item: {file_after}"
+            "the queue projection and tracked owner must fold into one open-items row: {file_after}"
         );
         assert!(
             file_after.contains("Session ready."),
@@ -18362,11 +18363,19 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "<!-- /agent:backlog -->\n",
         );
         let direct_reconcile =
-            agent_doc_work_projection::reconcile_managed_status_open_items(content)
+            agent_doc_work_projection::reconcile_managed_open_items(content)
                 .unwrap()
                 .expect("the stale queue-free projection must require reconciliation");
         assert!(
             direct_reconcile.contains("- **Open items** (0)"),
+            "{direct_reconcile}"
+        );
+        assert!(
+            direct_reconcile.contains("<!-- agent:open-items -->"),
+            "{direct_reconcile}"
+        );
+        assert!(
+            !direct_reconcile.contains("<!-- status:open-items -->"),
             "{direct_reconcile}"
         );
         std::fs::write(&doc, content).unwrap();
@@ -18382,6 +18391,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(file_after.contains("- **Open items** (0)"), "{file_after}");
+        assert!(file_after.contains("<!-- agent:open-items -->"), "{file_after}");
+        assert!(!file_after.contains("<!-- status:open-items -->"), "{file_after}");
         assert!(!file_after.contains("queue-free:"), "{file_after}");
 
         let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)

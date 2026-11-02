@@ -100,6 +100,9 @@ pub const BACKLOG_DONE_COMPONENT: &str = "done";
 /// Canonical component name for tracked work awaiting human review.
 pub const REVIEW_COMPONENT: &str = "review";
 
+/// Canonical component name for the binary-owned open-work index.
+pub const OPEN_ITEMS_COMPONENT: &str = "open-items";
+
 /// Canonical component name for the icebox component.
 pub const ICEBOX_COMPONENT: &str = "icebox";
 
@@ -130,8 +133,17 @@ pub fn canonical_component_name(name: &str) -> &str {
 
 /// Queue-centric order used by new template scaffolds and by repairs that must
 /// insert a missing managed component. Existing components are never moved.
-pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 9] = [
-    "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done", "exchange",
+pub const CANONICAL_MANAGED_COMPONENT_ORDER: [&str; 10] = [
+    "status",
+    "open-items",
+    "queue",
+    "review",
+    "todo",
+    "backlog",
+    "icebox",
+    "notes",
+    "done",
+    "exchange",
 ];
 
 /// Return a managed component's queue-centric scaffold rank.
@@ -1739,6 +1751,7 @@ pub fn parse(doc: &str) -> Result<Vec<Component>> {
 const SINGLETON_COMPONENT_NAMES: &[&str] = &[
     EXCHANGE_COMPONENT,
     "status",
+    OPEN_ITEMS_COMPONENT,
     BACKLOG_COMPONENT,
     REVIEW_COMPONENT,
     ICEBOX_COMPONENT,
@@ -2762,7 +2775,15 @@ mod tests {
         assert_eq!(
             CANONICAL_MANAGED_COMPONENT_ORDER,
             [
-                "status", "queue", "review", "todo", "backlog", "icebox", "notes", "done",
+                "status",
+                "open-items",
+                "queue",
+                "review",
+                "todo",
+                "backlog",
+                "icebox",
+                "notes",
+                "done",
                 "exchange",
             ]
         );
@@ -2784,8 +2805,9 @@ mod tests {
                 .close_end
         );
         assert!(todo_offset > legacy.find("<!-- /agent:exchange -->").unwrap());
-        assert_eq!(canonical_managed_component_rank("pending"), Some(4));
-        assert_eq!(canonical_managed_component_rank("run"), Some(1));
+        assert_eq!(canonical_managed_component_rank("pending"), Some(5));
+        assert_eq!(canonical_managed_component_rank("run"), Some(2));
+        assert_eq!(canonical_managed_component_rank("open-items"), Some(1));
     }
 
     #[test]

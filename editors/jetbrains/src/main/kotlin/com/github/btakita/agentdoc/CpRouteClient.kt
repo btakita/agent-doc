@@ -853,7 +853,7 @@ internal object CpRouteClient {
                                 socket = socket,
                                 filePath = filePath,
                                 commandId = commandId,
-                                timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
+                                timeoutMs = editorRouteCommandAwaitTimeoutMs(waitForReadySeconds),
                                 commandName = EditorCommandName.EditorRoute.token,
                             )
                         }
@@ -1542,6 +1542,14 @@ internal fun resolveCommandSubmitTerminalData(
 /// that into a fast retry through the `#rebootselfheal` path that already exists.
 private const val COMMAND_SUBMIT_ACCEPT_TIMEOUT_MS = 10_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
+// `wait_for_ready_secs` bounds route readiness, not the whole async worker. Once that
+// budget is exhausted the route still has to finish preflight/queue activation and
+// publish its retained terminal projection. Under a saturated state-event ingress that
+// tail has been observed to take 54 seconds after the old readiness+5s await returned,
+// turning a retained `queued_behind_owner` result into a false controller timeout.
+// Give terminal settlement its own ordered budget; the socket watchdog below still
+// outlives this server-side await by COMMAND_COMPLETION_GRACE_MS.
+private const val EDITOR_ROUTE_TERMINAL_SETTLE_GRACE_MS = 120_000L
 // Outlive the controller's 35-second command projection wait. Equal nested
 // deadlines can expose a valid same-generation `Applying` projection as a
 // terminal "Sync failed" receipt before the effect publishes its outcome.
@@ -1550,6 +1558,20 @@ private const val MIN_COMMAND_AWAIT_TIMEOUT_MS = 1L
 private const val TURN_AUTHORITY_STREAM_TIMEOUT_MS = 120_000L
 private const val TURN_AUTHORITY_RECONNECT_MIN_MS = 250L
 private const val TURN_AUTHORITY_RECONNECT_MAX_MS = 5_000L
+
+internal fun editorRouteCommandAwaitTimeoutMs(waitForReadySeconds: Long): Long {
+    val seconds = waitForReadySeconds.coerceAtLeast(0L)
+    val readinessMs = if (seconds > Long.MAX_VALUE / 1000L) {
+        Long.MAX_VALUE
+    } else {
+        seconds * 1000L
+    }
+    return if (readinessMs > Long.MAX_VALUE - EDITOR_ROUTE_TERMINAL_SETTLE_GRACE_MS) {
+        Long.MAX_VALUE
+    } else {
+        readinessMs + EDITOR_ROUTE_TERMINAL_SETTLE_GRACE_MS
+    }
+}
 
     private val socketWatchdog by lazy {
         GenerationWork.newSingleThreadScheduledExecutor("agent-doc-cp-socket-watchdog").also { executor ->

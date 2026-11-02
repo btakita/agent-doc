@@ -117,6 +117,7 @@ members = [
     "agent-doc-workflow",
     "agent-doc-workflow-io",
     "agent-doc-work-graph",
+    "agent-doc-work-projection",
     "agent-doc-state-backbone",
     "agent-doc-state-scope",
     "agent-doc-state-observer-io",
@@ -308,6 +309,7 @@ agent-doc-write-runtime-io = { path = "agent-doc-write-runtime-io", version = "0
 agent-doc-workflow = { path = "agent-doc-workflow", version = "0.35.565" }
 agent-doc-workflow-io = { path = "agent-doc-workflow-io", version = "0.35.565" }
 agent-doc-work-graph = { path = "agent-doc-work-graph", version = "0.35.565" }
+agent-doc-work-projection = { path = "agent-doc-work-projection", version = "0.35.565" }
 agent-doc-log-time = { path = "agent-doc-log-time", version = "0.35.565" }
 anyhow = "1"
 base64 = "0.22"

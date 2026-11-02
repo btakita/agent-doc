@@ -2555,7 +2555,7 @@ fn run_pending_maintenance_with_options(
     // current-file work across an ownership boundary.
     let mut open_items_status_mutated = false;
     if let Some(reconciled) =
-        agent_doc_work_graph::reconcile_managed_status_open_items(&current_content)?
+        agent_doc_work_projection::reconcile_managed_status_open_items(&current_content)?
     {
         eprintln!("[preflight] status: reconciled managed open-items list");
         current_content = reconciled;
@@ -2564,7 +2564,7 @@ fn run_pending_maintenance_with_options(
     }
     if let Some(ref mut snap_content) = snapshot_content
         && let Some(reconciled) =
-            agent_doc_work_graph::reconcile_managed_status_open_items(snap_content)?
+            agent_doc_work_projection::reconcile_managed_status_open_items(snap_content)?
     {
         *snap_content = reconciled;
         snapshot_mutated = true;

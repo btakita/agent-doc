@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-work-projection"
+version = "0.35.565"
+edition = "2024"
+description = "Document projection adapters for agent-doc work items"
+license = "Apache-2.0"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_work_projection"
+
+[dependencies]
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.565" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.565" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.565" }
+agent-doc-element-queue = { path = "../agent-doc-element-queue", version = "0.35.565" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.565" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.565" }
+anyhow = "1"

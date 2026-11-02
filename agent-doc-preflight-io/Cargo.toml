@@ -46,7 +46,7 @@ agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.565" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.565" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.565" }
-agent-doc-work-graph = { path = "../agent-doc-work-graph", version = "0.35.565" }
+agent-doc-work-projection = { path = "../agent-doc-work-projection", version = "0.35.565" }
 agent-doc-reliable-sync-io = { path = "../agent-doc-reliable-sync-io", version = "0.35.565" }
 agent-doc-session-accretion = { path = "../agent-doc-session-accretion", version = "0.35.565" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.565" }

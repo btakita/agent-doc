@@ -663,16 +663,38 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
                 file.display()
             );
         }
-        let claimed = agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(
-            &crate::queue_claim::claimed_live_head_texts_for_content(file, &content),
-        );
-        if claimed.claims(&row.lineage) {
-            anyhow::bail!(
-                "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
-                 worker attempt before acknowledging {:?}.",
-                file.display(),
-                row.lineage
+        // `#adadvprstatedrift`: `Reported` is coordinator integration debt, not
+        // worker-owned work still in flight. Once integration has materialized
+        // the exact queue echo, an owner selector supplies the remaining
+        // generation fence needed to close that one occurrence. Keep every
+        // other durable attempt state fail-closed, including `Lost`: a stale
+        // visible owner annotation is not authority to close an abandoned
+        // attempt.
+        let row_identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
+        let attempts = crate::queue_claim::claim_states_for_content(file, &content)
+            .context("queue consume --ack-text: failed to inspect queue attempt state")?;
+        if let Some(attempt) = attempts
+            .iter()
+            .find(|attempt| attempt.identity == row_identity)
+        {
+            let reported_owner_matches = matches!(
+                selector,
+                Some(AckTextSelector::Owner(expected_owner))
+                    if attempt.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+                        && attempt.owner == expected_owner.owner
+                        && attempt.generation == expected_owner.generation
             );
+            if !reported_owner_matches {
+                anyhow::bail!(
+                    "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
+                     worker attempt before acknowledging {:?}. state={:?} owner={:?} generation={}",
+                    file.display(),
+                    row.lineage,
+                    attempt.state,
+                    attempt.owner,
+                    attempt.generation,
+                );
+            }
         }
         if agent_doc_document::queue_projection::operator_action_holds_row(
             &row.lineage,
@@ -4335,6 +4357,165 @@ mod core_tests {
             updated.contains("- ~~https://github.com/haiven-dev/haiven-sdk/pull/172: #address~~"),
             "{updated}"
         );
+    }
+
+    #[test]
+    fn exact_text_ack_owner_closes_only_its_reported_effect_occurrence() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target =
+            "Complete the remaining work for the parent item. ⟦effect:1⟧ [#q-4b3281fc7d33]";
+        let sibling =
+            "Complete the remaining work for the parent item. ⟦effect:2⟧ [#q-c9c9744ad24e]";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: integrated worker result\n\n",
+                "> **Queue prompt:** {target}\n\n",
+                "The first effect is integrated.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=main subagents -->\n",
+                "- ☑️ [#subagent:typing_effect1#1] {target}\n",
+                "- ☑️ [#subagent:typing_effect2#1] {sibling}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            target = target,
+            sibling = sibling,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claim) =
+            crate::queue_claim::claim(&doc, target, "subagent:typing_effect1", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            target,
+            "subagent:typing_effect1",
+            "worker:typing_effect1",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, target, Some(claim.generation)).unwrap();
+
+        let unfenced = super::acknowledge_paused_free_text_queue_head_with_outcome(
+            &doc,
+            target,
+            &TEST_EFFECTS,
+        )
+        .unwrap_err();
+        assert!(
+            unfenced
+                .to_string()
+                .contains("refuses queue work with a live claim"),
+            "{unfenced}"
+        );
+
+        let selector = super::AckTextSelector::Owner(
+            agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:typing_effect1".to_string(),
+                generation: claim.generation,
+            },
+        );
+        let outcome = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+            &doc,
+            target,
+            Some(&selector),
+            &TEST_EFFECTS,
+        )
+        .unwrap()
+        .expect("the exact reported owner generation should close its occurrence");
+
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert_eq!(outcome.consumed_count, 1);
+        assert_eq!(outcome.remaining, 1);
+        assert!(updated.contains(&format!("- ~~{target}~~")), "{updated}");
+        assert!(
+            updated.contains(&format!("- ☑️ [#subagent:typing_effect2#1] {sibling}")),
+            "{updated}"
+        );
+    }
+
+    #[test]
+    fn exact_text_ack_owner_refuses_non_reported_attempt_states() {
+        use agent_doc_queue::queue_claim::QueueClaimState;
+
+        for (index, state) in [
+            QueueClaimState::Claimed,
+            QueueClaimState::Running,
+            QueueClaimState::Lost,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let tmp = TempDir::new().unwrap();
+            fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+            let doc = tmp.path().join("session.md");
+            let target = format!("finish guarded work [#q-{:012x}]", index + 1);
+            let content = format!(
+                concat!(
+                    "---\nqueue_active: true\n---\n\n",
+                    "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:run id=main subagents -->\n",
+                    "- [#subagent:guarded#1] {target}\n",
+                    "<!-- /agent:run -->\n",
+                ),
+                target = target,
+            );
+            fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let (_, claim) =
+                crate::queue_claim::claim(&doc, &target, "subagent:guarded", 3600).unwrap();
+            if matches!(state, QueueClaimState::Running | QueueClaimState::Lost) {
+                crate::queue_claim::start_attempt(
+                    &doc,
+                    &target,
+                    "subagent:guarded",
+                    "worker:guarded",
+                    3600,
+                    claim.generation,
+                )
+                .unwrap();
+            }
+            if state == QueueClaimState::Lost {
+                crate::queue_claim::abandon_attempt(&doc, &target, Some(claim.generation))
+                    .unwrap()
+                    .expect("running attempt should become lost");
+            }
+
+            let selector = super::AckTextSelector::Owner(
+                agent_doc_document::queue_projection::QueueOwnerProjection {
+                    owner: "subagent:guarded".to_string(),
+                    generation: claim.generation,
+                },
+            );
+            let error = super::acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
+                &doc,
+                &target,
+                Some(&selector),
+                &TEST_EFFECTS,
+            )
+            .unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains("refuses queue work with a live claim"),
+                "state={state:?}: {error}"
+            );
+            assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+        }
     }
 
     #[test]

@@ -117,6 +117,13 @@ pub enum QueueSyncResponseEvidence {
     /// The full history-attested worker response is already present in the
     /// root-authored exchange outside binary completion-receipt cells.
     ConsolidatedExchange,
+    /// Committed HEAD contains an exact queue-prompt echo and an explicit
+    /// terminal coordinator outcome for this generation-fenced completion.
+    CommittedQueuePrompt,
+    /// Committed HEAD contains an exact queue-prompt echo whose adjacent
+    /// coordinator outcome is explicitly deferred or blocked. This proves the
+    /// response was delivered, but deliberately does not authorize closeout.
+    CommittedQueuePromptBlocked,
     /// A binary completion receipt exists. This is completion/outbox evidence,
     /// but an abbreviated receipt never proves full root-response delivery.
     ExchangeOutbox,

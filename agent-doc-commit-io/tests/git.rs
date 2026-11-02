@@ -1091,7 +1091,10 @@ Duplicate replay should stay live.
             "committed duplicate projections",
         );
         let doc = root.join("session.md");
-        let newer_authority = document.replace("Operator content.", "Operator content updated.");
+        let newer_authority = document.replace(
+            "Operator content.",
+            "Operator content updated.\n<!-- no-pending-capture -->",
+        );
         fs::write(&doc, &newer_authority).unwrap();
 
         assert!(
@@ -1102,6 +1105,10 @@ Duplicate replay should stay live.
         assert!(
             repaired.contains("Operator content updated.\n"),
             "{repaired}"
+        );
+        assert!(
+            repaired.contains("<!-- no-pending-capture -->"),
+            "the live authority keeps its transient marker until normal closeout cleanup: {repaired}"
         );
         assert_eq!(
             repaired
@@ -1122,7 +1129,15 @@ Duplicate replay should stay live.
             .args(["show", "HEAD:session.md"])
             .output()
             .unwrap();
-        assert_eq!(String::from_utf8(head.stdout).unwrap(), repaired);
+        let head = String::from_utf8(head.stdout).unwrap();
+        assert!(
+            !head.contains("<!-- no-pending-capture -->"),
+            "the committed projection applies normal commit-time transient cleanup: {head}"
+        );
+        assert_eq!(
+            head,
+            agent_doc_git_io::transaction::normalize_session_document_content(&repaired)
+        );
     }
 
     #[test]

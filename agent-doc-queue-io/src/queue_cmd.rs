@@ -315,15 +315,43 @@ fn derive_runtime_projection_scoped(
     scope: ClaimProjectionScope<'_>,
     rows: RuntimeProjectionRows,
 ) -> Result<ClaimRuntimeProjection> {
+    let input_current = current;
+    let mut claim_ledger = crate::queue_claim::load_ledger(file);
+    let repair_claims = claim_ledger
+        .as_ref()
+        .map(|ledger| {
+            ledger
+                .claims
+                .iter()
+                .filter(|claim| {
+                    !ledger.cancellations.iter().any(|cancelled| {
+                        cancelled.cancels_attempt(&claim.identity, claim.generation)
+                    })
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let repaired_current =
+        agent_doc_queue::queue_mirror_projection::restore_missing_nested_claim_rows_across_queues(
+            current,
+            &repair_claims,
+        )?;
+    let current = repaired_current.as_deref().unwrap_or(current);
     let components = agent_doc_element::element::parse(current)?;
     if !components.iter().any(|component| component.name == "queue") {
         return Ok(ClaimRuntimeProjection {
-            target_content: current.to_string(),
+            target_content: input_current.to_string(),
             persisted_heads: Vec::new(),
             changed: false,
         });
     }
-    let claim_ledger = crate::queue_claim::load_ledger_following(file, current);
+    if let Ok(ledger) = &mut claim_ledger
+        && !ledger.claims.is_empty()
+        && let Some(view) = agent_doc_queue::queue_claim::ClaimQueueView::from_content(current)
+    {
+        ledger.follow_edits_in_view(crate::queue_claim::claim_clock_now_secs(), &view);
+    }
     let receipt_ledger = crate::claim_release_receipt::load(file);
     let state_degraded = claim_ledger.is_err() || receipt_ledger.is_err();
     if let Err(err) = &claim_ledger {
@@ -581,7 +609,7 @@ fn derive_runtime_projection_scoped(
         )?
         .unwrap_or_else(|| current.to_string());
     Ok(ClaimRuntimeProjection {
-        changed: target_content != current,
+        changed: target_content != input_current,
         target_content,
         persisted_heads,
     })
@@ -2141,6 +2169,23 @@ mod tests {
         doc
     }
 
+    fn write_named_claim_projection_doc(root: &Path, body: &str) -> std::path::PathBuf {
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("claim-runtime.md");
+        let content = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:run id=\"main\" subagents go -->\n{body}<!-- /agent:run -->\n"
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        doc
+    }
+
     /// The 2026-10-26 `tasks/agent-doc/agent-doc-bugs.md` shape: an immediate
     /// `main` run queue followed by an hourly `issues` loop that displays
     /// copies of the same work.
@@ -2497,9 +2542,95 @@ mod tests {
         assert!(projection.target_content.contains(&format!(
             "- https://github.com/haiven-dev/haiven-cli/pull/11\n  - 🚧 [#{owner11}#1] #adversarial-pr\n"
         )));
-        assert!(!projection.target_content.contains(&format!(
-            "pull/11\n  - 🚧 [#{owner10}#1]"
-        )));
+        assert!(
+            !projection
+                .target_content
+                .contains(&format!("pull/11\n  - 🚧 [#{owner10}#1]"))
+        );
+    }
+
+    /// `#adnestedidenticalchildprojection`: the exact `docs.md` PR 201-205
+    /// shape keeps every identical executable child through claim/start
+    /// projection. If an older binary already dropped PR 202-205's children,
+    /// the durable lineage claims restore those rows and their existing worker
+    /// bindings without allocating another attempt.
+    #[test]
+    fn docs_pr_201_205_nested_children_survive_and_repair_from_claim_lineage() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = (201..=205)
+            .map(|number| {
+                format!(
+                    "- ### https://github.com/haiven-dev/haiven-sdk/pull/{number}\n  - #adversarial-pr\n"
+                )
+            })
+            .collect::<String>();
+        let doc = write_named_claim_projection_doc(dir.path(), &body);
+
+        for number in 202..=205 {
+            let item =
+                format!("https://github.com/haiven-dev/haiven-sdk/pull/{number}: #adversarial-pr");
+            let owner = format!("subagent:pr{number}");
+            let worker = format!("/root/pr{number}");
+            crate::queue_claim::claim(&doc, &item, &owner, 600).unwrap();
+            crate::queue_claim::start_attempt(&doc, &item, &owner, &worker, 600, 1).unwrap();
+        }
+
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let projection = derive_claim_runtime_projection(&doc, &current, None).unwrap();
+        assert_eq!(
+            projection.target_content.matches("#adversarial-pr").count(),
+            5,
+            "every PR keeps its distinct child: {}",
+            projection.target_content
+        );
+        for number in 202..=205 {
+            assert!(
+                projection.target_content.contains(&format!(
+                    "- ### https://github.com/haiven-dev/haiven-sdk/pull/{number}\n  - 🚧 [#subagent:pr{number}#1] #adversarial-pr\n"
+                )),
+                "{}",
+                projection.target_content
+            );
+        }
+
+        let damaged_body = concat!(
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/201\n",
+            "  - #adversarial-pr\n",
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/202\n",
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/203\n",
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/204\n",
+            "- ### https://github.com/haiven-dev/haiven-sdk/pull/205\n",
+        );
+        let damaged = format!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n\
+             <!-- agent:run id=\"main\" subagents go -->\n{damaged_body}<!-- /agent:run -->\n"
+        );
+        std::fs::write(&doc, &damaged).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &damaged,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let before = crate::queue_claim::load_ledger(&doc).unwrap();
+
+        assert!(
+            project_claim_runtime_state_with_effects(&FakeEffects::default(), &doc, None).unwrap()
+        );
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        for number in 202..=205 {
+            assert!(
+                repaired.contains(&format!(
+                    "- ### https://github.com/haiven-dev/haiven-sdk/pull/{number}\n  - 🚧 [#subagent:pr{number}#1] #adversarial-pr\n"
+                )),
+                "{repaired}"
+            );
+        }
+        let after = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert_eq!(
+            after.claims, before.claims,
+            "repair must not redispatch work"
+        );
     }
 
     /// A parked parent has no executable child and no claim. A stale running

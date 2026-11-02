@@ -5101,9 +5101,14 @@ enum QueueAction {
         pushed_ref: Option<String>,
         #[arg(long)]
         integration_sha: Option<String>,
-        /// cherry-pick|rebase|merge|fast-forward|other
+        /// cherry-pick|rebase|merge|fast-forward
         #[arg(long)]
         method: Option<String>,
+        /// Designated integration branch/ref (for example main,
+        /// refs/heads/integration/queue, or refs/remotes/origin/pr-branch).
+        /// The integration commit must be reachable from this ref.
+        #[arg(long)]
+        sink_ref: Option<String>,
         #[arg(long)]
         release_tag: Option<String>,
         /// planned|tagged|published|failed
@@ -8916,6 +8921,7 @@ fn try_main() -> anyhow::Result<()> {
                 pushed_ref,
                 integration_sha,
                 method,
+                sink_ref,
                 release_tag,
                 release_state,
                 detail,
@@ -8942,6 +8948,7 @@ fn try_main() -> anyhow::Result<()> {
                             .as_deref()
                             .map(agent_doc_queue_io::queue_lineage::IntegrationMethod::parse)
                             .transpose()?,
+                        sink_ref,
                         release_tag,
                         release_state: release_state
                             .as_deref()

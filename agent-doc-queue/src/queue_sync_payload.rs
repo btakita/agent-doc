@@ -137,6 +137,8 @@ pub struct QueueSyncEffectEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integration_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sink_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_state: Option<String>,

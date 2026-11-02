@@ -846,16 +846,18 @@ fn apply_lineage_evidence(
         let effects = attempt
             .events
             .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    QueueLineageEventKind::Committed
-                        | QueueLineageEventKind::Pushed
-                        | QueueLineageEventKind::Integrated
-                        | QueueLineageEventKind::Released
-                )
+            .enumerate()
+            .filter(|(event_index, event)| match event.kind {
+                QueueLineageEventKind::Committed | QueueLineageEventKind::Pushed => true,
+                QueueLineageEventKind::Integrated => {
+                    crate::queue_lineage::stored_integration_is_verified(attempt, *event_index)
+                }
+                QueueLineageEventKind::Released => (0..*event_index).any(|index| {
+                    crate::queue_lineage::stored_integration_is_verified(attempt, index)
+                }),
+                _ => false,
             })
-            .map(|event| QueueSyncEffectEvidence {
+            .map(|(_, event)| QueueSyncEffectEvidence {
                 kind: match event.kind {
                     QueueLineageEventKind::Committed => "committed",
                     QueueLineageEventKind::Pushed => "pushed",
@@ -867,6 +869,7 @@ fn apply_lineage_evidence(
                 source_sha: event.source_sha.clone(),
                 pushed_ref: event.pushed_ref.clone(),
                 integration_sha: event.integration_sha.clone(),
+                sink_ref: event.sink_ref.clone(),
                 release_tag: event.release_tag.clone(),
                 release_state: event.release_state.map(|state| {
                     match state {
@@ -992,6 +995,39 @@ mod tests {
             started.lost[0].recovered_effects[0].source_sha.as_deref(),
             Some("abc123")
         );
+    }
+
+    #[test]
+    fn legacy_unverifiable_integration_is_not_recovered_as_effect() {
+        let mut payload = lost_payload();
+        let created = crate::queue_lineage::QueueLineageEvent {
+            kind: crate::queue_lineage::QueueLineageEventKind::Created,
+            ..Default::default()
+        };
+        let integrated = crate::queue_lineage::QueueLineageEvent {
+            kind: crate::queue_lineage::QueueLineageEventKind::Integrated,
+            source_sha: Some("legacy-source".to_string()),
+            integration_sha: Some("legacy-integration".to_string()),
+            integration_method: Some(crate::queue_lineage::IntegrationMethod::Other),
+            ..Default::default()
+        };
+        let released = crate::queue_lineage::QueueLineageEvent {
+            kind: crate::queue_lineage::QueueLineageEventKind::Released,
+            release_tag: Some("v0.0.0-legacy".to_string()),
+            release_state: Some(crate::queue_lineage::ReleaseState::Published),
+            ..Default::default()
+        };
+
+        apply_lineage_evidence(
+            &mut payload,
+            &lineage_with(vec![created, integrated, released]),
+        );
+
+        assert_eq!(
+            payload.lost[0].execution_evidence,
+            QueueSyncExecutionEvidence::Started
+        );
+        assert!(payload.lost[0].recovered_effects.is_empty());
     }
 
     #[test]

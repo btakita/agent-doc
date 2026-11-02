@@ -122,6 +122,8 @@ pub enum IntegrationMethod {
     Rebase,
     Merge,
     FastForward,
+    /// Legacy receipt shape retained for deserialization only. New receipts
+    /// must use a Git-verifiable integration method.
     Other,
 }
 
@@ -132,9 +134,11 @@ impl IntegrationMethod {
             "rebase" => Ok(Self::Rebase),
             "merge" => Ok(Self::Merge),
             "fast_forward" | "ff" => Ok(Self::FastForward),
-            "other" => Ok(Self::Other),
+            "other" => bail!(
+                "integration method `other` is not verifiable; expected cherry-pick|rebase|merge|fast-forward"
+            ),
             other => bail!(
-                "unknown integration method {other:?}; expected cherry-pick|rebase|merge|fast-forward|other"
+                "unknown integration method {other:?}; expected cherry-pick|rebase|merge|fast-forward"
             ),
         }
     }
@@ -185,6 +189,11 @@ pub struct QueueLineageEvent {
     pub integration_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integration_method: Option<IntegrationMethod>,
+    /// Explicit branch/ref that owns the integrated result. The integration
+    /// commit must remain reachable from this ref; a side-branch commit alone
+    /// is not durable integration proof.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sink_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -206,6 +215,7 @@ pub struct RecordRequest {
     pub pushed_ref: Option<String>,
     pub integration_sha: Option<String>,
     pub integration_method: Option<IntegrationMethod>,
+    pub sink_ref: Option<String>,
     pub release_tag: Option<String>,
     pub release_state: Option<ReleaseState>,
     pub detail: Option<String>,
@@ -235,6 +245,7 @@ pub struct QueueLineageAttemptReport {
     pub pushed_ref: Option<String>,
     pub integration_sha: Option<String>,
     pub integration_method: Option<IntegrationMethod>,
+    pub sink_ref: Option<String>,
     pub release_tag: Option<String>,
     pub release_state: Option<ReleaseState>,
     pub diagnostics: Vec<String>,
@@ -551,6 +562,7 @@ fn event_from_request(request: RecordRequest) -> Result<QueueLineageEvent> {
         pushed_ref: nonempty(request.pushed_ref),
         integration_sha: nonempty(request.integration_sha),
         integration_method: request.integration_method,
+        sink_ref: nonempty(request.sink_ref),
         release_tag: nonempty(request.release_tag),
         release_state: request.release_state,
         detail: nonempty(request.detail),
@@ -598,9 +610,15 @@ fn validate_transition(attempt: &QueueLineageAttempt, event: &QueueLineageEvent)
             if event.source_sha.is_none()
                 || event.integration_sha.is_none()
                 || event.integration_method.is_none()
+                || event.sink_ref.is_none()
             {
                 bail!(
-                    "integrated lineage event requires explicit --source-sha, --integration-sha, and --method"
+                    "integrated lineage event requires explicit --source-sha, --integration-sha, --method, and designated --sink-ref"
+                );
+            }
+            if event.integration_method == Some(IntegrationMethod::Other) {
+                bail!(
+                    "integrated lineage event refuses unverifiable method `other`; use cherry-pick|rebase|merge|fast-forward"
                 );
             }
         }
@@ -653,6 +671,7 @@ struct Facts {
     pushed_ref: Option<String>,
     integration_sha: Option<String>,
     integration_method: Option<IntegrationMethod>,
+    sink_ref: Option<String>,
     release_tag: Option<String>,
     release_state: Option<ReleaseState>,
 }
@@ -678,6 +697,7 @@ fn facts(attempt: &QueueLineageAttempt) -> Facts {
         if event.integration_method.is_some() {
             facts.integration_method = event.integration_method;
         }
+        keep!(sink_ref);
         keep!(release_tag);
         if event.release_state.is_some() {
             facts.release_state = event.release_state;
@@ -757,6 +777,7 @@ fn verify_event(attempt: &QueueLineageAttempt, event: &QueueLineageEvent) -> Res
                 event
                     .integration_method
                     .context("missing integration method")?,
+                event.sink_ref.as_deref().context("missing designated sink ref")?,
             )?;
         }
         QueueLineageEventKind::Released => {
@@ -824,11 +845,34 @@ fn require_ancestor(repo: &Path, ancestor: &str, descendant: &str, message: &str
     Ok(())
 }
 
+/// Revalidate one stored integration receipt against the repository and its
+/// designated sink as they exist now. A receipt that was valid when recorded
+/// can cease to prove integration after a force-move or deleted sink ref, so
+/// queue synchronization must not project it as recovered integration evidence
+/// without this live check.
+pub fn stored_integration_is_verified(
+    attempt: &QueueLineageAttempt,
+    event_index: usize,
+) -> bool {
+    let Some(event) = attempt.events.get(event_index) else {
+        return false;
+    };
+    if event.kind != QueueLineageEventKind::Integrated {
+        return false;
+    }
+    let mut prior = attempt.clone();
+    prior.events.truncate(event_index);
+    validate_transition(&prior, event)
+        .and_then(|()| verify_event(&prior, event))
+        .is_ok()
+}
+
 fn verify_integration(
     repo: &Path,
     source: &str,
     integration: &str,
     method: IntegrationMethod,
+    sink_ref: &str,
 ) -> Result<()> {
     require_commit(repo, source, "source")?;
     require_commit(repo, integration, "integration")?;
@@ -849,8 +893,18 @@ fn verify_integration(
             }
             Ok(())
         }
-        IntegrationMethod::Other => Ok(()),
-    }
+        IntegrationMethod::Other => bail!(
+            "integration method `other` is not verifiable; record a cherry-pick, rebase, merge, or fast-forward edge"
+        ),
+    }?;
+    let sink_commit = git_output(repo, &["rev-parse", &format!("{sink_ref}^{{commit}}")])
+        .with_context(|| format!("designated integration sink ref is unavailable: {sink_ref}"))?;
+    require_ancestor(
+        repo,
+        integration,
+        &sink_commit,
+        "integration commit is not reachable from the designated sink ref",
+    )
 }
 
 fn patch_id(repo: &Path, sha: &str) -> Result<String> {
@@ -973,6 +1027,7 @@ fn report_attempt(attempt: &QueueLineageAttempt) -> QueueLineageAttemptReport {
         pushed_ref: facts.pushed_ref,
         integration_sha: facts.integration_sha,
         integration_method: facts.integration_method,
+        sink_ref: facts.sink_ref,
         release_tag: facts.release_tag,
         release_state: facts.release_state,
         diagnostics: diagnostics.into_iter().map(|entry| entry.text).collect(),
@@ -1059,24 +1114,31 @@ fn diagnose(attempt: &QueueLineageAttempt, facts: &Facts) -> Vec<Diagnostic> {
             }),
         }
     }
-    if let (Some(source), Some(integration), Some(method)) = (
+    if let (Some(source), Some(integration), Some(method), Some(sink_ref)) = (
         facts.source_sha.as_deref(),
         facts.integration_sha.as_deref(),
         facts.integration_method,
+        facts.sink_ref.as_deref(),
     ) {
         if method == IntegrationMethod::Other {
             diagnostics.push(Diagnostic {
-                level: DiagnosticLevel::Degraded,
-                text: "integration_method_other: explicit edge retained but Git equivalence is unverified".to_string(),
+                level: DiagnosticLevel::Mismatch,
+                text: "integration_method_other: legacy edge is not integration proof".to_string(),
             });
-        } else if verify_integration(repo, source, integration, method).is_err() {
+        } else if verify_integration(repo, source, integration, method, sink_ref).is_err() {
             diagnostics.push(Diagnostic {
                 level: DiagnosticLevel::Mismatch,
                 text: format!(
-                    "integration_mapping_mismatch: {source} -> {integration} ({method:?})"
+                    "integration_mapping_mismatch: {source} -> {integration} ({method:?}) sink={sink_ref}"
                 ),
             });
         }
+    } else if facts.integration_sha.is_some() || facts.integration_method.is_some() {
+        diagnostics.push(Diagnostic {
+            level: DiagnosticLevel::Mismatch,
+            text: "integration_sink_missing: legacy integrated receipt is not designated-sink proof"
+                .to_string(),
+        });
     }
     if let (Some(tag), Some(integration), Some(ReleaseState::Tagged | ReleaseState::Published)) = (
         facts.release_tag.as_deref(),
@@ -1123,6 +1185,9 @@ pub fn render_text(report: &QueueLineageReport) -> String {
                 fields.push(format!("release={tag}/{state}"));
             } else if let Some(integration) = attempt.integration_sha.as_deref() {
                 fields.push(format!("integration={}", short_sha(integration)));
+                if let Some(sink_ref) = attempt.sink_ref.as_deref() {
+                    fields.push(format!("sink={sink_ref}"));
+                }
             } else if let Some(source) = attempt.source_sha.as_deref() {
                 fields.push(format!("source={}", short_sha(source)));
             } else if let Some(branch) = attempt.branch.as_deref() {
@@ -1170,14 +1235,15 @@ pub fn render_verbose_text(report: &QueueLineageReport) -> String {
             attempt.base_sha.as_deref().unwrap_or("-")
         ));
         out.push_str(&format!(
-            "  source={} pushed_ref={} integration={} method={}\n",
+            "  source={} pushed_ref={} integration={} method={} sink_ref={}\n",
             attempt.source_sha.as_deref().unwrap_or("-"),
             attempt.pushed_ref.as_deref().unwrap_or("-"),
             attempt.integration_sha.as_deref().unwrap_or("-"),
             attempt
                 .integration_method
                 .map(|method| format!("{method:?}").to_ascii_lowercase())
-                .unwrap_or_else(|| "-".to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            attempt.sink_ref.as_deref().unwrap_or("-")
         ));
         out.push_str(&format!(
             "  release={} state={}\n",
@@ -1214,6 +1280,9 @@ pub fn markdown_hint(report: &QueueLineageAttemptReport) -> String {
     }
     if let Some(integration) = report.integration_sha.as_deref() {
         parts.push(format!("int:{}", short_sha(integration)));
+    }
+    if let Some(sink_ref) = report.sink_ref.as_deref() {
+        parts.push(format!("sink:{sink_ref}"));
     }
     if let Some(tag) = report.release_tag.as_deref() {
         parts.push(format!("release:{tag}"));
@@ -1435,6 +1504,7 @@ mod tests {
         )
         .unwrap();
         let integration = fixture.commit_file("integration.txt", "integration\n", "integration");
+        let sink_ref = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
         record(
             &fixture.doc,
             "work",
@@ -1444,6 +1514,7 @@ mod tests {
                 source_sha: Some(source.clone()),
                 integration_sha: Some(integration.clone()),
                 integration_method: Some(IntegrationMethod::FastForward),
+                sink_ref: Some(sink_ref.clone()),
                 ..RecordRequest::default()
             },
         )
@@ -1491,6 +1562,7 @@ mod tests {
             report.attempts[0].integration_sha.as_deref(),
             Some(integration.as_str())
         );
+        assert_eq!(report.attempts[0].sink_ref.as_deref(), Some(sink_ref.as_str()));
 
         // Worktree disappearance degrades the live check without erasing or
         // invalidating the durable receipt. An explicit removed receipt clears
@@ -1594,6 +1666,7 @@ mod tests {
                 source_sha: Some(source.clone()),
                 integration_sha: Some(integration.clone()),
                 integration_method: Some(IntegrationMethod::CherryPick),
+                sink_ref: Some(base_branch.clone()),
                 ..RecordRequest::default()
             },
         )
@@ -1611,5 +1684,139 @@ mod tests {
             report.attempts[0].integration_method,
             Some(IntegrationMethod::CherryPick)
         );
+        assert_eq!(
+            report.attempts[0].sink_ref.as_deref(),
+            Some(base_branch.as_str())
+        );
+    }
+
+    #[test]
+    fn integration_requires_a_reachable_designated_sink_and_verifiable_method() {
+        let fixture = RepoFixture::new();
+        let base = fixture.head();
+        let sink_ref = git_output(&fixture.root, &["branch", "--show-current"]).unwrap();
+        git(&fixture.root, &["switch", "-qc", "side-integration"]);
+        let source = fixture.commit_file("source.txt", "source\n", "source");
+        let integration = fixture.commit_file("integration.txt", "integration\n", "integration");
+
+        let claim = make_claim(
+            &fixture.doc,
+            "work",
+            "subagent:sink-proof",
+            Some("worker:sink-proof"),
+        );
+        record_started(&fixture.doc, &claim).unwrap();
+        record(
+            &fixture.doc,
+            "work",
+            1,
+            attach_request(&fixture, "worker:sink-proof", &base),
+        )
+        .unwrap();
+        record(
+            &fixture.doc,
+            "work",
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_sha: Some(source.clone()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+
+        let missing_sink = record(
+            &fixture.doc,
+            "work",
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::Integrated,
+                source_sha: Some(source.clone()),
+                integration_sha: Some(integration.clone()),
+                integration_method: Some(IntegrationMethod::FastForward),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(missing_sink.contains("designated --sink-ref"), "{missing_sink}");
+
+        let unreachable_sink = record(
+            &fixture.doc,
+            "work",
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::Integrated,
+                source_sha: Some(source),
+                integration_sha: Some(integration),
+                integration_method: Some(IntegrationMethod::FastForward),
+                sink_ref: Some(sink_ref),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            unreachable_sink.contains(
+                "integration commit is not reachable from the designated sink ref"
+            ),
+            "{unreachable_sink}"
+        );
+
+        let source = fixture.commit_file("valid-source.txt", "valid\n", "valid source");
+        let integration = fixture.commit_file(
+            "valid-integration.txt",
+            "valid integration\n",
+            "valid integration",
+        );
+        git(
+            &fixture.root,
+            &[
+                "update-ref",
+                "refs/heads/designated-sink",
+                integration.as_str(),
+            ],
+        );
+        record(
+            &fixture.doc,
+            "work",
+            1,
+            RecordRequest {
+                kind: QueueLineageEventKind::Integrated,
+                source_sha: Some(source),
+                integration_sha: Some(integration),
+                integration_method: Some(IntegrationMethod::FastForward),
+                sink_ref: Some("refs/heads/designated-sink".to_string()),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+        let attempt = &load(&fixture.doc).unwrap().attempts[0];
+        let integrated_index = attempt
+            .events
+            .iter()
+            .position(|event| event.kind == QueueLineageEventKind::Integrated)
+            .unwrap();
+        assert!(stored_integration_is_verified(attempt, integrated_index));
+
+        // A force-move of the designated sink invalidates the receipt for
+        // recovery/closeout even though both commit objects still exist.
+        git(
+            &fixture.root,
+            &["update-ref", "refs/heads/designated-sink", &base],
+        );
+        let attempt = &load(&fixture.doc).unwrap().attempts[0];
+        assert!(!stored_integration_is_verified(attempt, integrated_index));
+        let report = query(&fixture.doc, Some("work"), Some(1)).unwrap();
+        assert_eq!(report.attempts[0].verification, "mismatch");
+        assert!(
+            report.attempts[0]
+                .diagnostics
+                .iter()
+                .any(|entry| entry.contains("integration_mapping_mismatch"))
+        );
+
+        let other = IntegrationMethod::parse("other").unwrap_err().to_string();
+        assert!(other.contains("not verifiable"), "{other}");
     }
 }

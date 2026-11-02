@@ -2382,6 +2382,7 @@ pub fn strike_orphan_id_backed_queue_head(
         &target_id,
         &keys,
         guard.reported.as_ref(),
+        None,
         "orphan_id_head_strike",
     )? {
         return Ok(false);
@@ -2433,6 +2434,135 @@ pub struct IdHeadDispatchEvidence {
     pub reported: Option<(String, u64)>,
     /// A reported-release receipt (`queue release`) governs the row.
     pub reported_receipt: bool,
+}
+
+/// A historical generated Reported child whose live claim/receipt was already
+/// pruned, but whose exact worker result remains hash-attested in exchange.
+/// This is migration evidence only; it never manufactures a replacement claim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrphanReportedCompletionEvidence {
+    node_keys: Vec<String>,
+    owner: String,
+    generation: u64,
+    completion_key: String,
+}
+
+fn line_indent_at(content: &str, start_byte: usize) -> usize {
+    content
+        .get(start_byte..)
+        .and_then(|tail| tail.lines().next())
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .unwrap_or(0)
+}
+
+/// Prove one orphaned waiting-tree projection from the document's own durable
+/// binary feedback (`#orphanreportedmigration`). The generated child supplies
+/// the exact owner/generation and direct parent edge; a structurally attested
+/// completion cell supplies the same owner and exact parent work plus a
+/// nonempty hash-verified response. Any ambiguity fails closed.
+fn orphan_reported_completion_evidence(
+    file: &Path,
+    content: &str,
+    target_id: &str,
+) -> Result<Option<OrphanReportedCompletionEvidence>> {
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+        .map_err(|err| anyhow::anyhow!("orphan reported migration: inspect queue rows: {err}"))?;
+    let ledger = crate::queue_claim::load_ledger(file)
+        .context("orphan reported migration: read cancellation ledger")?;
+    let cancelled_keys = ledger
+        .cancellations
+        .iter()
+        .filter_map(|cancelled| cancelled.completion_key.clone())
+        .collect::<HashSet<_>>();
+    let completions = agent_doc_document::subagent_completion::completion_evidence(content);
+    let expected_child =
+        format!("Resolve the open operator action to complete the parent item. [#{target_id}]");
+    let mut matches = Vec::new();
+
+    for (index, node) in nodes.iter().enumerate() {
+        if node.item.struck
+            || agent_doc_document::queue_projection::lifecycle_marker(&node.item.text)
+                != Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
+            || node.item.work_text().trim() != expected_child
+        {
+            continue;
+        }
+        let Some(projection) = owner_projection(&node.item.text) else {
+            continue;
+        };
+        if projection.generation == 0 || !projection.owner.starts_with("subagent:") {
+            continue;
+        }
+        let child_indent = line_indent_at(content, node.item.start_byte);
+        let parent = nodes[..index]
+            .iter()
+            .rev()
+            .find(|candidate| line_indent_at(content, candidate.item.start_byte) < child_indent);
+        let Some(parent) = parent else {
+            continue;
+        };
+        let parent_indent = line_indent_at(content, parent.item.start_byte);
+        if child_indent != parent_indent + 2
+            || parent.item.struck
+            || !parent.item.text.contains("<!-- agent-doc:waiting-item -->")
+            || !queue_prompt_done_id(&parent.item.text)
+                .is_some_and(|id| id.eq_ignore_ascii_case(target_id))
+        {
+            continue;
+        }
+
+        let mut completion_keys = completions
+            .iter()
+            .filter(|completion| {
+                completion.owner == projection.owner
+                    && !cancelled_keys.contains(&completion.key)
+                    && agent_doc_queue::queue_claim::completion_evidence_matches_row(
+                        &completion.item,
+                        &parent.item.text,
+                    )
+                    && agent_doc_document::subagent_completion::completion_response(
+                        content,
+                        &completion.key,
+                    )
+                    .is_some()
+            })
+            .map(|completion| completion.key.clone())
+            .collect::<Vec<_>>();
+        completion_keys.sort();
+        completion_keys.dedup();
+        if completion_keys.len() != 1 {
+            continue;
+        }
+        matches.push((
+            node.node_key.clone(),
+            projection.owner,
+            projection.generation,
+            completion_keys.remove(0),
+        ));
+    }
+
+    if matches.is_empty() {
+        return Ok(None);
+    }
+    let (owner, generation, completion_key) = {
+        let first = &matches[0];
+        (first.1.clone(), first.2, first.3.clone())
+    };
+    if matches
+        .iter()
+        .any(|entry| entry.1 != owner || entry.2 != generation || entry.3 != completion_key)
+    {
+        anyhow::bail!(
+            "{}: [#{target_id}] has ambiguous orphan Reported projections; preserve them for explicit repair",
+            file.display()
+        );
+    }
+    Ok(Some(OrphanReportedCompletionEvidence {
+        node_keys: matches.into_iter().map(|entry| entry.0).collect(),
+        owner,
+        generation,
+        completion_key,
+    }))
 }
 
 impl IdHeadDispatchEvidence {
@@ -2567,6 +2697,7 @@ fn converge_id_backed_head_strike(
     target_id: &str,
     keys: &[String],
     reported_attempt: Option<&(String, u64)>,
+    orphan_completion_key: Option<&str>,
     source: &str,
 ) -> Result<bool> {
     let content = content.to_string();
@@ -2599,13 +2730,21 @@ fn converge_id_backed_head_strike(
             if snap_keys.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(
+                let consumed = consume_queue_nodes_by_key(&snap, &snap_keys)?;
+                let mut retired =
                     agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
-                        &consume_queue_nodes_by_key(&snap, &snap_keys)?,
+                        &consumed,
                         &struck_heads,
                     )
-                    .0,
-                ))
+                    .0;
+                if let Some(completion_key) = orphan_completion_key {
+                    retired =
+                        agent_doc_document::subagent_completion::strip_completion_cells_matching(
+                            &retired,
+                            |evidence| evidence.key == completion_key,
+                        );
+                }
+                Ok(Some(retired))
             }
         })() {
             Ok(snapshot) => snapshot,
@@ -2625,11 +2764,18 @@ fn converge_id_backed_head_strike(
     if strike_ops.is_empty() {
         strike_ops = queue_consume_node_ops(keys);
     }
-    let (target, mut retired_completion_keys) =
+    let (mut target, mut retired_completion_keys) =
         agent_doc_queue::queue_consume::retire_consumed_completion_feedback(
             &new_document,
             &struck_heads,
         );
+    if let Some(completion_key) = orphan_completion_key {
+        target = agent_doc_document::subagent_completion::strip_completion_cells_matching(
+            &target,
+            |evidence| evidence.key == completion_key,
+        );
+        retired_completion_keys.insert(completion_key.to_string());
+    }
     retired_completion_keys.extend(
         effects
             .retained_completion_feedback_keys_for_heads(file, &struck_heads)
@@ -2692,9 +2838,10 @@ fn converge_id_backed_head_strike(
 /// open, for example a Todo that waits on an operator check, where `--done`
 /// would resolve the Todo. The open item may be a backlog item or an
 /// `agent:todo` item. Every non-correction row must carry dispatch evidence (a
-/// reported attempt or reported-release receipt): `--ack-id` never strikes an
-/// undispatched runnable row merely because its id is still open. Every row is
-/// refused while its attempt is claimed,
+/// reported attempt, reported-release receipt, or an exact hash-attested
+/// orphan completion left by the historical waiting-tree projection):
+/// `--ack-id` never strikes an undispatched runnable row merely because its id
+/// is still open. Every row is refused while its attempt is claimed,
 /// running or lost, or when another live coordinator session owns its report
 /// ([`id_head_dispatch_guard`]). The strike ends the reported attempt and
 /// retires its completion cell and release receipt (`#strikeretires`).
@@ -2733,6 +2880,7 @@ pub fn acknowledge_open_id_backed_queue_head(
         );
     }
     let mut evidence = None;
+    let mut orphan_completion = None;
     let mut keys = id_backed_head_node_keys(&content, &target_id)?;
     if keys.is_empty() {
         let candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
@@ -2743,6 +2891,12 @@ pub fn acknowledge_open_id_backed_queue_head(
                 owner,
                 *generation,
             )?;
+        }
+        if keys.is_empty() && candidate.reported.is_none() {
+            orphan_completion = orphan_reported_completion_evidence(file, &content, &target_id)?;
+            if let Some(orphan) = orphan_completion.as_ref() {
+                keys = orphan.node_keys.clone();
+            }
         }
         evidence = Some(candidate);
     }
@@ -2775,26 +2929,41 @@ pub fn acknowledge_open_id_backed_queue_head(
         None => id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?,
     };
     let correction_head = exact_top_level_correction_head(&content, &target_id, &keys)?;
-    let proof = OpenIdAckProof::from_evidence(&evidence, correction_head).ok_or_else(|| {
-        let tracked = if open_backlog { "backlog" } else { "Todo" };
-        anyhow::anyhow!(
-            "{}: [#{target_id}] names an open {tracked} item, but its queue row has no \
-             acknowledgement proof. `--ack-id` accepts only (a) one top-level bare \
-             `[#{}]` correction head outside a `subagents`/`fan-out` queue, or (b) a \
-             runnable row backed by a Reported attempt or reported-release receipt. \
-             Leave runnable work queued until its worker reports, or resolve/gate the \
-             tracked item through the normal closeout path.",
-            file.display(),
-            target_id,
-        )
-    })?;
+    let proof = orphan_completion
+        .as_ref()
+        .map(|orphan| OpenIdAckProof::OrphanReportedCompletion {
+            owner: orphan.owner.clone(),
+            generation: orphan.generation,
+        })
+        .or_else(|| OpenIdAckProof::from_evidence(&evidence, correction_head))
+        .ok_or_else(|| {
+            let tracked = if open_backlog { "backlog" } else { "Todo" };
+            anyhow::anyhow!(
+                "{}: [#{target_id}] names an open {tracked} item, but its queue row has no \
+                 acknowledgement proof. `--ack-id` accepts only (a) one top-level bare \
+                 `[#{}]` correction head outside a `subagents`/`fan-out` queue, or (b) a \
+                 runnable row backed by a Reported attempt, reported-release receipt, or \
+                 exact hash-attested orphan completion. Leave runnable work queued until \
+                 its worker reports, or resolve/gate the tracked item through the normal \
+                 closeout path.",
+                file.display(),
+                target_id,
+            )
+        })?;
+    let orphan_attempt = orphan_completion
+        .as_ref()
+        .map(|orphan| (orphan.owner.clone(), orphan.generation));
+    let reported_attempt = evidence.reported.as_ref().or(orphan_attempt.as_ref());
     if !converge_id_backed_head_strike(
         file,
         effects,
         &content,
         &target_id,
         &keys,
-        evidence.reported.as_ref(),
+        reported_attempt,
+        orphan_completion
+            .as_ref()
+            .map(|orphan| orphan.completion_key.as_str()),
         "open_id_head_ack",
     )? {
         return Ok(false);
@@ -2849,6 +3018,7 @@ enum OpenIdAckProof {
     CorrectionHead,
     ReportedAttempt { owner: String, generation: u64 },
     ReportedReceipt,
+    OrphanReportedCompletion { owner: String, generation: u64 },
 }
 
 impl OpenIdAckProof {
@@ -2872,6 +3042,9 @@ impl OpenIdAckProof {
                 format!("reported_attempt_closed owner={owner} generation={generation}")
             }
             Self::ReportedReceipt => "reported_receipt_closed".to_string(),
+            Self::OrphanReportedCompletion { owner, generation } => {
+                format!("orphan_reported_completion_closed owner={owner} generation={generation}")
+            }
         }
     }
 
@@ -2880,6 +3053,7 @@ impl OpenIdAckProof {
             Self::CorrectionHead => "explicit_bare_correction_head",
             Self::ReportedAttempt { .. } => "reported_attempt_closeout",
             Self::ReportedReceipt => "reported_release_closeout",
+            Self::OrphanReportedCompletion { .. } => "orphan_reported_completion_closeout",
         }
     }
 }
@@ -3976,6 +4150,7 @@ mod core_tests {
     use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
     use tempfile::TempDir;
@@ -9872,6 +10047,98 @@ Old.
                 .all(|claim| claim.owner != "subagent:vscode_smoke"),
             "the reported attempt ended: {ledger:?}"
         );
+    }
+
+    fn orphan_waiting_attempt_document(
+        root: &Path,
+        completion_owner: Option<&str>,
+    ) -> (PathBuf, String) {
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        let doc = root.join("bugs.md");
+        let parent = concat!(
+            "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace ",
+            "<!-- agent-doc:waiting-item -->"
+        );
+        let completion = completion_owner
+            .map(|owner| {
+                agent_doc_document::subagent_completion::cell_with_response(
+                    owner,
+                    parent,
+                    "orphan-completion-key",
+                    "Blocked on a real Coder workspace; keep the parent open.",
+                )
+                .unwrap()
+            })
+            .unwrap_or_default();
+        let content = format!(
+            concat!(
+                "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run subagents priority go -->\n",
+                "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+                "  - {parent}\n",
+                "    - **Response:** Provide the workspace. <!-- agent-doc:waiting-metadata -->\n",
+                "    - 🙋☑️ [#subagent:vscode_smoke#1] Resolve the open operator action to complete the parent item. [#vscodecodersmoke]\n",
+                "  - [#later] keep later work live\n",
+                "<!-- /agent:run -->\n\n",
+                "## Todo <!-- agent:todo priority -->\n",
+                "- [ ] {parent}\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            completion = completion,
+            parent = parent,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        (doc, parent.to_string())
+    }
+
+    #[test]
+    fn orphanreportedmigration_ack_reaps_attested_child_without_closing_waiting_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, parent) =
+            orphan_waiting_attempt_document(dir.path(), Some("subagent:vscode_smoke"));
+
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains(&format!("  - {parent}\n")), "{result}");
+        assert!(result.contains(&format!("- [ ] {parent}\n")), "{result}");
+        assert!(!result.contains("[#subagent:vscode_smoke#1]"), "{result}");
+        assert!(!result.contains("orphan-completion-key"), "{result}");
+        assert!(
+            result.contains("  - [#later] keep later work live\n"),
+            "{result}"
+        );
+    }
+
+    #[test]
+    fn orphanreportedmigration_ack_refuses_without_exact_owner_parent_response_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        let (doc, _) = orphan_waiting_attempt_document(dir.path(), Some("subagent:other"));
+
+        let refusal = acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            refusal.contains("free-text prose that merely mentions the id"),
+            "{refusal}"
+        );
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains("[#subagent:vscode_smoke#1]"), "{result}");
+        assert!(result.contains("orphan-completion-key"), "{result}");
     }
 
     #[test]

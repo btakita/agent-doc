@@ -1500,6 +1500,50 @@ mod tests {
     }
 
     #[test]
+    fn indexedheadpatchback_classifies_unindexed_head_copy_as_duplicate() {
+        let base = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange -->\n❯ a question\n",
+            "### Re: persisting latency — codex [#r-fdbb1cda0dd7]\n\n",
+            "Response body.\n<!-- /agent:exchange -->\n",
+        );
+        let (_dir, doc) = setup_git_project_with_doc(base);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &TEST_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(base),
+            Some(base),
+        )
+        .unwrap();
+        let duplicated = base.replace(
+            "Response body.\n<!-- /agent:exchange -->",
+            concat!(
+                "Response body.\n",
+                "### Re: persisting latency — codex (HEAD)\n\n",
+                "Response body.\n<!-- agent:boundary:latest -->\n",
+                "<!-- /agent:exchange -->",
+            ),
+        );
+        std::fs::write(&doc, &duplicated).unwrap();
+
+        let state = classify_closeout_recovery_state_for_file(&doc);
+        assert_eq!(state, CloseoutRecoveryState::DuplicateCommittedResponse);
+        let cmd = closeout_recovery_command_for_file(&doc, state).unwrap();
+        assert!(cmd.contains("agent-doc dedupe"), "{cmd}");
+        assert!(cmd.contains("agent-doc commit"), "{cmd}");
+        assert!(!cmd.contains("agent-doc write --commit"), "{cmd}");
+    }
+
+    #[test]
     fn classify_recovery_nested_parent_pointer_stale_when_submodule_ahead_of_parent() {
         // `#closeout-recovery-state-machine`: the document is clean (snapshot ==
         // HEAD == working) but its submodule HEAD is ahead of the parent repo's

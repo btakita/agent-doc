@@ -5251,6 +5251,15 @@ struct RetainedPersistenceProjection {
     controller_generation: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RetainedPersistenceDeliveryOutcome {
+    applied: bool,
+    /// The editor answered the exact save request by proving its visible cut
+    /// had moved.  This licenses bounded visible-buffer reconciliation; a
+    /// generic timeout or transport failure does not.
+    projection_unconverged: bool,
+}
+
 /// Exact bytes already present on disk are a terminal persistence receipt for
 /// this immutable delivery projection. A native-save route is needed only when
 /// disk has not reached the projection yet.
@@ -5288,8 +5297,10 @@ enum RetainedTransitionCompletion {
 /// waited for a delivery or generation edge that an idle document never
 /// produces, so one lost save request or receipt past the budget left the
 /// retained write (and every preflight it blocks) waiting forever. The retry
-/// is now level-triggered: it continues at the capped delay for as long as
-/// the refused epoch is still the desired one
+/// is now level-triggered for transport faults: it continues at the capped
+/// delay for as long as the refused epoch is still the desired one. A typed
+/// `projection_changed` answer instead spends the bounded replica/visible
+/// recovery frontier and then waits for changed content or operator recovery
 /// (`formal/tla/VisibleDeliveryReceiptNet.tla`, `SaveOneShot` wedge).
 const RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES: u32 = 8;
 const RETAINED_PERSISTENCE_REBUILD_AFTER_REFUSALS: u32 = 3;
@@ -5320,6 +5331,12 @@ const RETAINED_PERSISTENCE_MAX_UNDELIVERED_ROLL_FORWARDS: u32 = 3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct RetainedPersistenceRetryDecision {
     delay: Duration,
+    /// Whether another timer-driven save attempt can still make automatic
+    /// progress for this immutable content.  Once projection-changed receipts
+    /// have spent both bounded editor recoveries, only changed content may
+    /// re-arm the Effect; polling the same stale projection is an infinite
+    /// Hook-stop loop, not recovery.
+    schedule_retry: bool,
     request_replica_rebuild: bool,
     /// `#rebuildconverge`: the rebuild budget for this content was spent and
     /// the editor still refuses it. Surface the operator-visible state once.
@@ -5366,15 +5383,17 @@ fn retained_persistence_retry_delay(attempt: u32) -> Duration {
 /// the same bytes continues it, so neither the backoff nor the rebuild budget
 /// restarts; only different content (a real new write) starts a new streak.
 /// At most [`RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS`] delivered rebuilds are
-/// requested per content; after that the capped level-triggered retry
-/// (`#netadv3` F13) continues alone and the exhausted state is reported once.
-fn retained_persistence_retry_step(
+/// requested per content. Generic transport failures retain the capped
+/// level-triggered retry (`#netadv3` F13); typed projection drift stops after
+/// the visible recovery frontier and leaves one durable exhausted state.
+fn retained_persistence_retry_step_for_outcome(
     retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
     key: &str,
     epoch: u64,
     content: (&str, usize),
     applied: bool,
     newer_pending: bool,
+    projection_unconverged: bool,
 ) -> Option<RetainedPersistenceRetryDecision> {
     if applied {
         retries.remove(key);
@@ -5426,12 +5445,39 @@ fn retained_persistence_retry_step(
         delay: retained_persistence_retry_delay(
             entry.refusals.min(RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES),
         ),
+        schedule_retry: !projection_unconverged
+            || request_replica_rebuild
+            || request_visible_roll_forward
+            || entry.rebuilds < RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS
+            || entry.roll_forwards < RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS,
         request_replica_rebuild,
         report_rebuild_exhausted,
         request_visible_roll_forward,
         refusals: entry.refusals,
         rebuilds: entry.rebuilds,
     })
+}
+
+/// Test/model shorthand for the measured editor-visible divergence path.
+/// Production passes the typed native-save outcome explicitly.
+#[cfg(test)]
+fn retained_persistence_retry_step(
+    retries: &mut std::collections::HashMap<String, RetainedPersistenceRefusalStreak>,
+    key: &str,
+    epoch: u64,
+    content: (&str, usize),
+    applied: bool,
+    newer_pending: bool,
+) -> Option<RetainedPersistenceRetryDecision> {
+    retained_persistence_retry_step_for_outcome(
+        retries,
+        key,
+        epoch,
+        content,
+        applied,
+        newer_pending,
+        true,
+    )
 }
 
 /// `#rebuildconverge`: a rebuild signal that reached no editor replica is not a
@@ -5506,6 +5552,7 @@ pub struct TestSupportRetainedPersistenceLedger {
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TestSupportRetainedPersistenceStep {
+    pub schedule_retry: bool,
     pub request_replica_rebuild: bool,
     pub report_rebuild_exhausted: bool,
     pub request_visible_roll_forward: bool,
@@ -5541,13 +5588,14 @@ impl TestSupportRetainedPersistenceLedger {
     /// epoch, exactly as in the GH #273 loop.
     pub fn refuse(&mut self, file: &Path, content: &str) -> TestSupportRetainedPersistenceStep {
         let projection = self.projection(file, content);
-        let decision = retained_persistence_retry_step(
+        let decision = retained_persistence_retry_step_for_outcome(
             &mut self.retries,
             &file.display().to_string(),
             self.epoch,
             (&projection.content_hash, projection.content_len),
             false,
             false,
+            true,
         )
         .expect("a refused current epoch retries");
         self.sink
@@ -5556,6 +5604,7 @@ impl TestSupportRetainedPersistenceLedger {
             self.epoch += 3;
         }
         TestSupportRetainedPersistenceStep {
+            schedule_retry: decision.schedule_retry,
             request_replica_rebuild: decision.request_replica_rebuild,
             report_rebuild_exhausted: decision.report_rebuild_exhausted,
             request_visible_roll_forward: decision.request_visible_roll_forward,
@@ -5567,12 +5616,13 @@ impl TestSupportRetainedPersistenceLedger {
     /// The editor applied the save of `content`.
     pub fn apply(&mut self, file: &Path, content: &str) {
         let projection = self.projection(file, content);
-        let decision = retained_persistence_retry_step(
+        let decision = retained_persistence_retry_step_for_outcome(
             &mut self.retries,
             &file.display().to_string(),
             self.epoch,
             (&projection.content_hash, projection.content_len),
             true,
+            false,
             false,
         );
         assert_eq!(decision, None, "an applied save never retries");
@@ -6152,7 +6202,7 @@ impl RetainedWriteSettleSink {
         &self,
         document_hash: &str,
         projection: &RetainedPersistenceProjection,
-    ) -> bool {
+    ) -> RetainedPersistenceDeliveryOutcome {
         // `#retaineddiskproof` / GH #223: a previous native save can land the
         // exact immutable projection without its receipt reaching this worker.
         // Requiring another editor route in that state cannot make progress and
@@ -6171,7 +6221,10 @@ impl RetainedWriteSettleSink {
                         projection.content_len,
                     ),
                 );
-                return true;
+                return RetainedPersistenceDeliveryOutcome {
+                    applied: true,
+                    projection_unconverged: false,
+                };
             }
             Ok(false) => {}
             Err(error) => {
@@ -6206,13 +6259,16 @@ impl RetainedWriteSettleSink {
                         outcome.notified,
                     ),
                 );
-                true
+                RetainedPersistenceDeliveryOutcome {
+                    applied: true,
+                    projection_unconverged: false,
+                }
             }
             Ok(outcome) => {
                 agent_doc_ops_log_io::log_op(
                     &projection.file,
                     &format!(
-                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={} build_mismatches={} plugin_generation_mismatches={} reason=no_exact_native_save_receipt",
+                        "retained_persistence_retryable document_hash={document_hash} generation={} epoch={} content_hash={} content_len={} routes_found={} routes_applied={} build_mismatches={} plugin_generation_mismatches={} projection_unconverged={} reason=no_exact_native_save_receipt",
                         projection.controller_generation,
                         projection.delivery_version,
                         projection.content_hash,
@@ -6221,9 +6277,13 @@ impl RetainedWriteSettleSink {
                         outcome.notified,
                         outcome.build_mismatches.len(),
                         outcome.generation_mismatches,
+                        outcome.projection_unconverged,
                     ),
                 );
-                false
+                RetainedPersistenceDeliveryOutcome {
+                    applied: false,
+                    projection_unconverged: outcome.projection_unconverged > 0,
+                }
             }
             Err(error) => {
                 agent_doc_ops_log_io::log_op(
@@ -6236,7 +6296,10 @@ impl RetainedWriteSettleSink {
                         projection.content_len,
                     ),
                 );
-                false
+                RetainedPersistenceDeliveryOutcome {
+                    applied: false,
+                    projection_unconverged: false,
+                }
             }
         }
     }
@@ -6908,7 +6971,7 @@ impl ControllerDocumentGraphs {
                 .name("agent-doc-retained-persistence".to_string())
                 .spawn(move || {
                     while let Ok(command) = receiver.recv() {
-                        let applied = worker_sink.persist_current_delivery(
+                        let delivery_outcome = worker_sink.persist_current_delivery(
                             &command.document_hash,
                             &command.envelope.value,
                         );
@@ -6924,16 +6987,17 @@ impl ControllerDocumentGraphs {
                         let content_len = projection.content_len;
                         let retry = runtime
                             .document_graphs
-                            .complete_retained_persistence(command, applied);
+                            .complete_retained_persistence(command, delivery_outcome);
                         drop(runtime);
                         worker_sink.project_rebuild_exhaustion(
                             &projection,
                             generation,
                             epoch,
-                            applied,
+                            delivery_outcome.applied,
                             retry.as_ref(),
                         );
                         if let Some(retry) = retry {
+                            let mut terminal_recovery = false;
                             if retry.request_replica_rebuild {
                                 let delivered = match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
                                     &file,
@@ -6990,8 +7054,8 @@ impl ControllerDocumentGraphs {
                                 // the editor's VISIBLE buffer, not its replica,
                                 // diverges from this content: typically operator
                                 // text held as an unmerged local batch. The
-                                // capped retry continues; nothing here
-                                // overwrites that buffer.
+                                // bounded visible recovery follows; nothing
+                                // here overwrites that buffer.
                                 agent_doc_ops_log_io::log_op(
                                     &file,
                                     &format!(
@@ -7076,6 +7140,7 @@ impl ControllerDocumentGraphs {
                                             )
                                     });
                                 if terminal_refusal || undelivered_terminal {
+                                    terminal_recovery = true;
                                     if let Some(runtime) = worker_sink.runtime.upgrade() {
                                         runtime
                                             .document_graphs
@@ -7122,12 +7187,21 @@ impl ControllerDocumentGraphs {
                                     }
                                 }
                             }
-                            schedule_refused_retained_persistence_retry(
-                                worker_sink.runtime.clone(),
-                                document_hash,
-                                epoch,
-                                retry.delay,
-                            );
+                            if retry.schedule_retry && !terminal_recovery {
+                                schedule_refused_retained_persistence_retry(
+                                    worker_sink.runtime.clone(),
+                                    document_hash,
+                                    epoch,
+                                    retry.delay,
+                                );
+                            } else {
+                                agent_doc_ops_log_io::log_op(
+                                    &file,
+                                    &format!(
+                                        "retained_persistence_retry_stopped document_hash={document_hash} generation={generation} epoch={epoch} content_hash={content_hash} reason=projection_changed_recovery_exhausted terminal_recovery={terminal_recovery} state=editor_holds_unmerged_visible_text operator_action=reconcile_editor_buffer_with_retained_write",
+                                    ),
+                                );
+                            }
                         }
                     }
                 }) {
@@ -8424,8 +8498,9 @@ impl ControllerDocumentGraphs {
     fn complete_retained_persistence(
         &self,
         command: RetainedPersistenceCommand,
-        applied: bool,
+        delivery_outcome: RetainedPersistenceDeliveryOutcome,
     ) -> Option<RetainedPersistenceRetryDecision> {
+        let applied = delivery_outcome.applied;
         let key = command.document_hash;
         let envelope = command.envelope;
         let mut superseding_command = None;
@@ -8477,13 +8552,14 @@ impl ControllerDocumentGraphs {
             // (a plugin reload window, a lane timeout) without changing the
             // document -- so the retained write, and every preflight it blocks,
             // waited forever. Re-claim it on a bounded backoff instead.
-            refused_retry = retained_persistence_retry_step(
+            refused_retry = retained_persistence_retry_step_for_outcome(
                 &mut self.retained_persistence_retries.lock(),
                 &key,
                 envelope.epoch,
                 (&envelope.value.content_hash, envelope.value.content_len),
                 applied,
                 newer_pending,
+                delivery_outcome.projection_unconverged,
             );
             if newer_pending {
                 superseding_command = claim_superseding_retained_persistence(
@@ -27395,7 +27471,10 @@ mod retained_persistence_retry_tests {
             runtime: std::sync::Weak::new(),
         };
 
-        assert!(sink.persist_current_delivery("document", &projection));
+        assert!(
+            sink.persist_current_delivery("document", &projection)
+                .applied
+        );
     }
 
     #[test]
@@ -27424,7 +27503,17 @@ mod retained_persistence_retry_tests {
         // plugin reload and nothing re-armed it, so preflight refused every cycle.
         let mut retries = std::collections::HashMap::new();
         let delays: Vec<_> = (0..RETAINED_PERSISTENCE_MAX_REFUSED_RETRIES)
-            .map(|_| retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false))
+            .map(|_| {
+                retained_persistence_retry_step_for_outcome(
+                    &mut retries,
+                    "doc",
+                    7,
+                    CONTENT,
+                    false,
+                    false,
+                    false,
+                )
+            })
             .collect();
         assert!(delays.iter().all(Option::is_some));
         assert_eq!(
@@ -27463,9 +27552,17 @@ mod retained_persistence_retry_tests {
         // the rebuild budget, however, is spent, so only the save retries.
         let mut exhausted_reports = 0;
         for _ in 9u32..=40 {
-            let decision =
-                retained_persistence_retry_step(&mut retries, "doc", 7, CONTENT, false, false)
-                    .expect("a refused current epoch keeps retrying");
+            let decision = retained_persistence_retry_step_for_outcome(
+                &mut retries,
+                "doc",
+                7,
+                CONTENT,
+                false,
+                false,
+                false,
+            )
+            .expect("a refused current epoch keeps retrying");
+            assert!(decision.schedule_retry, "transport faults remain level-triggered");
             assert_eq!(decision.delay, Duration::from_secs(30));
             assert!(
                 !decision.request_replica_rebuild,
@@ -27474,11 +27571,12 @@ mod retained_persistence_retry_tests {
             exhausted_reports += usize::from(decision.report_rebuild_exhausted);
         }
         assert_eq!(exhausted_reports, 1, "the exhausted state is reported once");
-        let restarted = retained_persistence_retry_step(
+        let restarted = retained_persistence_retry_step_for_outcome(
             &mut retries,
             "doc",
             8,
             ("a-new-write", 12),
+            false,
             false,
             false,
         )
@@ -27550,6 +27648,100 @@ mod retained_persistence_retry_tests {
         .unwrap();
         assert_eq!(after.rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
         assert!(after.refusals > 200);
+    }
+
+    /// cycle-1793634471546 combined a ~300 KiB document (about 252 KiB of
+    /// unrelated exchange history) with queue/open-item churn and a stable
+    /// `projection_changed` receipt. Size amplified every retry, but did not
+    /// create the stale expected hash. Pin the scaling property: the retained
+    /// Effect keeps only hash/length bookkeeping and stops scheduling full
+    /// projection work after a content-size-independent recovery frontier.
+    #[test]
+    fn large_exchange_with_queue_and_open_item_churn_has_a_bounded_effect_frontier() {
+        let mut large = String::with_capacity(300_500);
+        large.push_str("<!-- agent:exchange -->\n");
+        large.extend(std::iter::repeat_n('e', 252_510));
+        large.push_str("\n<!-- agent:queue -->\n");
+        large.extend(std::iter::repeat_n('q', 22_477));
+        large.push_str("\n<!-- agent:open-items -->\n");
+        let open_items_start = large.len();
+        for item in 0..44 {
+            large.push_str(&format!("- [#open-{item}] retained item {item}\n"));
+        }
+        large.extend(std::iter::repeat_n(
+            'o',
+            7_680usize.saturating_sub(large.len() - open_items_start),
+        ));
+        large.extend(std::iter::repeat_n(
+            'x',
+            300_425usize.saturating_sub(large.len()),
+        ));
+        assert_eq!(large.len(), 300_425, "fixture matches the measured document scale");
+        let content_hash = agent_doc_hash::content_hash(&large);
+        let content = (content_hash.as_str(), large.len());
+        let mut retries = std::collections::HashMap::new();
+        let mut scheduled = 0u32;
+        let mut rebuilds = 0u32;
+        let mut roll_forwards = 0u32;
+        let mut terminal = None;
+
+        for refusal in 1..=100u32 {
+            let decision = retained_persistence_retry_step_for_outcome(
+                &mut retries,
+                "large-doc",
+                82,
+                content,
+                false,
+                false,
+                true,
+            )
+            .expect("the immutable retained projection remains durable");
+            scheduled += u32::from(decision.schedule_retry);
+            rebuilds += u32::from(decision.request_replica_rebuild);
+            roll_forwards += u32::from(decision.request_visible_roll_forward);
+            if !decision.schedule_retry {
+                terminal = Some(refusal);
+                break;
+            }
+        }
+
+        assert_eq!(terminal, Some(13));
+        assert_eq!(scheduled, 12);
+        assert_eq!(rebuilds, RETAINED_PERSISTENCE_MAX_REPLICA_REBUILDS);
+        assert_eq!(
+            roll_forwards,
+            RETAINED_PERSISTENCE_MAX_VISIBLE_ROLL_FORWARDS
+        );
+        assert_eq!(retries["large-doc"].content_hash, content_hash);
+        assert_eq!(retries["large-doc"].content_len, large.len());
+
+        let stable = retained_persistence_retry_step_for_outcome(
+            &mut retries,
+            "large-doc",
+            82,
+            content,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        assert!(!stable.schedule_retry);
+        assert!(!stable.request_replica_rebuild);
+        assert!(!stable.request_visible_roll_forward);
+
+        let changed = ("new-content-hash", large.len() + 1);
+        let rearmed = retained_persistence_retry_step_for_outcome(
+            &mut retries,
+            "large-doc",
+            83,
+            changed,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        assert!(rearmed.schedule_retry, "changed content re-arms the Effect");
+        assert_eq!(rearmed.refusals, 1);
     }
 
     /// `#splicesessionack` (GH #273 remainder): the exhausted rebuild budget
@@ -27628,7 +27820,7 @@ mod retained_persistence_retry_tests {
         std::fs::write(&file, retained).unwrap();
         assert_eq!(exhaustion::observe(&file), None, "disk reached the content");
         let converged = projection(retained, epoch);
-        assert!(sink.persist_current_delivery("doc-a", &converged));
+        assert!(sink.persist_current_delivery("doc-a", &converged).applied);
         assert_eq!(
             retained_persistence_retry_step(
                 &mut retries,

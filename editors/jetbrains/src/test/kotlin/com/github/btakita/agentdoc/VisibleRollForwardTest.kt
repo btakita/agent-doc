@@ -55,6 +55,14 @@ class VisibleRollForwardTest {
     }
 
     @Test
+    fun `canonical visible equality without replica equality is not an applied receipt`() {
+        assertEquals(
+            VisibleRollForwardDecision.ReplicaBehind,
+            decide(canonical = "d5e3a7b1", replica = expected, visible = "d5e3a7b1"),
+        )
+    }
+
+    @Test
     fun `a replica behind the fenced canonical drains before any splice is computed`() {
         assertEquals(VisibleRollForwardDecision.ReplicaBehind, decide(replica = "21456910"))
         assertEquals(VisibleRollForwardDecision.ReplicaBehind, decide(replica = null))
@@ -175,7 +183,8 @@ class VisibleRollForwardTest {
         assertTrue(
             "a canonical that kept controller text is drained in, not projected over",
             body.contains("canonicalAfter == visibleText && projectSettledVisibleState(") &&
-                body.contains("requestUrgentRemoteDrain(filePath, \"visible-roll-forward-drain\")"),
+                body.contains("requestUrgentRemoteDrain(filePath, \"visible-roll-forward-drain\")") &&
+                body.contains("return if (settled) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred"),
         )
         assertFalse(
             "the roll-forward must never mutate the editor buffer",
@@ -183,6 +192,27 @@ class VisibleRollForwardTest {
                 body.contains("setText(") ||
                 body.contains("replaceString(") ||
                 body.contains("prepareNonOperatorEditorMutationOnWorker"),
+        )
+    }
+
+    @Test
+    fun `publishing a visible cut is deferred until canonical convergence is proved`() {
+        // cycle-1793634471546: the editor published add4f597 while controller
+        // canonical remained 30cdb089. Returning Applied for that state spent
+        // the bounded recovery and restarted closeout although native save
+        // continued to answer projection_changed forever.
+        val body = source("CrdtReplicaManager.kt")
+            .substringAfter("private fun rollVisibleBufferForward(")
+            .substringBefore("private fun scheduleUnforwardedOperatorTextRecovery(")
+        val settled = body.indexOf("val settled =")
+        val receipt = body.indexOf(
+            "return if (settled) VisibleRollForwardResult.Applied else VisibleRollForwardResult.Deferred",
+        )
+        assertTrue(settled >= 0)
+        assertTrue(receipt > settled)
+        assertFalse(
+            "an unsettled publication must not be acknowledged unconditionally",
+            body.substring(settled, receipt).contains("return VisibleRollForwardResult.Applied"),
         )
     }
 

@@ -12,11 +12,11 @@ use agent_doc_controller::dispatch::{
     ActorDispatchState, AuthoritativeActorDispatchAction, AuthoritativeActorDispatchActionFacts,
     AuthoritativeActorDispatchIntent, CloseoutBlockDispatchDecision, DispatchOnlyBusyRefusalFacts,
     DispatchOnlyReopenDelivery, ReopenMode, RouteCloseoutBlockContext, RouteCloseoutDrainOutcome,
-    RouteExplicitSendDecision, RouteOwnerTurnEvidence, RoutedDispatchStartProof, RoutedReopenFacts,
-    RoutedReopenGuardReason, StartingTimeoutActorFacts, actor_blocked_by_starting_timeout,
-    actor_dispatch_blocker_reason, busy_projection_repaired_by_ready_prompt,
-    classify_authoritative_actor_dispatch_action, classify_route_explicit_send,
-    decide_authoritative_reopen,
+    RouteCloseoutEntryFacts, RouteCloseoutEntryPlan, RouteExplicitSendDecision,
+    RouteOwnerTurnEvidence, RoutedDispatchStartProof, RoutedReopenFacts, RoutedReopenGuardReason,
+    StartingTimeoutActorFacts, actor_blocked_by_starting_timeout, actor_dispatch_blocker_reason,
+    busy_projection_repaired_by_ready_prompt, classify_authoritative_actor_dispatch_action,
+    classify_route_closeout_entry_plan, classify_route_explicit_send, decide_authoritative_reopen,
     dispatch_only_busy_refusal_message as controller_dispatch_only_busy_refusal_message,
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
@@ -720,6 +720,66 @@ pub fn route_via_authoritative_actor(
         return accept_pending_harness_switch(tmux, file, &actor, pending);
     }
     let closeout_harness = actor_transport_harness(&actor.record.harness);
+
+    // `#persistingsubmitfast`: Run Agent Doc is an explicit send. When the
+    // matching actor is busy in an already-open cycle, inspect the live pane
+    // before starting closeout recovery. A real harness busy cue proves that
+    // the current turn can accept the document diff as a follow-up, so waiting
+    // up to 30 seconds for the same turn's closeout would only delay delivery.
+    // No cue means no bypass: idle, torn, protected, automated, and ambiguous
+    // shapes keep the existing drain/recovery boundary.
+    if classify_route_closeout_entry_plan(RouteCloseoutEntryFacts {
+        mode: reopen_mode,
+        intent: dispatch_intent,
+        origin: dispatch_origin,
+        actor_state: actor_dispatch_state(actor_state),
+        open_cycle: baseline.is_some_and(|state| state.is_open()),
+    }) == RouteCloseoutEntryPlan::ProbeLiveTurnForExplicitSend
+        && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
+        && let Some(cue) = closeout_harness.busy_proof_line(&content)
+    {
+        let owner_verdict = format!(
+            "[route] ACTIVE OWNER: authoritative actor generation {} on pane {} visibly proves an active {} turn ({})",
+            actor.record.generation,
+            dispatch_pane,
+            closeout_harness.binary,
+            agent_doc_secret_redact::redact(&cue),
+        );
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_explicit_send_before_closeout_drain file={} pane={} harness={} generation={} phase={} action=deliver_live_turn_steering (#persistingsubmitfast)",
+                file.display(),
+                dispatch_pane,
+                closeout_harness.binary,
+                actor.record.generation,
+                baseline
+                    .map(|state| state.phase.as_str())
+                    .unwrap_or("unknown"),
+            ),
+        );
+        let Some(explicit) = claimed_running_turn_steering(
+            tmux,
+            file,
+            &dispatch_pane,
+            &actor.record.harness,
+            true,
+            "route_predrain_live_owner_target_not_visible",
+        ) else {
+            return Ok(dispatch_pane);
+        };
+        let outcome = live_owner_turn_route_outcome(file, None, &owner_verdict, explicit);
+        eprintln!("{}", outcome.message());
+        outcome.record(file, explicit);
+        crate::invocation::report_pane_if_not_visible(
+            tmux,
+            file,
+            &dispatch_pane,
+            "route_predrain_live_owner_target_not_visible",
+        );
+        return Ok(dispatch_pane);
+    }
+
     // `#ctrlcrerun`: what the drain's two-capture pane probe saw, if it ran.
     // A live-owner verdict below must not contradict it silently.
     let stable_dispatch_ready_observed: std::cell::Cell<Option<bool>> = std::cell::Cell::new(None);

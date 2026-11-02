@@ -5989,7 +5989,7 @@ mod tests {
             );
             assert!(
                 annotated.contains(&format!(
-                    "~~{prompt}~~ — auto-struck: response: {response_id}"
+                    "~~{prompt}~~\n  - **Response {response_id}**"
                 )),
                 "the completed prompt and its heading must share one id: {annotated}"
             );
@@ -9124,7 +9124,7 @@ Old.
         assert!(
             projection
                 .target_content
-                .contains("- ~~Run the selected queue synchronization repair~~"),
+                .contains("- ### ~~Run the selected queue synchronization repair~~"),
             "{}",
             projection.target_content
         );
@@ -9176,7 +9176,7 @@ Old.
         assert!(
             projection
                 .target_content
-                .contains("- ~~If an issue was added, also add `- release + publish`~~"),
+                .contains("- ### ~~If an issue was added, also add `- release + publish`~~"),
             "{}",
             projection.target_content
         );
@@ -9404,7 +9404,7 @@ Old.
 
         assert!(
             projected.target_content.contains(&format!(
-                "- ~~{item}~~ — auto-struck: answered this cycle (#ftstrike)"
+                "- ### ~~{item}~~ — auto-struck: answered this cycle (#ftstrike)"
             )),
             "the integrated row must close"
         );
@@ -9587,7 +9587,7 @@ Old.
         .expect("a selected and explicitly answered late head should be consumed");
         assert_eq!(projected.node_keys.len(), 1);
         assert!(projected.target_content.contains(
-            "- ~~#gh-fix https://github.com/btakita/agent-doc/issues/177~~ — auto-struck: answered this cycle (#ftstrike)"
+            "- ### ~~#gh-fix https://github.com/btakita/agent-doc/issues/177~~ — auto-struck: answered this cycle (#ftstrike)"
         ));
         assert!(projected.target_content.contains("- unrelated later work"));
 
@@ -9688,7 +9688,7 @@ Old.
             .to_string();
         let attribute_id = response_id.trim_start_matches("[#").trim_end_matches(']');
         assert!(projected.target_content.contains(&format!(
-            "<!-- agent:queue go id=release response=\"inline\" -->\n- ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: upgrade — gpt-6.1-sol\n      \n      > **Queue prompt:** #upgrade\n      \n      Upgraded.\n      </details>\n<!-- /agent:queue -->"
+            "<!-- agent:queue go id=release response=\"inline\" -->\n- ### ~~#upgrade~~ — auto-struck: answered this cycle (#ftstrike)\n  - **Response {response_id}**\n    - **Timestamp:** {FALLBACK_RESPONSE_TIMESTAMP}\n    - <details data-agent-doc-response-id=\"{attribute_id}\">\n      <summary>Response</summary>\n      \n      ### Re: upgrade — gpt-6.1-sol\n      \n      > **Queue prompt:** #upgrade\n      \n      Upgraded.\n      </details>\n<!-- /agent:queue -->"
         )));
     }
 
@@ -9895,11 +9895,11 @@ Old.
             let target = &projected.target_content;
             assert_eq!(projected.node_keys.len(), 2, "{:?}", projected.node_keys);
             assert!(
-                target.contains("- ~~end a Reported queue claim on every strike path"),
+                target.contains("- ### ~~end a Reported queue claim on every strike path"),
                 "the echoed reported claimed row strikes:\n{target}"
             );
             assert!(
-                target.contains("- ~~I deleted a queue item in docs.md"),
+                target.contains("- ### ~~I deleted a queue item in docs.md"),
                 "the echoed unclaimed row strikes:\n{target}"
             );
             assert!(
@@ -10124,7 +10124,7 @@ Old.
         assert!(
             projected
                 .target_content
-                .contains("- ~~#gh-fix https://github.com/btakita/agent-doc/issues/80~~")
+                .contains("- ### ~~#gh-fix https://github.com/btakita/agent-doc/issues/80~~")
         );
         assert!(projected.target_content.contains("- do [#trackedwork]\n"));
     }

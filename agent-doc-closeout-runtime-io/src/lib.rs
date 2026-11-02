@@ -1340,6 +1340,13 @@ impl agent_doc_flow_io::closeout::CloseoutEffects for RuntimeCloseoutEffects {
         agent_doc_commit_io::commit(file)
     }
 
+    fn repair_committed_historical_snapshot_drift(
+        &self,
+        file: &Path,
+    ) -> Result<Option<&'static str>> {
+        agent_doc_repair_io::repair_committed_historical_snapshot_drift(file)
+    }
+
     fn commit_for_authority(&self, file: &Path, force_disk: bool) -> Result<bool> {
         agent_doc_commit_io::commit_for_authority(file, force_disk)
     }

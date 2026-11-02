@@ -702,6 +702,12 @@ pub fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> Closeou
 fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
     let normalized =
         agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(doc);
+    // Binary-attested subagent completion cells are recovery metadata. They are
+    // durable evidence used to reconcile a reported claim, but they are not an
+    // assistant response and must not turn a stale projection into
+    // `UnsafeUserContentDrift`. The recovery still preserves and commits the
+    // authoritative visible cell; stripping is classification-only.
+    let normalized = agent_doc_document::subagent_completion::strip_completion_cells(&normalized);
     closeout_content_component_signature(&normalized)
 }
 
@@ -1730,6 +1736,37 @@ mod tests {
                 ..CloseoutRecoveryStateInput::default()
             }),
             CloseoutRecoveryState::UnsafeUserContentDrift
+        );
+    }
+
+    #[test]
+    fn visible_binary_completion_replacement_is_recovery_metadata_not_user_content() {
+        let durable = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: recovered response — gpt-5\n\n",
+            "The cycle is committed.\n",
+        );
+        let old = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:old",
+            "old work",
+            "old-key",
+            "Old result.",
+        )
+        .unwrap();
+        let new = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:new",
+            "new work",
+            "new-key",
+            "New result.",
+        )
+        .unwrap();
+        let snapshot = format!("{durable}{old}\n<!-- /agent:exchange -->\n");
+        let visible = format!("{durable}{new}\n<!-- /agent:exchange -->\n");
+
+        assert_eq!(
+            classify_snapshot_visible_drift(&snapshot, &visible),
+            CloseoutRecoveryDrift::MetadataOnly,
         );
     }
 

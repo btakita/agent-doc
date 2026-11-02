@@ -13077,6 +13077,46 @@ mod tests {
     }
 
     #[test]
+    fn waiting_metadata_never_projects_as_queue_work() {
+        let body = concat!(
+            "- 📥 [#tdunityrunner20261202] Renew the Unity license. <!-- agent-doc:waiting-item -->\n",
+            "  - 📥 **Response:** Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-metadata -->\n",
+            "    - 📥 **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+            "      - 📥 **Action:** Renew the license. <!-- agent-doc:waiting-metadata -->\n",
+            "        - I renewed the license; verify the runner.\n",
+        );
+        let entries = parse(body).unwrap();
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| matches!(entry, QueueEntry::Freeform(_)))
+                .count(),
+            3,
+            "all binary-owned metadata rows stay inert: {entries:#?}"
+        );
+
+        let rows = crate::queue_projection::queue_prompt_projection_rows(body, &entries);
+        assert_eq!(
+            rows.len(),
+            2,
+            "only the waiting item and operator reply project: {rows:#?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| !row.text.contains("Before 2026-12-02T14:24:21Z")
+                    && !row.text.contains("**Next actions:**")
+                    && !row.text.contains("**Action:** Renew the license.")),
+            "generated response structure must never project as work: {rows:#?}"
+        );
+        assert!(
+            rows.iter().any(|row| row
+                .text
+                .contains("I renewed the license; verify the runner.")),
+            "the operator-authored child remains actionable: {rows:#?}"
+        );
+    }
+
+    #[test]
     fn waiting_answer_edges_select_only_the_durable_todo_node() {
         let id = "yeja".to_string();
         let body = concat!(

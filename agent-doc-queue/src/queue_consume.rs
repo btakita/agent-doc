@@ -4670,19 +4670,11 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
 /// Migrate legacy struck waiting metadata without touching operator-authored
 /// response edges nested beside it.
 fn unstrike_waiting_metadata(raw: &str) -> Result<String> {
-    let entries = document_queue::parse(raw)?;
-    let migrated = entries
-        .into_iter()
-        .map(|entry| match entry {
-            QueueEntry::Completed(prompt)
-                if prompt.text.contains(WAITING_ON_YOU_METADATA_MARKER) =>
-            {
-                QueueEntry::Prompt(prompt)
-            }
-            other => other,
-        })
-        .collect::<Vec<_>>();
-    Ok(document_queue::render(&migrated))
+    let without_lifecycle =
+        agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(raw);
+    Ok(agent_doc_markdown_ast::overlay::normalize_waiting_metadata_strikes(
+        &without_lifecycle,
+    ))
 }
 
 #[derive(Debug, Clone)]

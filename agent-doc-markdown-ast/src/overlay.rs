@@ -38,6 +38,11 @@ const AGENT_PIN_MARKERS: [&str; 6] = [
     "📍",
 ];
 
+/// Binary-owned marker attached to the legacy visible response tree under a
+/// `waiting-item`. These rows explain an operator decision or next action; they
+/// are metadata, never independent queue work.
+const WAITING_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+
 /// Deterministic, visible separator that introduces the auto-struck explanation
 /// note appended *outside* the `~~…~~` strike wrapper (`#qstrikenote`). A struck
 /// free-text queue head renders as `~~foo~~ — auto-struck: …`; the separator lets
@@ -706,6 +711,20 @@ fn related_row_child_end(
     Some(opener_index + 1)
 }
 
+/// Reserve one legacy waiting-response metadata row without swallowing any
+/// operator-authored child beneath it. The marker is the ownership proof: the
+/// visible label is intentionally not parsed because older projections used
+/// several labels (`Response`, `Question`, `Summary`, `Choices`, `Action`, ...).
+fn waiting_metadata_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    _item_indent: usize,
+) -> Option<usize> {
+    let body = strip_bullet(lines.get(opener_index)?)?;
+    body.contains(WAITING_METADATA_MARKER)
+        .then_some(opener_index + 1)
+}
+
 /// Return the end of an inert list child.
 ///
 /// Operator-authored multiline Obsidian comments retain their general list
@@ -717,6 +736,7 @@ pub fn inert_list_child_end(
     item_indent: usize,
 ) -> Option<usize> {
     multiline_list_comment_end(lines, opener_index, item_indent)
+        .or_else(|| waiting_metadata_child_end(lines, opener_index, item_indent))
         .or_else(|| response_details_child_end(lines, opener_index, item_indent))
         .or_else(|| response_row_child_end(lines, opener_index, item_indent))
         .or_else(|| response_back_reference_child_end(lines, opener_index, item_indent))
@@ -730,6 +750,34 @@ pub fn inert_list_child_end(
         .or_else(|| response_next_action_decision_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
+}
+
+/// Remove legacy strike wrappers from binary-owned waiting metadata rows.
+/// Operator-authored descendants and unmarked lookalikes remain byte-for-byte
+/// unchanged.
+pub fn normalize_waiting_metadata_strikes(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    for line in source.split_inclusive('\n') {
+        let Some(body) = strip_bullet(line) else {
+            out.push_str(line);
+            continue;
+        };
+        let (core, newline) = body
+            .strip_suffix("\r\n")
+            .map(|core| (core, "\r\n"))
+            .or_else(|| body.strip_suffix('\n').map(|core| (core, "\n")))
+            .unwrap_or((body, ""));
+        let (struck, inner) = split_struck_body(core);
+        if !struck || !inner.contains(WAITING_METADATA_MARKER) {
+            out.push_str(line);
+            continue;
+        }
+        let body_offset = body.as_ptr() as usize - line.as_ptr() as usize;
+        out.push_str(&line[..body_offset]);
+        out.push_str(inner);
+        out.push_str(newline);
+    }
+    out
 }
 
 /// Remove queue-attempt lifecycle prefixes accidentally projected onto
@@ -762,6 +810,7 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
         let line = normalized_lines[index];
         let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
         let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
+            || waiting_metadata_child_end(&normalized_lines, index, item_indent).is_some()
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
             || response_back_reference_child_end(&normalized_lines, index, item_indent).is_some()
             || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
@@ -2296,6 +2345,69 @@ mod tests {
                 "parent three",
                 "parent four",
             ]
+        );
+    }
+
+    #[test]
+    fn waiting_metadata_is_inert_and_repairs_accidental_lifecycle_markers() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- 📥 [#tdunityrunner20261202] Renew the Unity license. <!-- agent-doc:waiting-item -->\n",
+            "  - 📥 **Response:** Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-metadata -->\n",
+            "    - 📥 **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+            "      - 📥 **Action:** Renew the license. <!-- agent-doc:waiting-metadata -->\n",
+            "        - 📥 I renewed the license; verify the runner.\n",
+            "  - 📥 **Response:** Operator-authored text without the reserved marker.\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let normalized = normalize_generated_response_lifecycle_markers(source);
+        assert!(
+            normalized.contains("  - **Response:** Before 2026-12-02T14:24:21Z"),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("    - **Next actions:** <!-- agent-doc:waiting-metadata -->"),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("      - **Action:** Renew the license."),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("        - 📥 I renewed the license; verify the runner."),
+            "operator-authored descendants remain promptable: {normalized}"
+        );
+        assert!(
+            normalized.contains(
+                "  - 📥 **Response:** Operator-authored text without the reserved marker."
+            ),
+            "an unmarked lookalike remains promptable: {normalized}"
+        );
+
+        let parsed = components(&normalized);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            texts
+                .iter()
+                .any(|text| text.contains("I renewed the license; verify the runner.")),
+            "{texts:#?}"
+        );
+        assert!(
+            texts.iter().any(|text| text.contains(
+                "**Response:** Operator-authored text without the reserved marker."
+            )),
+            "{texts:#?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .all(|text| !text.contains("Before 2026-12-02T14:24:21Z")),
+            "reserved waiting metadata must not become typed work: {texts:#?}"
         );
     }
 

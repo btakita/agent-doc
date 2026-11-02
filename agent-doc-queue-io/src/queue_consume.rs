@@ -2085,6 +2085,17 @@ pub fn require_integrated_reported_repo_work_for_successor(
     before: &str,
     after: &str,
 ) -> Result<()> {
+    // A tracked-work-only document can close `--done #id` without owning any
+    // queue row. `live_queue_head_texts` uses `None` for both that valid shape
+    // and an unparseable selected queue, so distinguish them before preserving
+    // the fail-closed parse guard below. With no queue component there is no
+    // reported queue attempt this successor could accidentally close.
+    if !element::parse(before)?
+        .iter()
+        .any(|component| component.name == "queue")
+    {
+        return Ok(());
+    }
     let after_live = agent_doc_queue::queue_consume::live_work_identities(after);
     let mut seen = HashSet::new();
     let closed = agent_doc_queue::queue_continuation::live_queue_head_texts(before)

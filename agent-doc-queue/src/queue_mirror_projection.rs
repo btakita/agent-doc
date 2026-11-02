@@ -16,6 +16,7 @@
 
 use agent_doc_element::element;
 use anyhow::Result;
+use std::collections::HashSet;
 
 use crate::document_queue::{self, QueueEntry, QueueRowProjection};
 use crate::queue_graph::QueueGraph;
@@ -73,6 +74,76 @@ pub fn project_runtime_projections_across_queues(
             document_queue::project_prompt_runtime_projections(body, &targets)?
         {
             projected = block.component.replace_content(&projected, &new_body);
+            changed = true;
+        }
+    }
+    Ok(changed.then_some(projected))
+}
+
+/// Restore nested executable rows that an older lifecycle projection removed
+/// even though their durable claims still carry the exact authored row
+/// (`#adnestedidenticalchildprojection`).
+///
+/// Modern claims are queue-anchored, so a repair never lands in a mirrored
+/// sibling queue. A legacy unanchored claim is repaired only in a single-queue
+/// document; ambiguity is left untouched for an explicit operator repair.
+pub fn restore_missing_nested_claim_rows_across_queues(
+    content: &str,
+    claims: &[crate::queue_claim::QueueClaim],
+) -> Result<Option<String>> {
+    let components = element::parse(content)?;
+    let graph = QueueGraph::parse(content, &components)?;
+    let blocks = graph.blocks();
+    if blocks.is_empty() {
+        return Ok(None);
+    }
+
+    let mut present = blocks
+        .iter()
+        .flat_map(|block| {
+            block
+                .entries
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| {
+                    matches!(entry, QueueEntry::Prompt(_) | QueueEntry::Completed(_))
+                        .then(|| crate::queue_claim::claim_identity_at(&block.entries, index))
+                        .flatten()
+                        .map(|identity| (block.id.clone(), identity))
+                })
+        })
+        .collect::<HashSet<_>>();
+    let mut projected = content.to_string();
+    let mut changed = false;
+
+    for block in blocks.iter().rev() {
+        let mut body = block.component.content(content).to_string();
+        let mut block_changed = false;
+        for claim in claims {
+            let present_key = (block.id.clone(), claim.identity.clone());
+            if present.contains(&present_key) || claim.claim_time_row.is_none() {
+                continue;
+            }
+            match claim
+                .anchor
+                .as_ref()
+                .and_then(|anchor| anchor.queue_id.as_deref())
+            {
+                Some(queue_id) if queue_id != block.id => continue,
+                Some(_) => {}
+                None if blocks.len() == 1 => {}
+                None => continue,
+            }
+            let Some(repaired) = document_queue::restore_missing_nested_claim_row(&body, claim)?
+            else {
+                continue;
+            };
+            body = repaired;
+            present.insert(present_key);
+            block_changed = true;
+        }
+        if block_changed {
+            projected = block.component.replace_content(&projected, &body);
             changed = true;
         }
     }

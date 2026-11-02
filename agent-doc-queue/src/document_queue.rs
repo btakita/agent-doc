@@ -4346,6 +4346,98 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     Some(nest_vector_claim_at(entries, index, &canonical).unwrap_or(canonical))
 }
 
+/// Restore one nested executable row from the durable claim that was created
+/// while that row still existed (`#adnestedidenticalchildprojection`).
+///
+/// This is deliberately narrow: the claim must retain its exact authored row,
+/// its nest-vector identity must be reproducible from that row, and exactly one
+/// live parent in this queue body must match the vector's parent. The insertion
+/// is text-local so unrelated Markdown and list-marker spelling stay byte-exact.
+pub fn restore_missing_nested_claim_row(
+    body: &str,
+    claim: &crate::queue_claim::QueueClaim,
+) -> Result<Option<String>> {
+    let Some(row) = claim.claim_time_row.as_deref() else {
+        return Ok(None);
+    };
+    let row = row.trim();
+    if row.is_empty() || row.lines().count() != 1 {
+        return Ok(None);
+    }
+    let Some((parent_text, _)) = claim.item_text.rsplit_once(": ") else {
+        return Ok(None);
+    };
+    let parent_text = parent_text.trim();
+    if parent_text.is_empty()
+        || crate::queue_claim::claim_identity(&format!("{parent_text}: {row}")) != claim.identity
+    {
+        return Ok(None);
+    }
+
+    let spans = parse_spans(body)?;
+    let entries = spans
+        .iter()
+        .map(|(entry, _)| entry.clone())
+        .collect::<Vec<_>>();
+    if entries.iter().enumerate().any(|(index, entry)| {
+        matches!(entry, QueueEntry::Prompt(_) | QueueEntry::Completed(_))
+            && crate::queue_claim::claim_identity_at(&entries, index).as_ref()
+                == Some(&claim.identity)
+    }) {
+        return Ok(None);
+    }
+
+    let parent_identity = crate::queue_claim::claim_identity(parent_text);
+    let candidates = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            let QueueEntry::Prompt(prompt) = entry else {
+                return None;
+            };
+            let lineage = lineage_claim_text(&entries, index)?;
+            (crate::queue_claim::claim_identity(&lineage) == parent_identity)
+                .then_some((index, prompt.indent))
+        })
+        .collect::<Vec<_>>();
+    let [(parent_index, parent_indent)] = candidates.as_slice() else {
+        return Ok(None);
+    };
+
+    let insertion_index = (*parent_index + 1..entries.len())
+        .find(|index| {
+            prompt_of(&entries[*index])
+                .map(|prompt| prompt.indent <= *parent_indent)
+                .unwrap_or(true)
+        })
+        .unwrap_or(entries.len());
+    let insertion_byte = spans
+        .get(insertion_index)
+        .map(|(_, range)| range.start)
+        .unwrap_or(body.len());
+    let mut insertion = String::new();
+    if insertion_byte > 0 && !body[..insertion_byte].ends_with('\n') {
+        insertion.push('\n');
+    }
+    insertion.push_str(&" ".repeat(*parent_indent + 2));
+    insertion.push_str("- ");
+    insertion.push_str(row);
+    insertion.push('\n');
+
+    let mut repaired = body.to_string();
+    repaired.insert_str(insertion_byte, &insertion);
+    let repaired_entries = parse(&repaired)?;
+    anyhow::ensure!(
+        repaired_entries.iter().enumerate().any(|(index, entry)| {
+            matches!(entry, QueueEntry::Prompt(_) | QueueEntry::Completed(_))
+                && crate::queue_claim::claim_identity_at(&repaired_entries, index).as_ref()
+                    == Some(&claim.identity)
+        }),
+        "restored nested queue row did not reproduce its durable claim identity"
+    );
+    Ok(Some(repaired))
+}
+
 /// Whether row `index` is the live head named by `head_text`.
 ///
 /// `head_text` may be the row's own work text or its nest-vector claim key.

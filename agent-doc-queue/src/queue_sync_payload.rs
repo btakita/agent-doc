@@ -513,9 +513,16 @@ pub fn project_document_queue_sync(
         let executable = document_queue::executable_prompt_indexes(&block.entries)
             .into_iter()
             .collect::<HashSet<_>>();
+        let mut seen_projection_aliases = HashSet::new();
         for (index, entry) in block.entries.iter().enumerate() {
             match entry {
                 QueueEntry::Prompt(prompt) if executable.contains(&index) => {
+                    if let Some(alias_identity) =
+                        document_queue::generated_prompt_alias_identity(&block.entries, index)
+                        && !seen_projection_aliases.insert(alias_identity)
+                    {
+                        continue;
+                    }
                     let identity = claim_identity_at(&block.entries, index)
                         .unwrap_or_else(|| crate::queue_claim::claim_identity(&prompt.text));
                     let claim = claims.get(&identity).copied();
@@ -894,6 +901,82 @@ mod tests {
             QueueSyncOperation::InlineExecuteThenReconcile
         );
         assert_eq!(payload.operator_gated.len(), 1);
+    }
+
+    #[test]
+    fn nested_generated_id_aliases_share_lifecycle_and_one_sync_operation() {
+        let body = concat!(
+            "- Fastest path for the tester today\n",
+            "  - do [#approved-handoff] [#operator-request-access]\n",
+            "    - **Response [#r-shared]:** completed batch\n",
+            "      - **State:** Complete.\n",
+            "    - **Response [#r-shared]:** completed batch\n",
+            "      - **State:** Complete.\n",
+            "    - Is there anything left in this tree? [#q-111111111111]\n",
+            "    - Is there anything left in this tree? [#q-222222222222]\n",
+        );
+        let content = format!(
+            "<!-- agent:run id=main subagents -->\n{body}<!-- /agent:run -->\n"
+        );
+        let entries = crate::document_queue::parse(body).unwrap();
+        let first_alias = entries
+            .iter()
+            .position(|entry| {
+                matches!(entry, QueueEntry::Prompt(prompt) if prompt.text.contains("q-111111111111"))
+            })
+            .unwrap();
+        let claim_text = crate::document_queue::lineage_claim_text(&entries, first_alias).unwrap();
+        let claims = vec![claim(
+            &claim_text,
+            QueueClaimState::Running,
+            Some("worker-1"),
+        )];
+
+        let payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            &content,
+            Some(&content),
+            &claims,
+        )
+        .unwrap();
+
+        assert_eq!(
+            payload
+                .items()
+                .filter(|item| item.item.contains("Is there anything left in this tree?"))
+                .count(),
+            1,
+            "aliases must not become two inbox actions: {:?}",
+            payload.items().collect::<Vec<_>>()
+        );
+        assert_eq!(payload.running.len(), 1);
+        assert_eq!(payload.running[0].worker_id.as_deref(), Some("worker-1"));
+        assert!(payload.running[0].item.contains("[#q-111111111111]"));
+    }
+
+    #[test]
+    fn nested_authored_effects_remain_independent_sync_operations() {
+        let content = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- parent\n",
+            "  - repeat work ⟦effect:1⟧ [#q-111111111111]\n",
+            "  - repeat work ⟦effect:2⟧ [#q-222222222222]\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        let payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            Some(content),
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(payload.pending.len(), 2);
+        assert!(payload.pending.iter().any(|item| item.item.contains("effect:1")));
+        assert!(payload.pending.iter().any(|item| item.item.contains("effect:2")));
     }
 
     #[test]

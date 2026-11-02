@@ -887,6 +887,12 @@ pub fn run_closeout_pending_maintenance(
 
 fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Result<bool> {
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
+        // An abandoned cycle has no captured response to publish. Preserve the
+        // final-gate refusal instead of letting derived status maintenance
+        // start a new write/controller path ahead of that refusal.
+        if state.phase == agent_doc_turn::CyclePhase::Abandoned {
+            return Ok(false);
+        }
         if state.had_pending_mutations
             || state.pending_added_this_cycle
             || !state.pending_done_ids.is_empty()
@@ -896,8 +902,8 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
         {
             return Ok(true);
         }
-        if let Some(required) = state.tracked_work_maintenance_required_at_preflight {
-            return Ok(required);
+        if state.tracked_work_maintenance_required_at_preflight == Some(true) {
+            return Ok(true);
         }
     }
 
@@ -929,14 +935,18 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
         }
         Err(err) => return Err(err),
     };
-    Ok(content_requires_closeout_pending_maintenance(&content))
+    content_requires_closeout_pending_maintenance(&content)
 }
 
-fn content_requires_closeout_pending_maintenance(content: &str) -> bool {
-    agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
+fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> {
+    Ok(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
         || agent_doc_element_done::prune_proven_redundant_terminal_debris(content).is_some()
+        // The managed open-items status is derived from queue and tracked-work
+        // state that this closeout may have changed. Reconcile it before the
+        // closeout commit even when no legacy tracked-work maintenance is due,
+        // so status never lands in a second recovery commit.
+        || agent_doc_work_graph::reconcile_managed_status_open_items(content)?.is_some())
 }
-
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
     let detail = err
         .chain()
@@ -979,7 +989,25 @@ mod precommit_pending_capture_tests {
 
         assert!(super::content_requires_closeout_pending_maintenance(
             content
-        ));
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn managed_status_drift_requires_closeout_pending_maintenance() {
+        let content = concat!(
+            "<!-- agent:status -->\n",
+            "<!-- /agent:status -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- open item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        assert!(super::content_requires_closeout_pending_maintenance(content).unwrap());
+        let reconciled = agent_doc_work_graph::reconcile_managed_status_open_items(content)
+            .unwrap()
+            .expect("status projection should be added");
+        assert!(!super::content_requires_closeout_pending_maintenance(&reconciled).unwrap());
     }
 
     struct TestBacklogCommandEffects;

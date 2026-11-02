@@ -3472,9 +3472,18 @@ fn response_summary_row_child(
     }
     if !next_actions.is_empty() {
         child.push_str("\n- **Next actions:**");
-        for action in next_actions {
-            child.push_str("\n  - **Action:** ");
-            child.push_str(&action);
+        for projection in next_actions {
+            let action_indent = if let Some(decision) = projection.decision {
+                child.push_str("\n  - **Decision:** ");
+                child.push_str(&decision);
+                "\n    - **Action:** "
+            } else {
+                "\n  - **Action:** "
+            };
+            for action in projection.actions {
+                child.push_str(action_indent);
+                child.push_str(&action);
+            }
         }
     }
     Some(child)
@@ -3580,16 +3589,87 @@ fn response_has_unpublished_work_evidence(response_body: &str) -> bool {
     .any(|needle| normalized.contains(needle))
 }
 
-fn response_next_actions(response_body: &str) -> Vec<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResponseNextActionProjection {
+    decision: Option<String>,
+    actions: Vec<String>,
+}
+
+fn response_next_actions(response_body: &str) -> Vec<ResponseNextActionProjection> {
     let lines = response_body.lines().collect::<Vec<_>>();
-    let mut actions = Vec::new();
+    let normalize = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // Prose responses commonly present each real decision as a Markdown
+    // subsection with `- Decision:` and `- Next action:` fields. Prefer those
+    // row-scoped fields over a generic lead so the active queue tree preserves
+    // every actionable unit without requiring the operator to read exchange.
+    let mut detailed = Vec::<ResponseNextActionProjection>::new();
+    let mut current_decision = None::<usize>;
+    for line in &lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            current_decision = None;
+            continue;
+        }
+        let Some(bullet) = trimmed.strip_prefix("- ") else {
+            continue;
+        };
+        let decision = bullet
+            .strip_prefix("Decision:")
+            .or_else(|| bullet.strip_prefix("**Decision:**"));
+        if let Some(decision) = decision {
+            let decision = normalize(decision);
+            if decision.is_empty() {
+                current_decision = None;
+            } else {
+                detailed.push(ResponseNextActionProjection {
+                    decision: Some(decision),
+                    actions: Vec::new(),
+                });
+                current_decision = Some(detailed.len() - 1);
+            }
+            continue;
+        }
+        let action = bullet
+            .strip_prefix("Next action:")
+            .or_else(|| bullet.strip_prefix("**Next action:**"));
+        if let Some(action) = action {
+            let action = normalize(action);
+            if action.is_empty() {
+                continue;
+            }
+            if let Some(index) = current_decision {
+                if !detailed[index].actions.contains(&action) {
+                    detailed[index].actions.push(action);
+                }
+            } else if !detailed
+                .iter()
+                .any(|candidate| candidate.decision.is_none() && candidate.actions.contains(&action))
+            {
+                detailed.push(ResponseNextActionProjection {
+                    decision: None,
+                    actions: vec![action],
+                });
+            }
+        }
+    }
+    if !detailed.is_empty() {
+        return detailed;
+    }
+
+    let mut actions = Vec::<ResponseNextActionProjection>::new();
     let mut index = 0usize;
     while index < lines.len() {
         let trimmed = lines[index].trim();
         if let Some(action) = trimmed.strip_prefix("**Next action:**") {
-            let action = action.split_whitespace().collect::<Vec<_>>().join(" ");
-            if !action.is_empty() && !actions.contains(&action) {
-                actions.push(action);
+            let action = normalize(action);
+            if !action.is_empty()
+                && !actions.iter().any(|candidate| candidate.actions.contains(&action))
+            {
+                actions.push(ResponseNextActionProjection {
+                    decision: None,
+                    actions: vec![action],
+                });
             }
             index += 1;
             continue;
@@ -3601,9 +3681,14 @@ fn response_next_actions(response_body: &str) -> Vec<String> {
                 let Some(action) = trimmed.strip_prefix("- ") else {
                     break;
                 };
-                let action = action.split_whitespace().collect::<Vec<_>>().join(" ");
-                if !action.is_empty() && !actions.contains(&action) {
-                    actions.push(action);
+                let action = normalize(action);
+                if !action.is_empty()
+                    && !actions.iter().any(|candidate| candidate.actions.contains(&action))
+                {
+                    actions.push(ResponseNextActionProjection {
+                        decision: None,
+                        actions: vec![action],
+                    });
                 }
                 index += 1;
             }
@@ -4065,6 +4150,76 @@ mod tests {
         assert!(
             document_queue::prompts(&entries).is_empty(),
             "generated state and guidance must stay inert:\n{entries:#?}\n{queue}"
+        );
+    }
+
+    #[test]
+    fn decision_sections_project_every_action_into_the_active_queue_tree() {
+        let response = concat!(
+            "### Re: ADR next steps — test\n\n",
+            "> **Queue prompt:** Tell me the next actionable steps [#q-adr]\n\n",
+            "**Next action:** The owner provides or defers the decisions below.\n\n",
+            "#### 1. Permission copy\n\n",
+            "- Decision: name the online-play permission and agree its wording.\n",
+            "- Owner: Product.\n",
+            "- Next action: Product writes the final wording, or defers the workshop.\n\n",
+            "#### 2. Session channel\n\n",
+            "- Decision: accept `channel_type = 'session'` beside ADR 0040.\n",
+            "- Owner: API owner.\n",
+            "- Next action: the API owner records the decision, or defers the spec.\n\n",
+            "#### 3. Existing decisions\n\n",
+            "- Next action: record the two decisions when an edit is authorized.\n",
+            "\n#### 4. Deferred decision\n\n",
+            "- Decision: choose whether to defer the retention workshop.\n",
+        );
+        let before =
+            doc_with_queue_and_exchange("- Tell me the next actionable steps [#q-adr]\n", "");
+        let after = doc_with_queue_and_exchange(
+            "- ~~Tell me the next actionable steps [#q-adr]~~\n",
+            response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+
+        assert!(
+            queue.contains(
+                "- **Next actions:**\n      - **Decision:** name the online-play permission and agree its wording.\n        - **Action:** Product writes the final wording, or defers the workshop."
+            ),
+            "{queue}"
+        );
+        assert!(
+            queue.contains(
+                "      - **Decision:** accept `channel_type = 'session'` beside ADR 0040.\n        - **Action:** the API owner records the decision, or defers the spec."
+            ),
+            "{queue}"
+        );
+        assert!(
+            queue.contains(
+                "      - **Action:** record the two decisions when an edit is authorized."
+            ),
+            "{queue}"
+        );
+        assert!(
+            queue.contains(
+                "      - **Decision:** choose whether to defer the retention workshop."
+            ),
+            "a decision without an action still needs its own visible subitem:\n{queue}"
+        );
+        assert!(
+            !queue.contains("**Action:** The owner provides or defers the decisions below."),
+            "the generic lead must not replace the concrete actions:\n{queue}"
+        );
+        let entries = document_queue::parse(queue).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "generated decision/action descendants must stay inert:\n{entries:#?}\n{queue}"
         );
     }
 

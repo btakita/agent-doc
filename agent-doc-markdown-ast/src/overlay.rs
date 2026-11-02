@@ -636,6 +636,32 @@ fn response_action_child_end(
     }
     let (actions_index, actions_indent) =
         nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
+    if item_indent != actions_indent + 2 {
+        return None;
+    }
+    let direct_action =
+        response_next_actions_label_child_end(lines, actions_index, actions_indent).is_some();
+    let decision_action =
+        response_next_action_decision_child_end(lines, actions_index, actions_indent).is_some();
+    if !direct_action && !decision_action {
+        return None;
+    }
+    Some(opener_index + 1)
+}
+
+fn response_next_action_decision_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    let decision = strip_bullet(lines.get(opener_index)?)?
+        .trim()
+        .strip_prefix("**Decision:** ")?;
+    if decision.trim().is_empty() {
+        return None;
+    }
+    let (actions_index, actions_indent) =
+        nearest_prior_line_with_smaller_indent(lines, opener_index, item_indent)?;
     if item_indent != actions_indent + 2
         || response_next_actions_label_child_end(lines, actions_index, actions_indent).is_none()
     {
@@ -681,6 +707,7 @@ pub fn inert_list_child_end(
         .or_else(|| response_choice_child_end(lines, opener_index, item_indent))
         .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
         .or_else(|| response_decision_metadata_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_next_action_decision_child_end(lines, opener_index, item_indent))
         .or_else(|| response_action_child_end(lines, opener_index, item_indent))
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
 }
@@ -725,6 +752,12 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
                 .is_some()
             || response_decision_metadata_child_end(&normalized_lines, index, item_indent)
                 .is_some()
+            || response_next_action_decision_child_end(
+                &normalized_lines,
+                index,
+                item_indent,
+            )
+            .is_some()
             || response_action_child_end(&normalized_lines, index, item_indent).is_some()
             || related_row_child_end(&normalized_lines, index, item_indent).is_some();
         if generated {
@@ -831,6 +864,7 @@ pub fn response_row_child_ranges(source: &str) -> Vec<(usize, usize)> {
             .or_else(|| response_choice_child_end(&lines, index, item_indent))
             .or_else(|| response_next_actions_label_child_end(&lines, index, item_indent))
             .or_else(|| response_decision_metadata_child_end(&lines, index, item_indent))
+            .or_else(|| response_next_action_decision_child_end(&lines, index, item_indent))
             .or_else(|| response_action_child_end(&lines, index, item_indent))
         {
             ranges.push((offsets[index], offsets[end]));
@@ -2047,6 +2081,29 @@ mod tests {
         assert_eq!(texts, vec!["done", "I opened it; verify the screenshot."]);
         let ranges = response_row_child_ranges(source);
         assert_eq!(ranges.len(), 3, "{ranges:?}");
+    }
+
+    #[test]
+    fn generated_decision_action_tree_is_inert_but_operator_child_is_typed() {
+        let source = concat!(
+            "<!-- agent:queue -->\n",
+            "- ~~done~~ — auto-struck: response: [#r-0123456789ab]\n",
+            "  - **Response [#r-0123456789ab]:** One decision remains.\n",
+            "    - **Next actions:**\n",
+            "      - **Decision:** Choose the preview target.\n",
+            "        - **Action:** Open the selected preview.\n",
+            "          - I chose staging; verify the screenshot.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let parsed = components(source);
+        let texts = parsed[0]
+            .items
+            .iter()
+            .map(|item| item.text.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["done", "I chose staging; verify the screenshot."]);
+        let ranges = response_row_child_ranges(source);
+        assert_eq!(ranges.len(), 4, "{ranges:?}");
     }
 
     #[test]

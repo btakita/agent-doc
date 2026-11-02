@@ -39,11 +39,10 @@ pub const RESPONSE_ID_NOTE_PREFIX: &str = "response: ";
 const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
 /// Binary-owned sentinels for the closeout-maintained operator-work tree.
 ///
-/// H3 deliberately keeps generated response metadata on the existing
-/// completed-row path: completed rows are visible context but never executable
-/// queue leaves.  The sentinels distinguish those rows from operator-authored
-/// prose and make refresh/removal byte-addressable without introducing another
-/// queue entry type.
+/// Generated response metadata stays readable and unstruck: the sentinels make
+/// those evidence rows inert to scheduling, distinguish them from
+/// operator-authored response edges, and keep refresh/removal byte-addressable
+/// without introducing another queue entry type.
 pub const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
 pub const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
 pub const WAITING_ON_YOU_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
@@ -4616,10 +4615,10 @@ fn remove_inline_response_id(line: &str, response_id: &str) -> String {
 ///
 /// This is a pure closeout projection. `agent:todo` remains the durable source
 /// of truth; this function only maintains its queue-facing view. Generated
-/// response rows are rendered as completed nested rows, so H3's existing
-/// leaf-only scheduler treats the root and item rows as context parents and
-/// never dispatches their binary-authored metadata. A normal child the operator
-/// adds beneath an item is still an ordinary executable queue leaf.
+/// response rows remain readable, unstruck evidence tagged with the binary
+/// metadata marker. Queue parsing treats the entire waiting subtree as one
+/// graph projection: metadata and operator answer edges are never independent
+/// work; an answer selects the durable waiting item parent.
 pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Result<Option<String>> {
     let location = waiting_tree_location(document)?;
     let external_ids = queue_prompt_ids_outside_waiting_tree(document, location.as_ref())?;
@@ -4636,7 +4635,7 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
             continue;
         }
         if let Some((raw, true)) = existing.get(&todo.id) {
-            children.push(raw.clone());
+            children.push(unstrike_waiting_metadata(raw)?);
             continue;
         }
         children.push(render_waiting_child(&todo, packets.get(&todo.id)));
@@ -4666,6 +4665,24 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
         out.replace_range(location.start..location.end, &replacement);
     }
     Ok((out != document).then_some(out))
+}
+
+/// Migrate legacy struck waiting metadata without touching operator-authored
+/// response edges nested beside it.
+fn unstrike_waiting_metadata(raw: &str) -> Result<String> {
+    let entries = document_queue::parse(raw)?;
+    let migrated = entries
+        .into_iter()
+        .map(|entry| match entry {
+            QueueEntry::Completed(prompt)
+                if prompt.text.contains(WAITING_ON_YOU_METADATA_MARKER) =>
+            {
+                QueueEntry::Prompt(prompt)
+            }
+            other => other,
+        })
+        .collect::<Vec<_>>();
+    Ok(document_queue::render(&migrated))
 }
 
 #[derive(Debug, Clone)]
@@ -4985,58 +5002,52 @@ fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacke
         .filter(|summary| !summary.is_empty())
         .unwrap_or(&todo.action);
     let mut out = format!(
-        concat!(
-            "  - [#{}] {} {}\n",
-            "    - ~~**Response:** {} {}~~\n",
-            "      - ~~**Summary:** {} {}~~"
-        ),
+        concat!("  - [#{}] {} {}\n", "    - **Response:** {} {}"),
         todo.id,
         todo.action,
         WAITING_ON_YOU_ITEM_MARKER,
         summary,
-        WAITING_ON_YOU_METADATA_MARKER,
-        summary,
         WAITING_ON_YOU_METADATA_MARKER
     );
+    // `#waitingresponsededup`: this is a free-text Response node, so its text
+    // is itself the summary. A nested Summary belongs only under an identity
+    // container (`Response [#id]`), which this waiting projection does not
+    // render. Never duplicate or paraphrase this free-text evidence into a
+    // second metadata node.
     if let Some(packet) = packet {
         if !packet.context.is_empty() {
-            out.push_str("\n      - ~~**Context:** ");
+            out.push_str("\n      - **Context:** ");
             out.push_str(&packet.context);
             out.push(' ');
             out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-            out.push_str("~~");
         }
-        out.push_str("\n      - ~~**Question:** ");
+        out.push_str("\n      - **Question:** ");
         out.push_str(&packet.request);
         out.push(' ');
         out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-        out.push_str("~~");
         if !packet.choices.is_empty() {
-            out.push_str("\n      - ~~**Choices:** ");
+            out.push_str("\n      - **Choices:** ");
             out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-            out.push_str("~~");
             for choice in &packet.choices {
-                out.push_str("\n        - ~~");
+                out.push_str("\n        - ");
                 out.push_str(choice);
                 out.push(' ');
                 out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-                out.push_str("~~");
             }
         }
     } else {
         out.push_str(
-            "\n      - ~~**Question:** What decision or completion result should be recorded? ",
+            "\n      - **Question:** What decision or completion result should be recorded? ",
         );
         out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-        out.push_str("~~");
     }
-    out.push_str("\n      - ~~**Next actions:** ");
+    out.push_str("\n      - **Next actions:** ");
     out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-    out.push_str("~~\n        - ~~**Action:** ");
+    out.push_str("\n        - **Action:** ");
     out.push_str(&todo.action);
     out.push(' ');
     out.push_str(WAITING_ON_YOU_METADATA_MARKER);
-    out.push_str("~~\n");
+    out.push('\n');
     // A Todo may discuss agent-doc's own exchange syntax (for example the
     // exact Queue-prompt echo token). The waiting tree is a generated queue
     // projection, not conversation content, so encode that boundary token in
@@ -5173,9 +5184,18 @@ mod tests {
             projected.contains("- [#approve-pr] Approve and merge PR #42."),
             "{projected}"
         );
-        assert!(projected.contains("**Summary:** Approve and merge PR #42."));
+        assert!(
+            !projected.contains("**Summary:** Approve and merge PR #42."),
+            "an identical Response/summary must project once: {projected}"
+        );
         assert!(projected.contains("**Next actions:**"));
         assert!(projected.contains("**Action:** Approve and merge PR #42."));
+        assert!(
+            !projected.contains("~~**Response:")
+                && !projected.contains("~~**Question:")
+                && !projected.contains("~~**Action:"),
+            "response evidence stays readable and unstruck: {projected}"
+        );
 
         let queue = element::parse(&projected)
             .unwrap()
@@ -5195,6 +5215,24 @@ mod tests {
             None,
             "the closeout projection must be replay-idempotent"
         );
+    }
+
+    #[test]
+    fn waiting_tree_does_not_duplicate_identical_response_and_summary() {
+        let action = "Reopen the run-game sessions after the policy decision.";
+        let document = waiting_tree_document(
+            "",
+            &format!("- [ ] [#rungamesessions-reopen] {action}\n"),
+            "",
+        );
+
+        let projected = project_waiting_on_you_tree(&document, "")
+            .unwrap()
+            .expect("open Todo should create the waiting projection");
+        assert_eq!(projected.matches(action).count(), 4, "{projected}");
+        // Durable Todo + waiting item + Response + Action are the four
+        // legitimate occurrences. A fifth would be the redundant Summary.
+        assert!(!projected.contains("**Summary:**"), "{projected}");
     }
 
     #[test]
@@ -5265,6 +5303,10 @@ mod tests {
             projected.contains("**production**: Publish to production."),
             "{projected}"
         );
+        assert!(
+            !projected.contains("**Summary:**"),
+            "a free-text Response is already its own summary: {projected}"
+        );
     }
 
     #[test]
@@ -5306,7 +5348,7 @@ mod tests {
     }
 
     #[test]
-    fn operator_reply_stays_promptable_until_the_todo_resolves_then_tree_leaves() {
+    fn operator_reply_selects_waiting_item_until_the_todo_resolves_then_tree_leaves() {
         let response = "### Re: approval — test\n\nWaiting for approval.";
         let document = waiting_tree_document(
             "",
@@ -5332,11 +5374,13 @@ mod tests {
             .find(|component| component.name == "queue")
             .unwrap();
         let entries = document_queue::parse(queue.content(&with_reply)).unwrap();
-        assert!(
-            document_queue::prompts(&entries)
-                .into_iter()
-                .any(|prompt| prompt.text == "approved")
-        );
+        let executable = document_queue::executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 1, "{entries:#?}");
+        let head = document_queue::lineage_claim_text(&entries, executable[0]).unwrap();
+        assert!(head.contains("[#approve-pr]"), "{head}");
+        assert!(!head.contains("approved"), "response evidence is not work: {head}");
+        let packet = document_queue::prompt_context_packet_at(&entries, executable[0]).unwrap();
+        assert_eq!(packet.decision_evidence, ["approved"]);
 
         let resolved = with_reply.replace(
             "- [ ] [#approve-pr] Approve and merge PR #42.",
@@ -5347,6 +5391,31 @@ mod tests {
             .expect("resolved todo should remove the tree");
         assert!(!cleaned.contains(WAITING_ON_YOU_ROOT_MARKER), "{cleaned}");
         assert!(!cleaned.contains("    - approved\n"), "{cleaned}");
+    }
+
+    #[test]
+    fn refresh_unstrikes_legacy_waiting_metadata_without_losing_answer_edges() {
+        let response = "### Re: approval — test\n\nWaiting for approval.";
+        let legacy = concat!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
+            "    - ~~**Response:** Approve and merge PR #42. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Question:** What decision should be recorded? <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - approved\n",
+        );
+        let document = waiting_tree_document(
+            legacy,
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+
+        let repaired = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .expect("legacy struck evidence should migrate");
+        assert!(repaired.contains("        - approved\n"), "{repaired}");
+        assert!(repaired.contains("- **Response:** Approve and merge PR #42."));
+        assert!(!repaired.contains("~~**Response:"), "{repaired}");
+        assert!(!repaired.contains("~~**Question:"), "{repaired}");
     }
 
     #[test]

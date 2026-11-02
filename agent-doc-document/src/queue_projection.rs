@@ -655,6 +655,16 @@ pub fn operator_action_ids(text: &str) -> Vec<String> {
         }
         break;
     }
+    // A canonical tracked row may already own the same id as its operator
+    // gate (`🙋☑️ [#id] ...`). In that shape the id is the work node rather
+    // than a duplicated trailing annotation, but it still names the gate.
+    if marked
+        && let agent_doc_element_queue::QueueItemIdentity::Id(id) =
+            agent_doc_element_queue::queue_head_identity(rest)
+        && !ids.contains(&id)
+    {
+        ids.push(id);
+    }
     if let Some((id, after, _)) = trailing_operator_action_annotation(text.trim())
         && (marked
             || (is_reserved_operator_action_id(id)
@@ -940,7 +950,12 @@ pub fn apply_operator_action_ids(text: &str, ids: &[String]) -> String {
     let mut projected = bare;
     for id in &normalized {
         let already_local = trailing_operator_action_annotation(&projected)
-            .is_some_and(|(existing, _, _)| existing.eq_ignore_ascii_case(id));
+            .is_some_and(|(existing, _, _)| existing.eq_ignore_ascii_case(id))
+            || matches!(
+                agent_doc_element_queue::queue_head_identity(&projected),
+                agent_doc_element_queue::QueueItemIdentity::Id(ref existing)
+                    if existing.eq_ignore_ascii_case(id)
+            );
         if !already_local {
             if !projected.is_empty() {
                 projected.push(' ');

@@ -1440,6 +1440,28 @@ pub fn live_queue_head_texts(content: &str) -> Option<Vec<String>> {
     )
 }
 
+/// Visible row text and exact claim lineage for every executable row of the
+/// selected queue.
+///
+/// This is the shared steering/claim boundary: callers may show `visible` to
+/// the operator while keying lifecycle on `lineage`, without reparsing a
+/// different queue block or offering non-executable projection descendants.
+pub fn live_executable_rows(content: &str) -> Option<Vec<(String, String)>> {
+    let (_, entries) = queue_component_entries(content)?;
+    Some(
+        document_queue::executable_prompt_indexes(&entries)
+            .into_iter()
+            .filter_map(|index| {
+                let QueueEntry::Prompt(prompt) = entries.get(index)? else {
+                    return None;
+                };
+                let lineage = document_queue::lineage_claim_text(&entries, index)?;
+                Some((prompt.text.trim().to_string(), lineage))
+            })
+            .collect(),
+    )
+}
+
 /// Executable rows of the selected queue as `(display, lineage)`.
 ///
 /// `display` is the marker-stripped row text. `lineage` is that row's claim

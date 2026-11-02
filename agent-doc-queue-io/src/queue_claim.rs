@@ -2196,6 +2196,56 @@ pub fn retire_struck_claims(
     Ok(retired)
 }
 
+/// End one exact Reported attempt after its generated lifecycle projection was
+/// reaped while the tracked parent remains open (`#nestedechostrike`).
+///
+/// Ordinary row strikes retire by work identity. A waiting-tree projection has
+/// its own subagent identity, so striking only that child cannot match the
+/// parent claim. The acknowledgement guard has already proved this exact
+/// owner/generation is Reported; retire it directly and keep all other attempts.
+pub fn retire_exact_reported_attempt(
+    file: &Path,
+    target_id: &str,
+    owner: &str,
+    generation: u64,
+    source: &str,
+) -> Result<bool> {
+    let identity = agent_doc_queue::queue_claim::claim_identity(&format!("do [#{target_id}]"));
+    let retired = mutate_ledger(file, |ledger| {
+        let Some(index) = ledger
+            .claims
+            .iter()
+            .position(|claim| {
+                claim.identity == identity
+                    && claim.owner == owner
+                    && claim.generation == generation
+            })
+        else {
+            return Ok(None);
+        };
+        if ledger.claims[index].state != agent_doc_queue::queue_claim::QueueClaimState::Reported {
+            bail!(
+                "refusing to retire non-reported attempt owner={owner} generation={generation} state={:?}",
+                ledger.claims[index].state
+            );
+        }
+        Ok(Some(ledger.claims.remove(index)))
+    })?;
+    let Some(claim) = retired else {
+        return Ok(false);
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_exact_reported_retired owner={} generation={} source={source} item_bytes={} (#nestedechostrike #strikeretires)",
+            claim.owner,
+            claim.generation,
+            claim.item_text.trim().len(),
+        ),
+    );
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

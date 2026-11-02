@@ -2538,12 +2538,39 @@ fn run_pending_maintenance_with_options(
         }
     }
 
+    // Status-only maintenance must defer as one unit when the editor authority
+    // cannot be reached. Capture the pre-status cut before either derived
+    // projection so the legacy stale-marker recovery below does not strand a
+    // newly introduced open-items block behind an unavailable editor.
     let stale_marker_before = (
         current_content.clone(),
         snapshot_content.clone(),
         mutated,
         snapshot_mutated,
     );
+
+    // `agent:status` is a derived observer: keep its managed nested list in
+    // lockstep with the authoritative open queue/todo/tracked-work sources.
+    // Derive each document independently so snapshot maintenance never copies
+    // current-file work across an ownership boundary.
+    let mut open_items_status_mutated = false;
+    if let Some(reconciled) =
+        agent_doc_work_graph::reconcile_managed_status_open_items(&current_content)?
+    {
+        eprintln!("[preflight] status: reconciled managed open-items list");
+        current_content = reconciled;
+        mutated = true;
+        open_items_status_mutated = true;
+    }
+    if let Some(ref mut snap_content) = snapshot_content
+        && let Some(reconciled) =
+            agent_doc_work_graph::reconcile_managed_status_open_items(snap_content)?
+    {
+        *snap_content = reconciled;
+        snapshot_mutated = true;
+        open_items_status_mutated = true;
+    }
+
     let mut stale_supervisor_marker_mutated = false;
     // Historical versions wrote an operator-facing stale-supervisor marker into
     // the session document. Staleness now schedules an automatic safe-boundary
@@ -2656,17 +2683,20 @@ fn run_pending_maintenance_with_options(
                 agent_doc_turn::write_ownership::is_retained_delivery_projection_pending(
                     &err_message,
                 );
-            if stale_supervisor_marker_mutated && !stale_marker_before.2 && deferable_status_error {
+            if (stale_supervisor_marker_mutated || open_items_status_mutated)
+                && !stale_marker_before.2
+                && deferable_status_error
+            {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "stale_supervisor_status_update_deferred file={} source=pending_maintenance error={}",
+                        "status_projection_update_deferred file={} source=pending_maintenance error={}",
                         file.display(),
                         err_message.replace('\n', " ")
                     ),
                 );
                 eprintln!(
-                    "[preflight] status: deferred legacy stale-supervisor marker removal for {}: {}",
+                    "[preflight] status: deferred derived status projection for {}: {}",
                     file.display(),
                     err
                 );
@@ -18252,6 +18282,19 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let expected = "📤 Queue handoff: 1 reported item awaiting coordinator integration, verification, and closeout.";
         let file_after = std::fs::read_to_string(&doc).unwrap();
         assert!(file_after.contains(expected), "{file_after}");
+        assert_eq!(
+            file_after
+                .matches(agent_doc_document::status_projection::STATUS_OPEN_ITEMS_OPEN_MARKER)
+                .count(),
+            1,
+            "status must contain one managed nested-list projection: {file_after}"
+        );
+        assert!(
+            file_after.contains("- **Open items** (1)")
+                && file_after.contains("`[#reported]` — integrate the completed worker result")
+                && file_after.contains("**Sources:** queue (open); backlog (open)"),
+            "the queue projection and tracked owner must fold into one status item: {file_after}"
+        );
         assert!(
             file_after.contains("Session ready."),
             "operator-authored status prose must be preserved: {file_after}"
@@ -18260,6 +18303,10 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap()
             .unwrap();
         assert!(snapshot_after.contains(expected), "{snapshot_after}");
+        assert!(
+            snapshot_after.contains("`[#reported]` — integrate the completed worker result"),
+            "snapshot must carry the independently derived open-items projection: {snapshot_after}"
+        );
     }
 
     #[test]

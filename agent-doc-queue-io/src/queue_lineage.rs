@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_doc_element_queue::QueueItemIdentity;
+use agent_doc_element_queue::{QueueItemIdentity, strip_queue_prompt_stable_id_annotation};
 use agent_doc_queue::queue_claim::{QueueClaim, claim_identity};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -1018,14 +1018,31 @@ fn require_integrated_repo_work_inner(
     generation: u64,
     require_attempt: bool,
 ) -> Result<()> {
-    let identity = claim_identity(item);
     let ledger = load(file)?;
-    let attempt = ledger
+    let identity = claim_identity(item);
+    // Admission can add a binary-owned `[#q-...]` after claim/start recorded
+    // an authored nested lineage (`parent: leaf`). That projection is the
+    // same attempt, not fresh work. Resolve only that one-way generated-id
+    // alias; authored ids are never stripped. More than one candidate remains
+    // corrupt/ambiguous state and must not pick an attempt silently.
+    let authored_item = strip_queue_prompt_stable_id_annotation(item);
+    let authored_identity = claim_identity(&authored_item);
+    let mut attempts = ledger
         .attempts
         .iter()
-        .find(|attempt| {
-            attempt.generation == generation && attempt.matches_identity(&identity)
+        .filter(|attempt| {
+            attempt.generation == generation
+                && (attempt.matches_identity(&identity)
+                    || (authored_identity != identity
+                        && attempt.matches_identity(&authored_identity)))
         });
+    let attempt = attempts.next();
+    if attempts.next().is_some() {
+        bail!(
+            "ambiguous queue lineage attempts for {item:?} generation {generation} after resolving its admitted prompt-id projection; keep the reported row live and inspect `agent-doc queue lineage {} --generation {generation}`",
+            file.display(),
+        );
+    }
     let Some(attempt) = attempt else {
         if !require_attempt {
             return Ok(());
@@ -1473,6 +1490,56 @@ mod tests {
             base_sha: Some(base.to_string()),
             ..RecordRequest::default()
         }
+    }
+
+    #[test]
+    fn integration_guard_resolves_an_admitted_nested_projection_without_losing_repo_proof() {
+        let authored = "parent work: nested prose";
+        let projected = "parent work: nested prose [#q-a1b2c3d4e5f6]";
+
+        let prose = RepoFixture::new();
+        let claim = make_claim(
+            &prose.doc,
+            authored,
+            "subagent:prose",
+            Some("worker:prose"),
+        );
+        record_started(&prose.doc, &claim).unwrap();
+        require_integrated_repo_work(&prose.doc, projected, claim.generation).unwrap();
+
+        let repo = RepoFixture::new();
+        let base = repo.head();
+        let claim = make_claim(
+            &repo.doc,
+            authored,
+            "subagent:repo",
+            Some("worker:repo"),
+        );
+        record_started(&repo.doc, &claim).unwrap();
+        record(
+            &repo.doc,
+            authored,
+            claim.generation,
+            attach_request(&repo, "worker:repo", &base),
+        )
+        .unwrap();
+        let source = repo.commit_file("work.txt", "work\n", "worker work");
+        record(
+            &repo.doc,
+            authored,
+            claim.generation,
+            RecordRequest {
+                kind: QueueLineageEventKind::Committed,
+                source_sha: Some(source),
+                ..RecordRequest::default()
+            },
+        )
+        .unwrap();
+
+        let refusal = require_integrated_repo_work(&repo.doc, projected, claim.generation)
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("is not integrated"), "{refusal}");
     }
 
     #[test]

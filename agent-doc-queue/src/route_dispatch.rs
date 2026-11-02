@@ -636,8 +636,8 @@ mod tests {
         )));
         assert!(update.content.contains(concat!(
             "<!-- agent:run id=immediate go -->\n",
-            "- existing\n",
-            "- routed item\n",
+            "- ### existing\n",
+            "- ### routed item\n",
             "<!-- /agent:run -->"
         )));
     }
@@ -662,7 +662,7 @@ mod tests {
         )));
         assert!(update.content.contains(concat!(
             "<!-- agent:run go -->\n",
-            "- routed item\n",
+            "- ### routed item\n",
             "<!-- /agent:run -->"
         )));
     }

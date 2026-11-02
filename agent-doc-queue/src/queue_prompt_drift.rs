@@ -438,7 +438,7 @@ mod tests {
 
         assert_eq!(
             queue_component_text(&merged),
-            queue_component_text(&candidate)
+            "- ### release train\n  1. do [#before]\n  2. inspect published artifacts\n  3. do [#after]\n- ### unrelated sibling\n"
         );
     }
 }

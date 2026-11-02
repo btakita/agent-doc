@@ -1828,8 +1828,8 @@ mod tests {
         let components = element::parse(&outcome.content).unwrap();
         let graph = QueueGraph::parse(&outcome.content, &components).unwrap();
         assert_eq!(graph.selected().unwrap().id, "build");
-        assert!(outcome.content.contains("- build 2"));
-        assert!(outcome.content.contains("- publish 2"));
+        assert!(outcome.content.contains("- ### build 2"));
+        assert!(outcome.content.contains("- ### publish 2"));
     }
 
     #[test]

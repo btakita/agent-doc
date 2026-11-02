@@ -1989,7 +1989,14 @@ fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Optio
     for descendant in index + 1..end {
         match &entries[descendant] {
             QueueEntry::Prompt(_) | QueueEntry::Completed(_)
-                if !entry_is_group_parent(entries, descendant) =>
+                if !entry_is_group_parent(entries, descendant)
+                    && !matches!(
+                        &entries[descendant],
+                        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)
+                            if prompt.text.contains(
+                                crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER
+                            )
+                    ) =>
             {
                 saw_leaf = true;
                 all_struck &= matches!(entries[descendant], QueueEntry::Completed(_));

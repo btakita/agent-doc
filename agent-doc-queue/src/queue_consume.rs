@@ -44,9 +44,9 @@ const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
 /// queue leaves.  The sentinels distinguish those rows from operator-authored
 /// prose and make refresh/removal byte-addressable without introducing another
 /// queue entry type.
-const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
-const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
-const WAITING_ON_YOU_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+pub const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
+pub const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
+pub const WAITING_ON_YOU_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
 const WAITING_ON_YOU_ROOT_TEXT: &str =
     "Waiting on you — answer by adding a child line under an item";
 

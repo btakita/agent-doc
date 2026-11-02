@@ -418,6 +418,15 @@ fn derive_runtime_projection_scoped(
             .enumerate()
             .filter_map(|(index, entry)| match entry {
                 QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
+                    if prompt.text.contains(
+                        agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER,
+                    ) || prompt.text.contains(
+                        agent_doc_queue::queue_consume::WAITING_ON_YOU_ITEM_MARKER,
+                    ) || prompt.text.contains(
+                        agent_doc_queue::queue_consume::WAITING_ON_YOU_METADATA_MARKER,
+                    ) {
+                        return None;
+                    }
                     let struck = matches!(entry, QueueEntry::Completed(_));
                     // `#queuemirrormarkers`: a sibling queue's struck row is its
                     // own terminal (or `agent:loop` pass-owned) evidence.
@@ -1057,6 +1066,36 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             );
         }
     }
+    // `#adwaitingrepair`: declarative sync owns binary-authored queue
+    // projections even when there is no response-bearing closeout. Older
+    // versions struck the Waiting-on-you owner rows themselves, making live
+    // Todo-backed operator work look complete until another response happened
+    // to refresh the tree. Re-derive the tree from the current authoritative
+    // Todo state here; the empty response only means there is no new packet
+    // context to add.
+    let waiting_tree_repaired = if let Some(repaired) =
+        agent_doc_queue::queue_consume::project_waiting_on_you_tree(&content, "")?
+    {
+        effects.converge_document_or_disk(
+            file,
+            &repaired,
+            &content,
+            "queue_sync_waiting_tree_repair",
+        )?;
+        content = effects.current_document_content(file, "queue_sync_after_waiting_tree_repair")?;
+        if let Err(warning) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        ) {
+            eprintln!(
+                "[queue sync] warning: failed to update snapshot after Waiting-on-you repair: {warning}"
+            );
+        }
+        true
+    } else {
+        false
+    };
     let explicit_routing = crate::one_shot_sync::sync_explicit_backlog_queue_routes_with_snapshot(
         file,
         &content,
@@ -1172,15 +1211,17 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         }
         None if completion_cell_repaired
             || response_metadata_repaired
+            || waiting_tree_repaired
             || lifecycle_changed
             || answered_count > 0
             || action_debt_remains =>
         {
             println!(
-                "{}: reconciled queue state (completion_cell_repaired={}, response_metadata_repaired={}, lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
+                "{}: reconciled queue state (completion_cell_repaired={}, response_metadata_repaired={}, waiting_tree_repaired={}, lifecycle_projection_changed={}, captured_answered_free_text={}); no configured backlog mirror{}.",
                 file.display(),
                 completion_cell_repaired,
                 response_metadata_repaired,
+                waiting_tree_repaired,
                 lifecycle_changed,
                 answered_count,
                 if action_debt_remains {
@@ -1624,6 +1665,49 @@ mod tests {
             reconciled.contains("- 📥 unanswered manual prompt"),
             "sync should paint the pending lifecycle projection: {reconciled}"
         );
+    }
+
+    #[test]
+    fn sync_unstrikes_legacy_waiting_owner_without_a_new_response() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("s.md");
+        let content = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### Waiting on you — answer by adding a child line under an item: <!-- agent-doc:waiting-on-you -->\n",
+            "  - ~~[#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->~~\n",
+            "    - ~~**Response:** Approve and merge PR #42. <!-- agent-doc:waiting-metadata -->~~\n",
+            "<!-- /agent:queue -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let effects = FakeEffects::with_current(content);
+
+        sync_with_effects(&effects, &doc)
+            .expect("declarative sync should repair a struck live waiting owner");
+
+        let repaired = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains(
+                "  - [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n"
+            ),
+            "{repaired}"
+        );
+        assert!(
+            !repaired.contains(
+                "~~[#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->~~"
+            ),
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains("~~**Response:** Approve and merge PR #42."),
+            "binary metadata remains inert: {repaired}"
+        );
+
+        sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), repaired);
     }
 
     #[test]

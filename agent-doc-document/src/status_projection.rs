@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use agent_doc_element::element;
 use agent_doc_element::element::{is_backlog_component, is_tracked_work_component};
+use agent_doc_markdown_ast::{Block, BlockKind};
+use std::ops::Range;
 
 /// `#staleshow` — stable sentinel line inserted into the `<!-- agent:status -->`
 /// component whenever the live route-owned supervisor/controller serving the
@@ -15,6 +17,12 @@ pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your sup
 /// worker result still needs coordinator integration, verification, and closeout.
 pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
 const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
+
+/// Delimiters for the binary-owned open-work projection nested in
+/// `agent:status`. The source work remains owned by its queue, todo, backlog,
+/// review, or icebox component; this block is a read-only index of that work.
+pub const STATUS_OPEN_ITEMS_OPEN_MARKER: &str = "<!-- status:open-items -->";
+pub const STATUS_OPEN_ITEMS_CLOSE_MARKER: &str = "<!-- /status:open-items -->";
 
 /// `agent:status` opening-marker attribute that turns the per-document queue
 /// marker legend off (`queue-legend=off`, `#queuemarkerlegend`).
@@ -971,6 +979,166 @@ pub fn reconcile_reported_queue_status_content(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ManagedOpenItemsBlock {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenItemsMarkerKind {
+    Open,
+    Close,
+}
+
+#[derive(Debug, Clone)]
+struct OpenItemsMarker {
+    kind: OpenItemsMarkerKind,
+    span: Range<usize>,
+}
+
+fn is_open_items_marker_line(line: &str) -> bool {
+    matches!(
+        line.trim(),
+        STATUS_OPEN_ITEMS_OPEN_MARKER | STATUS_OPEN_ITEMS_CLOSE_MARKER
+    )
+}
+
+fn is_terminated_open_items_fence(block: &Block) -> bool {
+    block
+        .children
+        .iter()
+        .filter(|child| {
+            matches!(&child.kind, BlockKind::Other(kind) if kind == "fenced_code_block_delimiter")
+        })
+        .count()
+        >= 2
+}
+
+fn collect_open_items_markers(
+    block: &Block,
+    body: &str,
+    markers: &mut Vec<OpenItemsMarker>,
+) -> Result<()> {
+    for child in &block.children {
+        let text = child.text(body);
+        let kind = match child.kind {
+            BlockKind::Document | BlockKind::Section => {
+                collect_open_items_markers(child, body, markers)?;
+                continue;
+            }
+            BlockKind::HtmlBlock => match text.trim() {
+                STATUS_OPEN_ITEMS_OPEN_MARKER => OpenItemsMarkerKind::Open,
+                STATUS_OPEN_ITEMS_CLOSE_MARKER => OpenItemsMarkerKind::Close,
+                _ if text.lines().any(is_open_items_marker_line) => bail!(
+                    "agent:status hides a status:open-items delimiter inside an HTML block; put the delimiter on its own line after a blank line"
+                ),
+                _ => continue,
+            },
+            BlockKind::FencedCode if is_terminated_open_items_fence(child) => continue,
+            _ if text.lines().any(is_open_items_marker_line) => bail!(
+                "agent:status hides a status:open-items delimiter inside a {:?} block; move the delimiter to its own top-level line",
+                child.kind
+            ),
+            _ => continue,
+        };
+        let line_start = body[..child.start_byte]
+            .rfind('\n')
+            .map_or(0, |index| index + 1);
+        let mut end = child.end_byte;
+        if !body[..end].ends_with('\n') && body[end..].starts_with('\n') {
+            end += 1;
+        }
+        markers.push(OpenItemsMarker {
+            kind,
+            span: line_start..end,
+        });
+    }
+    Ok(())
+}
+
+/// Locate the single top-level `status:open-items` block.
+///
+/// Delimiters inside fenced code are prose. A malformed or duplicate managed
+/// block fails closed so projection maintenance cannot claim operator text.
+fn managed_open_items_block(status_body: &str) -> Result<Option<ManagedOpenItemsBlock>> {
+    let root = agent_doc_markdown_ast::parse(status_body)
+        .context("failed to parse agent:status body as markdown")?;
+    let mut markers = Vec::new();
+    collect_open_items_markers(&root, status_body, &mut markers)?;
+    markers.sort_by_key(|marker| marker.span.start);
+    let mut open = None;
+    let mut found = None;
+
+    for marker in markers {
+        match marker.kind {
+            OpenItemsMarkerKind::Open => {
+                if open.is_some() || found.is_some() {
+                    bail!("agent:status contains duplicate or nested status:open-items blocks");
+                }
+                open = Some(marker.span);
+            }
+            OpenItemsMarkerKind::Close => {
+                let Some(open_span) = open.take() else {
+                    bail!(
+                        "agent:status contains a status:open-items close marker without an opener"
+                    );
+                };
+                found = Some(ManagedOpenItemsBlock {
+                    start: open_span.start,
+                    end: marker.span.end,
+                });
+            }
+        }
+    }
+    if open.is_some() {
+        bail!("agent:status contains an unclosed status:open-items block");
+    }
+    Ok(found)
+}
+
+/// Reconcile the binary-owned managed nested list inside a status body.
+///
+/// `nested_list` is rendered by the work-graph layer from authoritative source
+/// components. This function owns only the bounded block and preserves all
+/// status prose, sync payloads, handoff telemetry, and the queue legend.
+pub fn apply_open_items_status(status_body: &str, nested_list: &str) -> Result<Option<String>> {
+    let payload = nested_list.trim_end();
+    let expected =
+        format!("{STATUS_OPEN_ITEMS_OPEN_MARKER}\n{payload}\n{STATUS_OPEN_ITEMS_CLOSE_MARKER}\n");
+    if let Some(block) = managed_open_items_block(status_body)? {
+        if status_body[block.start..block.end] == expected {
+            return Ok(None);
+        }
+        let mut out = String::with_capacity(status_body.len() + expected.len());
+        out.push_str(&status_body[..block.start]);
+        out.push_str(&expected);
+        out.push_str(&status_body[block.end..]);
+        return Ok(Some(out));
+    }
+
+    let rest = status_body.strip_prefix('\n').unwrap_or(status_body);
+    Ok(Some(format!("\n{expected}\n{rest}")))
+}
+
+/// Reconcile the managed open-items list in the document's status component.
+pub fn reconcile_open_items_status_content(
+    content: &str,
+    nested_list: &str,
+) -> Result<Option<String>> {
+    let components = element::parse(content).context("failed to parse components")?;
+    let Some(status) = components
+        .iter()
+        .find(|component| component.name == "status")
+    else {
+        return Ok(None);
+    };
+    match apply_open_items_status(status.content(content), nested_list)? {
+        Some(new_body) => Ok(Some(status.replace_content(content, &new_body))),
+        None => Ok(None),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -986,6 +1154,73 @@ mod tests {
             .find(|component| component.name == "status")
             .unwrap();
         status.content(doc).to_string()
+    }
+
+    #[test]
+    fn open_items_projection_owns_only_its_bounded_block() {
+        let doc = concat!(
+            "## Status <!-- agent:status sync=\"release\" -->\n",
+            "operator prose\n",
+            "<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->\n",
+            "Queue markers: retained legend\n",
+            "<!-- /agent:status -->\n",
+        );
+        let one =
+            reconcile_open_items_status_content(doc, "- **Open items** (1)\n  - `[#a]` — first")
+                .unwrap()
+                .expect("projection inserted");
+        assert!(one.contains("operator prose"));
+        assert!(one.contains("<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->"));
+        assert!(one.contains("Queue markers: retained legend"));
+        assert!(one.contains("<!-- status:open-items -->\n- **Open items** (1)"));
+        assert!(
+            reconcile_open_items_status_content(&one, "- **Open items** (1)\n  - `[#a]` — first",)
+                .unwrap()
+                .is_none()
+        );
+
+        let two = reconcile_open_items_status_content(&one, "- **Open items** (0)")
+            .unwrap()
+            .expect("projection updated");
+        assert!(!two.contains("`[#a]`"));
+        assert_eq!(two.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 1);
+    }
+
+    #[test]
+    fn open_items_projection_fails_closed_on_malformed_ownership_markers() {
+        let malformed = concat!(
+            "## Status <!-- agent:status -->\n",
+            "<!-- status:open-items -->\nold\n",
+            "<!-- /agent:status -->\n",
+        );
+        let err =
+            reconcile_open_items_status_content(malformed, "- **Open items** (0)").unwrap_err();
+        assert!(err.to_string().contains("unclosed status:open-items"));
+    }
+
+    #[test]
+    fn open_items_markers_inside_fenced_code_are_operator_prose() {
+        let doc = concat!(
+            "## Status <!-- agent:status -->\n",
+            "```md\n<!-- status:open-items -->\n<!-- /status:open-items -->\n```\n",
+            "<!-- /agent:status -->\n",
+        );
+        let updated = reconcile_open_items_status_content(doc, "- **Open items** (0)")
+            .unwrap()
+            .expect("real projection inserted");
+        assert_eq!(updated.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 2);
+        assert!(updated.contains("```md\n<!-- status:open-items -->"));
+    }
+
+    #[test]
+    fn open_items_projection_refuses_a_delimiter_hidden_in_html() {
+        let doc = concat!(
+            "## Status <!-- agent:status -->\n",
+            "<div>\n<!-- status:open-items -->\n</div>\n",
+            "<!-- /agent:status -->\n",
+        );
+        let err = reconcile_open_items_status_content(doc, "- **Open items** (0)").unwrap_err();
+        assert!(err.to_string().contains("inside an HTML block"));
     }
 
     fn queue_doc(status_marker: &str, status: &str) -> String {

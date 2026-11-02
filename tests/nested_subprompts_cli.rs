@@ -772,7 +772,8 @@ fn an_answer_row_nested_under_its_request_id_answers_the_request() {
 
 /// A live projected answer leaf lazily reopens its structural parent. Once the
 /// request Todo is already closed, that leaf remains ordinary queue work, but
-/// fresh dispatch waits for an already-reported sibling's coordinator closeout.
+/// an already-reported sibling remains coordinator debt without blocking
+/// independent fresh dispatch.
 #[test]
 fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     let dir = tempfile::tempdir().unwrap();
@@ -791,8 +792,18 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
         "{prompts:#?}"
     );
     assert!(
-        dispatch.is_empty(),
-        "reported writeback debt blocks fresh dispatch: {dispatch:#?}"
+        work_texts(&dispatch).iter().any(|item| item == ANSWER),
+        "the live answer leaf remains independently dispatchable: {dispatch:#?}"
+    );
+    assert!(
+        work_texts(&dispatch)
+            .iter()
+            .any(|item| item == "separate flat head"),
+        "the separate ready row is not blocked by reported debt: {dispatch:#?}"
+    );
+    assert!(
+        !work_texts(&dispatch).iter().any(|item| item == PAUSED_ROW),
+        "the reported row itself remains excluded from redispatch: {dispatch:#?}"
     );
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(

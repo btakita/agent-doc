@@ -2272,7 +2272,7 @@ fn canonicalize_duplicate_response_projections_in_queue(
             .map(str::to_string)
     };
     let response_ids = (0..lines.len())
-        .map(|index| response_id_at(index))
+        .map(response_id_at)
         .collect::<Vec<_>>();
     let mut duplicate_markers = HashMap::<usize, String>::new();
     for (index, response_id) in response_ids.iter().enumerate() {

@@ -181,15 +181,18 @@ fn without_blank_lines_immediately_before_response(
     if response_heading.is_empty() {
         return None;
     }
+    let response_heading_without_id =
+        agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(response_heading);
     let components = agent_doc_element::element::parse(content).ok()?;
     let exchange = components
         .iter()
         .find(|component| component.name == "exchange")?;
     let exchange_body = exchange.content(content);
     let lines = exchange_body.split_inclusive('\n').collect::<Vec<_>>();
-    let heading_index = lines
-        .iter()
-        .rposition(|line| line.trim() == response_heading)?;
+    let heading_index = lines.iter().rposition(|line| {
+        agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(line.trim())
+            == response_heading_without_id
+    })?;
     let mut normalized = Vec::with_capacity(lines.len());
     for (index, line) in lines.into_iter().enumerate() {
         if index == heading_index {

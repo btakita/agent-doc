@@ -902,6 +902,49 @@ pub enum RouteCloseoutDrainPolicy {
     DrainBeforeDispatch,
 }
 
+/// What an authoritative route does before entering closeout recovery.
+///
+/// An operator clicking Run Agent Doc while the matching actor is visibly busy
+/// is an explicit real-time send. The route must inspect that live composer
+/// before it starts the (up to 30 second) closeout drain: when the pane confirms
+/// the turn is running, the document diff belongs to that turn and can be
+/// delivered immediately. Every other shape keeps the closeout boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteCloseoutEntryPlan {
+    ProbeLiveTurnForExplicitSend,
+    DrainBeforeDispatch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteCloseoutEntryFacts {
+    pub mode: ReopenMode,
+    pub intent: AuthoritativeActorDispatchIntent,
+    pub origin: AuthoritativeActorDispatchOrigin,
+    pub actor_state: ActorDispatchState,
+    pub open_cycle: bool,
+}
+
+/// Pure entry-plan projection for the closeout/explicit-send boundary.
+///
+/// The probe is deliberately narrower than the later pane dispatch policy. It
+/// cannot start a second turn: the I/O adapter may bypass the drain only after
+/// the same pane also exposes a harness-specific active-turn cue. Automated
+/// recovery has no operator steering intent and therefore never takes it.
+pub fn classify_route_closeout_entry_plan(
+    facts: RouteCloseoutEntryFacts,
+) -> RouteCloseoutEntryPlan {
+    if facts.mode == ReopenMode::DispatchOnly
+        && facts.intent == AuthoritativeActorDispatchIntent::PlainTrigger
+        && matches!(facts.origin, AuthoritativeActorDispatchOrigin::Operator)
+        && facts.actor_state == ActorDispatchState::Busy
+        && facts.open_cycle
+    {
+        RouteCloseoutEntryPlan::ProbeLiveTurnForExplicitSend
+    } else {
+        RouteCloseoutEntryPlan::DrainBeforeDispatch
+    }
+}
+
 /// Every routed trigger must cross the prior cycle's terminal closeout boundary.
 /// Plain triggers remain transport-only after admission, but they may not overtake
 /// an unresolved response or retained component write.
@@ -8658,6 +8701,62 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
             ),
             RouteCloseoutDrainPolicy::DrainBeforeDispatch,
         );
+    }
+
+    #[test]
+    fn persisting_operator_run_probes_live_turn_before_the_closeout_wait() {
+        // Regression: this exact shape used to enter the closeout drain first,
+        // including its 30 second projection wait, before the explicit-send
+        // branch could hand the new document edit to the running turn.
+        assert_eq!(
+            classify_route_closeout_entry_plan(RouteCloseoutEntryFacts {
+                mode: ReopenMode::DispatchOnly,
+                intent: AuthoritativeActorDispatchIntent::PlainTrigger,
+                origin: AuthoritativeActorDispatchOrigin::Operator,
+                actor_state: ActorDispatchState::Busy,
+                open_cycle: true,
+            }),
+            RouteCloseoutEntryPlan::ProbeLiveTurnForExplicitSend,
+        );
+    }
+
+    #[test]
+    fn closeout_entry_probe_never_widens_past_live_operator_plain_trigger() {
+        let base = RouteCloseoutEntryFacts {
+            mode: ReopenMode::DispatchOnly,
+            intent: AuthoritativeActorDispatchIntent::PlainTrigger,
+            origin: AuthoritativeActorDispatchOrigin::Operator,
+            actor_state: ActorDispatchState::Busy,
+            open_cycle: true,
+        };
+        for facts in [
+            RouteCloseoutEntryFacts {
+                mode: ReopenMode::Managed,
+                ..base
+            },
+            RouteCloseoutEntryFacts {
+                intent: AuthoritativeActorDispatchIntent::PromptAware,
+                ..base
+            },
+            RouteCloseoutEntryFacts {
+                origin: AuthoritativeActorDispatchOrigin::AutomatedBackground,
+                ..base
+            },
+            RouteCloseoutEntryFacts {
+                actor_state: ActorDispatchState::Ready,
+                ..base
+            },
+            RouteCloseoutEntryFacts {
+                open_cycle: false,
+                ..base
+            },
+        ] {
+            assert_eq!(
+                classify_route_closeout_entry_plan(facts),
+                RouteCloseoutEntryPlan::DrainBeforeDispatch,
+                "facts={facts:?}",
+            );
+        }
     }
 
     #[test]

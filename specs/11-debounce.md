@@ -84,6 +84,15 @@ one late submit-key retry and rechecks dispatch-start proof.
    flicker, giving a ~500-1000ms ready floor. The poll interval is now
    `AGENT_READY_POLL_INTERVAL` (150ms), so the streak settles in ~150-300ms while
    keeping the 2-observation debounce.
+4. **A live persisting turn receives the explicit send before closeout drain.**
+   An operator-originated dispatch-only plain trigger with an open cycle and the
+   matching actor in `busy` now probes that actor's pane before closeout
+   recovery. When the pane exposes a harness-specific active-turn cue, route
+   submits the document diff as real-time steering immediately and skips the
+   closeout drain's 30-second projection wait. No cue, an idle or protected
+   composer, an automated origin, a non-busy actor, or a managed/prompt-aware
+   route keeps the existing drain and fail-closed behavior
+   (`#persistingsubmitfast`).
 
 **Test coverage:** `run route command requests plain trigger for editor dispatch`
 (JB `TerminalUtilTest`, asserts `--debounce 0`);
@@ -93,6 +102,9 @@ empty-input acceptance state machine; `direct_pane_enter_resubmit_retries_at_lea
 locks the submit retry cadence; the capture/poll cadence changes are
 exercised by the live-tmux `send_command_checked_*` and
 `wait_for_agent_ready*` integration tests (`make tmux-ci`).
+`persisting_operator_run_probes_live_turn_before_the_closeout_wait` and
+`closeout_entry_probe_never_widens_past_live_operator_plain_trigger` lock the
+pre-drain performance path and its safety boundary.
 
 **Test coverage:** `route_debounce_fails_closed_while_typing_indicator_is_active`,
 `route_debounce_allows_dispatch_after_typing_indicator_expires`,

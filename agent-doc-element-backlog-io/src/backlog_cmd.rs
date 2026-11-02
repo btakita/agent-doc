@@ -2926,11 +2926,11 @@ mod tests {
 
         let projected = fs::read_to_string(&doc).unwrap();
         assert!(
-            projected.contains(&format!("- 🙋 do [#first-work] [#{first}]")),
+            projected.contains(&format!("- ### 🙋 do [#first-work] [#{first}]")),
             "{projected}"
         );
         assert!(
-            projected.contains(&format!("- 🙋 do [#second-work] [#{second}]")),
+            projected.contains(&format!("- ### 🙋 do [#second-work] [#{second}]")),
             "{projected}"
         );
     }

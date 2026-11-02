@@ -3538,6 +3538,26 @@ fn claimed_queue_head_facts(
         .collect()
 }
 
+fn queue_is_held_only_by_ended_owner_claims(
+    active: bool,
+    queue_prompts: &[String],
+    selected_queue_prompts: &[String],
+    drainable_head_count: usize,
+    claimed_queue_heads: &[agent_doc_queue::no_changes_explanation::ClaimedQueueItemFact],
+) -> bool {
+    active
+        && !queue_prompts.is_empty()
+        && selected_queue_prompts.is_empty()
+        && drainable_head_count == 0
+        && queue_prompts.iter().all(|prompt| {
+            let identity = agent_doc_queue::queue_claim::claim_identity(prompt);
+            claimed_queue_heads.iter().any(|claim| {
+                claim.owner_session_ended.is_some()
+                    && agent_doc_queue::queue_claim::claim_identity(&claim.item) == identity
+            })
+        })
+}
+
 /// `#claimownerliveness`: the adopt/release exits for a claim whose owner
 /// session ended, as runnable commands for this document.
 fn stale_claim_fact(
@@ -4070,12 +4090,27 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     } else {
         Vec::new()
     };
+    // A cleared/replaced coordinator leaves a stale claim that still fences
+    // the row pending explicit adopt/release. It is reconcile evidence, not an
+    // active execution selector. Report the queue inactive when every visible
+    // prompt is held only by such ended-owner claims; otherwise callers and
+    // derived open-items maintenance can misread the retained row as fresh
+    // pending work even though claim resolution exposes no runnable head.
+    let stale_claim_only = queue_is_held_only_by_ended_owner_claims(
+        activation.active,
+        &queue_prompts,
+        &selected_queue_prompts,
+        queue_drainable_head_count,
+        &claimed_queue_heads,
+    );
 
     Ok(QueueState {
         authoritative_content: Some(content),
         queue_prompts,
         selected_queue_prompts,
-        queue_active: if activation.active {
+        queue_active: if stale_claim_only {
+            Some(false)
+        } else if activation.active {
             Some(true)
         } else if activation.deferred {
             None
@@ -8252,6 +8287,13 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
     } else {
         Vec::new()
     };
+    let stale_claim_only = queue_is_held_only_by_ended_owner_claims(
+        activation.active,
+        &queue_prompts,
+        &active_queue_prompt_texts,
+        queue_drainable_head_count,
+        &claimed_queue_heads,
+    );
     // Publish the final authority frontier before worklist/selection facts.
     // Lifecycle persistence remains a projection Effect, not a maintenance
     // companion write.
@@ -8282,7 +8324,9 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         authoritative_content: Some(current_content),
         queue_prompts,
         selected_queue_prompts: active_queue_prompt_texts,
-        queue_active: if activation.active {
+        queue_active: if stale_claim_only {
+            Some(false)
+        } else if activation.active {
             Some(true)
         } else if activation.deferred {
             None

@@ -4077,6 +4077,27 @@ mod tests {
     fn a_claim_whose_coordinator_session_cleared_is_reported_stale_not_in_flight() {
         let dir = setup_project();
         let doc = seed_claimed_head_doc(&dir);
+        let legacy = std::fs::read_to_string(&doc).unwrap().replace(
+            "## Exchange\n",
+            concat!(
+                "## Status\n\n",
+                "<!-- agent:status -->\n",
+                "<!-- status:open-items -->\n",
+                "- **Open items** (1)\n",
+                "  - `[#runctrlclaude]` — Fix background supervisor thrash\n",
+                "    - **Sources:** queue (open); backlog (open)\n",
+                "<!-- /status:open-items -->\n",
+                "<!-- /agent:status -->\n\n",
+                "## Exchange\n",
+            ),
+        );
+        std::fs::write(&doc, &legacy).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &legacy,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let pane = "%claimlivenesspreflight";
         agent_doc_queue_io::queue_claim::claim_with_session(
             &doc,
@@ -4109,7 +4130,33 @@ mod tests {
 
         let parsed = claimed_head_preflight(&doc);
         assert_eq!(parsed["no_changes"], true, "{parsed:#}");
+        assert_eq!(parsed["queue_active"], false, "{parsed:#}");
         assert_eq!(parsed["queue_drainable_head_count"], 0, "{parsed:#}");
+        assert!(parsed["queue_sync"]["pending"].is_null(), "{parsed:#}");
+        assert!(
+            parsed["queue_sync"]["claimed_unstarted"].is_null(),
+            "{parsed:#}"
+        );
+        assert_eq!(
+            parsed["queue_sync"]["reconcile_unknown"][0]["lifecycle"],
+            "reconcile_unknown",
+            "{parsed:#}"
+        );
+        assert_eq!(
+            parsed["queue_sync"]["reconcile_unknown"][0]["operation"],
+            "reconcile",
+            "{parsed:#}"
+        );
+        assert_eq!(
+            parsed["queue_sync"]["reconcile_unknown"][0]["execution_evidence"],
+            "unknown",
+            "{parsed:#}"
+        );
+        let maintained = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            maintained.contains("<!-- agent:open-items -->"),
+            "the derived open-items projection must not reactivate the claim: {maintained}"
+        );
         let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];
         assert_eq!(
             fact["owner_session_ended"]["reason"], "session_replaced",
@@ -4142,12 +4189,17 @@ mod tests {
             "{parsed:#}"
         );
 
-        // Following the release exit returns the head to this session.
+        // Explicit release removes the stale fence. Only then may the retained
+        // row become ordinary pending work again.
         agent_doc_queue_io::queue_claim::release(&doc, "#runctrlclaude")
             .unwrap()
             .expect("the stale claim is released");
         let parsed = claimed_head_preflight(&doc);
-        assert_eq!(parsed["no_changes"], false, "{parsed:#}");
+        assert!(
+            parsed["no_changes_explanation"]["claimed_queue_items"].is_null(),
+            "{parsed:#}"
+        );
+        assert_eq!(parsed["queue_sync"]["pending"][0]["lifecycle"], "pending");
     }
 
     /// Control for the test above: the same document with NO claim still

@@ -1702,8 +1702,10 @@ mod tests {
             "{repaired}"
         );
         assert!(
-            repaired.contains("~~**Response:** Approve and merge PR #42."),
-            "binary metadata remains inert: {repaired}"
+            repaired.contains(
+                "- **Response:** Approve and merge PR #42. <!-- agent-doc:waiting-metadata -->"
+            ) && !repaired.contains("~~**Response:** Approve and merge PR #42."),
+            "binary metadata remains inert without being struck: {repaired}"
         );
 
         sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");

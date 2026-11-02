@@ -160,6 +160,14 @@ pub fn build_project_queue_sync_payload(
                 if let Some(lineage) = lineage.as_ref() {
                     apply_lineage_evidence(&mut document_payload, lineage);
                 }
+                // A claim whose coordinator session ended is durable reconcile
+                // evidence, not proof that a worker is still in flight. Keep
+                // the row fenced by the claim, but do not advertise it as a
+                // fresh pending/claimed/running execution obligation. This is
+                // especially important after derived open-items maintenance:
+                // the selected-row projection must not resurrect the same
+                // cleared-session claim as runnable work.
+                reclassify_ended_owner_claims(&document, &claims, &mut document_payload);
                 payload.extend(document_payload);
                 match collect_placement_debt(&key, scope, &content) {
                     Ok(debt) => payload.placement_reconcile.extend(debt),
@@ -170,6 +178,46 @@ pub fn build_project_queue_sync_payload(
         }
     }
     Ok(payload)
+}
+
+fn reclassify_ended_owner_claims(
+    document: &Path,
+    claims: &[agent_doc_queue::queue_claim::QueueClaim],
+    payload: &mut QueueSyncPayload,
+) {
+    let ended = claims
+        .iter()
+        .filter(|claim| {
+            matches!(
+                crate::queue_claim::claim_owner_liveness(document, claim),
+                agent_doc_queue::queue_claim::ClaimOwnerLiveness::Ended(_)
+            )
+        })
+        .map(|claim| claim.identity.clone())
+        .collect::<std::collections::HashSet<_>>();
+    if ended.is_empty() {
+        return;
+    }
+
+    let mut stale = Vec::new();
+    for partition in [&mut payload.claimed_unstarted, &mut payload.running] {
+        let mut retained = Vec::with_capacity(partition.len());
+        for mut item in std::mem::take(partition) {
+            let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
+            if ended.contains(&identity) {
+                item.lifecycle =
+                    agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReconcileUnknown;
+                item.operation = QueueSyncOperation::Reconcile;
+                item.execution_evidence = QueueSyncExecutionEvidence::Unknown;
+                item.retry_safe = false;
+                stale.push(item);
+            } else {
+                retained.push(item);
+            }
+        }
+        *partition = retained;
+    }
+    payload.reconcile_unknown.extend(stale);
 }
 
 #[derive(Debug, PartialEq, Eq)]

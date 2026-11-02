@@ -2091,10 +2091,12 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
             "canonicalize_duplicate_queue_response_projection_post_disk",
         )?;
         let post_head = agent_doc_git_io::revision::show_head(file)?;
+        let committed_target =
+            agent_doc_git_io::transaction::normalize_session_document_content(&target);
         anyhow::ensure!(
             post_authority == target
                 && post_disk == target
-                && post_head.as_deref() == Some(target.as_str()),
+                && post_head.as_deref() == Some(committed_target.as_str()),
             "duplicate queue response-projection migration for {} did not commit its exact converged repair",
             file.display(),
         );

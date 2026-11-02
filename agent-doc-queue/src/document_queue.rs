@@ -2289,7 +2289,44 @@ pub fn set_prompt_operator_actions(
             .into_iter()
             .filter(|id| open_todo_ids.contains(id))
             .collect::<Vec<_>>();
+        let mut waiting_answer_selected = false;
         if live {
+            // `#waitingselectboundary`: the Waiting-on-you tree is a
+            // binary-owned view of Todo state, not operator-authored run
+            // selection. Keep its parent explicitly gated by the matching
+            // open Todo so lifecycle settling cannot synthesize a runnable
+            // "Complete the remaining work" child and dispatch it.
+            let waiting_id = prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+                .then(|| {
+                    ids.first().cloned().or_else(|| {
+                        match agent_doc_element_queue::queue_head_identity(&prompt.text) {
+                            agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
+                            agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+                        }
+                    })
+                })
+                .flatten();
+            if let Some(id) = waiting_id
+                && open_todo_ids.contains(&id)
+            {
+                let operator_replied = waiting_item_has_operator_reply(entries, index);
+                let attempt_started =
+                    agent_doc_document::queue_projection::has_lifecycle_marker(&prompt.text);
+                if operator_replied && !attempt_started {
+                    // The reply selects this waiting item for one attempt. Do
+                    // not leave the pre-answer gate on it or dispatch cannot
+                    // claim the intended parent identity.
+                    ids.retain(|candidate| candidate != &id);
+                    waiting_answer_selected = true;
+                } else if !ids.contains(&id) {
+                    // Before an answer, and again after an attempt has started,
+                    // the still-open Todo keeps the selector explicitly
+                    // waiting. It may be struck only when the Todo closes.
+                    ids.push(id);
+                }
+            }
             for (queue_item, request_id) in actions {
                 let request_id = request_id.to_ascii_lowercase();
                 if !agent_doc_document::queue_projection::is_reserved_operator_action_id(
@@ -2316,14 +2353,33 @@ pub fn set_prompt_operator_actions(
         } else {
             ids.clear();
         }
-        let projected =
-            agent_doc_document::queue_projection::apply_operator_action_ids(&prompt.text, &ids);
+        let projected = if waiting_answer_selected {
+            clear_waiting_item_operator_gate(&prompt.text)
+        } else {
+            agent_doc_document::queue_projection::apply_operator_action_ids(&prompt.text, &ids)
+        };
         if projected != prompt.text {
             prompt.text = projected;
             changed = true;
         }
     }
     changed.then_some(updated)
+}
+
+/// Remove only the visible operator gate from a waiting item whose response
+/// edge selected it. Unlike the general legacy-annotation normalizer, this
+/// preserves the leading `[#todo-id]` as the durable node identity.
+fn clear_waiting_item_operator_gate(text: &str) -> String {
+    let leading_len = text.len() - text.trim_start().len();
+    let (leading, rest) = text.split_at(leading_len);
+    let marker = agent_doc_document::queue_projection::operator_action_marker();
+    let after = rest
+        .strip_prefix(marker)
+        .or_else(|| rest.strip_prefix("🙋"));
+    match after {
+        Some(after) => format!("{leading}{}", after.trim_start()),
+        None => text.to_string(),
+    }
 }
 
 /// Settle a nested context row after every executable descendant has reached a
@@ -3499,6 +3555,26 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(idx, entry)| match entry {
+            // `#waitingselectboundary`: the binary-owned Waiting-on-you tree
+            // mirrors open Todo state inside `agent:run`; it is not a second
+            // authored work tree. Its completed Response/Summary/Action rows
+            // and the operator's answer descendants are context/evidence, not
+            // independent queue leaves. Once the operator supplies an answer,
+            // the waiting ITEM is the one selectable identity. This keeps
+            // claim, dispatch, steering and drainability on `[#todo-id]`
+            // instead of inventing a nested `parent: metadata: answer` head.
+            QueueEntry::Prompt(_)
+                if waiting_item_origin_index(entries, idx).is_some_and(|origin| origin != idx) =>
+            {
+                None
+            }
+            QueueEntry::Prompt(prompt)
+                if waiting_item_has_operator_reply(entries, idx)
+                    && agent_doc_document::queue_projection::operator_action_ids(&prompt.text)
+                        .is_empty() =>
+            {
+                Some(idx)
+            }
             // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
             // epic/group LABEL and is never executable, so it must not surface
             // as a runnable head.
@@ -3511,6 +3587,54 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             _ => None,
         })
         .collect()
+}
+
+/// Nearest binary-owned Waiting-on-you item that owns `idx`, including itself.
+fn waiting_item_origin_index(entries: &[QueueEntry], idx: usize) -> Option<usize> {
+    let own_indent = entries.get(idx).and_then(entry_indent)?;
+    for (candidate, entry) in entries[..=idx].iter().enumerate().rev() {
+        let Some(indent) = entry_indent(entry) else {
+            continue;
+        };
+        if candidate != idx && indent >= own_indent {
+            continue;
+        }
+        if prompt_of(entry).is_some_and(|prompt| {
+            prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+        }) {
+            return Some(candidate);
+        }
+        if candidate != idx && indent == 0 {
+            break;
+        }
+    }
+    None
+}
+
+/// Whether a generated waiting item has live operator-authored decision text.
+///
+/// All binary metadata is marker-tagged. A live prompt in the item's descendant
+/// range without that marker is therefore operator evidence.
+fn waiting_item_has_operator_reply(entries: &[QueueEntry], item_idx: usize) -> bool {
+    let Some(QueueEntry::Prompt(item)) = entries.get(item_idx) else {
+        return false;
+    };
+    if !item
+        .text
+        .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+    {
+        return false;
+    }
+    entries[item_idx + 1..]
+        .iter()
+        .take_while(|entry| entry_indent(entry).is_none_or(|indent| indent > item.indent))
+        .any(|entry| {
+            matches!(entry, QueueEntry::Prompt(prompt)
+                if !prompt.text.contains(crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER)
+                    && !nest_row_work_text(&prompt.text).trim().is_empty())
+        })
 }
 
 /// `true` when the entry at `idx` is a nesting PARENT — it has at least one
@@ -3927,11 +4051,21 @@ pub fn prompt_context_packet_at(
     }
     chain.reverse();
 
-    let origin_index = chain
-        .iter()
-        .copied()
-        .find(|candidate| prompt_of(&entries[*candidate]).is_some())
-        .unwrap_or(index);
+    let origin_index = if entries.get(index).and_then(prompt_of).is_some_and(|prompt| {
+        prompt
+            .text
+            .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER)
+    }) {
+        // The binary Waiting-on-you root is presentation, not the durable work
+        // node that owns the operator's response edges.
+        index
+    } else {
+        chain
+            .iter()
+            .copied()
+            .find(|candidate| prompt_of(&entries[*candidate]).is_some())
+            .unwrap_or(index)
+    };
     let origin_prompt = prompt_of(&entries[origin_index])?;
     let origin_text = nest_row_work_text(&origin_prompt.text);
     let origin_head = origin_text.lines().next().unwrap_or("").trim();
@@ -3972,6 +4106,9 @@ pub fn prompt_context_packet_at(
         }
         if candidate != origin_index
             && let Some(prompt) = prompt_of(&entries[candidate])
+            && !prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_ROOT_MARKER)
         {
             let evidence = nest_row_work_text(&prompt.text);
             if !evidence.trim().is_empty() {
@@ -3980,10 +4117,38 @@ pub fn prompt_context_packet_at(
         }
     }
 
+    // Waiting-on-you answer rows are response edges attached to the durable
+    // Todo/action node, never work nodes of their own. The parent is the
+    // selectable identity, so attach its live descendants as bounded decision
+    // evidence instead of manufacturing a nested executable lineage.
+    if waiting_item_has_operator_reply(entries, index) {
+        let own_indent = origin_prompt.indent;
+        for entry in entries[index + 1..]
+            .iter()
+            .take_while(|entry| entry_indent(entry).is_none_or(|indent| indent > own_indent))
+        {
+            let Some(prompt) = prompt_of(entry) else {
+                continue;
+            };
+            if prompt
+                .text
+                .contains(crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER)
+            {
+                continue;
+            }
+            let evidence = nest_row_work_text(&prompt.text);
+            if !evidence.trim().is_empty() && !decision_evidence.contains(&evidence) {
+                decision_evidence.push(evidence);
+            }
+        }
+    }
+
     let (claim_owner, claim_generation) = projected_claim(&origin_prompt.text)
         .map(|(owner, generation)| (Some(owner), Some(generation)))
         .unwrap_or_default();
-    let response_child = response.is_some() || selection.is_some();
+    let response_child = response.is_some()
+        || selection.is_some()
+        || waiting_item_has_operator_reply(entries, index);
     let producer = if response_child {
         PromptProducer {
             kind: PromptProducerKind::Operator,
@@ -12786,6 +12951,118 @@ mod tests {
             set_prompt_operator_actions(&entries, &actions, &open).is_none(),
             "ordinary tracked ids must not become decision annotations"
         );
+    }
+
+    #[test]
+    fn waiting_todo_mirror_is_gated_by_its_open_todo_and_never_becomes_run_work() {
+        let id = "yeja".to_string();
+        let entries = parse(concat!(
+            "- [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
+            "  - ~~**Response:** Choose the project-root policy. <!-- agent-doc:waiting-metadata -->~~\n",
+        ))
+        .unwrap();
+        let open = std::collections::HashSet::from([id.clone()]);
+        let annotated = set_prompt_operator_actions(&entries, &[], &open)
+            .expect("the binary waiting mirror must carry the open Todo gate");
+        let rendered = render(&annotated);
+        assert!(
+            rendered.starts_with("- 🙋 [#yeja] Choose the project-root policy."),
+            "{rendered}"
+        );
+        let live = prompts(&annotated);
+        assert!(live.is_empty(), "the open Todo gate is not agent work: {live:?}");
+        let QueueEntry::Prompt(parent) = &annotated[0] else {
+            panic!("waiting Todo parent must remain live");
+        };
+        assert_eq!(
+            agent_doc_document::queue_projection::operator_action_ids(&parent.text),
+            vec![id]
+        );
+        assert!(
+            !rendered.contains("Complete the remaining work for the parent item."),
+            "an open Todo cannot be converted into runnable agent work: {rendered}"
+        );
+    }
+
+    #[test]
+    fn waiting_answer_edges_select_only_the_durable_todo_node() {
+        let id = "yeja".to_string();
+        let body = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - 🙋 [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
+            "    - ~~**Response:** Choose the project-root policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Summary:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "          - pick: a + b\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Clean the live buffer. <!-- agent-doc:waiting-metadata -->~~\n",
+            "          - ~/.agent-doc/live-buffer: delete\n",
+        );
+        let entries = parse(body).unwrap();
+        assert!(
+            waiting_item_has_operator_reply(&entries, 1),
+            "live children must parse as response evidence: {entries:#?}"
+        );
+        let QueueEntry::Prompt(initial_parent) = &entries[1] else {
+            panic!("waiting parent");
+        };
+        assert!(
+            !agent_doc_document::queue_projection::has_lifecycle_marker(&initial_parent.text),
+            "operator gate is not a started worker attempt: {}",
+            initial_parent.text
+        );
+        let open = std::collections::HashSet::from([id.clone()]);
+        let selected = set_prompt_operator_actions(&entries, &[], &open)
+            .expect("the operator answer removes the pre-answer gate");
+
+        let executable = executable_prompt_indexes(&selected);
+        assert_eq!(
+            executable,
+            vec![1],
+            "answer edges are never work nodes: {selected:#?}\n{}",
+            render(&selected)
+        );
+        let head = lineage_claim_text(&selected, executable[0]).unwrap();
+        assert!(head.starts_with("[#yeja] Choose the project-root policy."), "{head}");
+        assert!(!head.contains("pick: a + b"), "{head}");
+        assert!(!head.contains("live-buffer"), "{head}");
+        assert_eq!(
+            crate::queue_claim::claim_identity(&head),
+            agent_doc_element_queue::QueueItemIdentity::Id(id.clone())
+        );
+
+        let packet = prompt_context_packet_at(&selected, executable[0]).unwrap();
+        assert_eq!(packet.origin.item_id.as_deref(), Some(id.as_str()));
+        assert_eq!(
+            packet.decision_evidence,
+            ["pick: a + b", "~/.agent-doc/live-buffer: delete"]
+        );
+        assert_eq!(
+            packet.producer.kind,
+            agent_doc_prompt_context::lineage::PromptProducerKind::Operator
+        );
+
+        // Starting the selected attempt must not retire the selector while its
+        // durable Todo remains open. It returns to an explicit waiting state.
+        let mut started = selected.clone();
+        let QueueEntry::Prompt(parent) = &mut started[1] else {
+            panic!("waiting item stays live");
+        };
+        parent.text = agent_doc_document::queue_projection::apply_lifecycle_marker(
+            &parent.text,
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Reported,
+        );
+        let waiting = set_prompt_operator_actions(&started, &[], &open)
+            .expect("open Todo restores the explicit operator gate");
+        let QueueEntry::Prompt(parent) = &waiting[1] else {
+            panic!("open Todo must not strike its run selector");
+        };
+        assert!(
+            agent_doc_document::queue_projection::operator_action_ids(&parent.text)
+                .contains(&id)
+        );
+        assert!(executable_prompt_indexes(&waiting).is_empty());
     }
 
     #[test]

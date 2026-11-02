@@ -261,7 +261,11 @@ impl SteeringWatermark {
                 .map(normalize_queue_text)
                 .filter(|text| !text.is_empty()),
             session_presets,
-            acknowledged_queue: queue_items(baseline)
+            // Steering follows the same executable-head view as queue claim
+            // and dispatch. Binary-owned context parents and completed
+            // response metadata can appear or disappear during closeout, but
+            // they are presentation, never newly runnable work.
+            acknowledged_queue: executable_queue_items(baseline)
                 .into_iter()
                 .map(|item| item.norm)
                 .collect(),
@@ -820,38 +824,22 @@ pub fn normalize_queue_text(text: &str) -> String {
     agent_doc_queue::queue_head_alignment::normalize_queue_head_text(text)
 }
 
-fn queue_items(content: &str) -> Vec<QueueItem> {
-    let body = agent_doc_queue::queue_prompt_drift::queue_component_text(content);
-    let Ok(entries) = agent_doc_queue::document_queue::parse(&body) else {
-        return Vec::new();
-    };
-    let entries = agent_doc_queue::nested_claim_steer::expand_if_installed(entries);
-    entries
-        .into_iter()
-        .filter_map(|entry| match entry {
-            agent_doc_queue::document_queue::QueueEntry::Prompt(prompt) => {
-                let norm = normalize_queue_text(&prompt.text);
-                (!norm.is_empty()).then(|| QueueItem {
-                    raw: prompt.text.trim().to_string(),
-                    norm,
-                })
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 /// Live, executable queue heads (group-parent labels excluded) in queue
 /// order: exactly the set `agent-doc queue claim` resolves `--item` against
 /// (`live_queue_head_texts`), so dispatch can never offer a head the claim
 /// path refuses as "no live queue head" (GH #124 ask 5).
 fn executable_queue_items(content: &str) -> Vec<QueueItem> {
-    agent_doc_queue::queue_continuation::live_queue_head_texts(content)
+    agent_doc_queue::queue_continuation::live_executable_rows(content)
         .unwrap_or_default()
         .into_iter()
-        .filter_map(|raw| {
-            let norm = normalize_queue_text(&raw);
-            (!norm.is_empty()).then_some(QueueItem { raw, norm })
+        .filter_map(|(raw, lineage)| {
+            let norm = normalize_queue_text(&lineage);
+            (!norm.is_empty()).then_some(QueueItem {
+                // Steering remains operator-facing and therefore preserves the
+                // visible row. Identity is the exact claim lineage above.
+                raw,
+                norm,
+            })
         })
         .collect()
 }
@@ -884,7 +872,7 @@ pub fn current_item_is_present(watermark: &SteeringWatermark, current: &str) -> 
         return false;
     };
     let selected_identity = queue_identity(selected);
-    queue_items(current)
+    executable_queue_items(current)
         .iter()
         .any(|item| item.norm == selected || queue_identity(&item.norm) == selected_identity)
 }
@@ -897,7 +885,12 @@ fn queue_alignment(
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> QueueAlignment {
     let old = &watermark.acknowledged_queue;
-    let new = queue_items(current);
+    // `#steeringclaimparity`: only claimable queue heads can become steering
+    // work. In particular, the binary-owned Waiting-on-you mirror contains
+    // context parents and completed response metadata; aligning the raw tree
+    // offered those rows as fresh subagent dispatch even though `queue claim`
+    // correctly refused every one of them.
+    let new = executable_queue_items(current);
     let old_keys: Vec<String> = old.iter().map(|norm| queue_identity(norm)).collect();
     // At the boundary the current item is finished: its consumption is not
     // an operator deletion and an edit to it is ordinary queue work.
@@ -1581,7 +1574,7 @@ pub fn append_claimed_queue_removals(
     current: &str,
     claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
 ) {
-    let current_identities: Vec<_> = queue_items(current)
+    let current_identities: Vec<_> = executable_queue_items(current)
         .into_iter()
         .map(|item| agent_doc_queue::queue_claim::claim_identity(&item.norm))
         .collect();
@@ -3706,6 +3699,77 @@ mod tests {
             subagent_dispatch_heads(&scoped, Some(&reference)),
             vec!["#subagents do [#new1]".to_string(), "plain new".to_string()]
         );
+    }
+
+    #[test]
+    fn todo_tracking_and_waiting_response_edges_preserve_claim_dispatch_parity() {
+        let todo_only = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#yeja] Choose the project-root policy.\n",
+            "<!-- /agent:todo -->\n",
+        );
+        assert_eq!(
+            agent_doc_queue::queue_continuation::live_queue_head_texts(todo_only)
+                .unwrap_or_default(),
+            Vec::<String>::new(),
+            "Todo tracking alone is never run selection"
+        );
+        assert!(subagent_dispatch_heads(todo_only, None).is_empty());
+
+        let answered = concat!(
+            "<!-- agent:run id=main subagents -->\n",
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
+            "    - ~~**Response:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "          - pick: a + b\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Clean the live buffer. <!-- agent-doc:waiting-metadata -->~~\n",
+            "          - ~/.agent-doc/live-buffer: delete\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:todo -->\n",
+            "- [ ] [#yeja] Choose the project-root policy.\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let claim_heads =
+            agent_doc_queue::queue_continuation::live_queue_head_texts(answered).unwrap();
+        let (_, eligible, dispatch_live) = queue_attr_subagent_heads(answered)
+            .expect("the subagents run exposes one selected work node");
+        assert_eq!(claim_heads, dispatch_live, "claim and dispatch share one live set");
+        assert_eq!(eligible, dispatch_live);
+        assert_eq!(dispatch_live.len(), 1, "{dispatch_live:#?}");
+        assert!(dispatch_live[0].contains("[#yeja]"), "{dispatch_live:#?}");
+        assert!(!dispatch_live[0].contains("pick: a + b"));
+        assert!(!dispatch_live[0].contains("live-buffer"));
+    }
+
+    #[test]
+    fn waiting_answer_edit_steers_one_parent_selection_not_response_leaves() {
+        let owned = BTreeSet::new();
+        let baseline_queue = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
+            "    - ~~**Response:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+        );
+        let answered_queue = format!(
+            "{baseline_queue}          - pick: a + b\n          - ~/.agent-doc/live-buffer: delete\n"
+        );
+        let baseline = doc(baseline_queue, EX);
+        let current = doc(&answered_queue, EX);
+        let obs = observe(&seeded(&baseline, None), &current, &quiet_ctx(&owned));
+
+        assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+        let item = &obs.ready[0];
+        assert_eq!(item.source, SteeringSource::Queue);
+        assert_eq!(item.change, SteeringChange::Added);
+        assert!(item.verbatim.contains("[#yeja]"), "{item:?}");
+        assert!(!item.verbatim.contains("pick: a + b"), "{item:?}");
+        assert!(!item.verbatim.contains("live-buffer"), "{item:?}");
     }
 
     /// `#regressionawaitingoperat`: a head whose tracked item waits on the

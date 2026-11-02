@@ -918,6 +918,103 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn historical_structured_response_evidence_repairs_with_unrelated_live_drift() {
+        const RESPONSE_ID: &str = "[#r-00d5833b78bd]";
+        const SUMMARY: &str = "The completed work remains authoritative.";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~completed prompt~~ — auto-struck: response: {id}\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "    - **Summary:** {summary}\n",
+                "    - **State:** Integrated\n",
+                "    - **Guidance:** No operator action remains.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = RESPONSE_ID,
+            summary = SUMMARY,
+        );
+        th::commit_file(root, "session.md", &historical, "structured response evidence");
+        let doc = root.join("session.md");
+        let authority = historical.replace(
+            "<!-- /agent:queue -->\n",
+            "- unrelated live follow-up\n<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, &authority).unwrap();
+
+        assert!(
+            restore_and_commit_historical_response_evidence(&doc)
+                .expect("committed evidence should repair through unrelated live drift")
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            authority,
+            "binary-owned index repair must not overwrite live document authority"
+        );
+        let head_document = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&head_document.stdout), historical);
+        let index = agent_doc_archive_io::parse_response_index_file(
+            &agent_doc_archive_io::response_index_path(&doc),
+        )
+        .unwrap();
+        assert_eq!(index[RESPONSE_ID].action, "restored");
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, &authority)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn historical_structured_response_repair_rejects_changed_live_evidence() {
+        const RESPONSE_ID: &str = "[#r-56ec02d88801]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let historical = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~completed prompt~~ — auto-struck: response: {id}\n",
+                "  - **Response {id}**\n",
+                "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
+                "    - **Summary:** Original authoritative summary.\n",
+                "    - **State:** Integrated\n",
+                "    - **Guidance:** No operator action remains.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            id = RESPONSE_ID,
+        );
+        th::commit_file(root, "session.md", &historical, "structured response evidence");
+        let doc = root.join("session.md");
+        let authority = historical.replace(
+            "Original authoritative summary.",
+            "Changed live summary requiring an explicit decision.",
+        );
+        fs::write(&doc, &authority).unwrap();
+
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc)
+                .expect("changed response evidence must fail closed")
+        );
+        assert!(!agent_doc_archive_io::response_index_path(&doc).exists());
+        assert_eq!(
+            agent_doc_archive_io::dangling_response_references(&doc, &authority).unwrap(),
+            [RESPONSE_ID.to_string()],
+            "history compatibility must not hide conflicting live evidence"
+        );
+    }
+
+    #[test]
     fn committed_orphaned_struck_queue_projection_is_detached_and_committed() {
         const STALE: &str = "[#r-0123456789ab]";
         let dir = tempfile::TempDir::new().unwrap();

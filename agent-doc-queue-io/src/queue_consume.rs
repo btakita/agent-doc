@@ -695,6 +695,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
                     attempt.generation,
                 );
             }
+            crate::queue_lineage::require_integrated_repo_work(
+                file,
+                &attempt.item_text,
+                attempt.generation,
+            )?;
         }
         if agent_doc_document::queue_projection::operator_action_holds_row(
             &row.lineage,
@@ -2377,6 +2382,11 @@ pub fn id_head_dispatch_guard_for_caller(
                          from that session."
                     );
                 }
+                crate::queue_lineage::require_integrated_repo_work(
+                    file,
+                    &claim.item_text,
+                    generation,
+                )?;
                 evidence.reported = Some((owner.clone(), generation));
             }
         }
@@ -9647,6 +9657,109 @@ Old.
             vec!["publish-session-contracts".to_string()],
             "the acknowledgement is the keep-unqueued proof"
         );
+    }
+
+    #[test]
+    fn ack_id_keeps_reported_repository_work_live_until_integrated_lineage() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "queue-test@example.com"]);
+        git(&["config", "user.name", "Queue Test"]);
+        std::fs::write(dir.path().join("base.txt"), "base\n").unwrap();
+        git(&["add", "base.txt"]);
+        git(&["commit", "-qm", "base"]);
+        let base = git(&["rev-parse", "HEAD"]);
+        let branch = git(&["branch", "--show-current"]);
+
+        let doc = dir.path().join("sessions.md");
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+            "## Run <!-- agent:run subagents priority go -->\n",
+            "- do [#repo-work]\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog priority queue -->\n",
+            "- [ ] [#repo-work] integrate repository work\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, "#repo-work", "subagent:repo-work");
+        crate::queue_lineage::record(
+            &doc,
+            "#repo-work",
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Attached,
+                worker_id: Some("worker-subagent:repo-work".to_string()),
+                repo_path: Some(dir.path().to_path_buf()),
+                worktree_path: Some(dir.path().to_path_buf()),
+                branch: Some(branch.clone()),
+                base_sha: Some(base),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("work.txt"), "work\n").unwrap();
+        git(&["add", "work.txt"]);
+        git(&["commit", "-qm", "worker work"]);
+        let source = git(&["rev-parse", "HEAD"]);
+        crate::queue_lineage::record(
+            &doc,
+            "#repo-work",
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Committed,
+                source_sha: Some(source.clone()),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(&doc, "#repo-work", Some(generation)).unwrap();
+
+        let before = std::fs::read_to_string(&doc).unwrap();
+        let refusal = acknowledge_open_id_backed_queue_head(&doc, "repo-work")
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("is not integrated"), "{refusal}");
+        assert!(refusal.contains("--sink-ref"), "{refusal}");
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), before);
+
+        crate::queue_lineage::record(
+            &doc,
+            "#repo-work",
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Integrated,
+                source_sha: Some(source.clone()),
+                integration_sha: Some(source),
+                sink_ref: Some(branch),
+                integration_method: Some(crate::queue_lineage::IntegrationMethod::FastForward),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "repo-work").unwrap());
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -381,8 +381,12 @@ impl QueueSyncPayload {
                         "Blocked on external evidence: recover the exact full response for generation {generation} from worker {worker}; retain the row until capture, receipt, exchange projection, and editor authority agree."
                     )],
                     vec![
-                        format!("**recover-worker-{worker}:** Evidence: generation {generation} is completion-proven but its full capture is unavailable. Effect: supply the exact response from this worker lineage and resume integration. Risk: accepting the wrong generation would corrupt attribution. Reversible until closeout. Recommended when worker history or retained output exists."),
-                        format!("**operator-cancel:** Evidence: generation {generation} cannot advance without a response or explicit response-free proof. Effect: record typed operator cancellation and leave no inferred response. Risk: abandons any unrecovered worker result. Reversible only by a new generation. Choose only when recovery is impossible or the result is intentionally discarded."),
+                        format!(
+                            "**recover-worker-{worker}:** Evidence: generation {generation} is completion-proven but its full capture is unavailable. Effect: supply the exact response from this worker lineage and resume integration. Risk: accepting the wrong generation would corrupt attribution. Reversible until closeout. Recommended when worker history or retained output exists."
+                        ),
+                        format!(
+                            "**operator-cancel:** Evidence: generation {generation} cannot advance without a response or explicit response-free proof. Effect: record typed operator cancellation and leave no inferred response. Risk: abandons any unrecovered worker result. Reversible only by a new generation. Choose only when recovery is impossible or the result is intentionally discarded."
+                        ),
                     ],
                 )
             } else {
@@ -403,10 +407,7 @@ impl QueueSyncPayload {
             });
         }
         for debt in &self.placement_reconcile {
-            let stable_key = format!(
-                "{}\0placement\0{}",
-                debt.document_path, debt.item_id
-            );
+            let stable_key = format!("{}\0placement\0{}", debt.document_path, debt.item_id);
             let response_id = format!("r-{}", agent_doc_hash::short_content_hash(&stable_key));
             if !seen.insert(response_id.clone()) {
                 continue;
@@ -1118,8 +1119,7 @@ mod tests {
                 && choice.contains("Reversible")
         }));
 
-        payload.lost_reported[0].response_evidence =
-            QueueSyncResponseEvidence::AmbiguousHistory;
+        payload.lost_reported[0].response_evidence = QueueSyncResponseEvidence::AmbiguousHistory;
         let updated = payload.recovery_responses().pop().unwrap();
         assert_eq!(first.response_id, updated.response_id);
         assert_ne!(first.summary, updated.summary);

@@ -8769,34 +8769,48 @@ fn try_main() -> anyhow::Result<()> {
                         publication_state,
                         &response,
                     )? {
-                        Some(outcome) => eprintln!(
-                            "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. Next: {}{}",
-                            if outcome.appended {
-                                "accepted"
-                            } else {
-                                "already present"
-                            },
-                            outcome.claim.item_text,
-                            outcome.claim.owner,
-                            outcome.claim.generation,
-                            agent_doc_queue::claim_release_receipt::queue_line_closeout(
-                                &file.display().to_string(),
+                        Some(outcome) => {
+                            let closeout =
+                                agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                                    &file.display().to_string(),
+                                    &outcome.claim.item_text,
+                                );
+                            let next = match agent_doc_queue_io::queue_lineage::require_integrated_repo_work(
+                                &file,
                                 &outcome.claim.item_text,
-                            ),
-                            if outcome.projection_pending {
-                                format!(
-                                    "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
-                                    outcome
-                                        .intent_id
-                                        .as_deref()
-                                        .map(|intent| format!(" (intent {intent})"))
-                                        .unwrap_or_default(),
-                                    file,
-                                )
-                            } else {
-                                String::new()
-                            },
-                        ),
+                                outcome.claim.generation,
+                            ) {
+                                Ok(()) => format!(
+                                    "integration proof is verified (or this attempt is prose-only); now run: {closeout}"
+                                ),
+                                Err(err) => err.to_string(),
+                            };
+                            eprintln!(
+                                "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. A worker report, side-worktree commit, or published side branch is not terminal completion; verify the authorized delivery boundary and commit reachability. Next: {}{}",
+                                if outcome.appended {
+                                    "accepted"
+                                } else {
+                                    "already present"
+                                },
+                                outcome.claim.item_text,
+                                outcome.claim.owner,
+                                outcome.claim.generation,
+                                next,
+                                if outcome.projection_pending {
+                                    format!(
+                                        "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
+                                        outcome
+                                            .intent_id
+                                            .as_deref()
+                                            .map(|intent| format!(" (intent {intent})"))
+                                            .unwrap_or_default(),
+                                        file,
+                                    )
+                                } else {
+                                    String::new()
+                                },
+                            );
+                        }
                         None => eprintln!(
                             "[queue] no subagent claim on {item:?}; no completion feedback written"
                         ),

@@ -881,7 +881,15 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
         );
         assert_ok(&report, "queue report-complete");
         let stderr = String::from_utf8_lossy(&report.stderr);
-        assert!(stderr.contains("awaiting integration. Next:"), "{stderr}");
+        assert!(stderr.contains("awaiting integration."), "{stderr}");
+        assert!(
+            stderr.contains("side-worktree commit, or published side branch is not terminal completion"),
+            "report-complete must explain that a worker handback is integration debt: {stderr}"
+        );
+        assert!(
+            stderr.contains("verify the authorized delivery boundary and commit reachability"),
+            "report-complete must give the integration-proof next step: {stderr}"
+        );
         assert!(
             stderr.contains(&format!("agent-doc queue consume {path} --ack-id {id}")),
             "an id-backed report must say how to strike its row while keeping tracked work open: {stderr}"

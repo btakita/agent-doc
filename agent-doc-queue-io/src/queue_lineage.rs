@@ -992,6 +992,63 @@ pub fn query(
     })
 }
 
+/// Fail closed when a reported attempt carried repository work but has no
+/// mechanically verified `Integrated` receipt (`#subagentintegrationproof`).
+/// Attempts with no repository/worktree/source facts are explicitly prose-only.
+pub fn require_integrated_repo_work(file: &Path, item: &str, generation: u64) -> Result<()> {
+    let identity = claim_identity(item);
+    let ledger = load(file)?;
+    let attempt = ledger
+        .attempts
+        .iter()
+        .find(|attempt| {
+            attempt.generation == generation && attempt.matches_identity(&identity)
+        })
+        .with_context(|| {
+            format!(
+                "no queue lineage attempt for {item:?} generation {generation}; keep the reported row live and inspect `agent-doc queue lineage {} --item {:?} --generation {generation}`",
+                file.display(),
+                item,
+            )
+        })?;
+    let carries_repo_work = attempt.events.iter().any(|event| {
+        event.repo_path.is_some()
+            || event.worktree_path.is_some()
+            || event.source_sha.is_some()
+            || matches!(
+                event.kind,
+                QueueLineageEventKind::Dirty
+                    | QueueLineageEventKind::Committed
+                    | QueueLineageEventKind::Pushed
+                    | QueueLineageEventKind::Integrated
+            )
+    });
+    if !carries_repo_work {
+        return Ok(());
+    }
+    let integrated = attempt
+        .events
+        .iter()
+        .rev()
+        .find(|event| event.kind == QueueLineageEventKind::Integrated)
+        .ok_or_else(|| {
+            let prior = facts(attempt);
+            let repo = prior.repo_path.as_deref().unwrap_or("<repo>");
+            let source = prior.source_sha.as_deref().unwrap_or("<source-sha>");
+            anyhow::anyhow!(
+                "reported repository work for {item:?} generation {generation} is not integrated. A dirty worktree, commit, or side branch is not terminal. Integrate it into the designated sink, then record proof with `agent-doc queue lineage-record {} --item {:?} --generation {generation} --event integrated --repo {:?} --source-sha {source} --integration-sha <sink-commit-sha> --sink-ref <designated-sink-ref> --method <merge|fast-forward|cherry-pick|rebase>`; keep the row live until that command succeeds",
+                file.display(),
+                item,
+                repo,
+            )
+        })?;
+    verify_event(attempt, integrated).with_context(|| {
+        format!(
+            "recorded integration proof for {item:?} generation {generation} no longer verifies; keep the row live and repair its designated-sink lineage"
+        )
+    })
+}
+
 fn report_attempt(attempt: &QueueLineageAttempt) -> QueueLineageAttemptReport {
     let facts = facts(attempt);
     let diagnostics = diagnose(attempt, &facts);

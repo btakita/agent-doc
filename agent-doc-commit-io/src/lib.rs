@@ -2098,7 +2098,7 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "duplicate_queue_response_projections_canonicalized file={} ids={} proof=committed_binary_owned_projection_migration operator_descendants=preserved",
+                "duplicate_queue_response_projections_canonicalized_from_committed_binary_owned_projection file={} ids={} operator_descendants=preserved",
                 file.display(),
                 response_ids.into_iter().collect::<Vec<_>>().join(","),
             ),

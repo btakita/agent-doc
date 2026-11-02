@@ -2085,21 +2085,17 @@ pub fn require_integrated_reported_repo_work_for_successor(
     before: &str,
     after: &str,
 ) -> Result<()> {
-    // A tracked-work-only document can close `--done #id` without owning any
-    // queue row. `live_queue_head_texts` uses `None` for both that valid shape
-    // and an unparseable selected queue, so distinguish them before preserving
-    // the fail-closed parse guard below. With no queue component there is no
-    // reported queue attempt this successor could accidentally close.
-    if !element::parse(before)?
-        .iter()
-        .any(|component| component.name == "queue")
-    {
-        return Ok(());
-    }
+    // Parse the whole queue graph rather than asking for its selected head.
+    // Selection is legitimately absent for both a document with no queue and
+    // a queue whose rows are all struck; neither shape closes a live reported
+    // attempt. A malformed existing queue still fails here. Reading every
+    // block also prevents a blocked/paused first queue from hiding a live row
+    // that a tracked-work successor closes in a later component.
+    let before_heads = agent_doc_queue::queue_continuation::all_queue_head_texts(before)
+        .context("integration closeout guard: failed to parse queue graph")?;
     let after_live = agent_doc_queue::queue_consume::live_work_identities(after);
     let mut seen = HashSet::new();
-    let closed = agent_doc_queue::queue_continuation::live_queue_head_texts(before)
-        .context("integration closeout guard: failed to parse live queue heads")?
+    let closed = before_heads
         .into_iter()
         .filter(|head| {
             let identity = agent_doc_queue::queue_claim::claim_identity(head);

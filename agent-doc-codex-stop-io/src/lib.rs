@@ -51,8 +51,8 @@ use agent_doc_turn::codex_stop_continuation::{
     render_prompt_continuation_instruction, render_slash_command_continuation_instruction,
 };
 use agent_doc_turn::response_text::{
-    first_nonempty_prompt_line, is_committed_prompt_diff_interruption,
-    prompt_target_from_interruption_reason,
+    first_nonempty_prompt_line, is_active_session_post_commit_drift_interruption,
+    is_committed_prompt_diff_interruption, prompt_target_from_interruption_reason,
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -1987,8 +1987,17 @@ fn apply_bound_stop(
                 );
                 return Ok(response);
             }
+            // `#activechatstoprecovery`: an unproven active-session drift has
+            // no steering marker by definition, so it is not a committed
+            // prompt-diff interruption. It nevertheless owns the same
+            // recursive Stop recovery boundary: the first Stop can discover
+            // that its closing payload is already committed and ask Codex for
+            // a response to the active chat prompt; the recursive Stop must
+            // capture that fresh response instead of refusing forever with
+            // "already continued once".
             let recursive_post_commit_prompt = input.stop_hook_active
-                && is_committed_prompt_diff_interruption(&reason)
+                && (is_committed_prompt_diff_interruption(&reason)
+                    || is_active_session_post_commit_drift_interruption(&reason))
                 && agent_doc_flow_io::closeout::cycle_already_committed(file).is_some()
                 && matches!(
                     agent_doc_template::replay_guard::classify_replay_payload(
@@ -7880,6 +7889,118 @@ The completed response is already committed.\n\
             }
             other => panic!("expected committed session-check status, got {other:?}"),
         }
+    }
+
+    /// `#activechatstoprecovery`: the first Stop after a committed response can
+    /// carry that same response while a newer active chat prompt has already
+    /// changed the document. The committed payload is not the new answer, so
+    /// Stop hands the turn back. The recursive Stop must then capture the fresh
+    /// final answer even though fail-closed active-session drift has no
+    /// `prompt_target:` steering marker.
+    #[test]
+    fn recursive_stop_closes_unmarked_active_session_post_commit_chat_drift() {
+        let dir = setup_project();
+        let doc = write_template_doc(&dir);
+        let committed_response =
+            "Cycle `cycle-1` converged and committed successfully. No queue work is drainable.";
+        let committed = fs::read_to_string(&doc).unwrap().replace(
+            "❯ Hello\n<!-- /agent:exchange -->",
+            &format!(
+                "❯ Hello\n\n### Re: previous closeout — gpt-5\n\n{committed_response}\n<!-- /agent:exchange -->"
+            ),
+        );
+        fs::write(&doc, &committed).unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&committed), Some(&committed))
+            .unwrap();
+        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
+            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+
+        let chat_prompt = "agent-doc sdk-release.md issue: finish extraction release state";
+        fs::write(
+            &doc,
+            format!("{committed}\nPost-closeout active-session document change.\n"),
+        )
+        .unwrap();
+        track_doc(&dir, &doc, "turn-1");
+        let root = project_root_for(dir.path()).unwrap();
+        let mut tracked = load_state(&root, "codex-session")
+            .unwrap()
+            .expect("tracked Codex session");
+        tracked.last_prompt = chat_prompt.to_string();
+        save_state(&root, &tracked).unwrap();
+        let _session = codex_session_bound_to_this_thread();
+
+        match agent_doc_session_check_io::inspect(
+            &doc,
+            &agent_doc_closeout_runtime_io::session_check_effects(),
+        )
+        .unwrap()
+        {
+            agent_doc_session_check_io::SessionCheckStatus::Interrupted(message) => {
+                assert!(
+                    is_active_session_post_commit_drift_interruption(&message),
+                    "{message}"
+                );
+            }
+            other => panic!("expected active-session post-commit drift, got {other:?}"),
+        }
+
+        let first = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: committed_response.to_string(),
+            stop_hook_active: false,
+        })
+        .unwrap();
+        assert!(
+            matches!(&first, StopResponse::ContinueTurn { reason, .. }
+                if reason.contains("active harness session changed this document")),
+            "{first:?}"
+        );
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .phase
+                .as_str(),
+            "committed",
+            "the already-committed predecessor must not be reopened"
+        );
+
+        let recovered = "Recovered the active chat prompt through final-message closeout.";
+        let second = apply_stop(&StopInput {
+            session_id: "codex-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            cwd: dir.path().display().to_string(),
+            last_assistant_message: format!("### Re: {chat_prompt} — gpt-5\n\n{recovered}"),
+            stop_hook_active: true,
+        })
+        .unwrap();
+
+        assert_eq!(second, StopResponse::AllowExit);
+        assert!(fs::read_to_string(&doc).unwrap().contains(recovered));
+        assert!(matches!(
+            agent_doc_session_check_io::inspect(
+                &doc,
+                &agent_doc_closeout_runtime_io::session_check_effects(),
+            )
+            .unwrap(),
+            agent_doc_session_check_io::SessionCheckStatus::Ok(_)
+        ));
     }
 
     /// `#donearchive-stop-race`: the editor may publish `agent:done` content

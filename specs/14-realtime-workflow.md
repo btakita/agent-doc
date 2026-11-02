@@ -1047,6 +1047,17 @@ the family at its earliest queue slot. Ambiguous descendants, short anchors, and
 snapshot-authored duplicate families remain untouched. This repair is legal only
 inside the post-apply projection-race path; it is not general fuzzy queue dedup.
 
+The keyed CRDT merge has a narrower pre-commit guard for a newly authored
+free-text row (`#adtypingdupsiblings`). When one plane carries a stale spelling
+in an anchored queue gap and the live operator plane carries the revised
+spelling more than once, the stale spelling proves that the repeated live key
+is a replay of that one in-progress row. Reconciliation removes the stale
+spelling and caps that exact live spelling to one before its unique-key gate;
+otherwise the duplicate key would force a flat merge and materialize every
+revision as separately dispatchable sibling work. Snapshot-authored duplicates,
+and live duplicates with no stale-revision evidence, keep the conservative
+duplicate-key path so an intentional repeated effect is not silently erased.
+
 An id-backed queue head with a nonempty inline operator verdict, such as
 `complete [#push]: hold lifted; do the push`, is fresh executable authority even
 when the referenced item currently lives in `agent:review` and therefore has no

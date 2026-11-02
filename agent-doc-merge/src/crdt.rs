@@ -1482,15 +1482,8 @@ fn reconcile_component_body(
         }
     };
     let mut ours_children = split(ours_body)?;
-    let theirs_children = split(theirs_body)?;
+    let mut theirs_children = split(theirs_body)?;
     let base_children = base_body.and_then(split).unwrap_or_default();
-
-    if !keys_unique(&ours_children)
-        || !keys_unique(&theirs_children)
-        || !keys_unique(&base_children)
-    {
-        return None;
-    }
 
     // An id-less queue child's text is its fallback key. While the operator is
     // progressively rewriting a newly-added line, a stale base can therefore
@@ -1498,7 +1491,16 @@ fn reconcile_component_body(
     // intermediate draft. Within the same shared-anchor gap, prefer the live
     // operator run and discard only OURS-only, base-unbacked free-text keys.
     // Explicit `#id` children and additions in different gaps remain independent.
-    if name == "queue" && has_operator_free_text_queue_revision(base_body, ours_body, theirs_body) {
+    //
+    // Do this before the uniqueness gate. A mid-typing editor replay can carry
+    // the final spelling twice beside OURS' stale draft (`#adtypingdupsiblings`).
+    // That duplicate key used to make keyed reconciliation decline, after which
+    // the flat merge materialized all three rows. When the stale draft proves
+    // this is one operator revision gap, collapse only repeated live spellings
+    // that are absent from the base. An intentional duplicate already present
+    // in the base, or one without stale-revision evidence, still takes the
+    // conservative duplicate-key fallback.
+    if name == "queue" {
         let gaps =
             operator_free_text_revision_gaps(&base_children, &ours_children, &theirs_children);
         let theirs_keys: std::collections::HashSet<&str> = theirs_children
@@ -1526,7 +1528,41 @@ fn reconcile_component_body(
             })
             .map(|(_, child)| child.key.clone())
             .collect();
-        ours_children.retain(|child| !stale_revision_keys.contains(&child.key));
+        if !stale_revision_keys.is_empty() {
+            let mut seen_live_revision_keys = std::collections::HashSet::<String>::new();
+            let duplicate_live_revision_indexes = theirs_children
+                .iter()
+                .enumerate()
+                .filter_map(|(index, child)| {
+                    let is_live_revision = child.key.starts_with("txt:")
+                        && !base_keys.contains(child.key.as_str())
+                        && gaps.contains(&child_anchor_gap(
+                            &theirs_children,
+                            index,
+                            &shared_anchors,
+                        ));
+                    (is_live_revision
+                        && !seen_live_revision_keys.insert(child.key.clone()))
+                    .then_some(index)
+                })
+                .collect::<std::collections::HashSet<_>>();
+            ours_children.retain(|child| !stale_revision_keys.contains(&child.key));
+            if !duplicate_live_revision_indexes.is_empty() {
+                let mut index = 0usize;
+                theirs_children.retain(|_| {
+                    let keep = !duplicate_live_revision_indexes.contains(&index);
+                    index += 1;
+                    keep
+                });
+            }
+        }
+    }
+
+    if !keys_unique(&ours_children)
+        || !keys_unique(&theirs_children)
+        || !keys_unique(&base_children)
+    {
+        return None;
     }
 
     let ours_map: std::collections::HashMap<&str, &KeyedChild> =
@@ -5436,6 +5472,62 @@ Second answer line three.
             !queue_body.contains("refined draft request"),
             "{queue_body}"
         );
+    }
+
+    #[test]
+    fn reconcile_queue_nested_typing_revision_does_not_materialize_sibling_rows() {
+        let doc = |rows: &str| {
+            format!(
+                "# SDK\n\n## Main <!-- agent:run id=\"main\" subagents priority -->\n{rows}\n<!-- /agent:run -->\n"
+            )
+        };
+        let base = doc("- [#tdprovauth]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let prefix = "  - 📥 We will support anonymous interactions. The P2P ADRs define the auth rules. ";
+        let draft = format!(
+            "{prefix}Create an ADR to promote the P2P auth rules to general Haiven Rules to codify #chat-ploic"
+        );
+        let final_row = format!(
+            "{prefix}Promote the P2P auth rules to general Haiven Rules to codify #chat-policy."
+        );
+        for (ours_rows, theirs_rows) in [
+            (draft.to_string(), final_row.to_string()),
+            (format!("{draft}\n{final_row}"), final_row.to_string()),
+            (draft.to_string(), format!("{final_row}\n{final_row}")),
+            (
+                format!("{draft}\n{final_row}"),
+                format!("{final_row}\n{final_row}"),
+            ),
+        ] {
+            let ours = doc(&format!("- [#tdprovauth]\n{ours_rows}"));
+            let theirs = doc(&format!("- [#tdprovauth]\n{theirs_rows}"));
+
+            let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+            assert_eq!(
+                merged.matches("Promote the P2P auth rules").count(),
+                1,
+                "{merged}"
+            );
+            assert!(!merged.contains("Create an ADR"), "{merged}");
+            assert!(!merged.contains("#chat-ploic"), "{merged}");
+        }
+    }
+
+    #[test]
+    fn reconcile_queue_keeps_operator_authored_identical_rows_without_revision_evidence() {
+        let doc = |rows: &str| {
+            format!(
+                "<!-- agent:run id=\"main\" -->\n{rows}\n<!-- /agent:run -->\n"
+            )
+        };
+        let base = doc("- [#tdprovauth]");
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let repeated = "  - 📥 intentionally repeat this effect";
+        let ours = base.clone();
+        let theirs = doc(&format!("- [#tdprovauth]\n{repeated}\n{repeated}"));
+
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(merged.matches("intentionally repeat this effect").count(), 2);
     }
 
     #[test]

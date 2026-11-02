@@ -164,7 +164,7 @@ fn an_operator_checked_todo_closes_its_queue_row() {
         "preflight",
     );
     assert!(
-        run_body(&doc).contains("📥 do [#pmq]\n"),
+        run_body(&doc).contains("- ### 📥 do [#pmq]\n"),
         "an open Todo's row is live:\n{}",
         run_body(&doc)
     );
@@ -184,13 +184,16 @@ fn an_operator_checked_todo_closes_its_queue_row() {
     );
 
     let body = run_body(&doc);
-    assert!(body.contains("- ~~do [#bk1]~~"), "backlog parity:\n{body}");
     assert!(
-        body.contains("- ~~do [#pmq]~~"),
+        body.contains("- ### ~~do [#bk1]~~"),
+        "backlog parity:\n{body}"
+    );
+    assert!(
+        body.contains("- ### ~~do [#pmq]~~"),
         "the checked Todo closes its row:\n{body}"
     );
     assert!(
-        body.contains("📥 do [#other]\n"),
+        body.contains("- ### 📥 do [#other]\n"),
         "an open Todo's row stays live:\n{body}"
     );
     let after = fs::read_to_string(&doc).unwrap();
@@ -218,6 +221,6 @@ fn a_checked_todo_sharing_an_open_backlog_id_keeps_the_backlog_row() {
     let output = run_agent_doc(dir.path(), &["preflight", path]);
     assert_ok(&output, "preflight");
     let body = run_body(&doc);
-    assert!(body.contains("📥 do [#bk1]\n"), "{body}");
+    assert!(body.contains("- ### 📥 do [#bk1]\n"), "{body}");
     assert!(!body.contains("~~"), "{body}");
 }

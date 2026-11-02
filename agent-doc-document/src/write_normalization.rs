@@ -234,6 +234,24 @@ pub fn latest_response_heading_missing_from_current(head: &str, current: &str) -
     if response_marker_present_in_content(current, &heading) {
         return None;
     }
+    // The commit projection assigns a compact response id to the heading. A
+    // live editor cut can still carry the same response without that
+    // binary-owned id while its VCS-refresh receipt is in flight. Compare the
+    // complete latest response blocks before calling the response missing so a
+    // true body mismatch still fails closed.
+    let latest_block = |content: &str| {
+        let components = element::parse(content).ok()?;
+        let exchange = components
+            .iter()
+            .find(|component| component.name == AGENT_RESPONSE_COMPONENT)?;
+        latest_response_block_from_exchange_body(exchange.content(content))
+    };
+    if let (Some(head_block), Some(current_block)) = (latest_block(head), latest_block(current))
+        && compact_exchange_for_compare(&head_block)
+            == compact_exchange_for_compare(&current_block)
+    {
+        return None;
+    }
     Some(heading)
 }
 
@@ -954,6 +972,34 @@ mod tests {
             latest_response_heading_missing_from_current(head, head),
             None
         );
+    }
+
+    #[test]
+    fn latest_response_heading_accepts_live_block_before_response_id_projection() {
+        let head = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout lease race [#r-de7af8e9df2d]\n\n",
+            "> **Queue prompt:** Fix the closeout lease race.\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:new -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: closeout lease race\n\n",
+            "> **Queue prompt:** Fix the closeout lease race.\n\n",
+            "Fixed.\n",
+            "<!-- agent:boundary:old -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(
+            latest_response_heading_missing_from_current(head, current),
+            None
+        );
+
+        let changed = current.replace("Fixed.", "Still broken.");
+        assert!(latest_response_heading_missing_from_current(head, &changed).is_some());
     }
 
     #[test]

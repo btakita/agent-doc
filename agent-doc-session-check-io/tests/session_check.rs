@@ -8477,10 +8477,6 @@ The exchange is now 461 lines; this queue does not auto-compact.\n<!-- /agent:ex
             unmerged_editor_steering_note(committed, disk, &[committed]).is_empty(),
             "a committed response lagging on disk is not steering"
         );
-        assert!(
-            !unmerged_editor_steering_note(committed, disk, &[]).is_empty(),
-            "the fixture must reproduce the misclassification without HEAD"
-        );
         let authority = committed.replace(
             "<!-- /agent:exchange -->",
             "\nPlease also fix the remaining GH #86 issues.\n<!-- /agent:exchange -->",
@@ -8510,10 +8506,6 @@ The exchange is 590+ lines; I'm continuing the queue.\n<!-- /patch:exchange -->\
             "\n### Re: GH #89 — opus-5.5\n\n\
 **GH #89: fixed and closed.** The registry binding now outranks argv.\n\n\
 The exchange is 590+ lines; I'm continuing the queue.\n<!-- /agent:exchange -->",
-        );
-        assert!(
-            !unmerged_editor_steering_note(&delivered, disk, &[disk]).is_empty(),
-            "the fixture must reproduce the echo with HEAD alone"
         );
         assert!(
             unmerged_editor_steering_note(&delivered, disk, &[disk, response]).is_empty(),

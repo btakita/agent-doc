@@ -1769,6 +1769,24 @@ fn apply_bound_stop(
                         "codex_stop_terminal_reap_maintenance_started capture_skipped=true kind={maintenance_kind}"
                     ),
                 );
+                let answered_residue_has_post_commit_drift = if completed_free_text_residue {
+                    match agent_doc_git_io::revision::show_head(file)? {
+                        Some(head) => {
+                            let current = fresh_document_content(
+                                file,
+                                "codex_stop_answered_residue_post_commit_drift",
+                            )?;
+                            agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                                &head,
+                            ) != agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
+                                &current,
+                            )
+                        }
+                        None => false,
+                    }
+                } else {
+                    false
+                };
                 // `#qresiduestop`: the completed free-text guard names a
                 // committed predecessor. Run the same queue catch-up that the
                 // next admission would own before strict closeout; never let
@@ -1794,6 +1812,18 @@ fn apply_bound_stop(
                         .err()
                         .is_some_and(unanswered_edit_pending_commit_refusal)
                 {
+                    invalidate_stop_document_cache();
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        "codex_stop_terminal_reap_handed_off capture_skipped=true kind=answered_free_text_queue_residue verdict=unanswered_edit_pending action=allow_exit (#qresiduenextedit)",
+                    );
+                    return Ok(StopResponse::AllowExit);
+                }
+                // Queue catch-up can now settle successfully while preserving a
+                // newer typed edit outside the committed snapshot. That edit is
+                // still next-cycle work: do not immediately select it using the
+                // predecessor's recursive Stop invocation.
+                if answered_residue_has_post_commit_drift && closeout_result.is_ok() {
                     invalidate_stop_document_cache();
                     agent_doc_ops_log_io::log_op(
                         file,

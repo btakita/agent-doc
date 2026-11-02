@@ -3947,7 +3947,7 @@ Duplicate replay should stay live.
             .expect("committed document");
         assert!(
             landed
-                .contains("- ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike); response: [#r-")
+                .contains("- ### ~~finish the plan~~ — auto-struck: answered this cycle (#ftstrike)\n  - **Response [#r-")
                 && landed.contains("- later work\n"),
             "HEAD must carry the exact late strike without losing later queue work:\n{landed}"
         );

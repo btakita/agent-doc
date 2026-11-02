@@ -3401,6 +3401,13 @@ pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
         return false;
     };
     for later in entries.iter().skip(idx + 1) {
+        // A complete list comment is annotation, not an executable
+        // descendant. Keep scanning through it so a real child below the
+        // comment still makes this prompt row a group parent, while a
+        // comment-only child leaves its prompt parent runnable.
+        if list_comment_context_row(later).is_some() {
+            continue;
+        }
         match entry_indent(later) {
             // Deeper than us before we returned to our own depth: we are a parent.
             Some(indent) if indent > own_indent => return true,
@@ -3642,6 +3649,58 @@ fn response_metadata_row_indent(entry: &QueueEntry) -> Option<usize> {
     (!label.trim().is_empty() && !effect.trim().is_empty()).then_some(indent)
 }
 
+/// A complete list comment that can supply lineage to executable descendants.
+///
+/// The markdown overlay deliberately keeps these rows out of typed prompts.
+/// Retaining their structural indent and a compact label here lets a child
+/// below a comment execute independently without discarding the operator's
+/// note. Comment-only children remain annotations on their runnable prompt
+/// parent; [`entry_is_group_parent`] skips them when looking for executable
+/// descendants.
+fn list_comment_context_row(entry: &QueueEntry) -> Option<(usize, String)> {
+    let QueueEntry::Freeform(raw) = entry else {
+        return None;
+    };
+    let (indent, _, item_content) = split_list_item(raw)?;
+    let content = item_content.trim();
+    if agent_doc_markdown_ast::overlay::is_ignored_list_comment(content) {
+        if !content.contains('\n') {
+            return Some((indent, content.to_string()));
+        }
+        let body = content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && *line != "%%")
+            .collect::<Vec<_>>()
+            .join(" ");
+        let label = if body.is_empty() {
+            "%% … %%".to_string()
+        } else {
+            format!("%% {body} %%")
+        };
+        return Some((indent, label));
+    }
+    if content != "%%"
+        || agent_doc_markdown_ast::overlay::multiline_list_comment_ranges(raw).is_empty()
+    {
+        return None;
+    }
+
+    let body = raw
+        .lines()
+        .skip(1)
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != "%%")
+        .collect::<Vec<_>>()
+        .join(" ");
+    let label = if body.is_empty() {
+        "%% … %%".to_string()
+    } else {
+        format!("%% {body} %%")
+    };
+    Some((indent, label))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum StructuredResponseContext {
     Container,
@@ -3877,6 +3936,14 @@ fn nest_vector_at_with_work(entries: &[QueueEntry], index: usize, shown: &str) -
             continue;
         };
         if indent < depth {
+            if let Some((_, label)) = list_comment_context_row(earlier) {
+                labels.push(label);
+                depth = indent;
+                if depth == 0 {
+                    break;
+                }
+                continue;
+            }
             if response_metadata_row_indent(earlier).is_some() {
                 // Generated response rows are transparent to executable
                 // ancestry. Keep searching at the same depth for the nearest
@@ -4121,6 +4188,12 @@ fn prompt_tree_outline(entries: &[QueueEntry], leaf_idx: usize) -> String {
             && idx != leaf_idx
             && !entry_is_ancestor_of(entries, idx, leaf_idx)
         {
+            continue;
+        }
+        if let QueueEntry::Freeform(raw) = entry
+            && list_comment_context_row(entry).is_some()
+        {
+            lines.extend(raw.trim_end().lines().map(str::to_string));
             continue;
         }
         let (prompt, completed) = match entry {
@@ -4403,7 +4476,8 @@ pub fn has_nested_or_ordered_list(entries: &[QueueEntry]) -> bool {
 fn entry_indent(entry: &QueueEntry) -> Option<usize> {
     match entry {
         QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
-        _ => response_metadata_row_indent(entry),
+        _ => response_metadata_row_indent(entry)
+            .or_else(|| list_comment_context_row(entry).map(|(indent, _)| indent)),
     }
 }
 
@@ -10719,6 +10793,62 @@ mod tests {
         assert!(!subagent.contains("**staging**"), "{subagent}");
         assert!(!subagent.contains("**production**"), "{subagent}");
         assert!(!subagent.contains("Unrelated production"), "{subagent}");
+    }
+
+    #[test]
+    fn comment_parent_is_context_for_its_executable_child() {
+        for (body, lineage, tree_comment) in [
+            (
+                "- %%release context%%\n  - deploy staging\n",
+                "%%release context%%: deploy staging",
+                "- %%release context%%\n>   - deploy staging",
+            ),
+            (
+                "- %%\n  release context\n  %%\n  - deploy staging\n",
+                "%% release context %%: deploy staging",
+                "- %%\n  release context\n  %%\n>   - deploy staging",
+            ),
+        ] {
+            let entries = parse(body).unwrap();
+            let executable = executable_prompt_indexes(&entries);
+
+            assert_eq!(executable.len(), 1, "only the child is executable");
+            let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
+            assert!(
+                submitted.contains(lineage),
+                "the inert parent must remain inherited task context: {submitted}"
+            );
+            assert!(
+                submitted.contains(tree_comment),
+                "the submitted prompt tree must retain the comment and selected child: {submitted}"
+            );
+            assert_eq!(render(&entries), body);
+        }
+    }
+
+    #[test]
+    fn comment_between_prompt_parent_and_child_preserves_both_context_layers() {
+        let body = concat!(
+            "- release work\n",
+            "  - %%deployment context%%\n",
+            "    - deploy staging\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+
+        assert_eq!(executable.len(), 1, "only the deepest child executes");
+        let submitted = submitted_prompt_at(&entries, executable[0]).unwrap();
+        assert!(
+            submitted.starts_with("release work: %%deployment context%%: deploy staging"),
+            "{submitted}"
+        );
+        assert!(submitted.contains("- release work"), "{submitted}");
+        assert!(
+            submitted.contains("  - %%deployment context%%"),
+            "{submitted}"
+        );
+        assert!(submitted.contains(">     - deploy staging"), "{submitted}");
+        assert_eq!(render(&entries), body);
     }
 
     #[test]

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use agent_doc_commit_io::{
-    commit, commit_document_only_drift, commit_proven_response_replay_canonicalization,
+    canonicalize_and_commit_duplicate_queue_response_projections, commit,
+    commit_document_only_drift, commit_proven_response_replay_canonicalization,
     commit_with_authoritative_compaction, detach_and_commit_orphaned_queue_response_projections,
     restore_and_commit_historical_response_evidence,
 };
@@ -981,6 +982,85 @@ Duplicate replay should stay live.
         assert!(
             !detach_and_commit_orphaned_queue_response_projections(&doc)
                 .expect("the repair is idempotent")
+        );
+    }
+
+    #[test]
+    fn committed_duplicate_queue_response_projections_are_canonicalized() {
+        const RESPONSE_ID: &str = "[#r-0123456789ab]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let document = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~canonical~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** 2026-11-01T03:40:12.000Z\n",
+                "    - **Summary:** Shared result.\n",
+                "- ~~duplicate~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** 2026-11-01T03:40:12.000Z\n",
+                "    - **Summary:** Shared result.\n",
+                "    - **Choices:**\n",
+                "      - **keep**: Keep the result.\n",
+                "        - Operator-authored descendant survives.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            RESPONSE_ID,
+        );
+        th::commit_file(
+            root,
+            "session.md",
+            &document,
+            "committed duplicate projections",
+        );
+        let doc = root.join("session.md");
+
+        assert!(
+            canonicalize_and_commit_duplicate_queue_response_projections(&doc)
+                .expect("the historical duplicate projection should migrate")
+        );
+        let repaired = fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Response {RESPONSE_ID}**"))
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Closed by:** {RESPONSE_ID}"))
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(repaired.matches("Shared result.").count(), 1, "{repaired}");
+        assert!(
+            repaired.contains("        - Operator-authored descendant survives.\n"),
+            "{repaired}"
+        );
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(head.stdout).unwrap(), repaired);
+        let message = Command::new("git")
+            .current_dir(root)
+            .args(["log", "-1", "--format=%B"])
+            .output()
+            .unwrap();
+        let message = String::from_utf8_lossy(&message.stdout);
+        assert!(
+            message.contains("canonicalize duplicate queue response projections")
+                && message.contains("Agent-Doc-Response: r-0123456789ab"),
+            "{message}"
+        );
+        assert!(
+            !canonicalize_and_commit_duplicate_queue_response_projections(&doc)
+                .expect("the migration should be idempotent")
         );
     }
 

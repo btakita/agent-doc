@@ -577,6 +577,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
     }
 
     fn restore_committed_response_evidence(&self, file: &Path) -> Result<bool> {
+        if agent_doc_commit_io::canonicalize_and_commit_duplicate_queue_response_projections(file)?
+        {
+            return Ok(true);
+        }
         if agent_doc_commit_io::restore_and_commit_historical_response_evidence(file)? {
             return Ok(true);
         }

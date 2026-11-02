@@ -2174,6 +2174,176 @@ fn strip_response_projection_children(body: &str) -> String {
     without_projection
 }
 
+/// Collapse historical copies of one queue response projection to one
+/// canonical node per public response id.
+///
+/// The first full `**Response [#r-…]**` row in document order is retained.
+/// Later full rows become inert `**Closed by:** [#r-…]` backlinks and only
+/// binary-owned metadata beneath those rows is removed. Unknown descendants
+/// remain byte-for-byte so an operator reply nested under a generated choice
+/// or action cannot be discarded by the migration.
+pub fn canonicalize_duplicate_queue_response_projections(content: &str) -> Result<String> {
+    let components = element::parse(content)?;
+    let mut seen = HashSet::<String>::new();
+    let mut edits = Vec::new();
+    for queue in components
+        .iter()
+        .filter(|component| component.name == "queue")
+    {
+        let body = queue.content(content);
+        let repaired = canonicalize_duplicate_response_projections_in_queue(body, &mut seen);
+        if repaired != body {
+            edits.push((queue.open_end, queue.close_start, repaired));
+        }
+    }
+    let mut repaired = content.to_string();
+    for (start, end, body) in edits.into_iter().rev() {
+        repaired.replace_range(start..end, &body);
+    }
+    Ok(repaired)
+}
+
+/// Public response ids that own more than one full queue response node.
+pub fn duplicate_queue_response_projection_ids(content: &str) -> Result<BTreeSet<String>> {
+    let mut seen = HashSet::<String>::new();
+    let mut duplicates = BTreeSet::new();
+    for queue in element::parse(content)?
+        .into_iter()
+        .filter(|component| component.name == "queue")
+    {
+        for line in queue.content(content).lines() {
+            let item = line.trim();
+            let Some(item) = item
+                .strip_prefix("- ")
+                .or_else(|| item.strip_prefix("* "))
+                .or_else(|| item.strip_prefix("+ "))
+            else {
+                continue;
+            };
+            let Some(response_id) =
+                agent_doc_markdown_ast::exchange_tree::response_id_from_lookup_marker(item)
+            else {
+                continue;
+            };
+            if !seen.insert(response_id.to_string()) {
+                duplicates.insert(response_id.to_string());
+            }
+        }
+    }
+    Ok(duplicates)
+}
+
+fn canonicalize_duplicate_response_projections_in_queue(
+    body: &str,
+    seen: &mut HashSet<String>,
+) -> String {
+    let lines = body.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0usize);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+
+    let mut parents = vec![None; lines.len()];
+    let mut stack = Vec::<(usize, usize)>::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        if !trimmed.starts_with("- ") && !trimmed.starts_with("* ") && !trimmed.starts_with("+ ") {
+            continue;
+        }
+        let indent = line.len() - trimmed.len();
+        while stack
+            .last()
+            .is_some_and(|(prior_indent, _)| *prior_indent >= indent)
+        {
+            stack.pop();
+        }
+        parents[index] = stack.last().map(|(_, parent)| *parent);
+        stack.push((indent, index));
+    }
+
+    let response_id_at = |index: usize| -> Option<String> {
+        let item = lines.get(index)?.trim();
+        let item = item
+            .strip_prefix("- ")
+            .or_else(|| item.strip_prefix("* "))
+            .or_else(|| item.strip_prefix("+ "))?;
+        agent_doc_markdown_ast::exchange_tree::response_id_from_lookup_marker(item)
+            .map(str::to_string)
+    };
+    let response_ids = (0..lines.len())
+        .map(|index| response_id_at(index))
+        .collect::<Vec<_>>();
+    let mut duplicate_markers = HashMap::<usize, String>::new();
+    for (index, response_id) in response_ids.iter().enumerate() {
+        let Some(response_id) = response_id else {
+            continue;
+        };
+        if !seen.insert(response_id.clone()) {
+            duplicate_markers.insert(index, response_id.clone());
+        }
+    }
+    if duplicate_markers.is_empty() {
+        return body.to_string();
+    }
+
+    let root_response_marker = |mut index: usize| -> Option<usize> {
+        loop {
+            if response_ids.get(index).is_some_and(Option::is_some) {
+                return Some(index);
+            }
+            index = parents.get(index).copied().flatten()?;
+        }
+    };
+    let mut generated = agent_doc_markdown_ast::overlay::response_details_child_ranges(body);
+    generated.extend(agent_doc_markdown_ast::overlay::response_row_child_ranges(
+        body,
+    ));
+    generated.sort_unstable_by_key(|(start, end)| (*start, std::cmp::Reverse(*end)));
+    generated.dedup();
+
+    let mut replacements = Vec::<(usize, usize, String)>::new();
+    let mut removed = Vec::<(usize, usize)>::new();
+    for (start, end) in generated {
+        let Ok(line_index) = offsets.binary_search(&start) else {
+            continue;
+        };
+        let Some(owner) = root_response_marker(line_index) else {
+            continue;
+        };
+        let Some(response_id) = duplicate_markers.get(&owner) else {
+            continue;
+        };
+        if line_index == owner {
+            let line = &body[start..end];
+            let marker =
+                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+                    .expect("parsed response lookup ids are canonical");
+            replacements.push((
+                start,
+                end,
+                line.replacen(&marker, &format!("**Closed by:** {response_id}"), 1),
+            ));
+        } else if !removed
+            .iter()
+            .any(|(outer_start, outer_end)| *outer_start <= start && end <= *outer_end)
+        {
+            removed.push((start, end));
+        }
+    }
+    replacements.extend(
+        removed
+            .into_iter()
+            .map(|(start, end)| (start, end, String::new())),
+    );
+    replacements.sort_unstable_by_key(|(start, _, _)| *start);
+    let mut repaired = body.to_string();
+    for (start, end, replacement) in replacements.into_iter().rev() {
+        repaired.replace_range(start..end, &replacement);
+    }
+    repaired
+}
+
 /// Detach binary-owned response projections for response ids whose durable
 /// evidence no longer exists.
 ///
@@ -4711,6 +4881,130 @@ mod tests {
             1,
             "the duplicate row must point to the canonical response:\n{annotated}"
         );
+    }
+
+    #[test]
+    fn historical_duplicate_response_migration_preserves_operator_descendants() {
+        const RESPONSE: &str = "[#r-0123456789ab]";
+        const NESTED: &str = "[#r-abcdef012345]";
+        let content = queue_doc(&format!(
+            concat!(
+                "- ~~canonical~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** 2026-11-01T12:00:00Z\n",
+                "    - **Summary:** Batch completed.\n",
+                "- ~~duplicate~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** 2026-11-01T12:00:00Z\n",
+                "    - **Summary:** Batch completed.\n",
+                "    - **Choices:**\n",
+                "      - **publish**: Publish it.\n",
+                "        - Operator chose staging; preserve this reply exactly.\n",
+                "    - ~~nested completion~~ — auto-struck: response: {1}\n",
+                "      - **Response {1}**\n",
+                "        - **Timestamp:** 2026-11-01T12:01:00Z\n",
+                "        - **Summary:** Nested work completed.\n",
+            ),
+            RESPONSE, NESTED
+        ));
+
+        let repaired = canonicalize_duplicate_queue_response_projections(&content).unwrap();
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Response {RESPONSE}**"))
+                .count(),
+            1,
+            "one canonical response must remain:\n{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Closed by:** {RESPONSE}"))
+                .count(),
+            1,
+            "the duplicate becomes one inert backlink:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("Batch completed.").count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("2026-11-01T12:00:00Z").count(),
+            1,
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains("        - Operator chose staging; preserve this reply exactly.\n"),
+            "operator-authored descendants stay byte-identical:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("    - ~~nested completion~~ — auto-struck:"),
+            "an operator-owned nested row must survive:\n{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Response {NESTED}**"))
+                .count(),
+            1,
+            "a distinct nested response must remain canonical:\n{repaired}"
+        );
+        assert_eq!(
+            canonicalize_duplicate_queue_response_projections(&repaired).unwrap(),
+            repaired,
+            "the historical migration must be idempotent"
+        );
+        let queue = element::parse(&repaired)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let entries = document_queue::parse(queue.content(&repaired)).unwrap();
+        assert!(
+            document_queue::prompts(&entries)
+                .iter()
+                .any(|prompt| prompt.text.contains("Operator chose staging")),
+            "preserved operator descendants remain actionable:\n{entries:#?}\n{repaired}"
+        );
+    }
+
+    #[test]
+    fn historical_duplicate_response_migration_is_document_wide() {
+        const RESPONSE: &str = "[#r-0123456789ab]";
+        let content = format!(
+            concat!(
+                "<!-- agent:queue id=docs -->\n",
+                "- ~~docs~~\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** first\n",
+                "<!-- /agent:queue -->\n",
+                "<!-- agent:queue id=main -->\n",
+                "- ~~main~~\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** second\n",
+                "- ~~main duplicate~~\n",
+                "  - **Response {0}**\n",
+                "    - **Timestamp:** third\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            RESPONSE
+        );
+
+        let repaired = canonicalize_duplicate_queue_response_projections(&content).unwrap();
+        assert_eq!(
+            repaired
+                .matches(&format!("**Response {RESPONSE}**"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("**Closed by:** {RESPONSE}"))
+                .count(),
+            2
+        );
+        assert!(repaired.contains("**Timestamp:** first"), "{repaired}");
+        assert!(!repaired.contains("**Timestamp:** second"), "{repaired}");
+        assert!(!repaired.contains("**Timestamp:** third"), "{repaired}");
     }
 
     #[test]

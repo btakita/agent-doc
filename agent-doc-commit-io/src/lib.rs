@@ -1952,17 +1952,167 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
     })
 }
 
+/// Collapse committed duplicate queue response projections to one canonical
+/// response node and inert backlinks.
+///
+/// The pure projection preserves operator-authored descendants. This commit
+/// boundary accepts only the committed source or its exact deterministic
+/// repair, then records that repair through the normal private-index CAS path.
+pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path) -> Result<bool> {
+    agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
+        let authority = commit_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_authority",
+        )?;
+        let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_disk",
+        )?;
+        if authority != disk {
+            return Ok(false);
+        }
+        let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
+            return Ok(false);
+        };
+        let response_ids =
+            agent_doc_queue::queue_consume::duplicate_queue_response_projection_ids(&head)?;
+        if response_ids.is_empty() {
+            return Ok(false);
+        }
+        let target =
+            agent_doc_queue::queue_consume::canonicalize_duplicate_queue_response_projections(
+                &head,
+            )?;
+        if target == head {
+            return Ok(false);
+        }
+        anyhow::ensure!(
+            authority == head || authority == target,
+            "refusing duplicate queue response-projection migration for {}: authority is neither the committed source nor its exact repair",
+            file.display(),
+        );
+        if authority == head {
+            commit_atomic_write(file, &target)?;
+            agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        }
+        let repaired_authority = commit_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_repaired_authority",
+        )?;
+        let repaired_disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_repaired_disk",
+        )?;
+        anyhow::ensure!(
+            repaired_authority == target && repaired_disk == target,
+            "duplicate queue response-projection migration for {} did not converge authority and disk on the exact repair",
+            file.display(),
+        );
+
+        let (super_root, resolved) = resolve_to_git_root(file)?;
+        let (git_root, in_submodule) = narrow_to_submodule(&super_root, &resolved);
+        let relative_document = resolved
+            .strip_prefix(&git_root)
+            .unwrap_or(&resolved)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let message = agent_doc_archive_io::append_affected_id_trailers(
+            "agent-doc: canonicalize duplicate queue response projections",
+            &relative_document,
+            response_ids.clone(),
+            std::iter::empty(),
+        );
+        let mut attempts = 0u32;
+        let commit_output = loop {
+            match stage_and_commit_exact_paths_once(
+                &git_root,
+                &resolved,
+                Some(&target),
+                &[],
+                &message,
+            ) {
+                Ok(output) => break output,
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail })
+                    if attempts < 3 =>
+                {
+                    attempts += 1;
+                    eprintln!(
+                        "[commit] duplicate response migration index.lock contention during {} (retry {}/3): {}",
+                        phase, attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(attempts));
+                }
+                Err(CommitTransactionError::RetryableHeadMoved { detail }) if attempts < 3 => {
+                    attempts += 1;
+                    eprintln!(
+                        "[commit] HEAD moved during duplicate response migration (retry {}/3): {}",
+                        attempts, detail
+                    );
+                    std::thread::sleep(commit_retry_backoff(attempts));
+                }
+                Err(CommitTransactionError::RetryableIndexLock { phase, detail }) => {
+                    anyhow::bail!(
+                        "git {phase} failed after duplicate response migration retries: {detail}"
+                    );
+                }
+                Err(CommitTransactionError::RetryableHeadMoved { detail }) => anyhow::bail!(
+                    "duplicate response migration failed after HEAD compare-and-swap retries: {detail}"
+                ),
+                Err(CommitTransactionError::IgnoredPath { path }) => anyhow::bail!(
+                    "refusing duplicate response migration for ignored untracked path {path}"
+                ),
+                Err(CommitTransactionError::Fatal(error)) => return Err(error),
+            }
+        };
+        anyhow::ensure!(
+            commit_output.status.success(),
+            "duplicate response migration update-ref did not report success for {}",
+            file.display()
+        );
+
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        let post_authority = commit_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_post_authority",
+        )?;
+        let post_disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            "canonicalize_duplicate_queue_response_projection_post_disk",
+        )?;
+        let post_head = agent_doc_git_io::revision::show_head(file)?;
+        anyhow::ensure!(
+            post_authority == target
+                && post_disk == target
+                && post_head.as_deref() == Some(target.as_str()),
+            "duplicate queue response-projection migration for {} did not commit its exact converged repair",
+            file.display(),
+        );
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &target,
+            agent_doc_ops_log_io::log_op,
+        )?;
+        if in_submodule {
+            update_parent_submodule_pointer(&super_root, &git_root, &message)?;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "duplicate_queue_response_projections_canonicalized file={} ids={} proof=committed_binary_owned_projection_migration operator_descendants=preserved",
+                file.display(),
+                response_ids.into_iter().collect::<Vec<_>>().join(","),
+            ),
+        );
+        Ok(true)
+    })
+}
+
 /// Remove committed, binary-owned queue response projections whose response
 /// evidence is no longer live, indexed, recoverable from Git, or pinned by a
 /// decision.
 ///
-/// This is the terminal fallback after
-/// [`restore_and_commit_historical_response_evidence`]. It is intentionally
-/// limited to already-struck queue rows and commits the exact pure projection
-/// through a private index transaction. A retry may observe the authority write
-/// already applied while `HEAD` still contains the stale projection; the same
-/// deterministic target closes that interrupted boundary without widening the
-/// repair.
+/// This remains separate from duplicate canonicalization: these ids have no
+/// durable response at all, so retaining even one queue node would be unsafe.
 pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Result<bool> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let authority = commit_current_document_content(

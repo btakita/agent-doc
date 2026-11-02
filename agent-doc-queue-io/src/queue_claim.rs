@@ -179,6 +179,48 @@ fn claim_owner_liveness_observed(
     )
 }
 
+/// One read-consistent view of the queue-claim authority.
+///
+/// The idle supervisor pairs this with the document CRDT revision. Claims live
+/// in `state.db`, so a stable document revision alone is not enough to memoize a
+/// drainability decision. Equality intentionally compares only the claims that
+/// are active at the snapshot's observation time: the wall clock may advance
+/// without changing drainability, while crossing a claim expiry changes the
+/// snapshot and invalidates the memo.
+#[derive(Debug, Clone)]
+pub struct QueueClaimSnapshot {
+    ledger: QueueClaimLedger,
+    observed_at_secs: u64,
+    active_claims: Vec<QueueClaim>,
+}
+
+impl PartialEq for QueueClaimSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.active_claims == other.active_claims
+    }
+}
+
+impl Eq for QueueClaimSnapshot {}
+
+impl QueueClaimSnapshot {
+    /// Resolve claimed and queue-held heads against `content` without another
+    /// state-db read. This keeps the claim snapshot and the resulting queue-head
+    /// observation from straddling a claim mutation.
+    pub fn claimed_items_for_content(&self, file: &Path, content: &str) -> ClaimedQueueItems {
+        let mut ledger = self.ledger.clone();
+        if !ledger.claims.is_empty()
+            && let Some(view) = ClaimQueueView::from_content(content)
+        {
+            let outcome = ledger.follow_edits_in_view(self.observed_at_secs, &view);
+            log_followed(file, &outcome);
+        }
+        let _guard = steer_guard(snapshots_from_ledger(&ledger));
+        let live = live_queue_head_identities(content);
+        let claimed = ledger.claimed_items(self.observed_at_secs, live.as_ref());
+        claimed_items_with_non_ledger_holds(file, content, claimed)
+    }
+}
+
 fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
@@ -408,7 +450,28 @@ fn row_head_texts(rows: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// The editor/CRDT authority's current text of `file`. `None` when no editor
+/// Capture the claim authority once for a memoized queue-head decision.
+///
+/// Expired claims are omitted from the equality token, so a cache remains hot
+/// while the wall clock advances but invalidates exactly when a live claim
+/// expires (or is created, refreshed, reassigned, or released).
+pub fn snapshot(file: &Path) -> Result<QueueClaimSnapshot> {
+    let observed_at_secs = now_secs();
+    let ledger = load_ledger(file)?;
+    let active_claims = ledger
+        .active(observed_at_secs, None)
+        .into_iter()
+        .cloned()
+        .collect();
+    Ok(QueueClaimSnapshot {
+        ledger,
+        observed_at_secs,
+        active_claims,
+    })
+}
+
+/// Live queue heads of the editor/CRDT authority's current text, the view
+/// preflight computes `queue_subagent_dispatch` from. `None` when no editor
 /// owns the document (disk is the authority) or no current cut is available.
 pub(crate) fn editor_authority_text(file: &Path, source: &str) -> Option<String> {
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(

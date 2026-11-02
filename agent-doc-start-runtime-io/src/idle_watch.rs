@@ -206,44 +206,63 @@ static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
 /// between the two reads stores the older revision and simply misses again next
 /// tick. Storing the revision observed after the text could pair a new revision
 /// with stale text, which is the one ordering that would be wrong.
+#[derive(Clone)]
+struct MemoizedQueueHead {
+    revision: agent_doc_crdt_relay_io::CurrentRevision,
+    claims: agent_doc_queue_io::queue_claim::QueueClaimSnapshot,
+    content: std::sync::Arc<str>,
+    observation: QueueHeadObservation,
+}
+
 static IDLE_WATCH_QUEUE_HEAD_BY_REVISION: std::sync::LazyLock<
-    parking_lot::Mutex<
-        std::collections::HashMap<
-            std::path::PathBuf,
-            (
-                agent_doc_crdt_relay_io::CurrentRevision,
-                QueueHeadObservation,
-            ),
-        >,
-    >,
+    parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, MemoizedQueueHead>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
 /// The memoized observation for `canonical`, if `revision` still matches.
 fn memoized_queue_head(
     canonical: &Path,
     revision: &agent_doc_crdt_relay_io::CurrentRevision,
+    claims: &agent_doc_queue_io::queue_claim::QueueClaimSnapshot,
 ) -> Option<QueueHeadObservation> {
-    IDLE_WATCH_QUEUE_HEAD_BY_REVISION
-        .lock()
-        .get(canonical)
-        .filter(|(cached_revision, _)| cached_revision == revision)
-        .map(|(_, observation)| observation.clone())
+    let mut cache = IDLE_WATCH_QUEUE_HEAD_BY_REVISION.lock();
+    let cached = cache
+        .get_mut(canonical)
+        .filter(|cached| &cached.revision == revision)?;
+    if &cached.claims != claims {
+        let QueueHeadObservation::Observed { transition, .. } = cached.observation else {
+            return None;
+        };
+        cached.observation = QueueHeadObservation::Observed {
+            head: supervisor_drainable_head_from_snapshot(canonical, &cached.content, claims),
+            transition,
+        };
+        cached.claims = claims.clone();
+    }
+    Some(cached.observation.clone())
 }
 
 fn memoize_queue_head(
     canonical: &Path,
     revision: Option<agent_doc_crdt_relay_io::CurrentRevision>,
+    claims: Option<agent_doc_queue_io::queue_claim::QueueClaimSnapshot>,
+    content: String,
     observation: &QueueHeadObservation,
 ) {
-    let Some(revision) = revision else {
+    let (Some(revision), Some(claims)) = (revision, claims) else {
         // No cheap revision to key on: drop any stale entry rather than let a
-        // later probe match against a revision this observation never had.
+        // later probe match against authorities this observation never had.
         IDLE_WATCH_QUEUE_HEAD_BY_REVISION.lock().remove(canonical);
         return;
     };
-    IDLE_WATCH_QUEUE_HEAD_BY_REVISION
-        .lock()
-        .insert(canonical.to_path_buf(), (revision, observation.clone()));
+    IDLE_WATCH_QUEUE_HEAD_BY_REVISION.lock().insert(
+        canonical.to_path_buf(),
+        MemoizedQueueHead {
+            revision,
+            claims,
+            content: content.into(),
+            observation: observation.clone(),
+        },
+    );
 }
 
 fn show_pane_message(
@@ -1559,15 +1578,25 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     // is what gets stored, so a document that changes between the two reads
     // simply misses again next tick. Storing the revision observed after the
     // text could pair a fresh revision with stale text.
+    let mut claim_snapshot = None;
     let revision = match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
         file,
         "idle_watch_queue_head_revision_gate",
     ) {
         Ok(Some(revision @ agent_doc_crdt_relay_io::CurrentRevision::Current { .. })) => {
-            if let Some(cached) = memoized_queue_head(&canonical, &revision)
-                && !memoized_head_may_be_claimed(file, &cached)
-            {
-                return cached;
+            match agent_doc_queue_io::queue_claim::snapshot(file) {
+                Ok(snapshot) => {
+                    if let Some(cached) = memoized_queue_head(&canonical, &revision, &snapshot) {
+                        return cached;
+                    }
+                    claim_snapshot = Some(snapshot);
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[queue-claim] WARNING: could not snapshot queue claims for {}: {err:#}",
+                        file.display()
+                    );
+                }
             }
             Some(revision)
         }
@@ -1642,6 +1671,8 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     let observation = QueueHeadObservation::Observed {
         head: if queue_unresolved_prompts == Some(0) {
             None
+        } else if let Some(snapshot) = &claim_snapshot {
+            supervisor_drainable_head_from_snapshot(file, &content, snapshot)
         } else {
             supervisor_drainable_head(file, &content)
         },
@@ -1652,7 +1683,7 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     // revision change. Never memoize it by revision.
     let revision =
         revision.filter(|_| !agent_doc_queue::queue_schedule::content_is_scheduled(&content));
-    memoize_queue_head(&canonical, revision, &observation);
+    memoize_queue_head(&canonical, revision, claim_snapshot, content, &observation);
     observation
 }
 
@@ -1692,14 +1723,17 @@ fn supervisor_drainable_head(file: &Path, content: &str) -> Option<String> {
     )
 }
 
-/// A memoized head was derived before any claim made since; claims live in
-/// `state.db`, not the document, so they never change the revision the memo is
-/// keyed on. Re-derive whenever the ledger holds any claim.
-fn memoized_head_may_be_claimed(file: &Path, cached: &QueueHeadObservation) -> bool {
-    matches!(cached, QueueHeadObservation::Observed { head: Some(_), .. })
-        && agent_doc_queue_io::queue_claim::load_ledger(file)
-            .map(|ledger| !ledger.claims.is_empty())
-            .unwrap_or(false)
+fn supervisor_drainable_head_from_snapshot(
+    file: &Path,
+    content: &str,
+    snapshot: &agent_doc_queue_io::queue_claim::QueueClaimSnapshot,
+) -> Option<String> {
+    let claimed = snapshot.claimed_items_for_content(file, content);
+    agent_doc_queue::queue_continuation::live_drainable_continuation_head_excluding_claimed(
+        content,
+        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        &claimed,
+    )
 }
 
 fn idle_watch_paused_queue_head(file: &Path) -> QueueHeadObservation {
@@ -7556,11 +7590,18 @@ mod tests {
             head: Some("do [#alpha]".to_string()),
             transition: IdleQueueTransition::Converged,
         };
+        let claims = agent_doc_queue_io::queue_claim::snapshot(&doc).unwrap();
 
         let base = revision("lineage-a", b"sv-1", 1, true);
-        memoize_queue_head(&doc, Some(base.clone()), &observed);
+        memoize_queue_head(
+            &doc,
+            Some(base.clone()),
+            Some(claims.clone()),
+            "# memo\n".to_string(),
+            &observed,
+        );
         assert_eq!(
-            memoized_queue_head(&doc, &base),
+            memoized_queue_head(&doc, &base, &claims),
             Some(observed.clone()),
             "an unchanged revision must be served from the memo, not a full-text read"
         );
@@ -7576,7 +7617,7 @@ mod tests {
             revision("lineage-a", b"sv-1", 1, false),
         ] {
             assert_eq!(
-                memoized_queue_head(&doc, &moved),
+                memoized_queue_head(&doc, &moved, &claims),
                 None,
                 "a moved revision must force a fresh read: {moved:?}"
             );
@@ -7585,8 +7626,63 @@ mod tests {
         // Without a cheap revision to key on, the entry is dropped rather than
         // left where a later probe could match it against a revision this
         // observation never had.
-        memoize_queue_head(&doc, None, &observed);
-        assert_eq!(memoized_queue_head(&doc, &base), None);
+        memoize_queue_head(
+            &doc,
+            None,
+            Some(claims.clone()),
+            "# memo\n".to_string(),
+            &observed,
+        );
+        assert_eq!(memoized_queue_head(&doc, &base, &claims), None);
+    }
+
+    /// `#idlewatchclaimrevisiongate`: a long-lived worker claim must not disable
+    /// the document-revision memo. A claim mutation re-evaluates the cached
+    /// canonical text once, then subsequent ticks serve the new observation.
+    #[test]
+    fn the_queue_head_memo_reconciles_claim_changes_without_a_document_read() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("memo-claims.md");
+        let content = "---\nsession: sid\nagent_doc_format: template\n---\n\n## Queue\n\n<!-- agent:queue go -->\n- do [#alpha]\n- do [#beta]\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, content).unwrap();
+        let revision = agent_doc_crdt_relay_io::CurrentRevision::Current {
+            lineage: "lineage-a".to_string(),
+            state_vector: b"sv-1".to_vec(),
+            live_editors: 1,
+            delivery_converged: true,
+        };
+        let before = agent_doc_queue_io::queue_claim::snapshot(&doc).unwrap();
+        let observed = QueueHeadObservation::Observed {
+            head: Some("alpha".to_string()),
+            transition: IdleQueueTransition::Converged,
+        };
+        memoize_queue_head(
+            &doc,
+            Some(revision.clone()),
+            Some(before),
+            content.to_string(),
+            &observed,
+        );
+
+        agent_doc_queue_io::queue_claim::claim(&doc, "#alpha", "subagent:alpha", 60).unwrap();
+        let claimed = agent_doc_queue_io::queue_claim::snapshot(&doc).unwrap();
+        assert_eq!(
+            memoized_queue_head(&doc, &revision, &claimed),
+            Some(QueueHeadObservation::Observed {
+                head: Some("beta".to_string()),
+                transition: IdleQueueTransition::Converged,
+            }),
+            "the claim change must reveal the next head from cached text"
+        );
+        assert_eq!(
+            memoized_queue_head(&doc, &revision, &claimed),
+            Some(QueueHeadObservation::Observed {
+                head: Some("beta".to_string()),
+                transition: IdleQueueTransition::Converged,
+            }),
+            "a stable live claim must remain memoized"
+        );
     }
 
     #[test]

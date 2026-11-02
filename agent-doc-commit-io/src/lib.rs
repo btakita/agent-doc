@@ -2162,31 +2162,40 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
             return Ok(false);
         }
 
-        let mut target = head.clone();
+        let mut head_target = head.clone();
         let mut detached = BTreeSet::new();
         for response_id in candidates {
             let candidate =
                 agent_doc_queue::queue_consume::detach_struck_queue_response_projections(
-                    &target,
+                    &head_target,
                     &BTreeSet::from([response_id.clone()]),
                 )?;
-            if candidate != target
+            if candidate != head_target
                 && !agent_doc_archive_io::extract_response_reference_ids(&candidate)
                     .contains(&response_id)
             {
-                target = candidate;
+                head_target = candidate;
                 detached.insert(response_id);
             }
         }
         if detached.is_empty() {
             return Ok(false);
         }
-        anyhow::ensure!(
-            authority == head || authority == target,
-            "refusing orphaned queue response-projection detach for {}: authority is neither the committed source nor its exact repair",
-            file.display(),
-        );
-        if authority == head {
+        let mut target = authority.clone();
+        for response_id in &detached {
+            target = agent_doc_queue::queue_consume::detach_struck_queue_response_projections(
+                &target,
+                &BTreeSet::from([response_id.clone()]),
+            )?;
+            anyhow::ensure!(
+                !agent_doc_archive_io::extract_response_reference_ids(&target)
+                    .contains(response_id),
+                "orphaned queue response-projection detach for {} left response {} in current authority",
+                file.display(),
+                response_id,
+            );
+        }
+        if authority != target {
             commit_atomic_write(file, &target)?;
             agent_doc_document_realtime_io::invalidate_current_document_projection(file);
         }
@@ -2273,10 +2282,12 @@ pub fn detach_and_commit_orphaned_queue_response_projections(file: &Path) -> Res
             "detach_orphaned_queue_response_projection_post_disk",
         )?;
         let post_head = agent_doc_git_io::revision::show_head(file)?;
+        let committed_target =
+            agent_doc_git_io::transaction::normalize_session_document_content(&target);
         anyhow::ensure!(
             post_authority == target
                 && post_disk == target
-                && post_head.as_deref() == Some(target.as_str()),
+                && post_head.as_deref() == Some(committed_target.as_str()),
             "orphaned queue response-projection detach for {} did not commit its exact converged repair",
             file.display(),
         );

@@ -949,6 +949,11 @@ Duplicate replay should stay live.
             !restore_and_commit_historical_response_evidence(&doc)
                 .expect("a lookup-only projection has no response body to restore")
         );
+        let newer_authority = document.replace(
+            "- open prompt\n",
+            "- open prompt updated\n<!-- no-pending-capture -->\n",
+        );
+        fs::write(&doc, &newer_authority).unwrap();
         assert!(
             detach_and_commit_orphaned_queue_response_projections(&doc)
                 .expect("the binary-owned struck projection should be detached")
@@ -966,14 +971,26 @@ Duplicate replay should stay live.
             )),
             "{repaired}"
         );
-        assert!(repaired.contains("- open prompt\n"), "{repaired}");
+        assert!(repaired.contains("- open prompt updated\n"), "{repaired}");
+        assert!(
+            repaired.contains("<!-- no-pending-capture -->"),
+            "the live authority keeps its transient marker until normal closeout cleanup: {repaired}"
+        );
         let head = Command::new("git")
             .current_dir(root)
             .args(["show", "HEAD:session.md"])
             .output()
             .unwrap();
         assert!(head.status.success());
-        assert_eq!(String::from_utf8(head.stdout).unwrap(), repaired);
+        let head = String::from_utf8(head.stdout).unwrap();
+        assert!(
+            !head.contains("<!-- no-pending-capture -->"),
+            "the committed projection applies normal commit-time transient cleanup: {head}"
+        );
+        assert_eq!(
+            head,
+            agent_doc_git_io::transaction::normalize_session_document_content(&repaired)
+        );
         assert!(
             agent_doc_archive_io::dangling_response_references(&doc, &repaired)
                 .unwrap()

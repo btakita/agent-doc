@@ -3689,8 +3689,10 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
     let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(None);
     };
-    let committed_capture_materialized =
-        committed_capture_response_materialized_in_head(file, &head_doc);
+    let committed_capture_materialized_in_head =
+        committed_capture_response_materialized_in_content(file, &head_doc);
+    let committed_capture_materialized_in_snapshot =
+        committed_capture_response_materialized_in_content(file, &snapshot_doc);
     let historical_mutation =
         agent_doc_document_realtime::write_policy::classify_committed_historical_agent_doc_mutation(
             &snapshot_doc,
@@ -3718,7 +3720,18 @@ pub fn repair_committed_historical_snapshot_drift(file: &Path) -> Result<Option<
             &head_doc,
         );
     let Some(reason) = (match historical_mutation {
-        _ if committed_capture_materialized => Some("committed_capture"),
+        // A capture present in HEAD but absent from the baseline proves HEAD is
+        // the forward projection. Presence on both sides does not: completion
+        // reporting can checkpoint a newer binary projection before its commit
+        // lands, leaving the baseline ahead of HEAD. Rebasing that snapshot
+        // backward loses the only durable ownership evidence for the pending
+        // completion and turns the remaining operator choice into unexplained
+        // user-content drift (`#completion-cell-queue-echo`).
+        _ if committed_capture_materialized_in_head
+            && !committed_capture_materialized_in_snapshot =>
+        {
+            Some("committed_capture")
+        }
         Some("exchange") => Some("exchange"),
         None if !non_exchange_component_drift && historical_response_marker.is_some() => {
             Some("exchange")
@@ -3825,13 +3838,13 @@ fn converge_crdt_canonical_to_head(file: &Path, head_doc: &str) {
     }
 }
 
-fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) -> bool {
+fn committed_capture_response_materialized_in_content(file: &Path, content: &str) -> bool {
     match projected_committed_capture_response_body(file) {
         Ok(Some(response_body)) => {
             return !response_body.trim().is_empty()
                 && agent_doc_turn::response_replay::response_materialized_in_content(
                     &response_body,
-                    head_doc,
+                    content,
                 );
         }
         Ok(None) => {}
@@ -3880,7 +3893,7 @@ fn committed_capture_response_materialized_in_head(file: &Path, head_doc: &str) 
     !materialization_body.trim().is_empty()
         && agent_doc_turn::response_replay::response_materialized_in_content(
             materialization_body,
-            head_doc,
+            content,
         )
 }
 
@@ -5370,6 +5383,115 @@ mod tests {
         );
     }
 
+    /// `#completion-cell-queue-echo`: a committed capture present on both sides
+    /// does not prove HEAD is newer. Completion reporting can checkpoint a
+    /// forward binary projection before its commit lands; keep that snapshot so
+    /// closeout recovery can classify and integrate it instead of rebasing it
+    /// backward to the older completion in HEAD.
+    #[test]
+    fn committed_capture_on_both_sides_does_not_rewind_forward_completion_snapshot() {
+        use std::process::Command;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "git {args:?}: {output:?}");
+        };
+        git(&["init"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "user.name", "Test"]);
+
+        let doc = root.join("session.md");
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: recovered response\n\n",
+            "The cycle is committed.\n",
+            "<!-- /patch:exchange -->",
+        );
+        let response_turn = "### Re: recovered response\n\nThe cycle is committed.\n";
+        let old_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:old",
+            "old work",
+            "old-key",
+            "Old result.",
+        )
+        .unwrap();
+        let item = "enforce visibility before signing";
+        let new_cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:new",
+            item,
+            "new-key",
+            "New result.",
+        )
+        .unwrap()
+        .replacen(
+            "\n<!-- agent-doc-subagent-response",
+            &format!(
+                "\n\n> **Queue prompt:**\n>\n> {item} ⟦local⟧\n\n<!-- agent-doc-subagent-response"
+            ),
+            1,
+        );
+        let prefix = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+        );
+        let head = format!("{prefix}{old_cell}\n{response_turn}<!-- /agent:exchange -->\n");
+        let snapshot =
+            format!("{prefix}{response_turn}{new_cell}\n<!-- /agent:exchange -->\n");
+        let current = format!(
+            "{snapshot}\n<!-- agent:status -->\ncompletion pending integration\n<!-- /agent:status -->\n"
+        );
+
+        std::fs::write(&doc, &head).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        git(&["add", "session.md"]);
+        git(&["commit", "-m", "committed response", "--no-verify"]);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&head), Some(&head)).unwrap();
+        agent_doc_capture_io::capture_response(&doc, response).unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&head),
+            Some(&head),
+        )
+        .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        std::fs::write(&doc, &current).unwrap();
+
+        assert_eq!(
+            agent_doc_turn::closeout_recovery::classify_snapshot_head_drift(&snapshot, &head),
+            agent_doc_turn::closeout_recovery::CloseoutRecoveryDrift::MetadataOnly,
+        );
+        assert_eq!(
+            repair_committed_historical_snapshot_drift(&doc).unwrap(),
+            None,
+            "capture materialized on both sides must not establish HEAD as the forward side",
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(snapshot.as_str()),
+        );
+    }
+
     #[test]
     fn stale_preflight_repair_uses_terminal_ledger_projection() {
         let dir = tempfile::tempdir().unwrap();
@@ -5484,7 +5606,7 @@ mod tests {
 
         let head_doc = format!("{content}\n{response}");
         assert!(
-            committed_capture_response_materialized_in_head(&doc, &head_doc),
+            committed_capture_response_materialized_in_content(&doc, &head_doc),
             "committed captured-response projection must prove materialization without capture JSON"
         );
     }

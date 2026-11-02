@@ -20,7 +20,8 @@
 //! Recognition is structural, never a fuzzy text match on prose: a heading is
 //! a binary completion cell only when it carries the completion heading grammar
 //! AND is followed by a hash-attested quoted worker response and the keyed
-//! completion marker (or one of the legacy fixed/bodyless forms). Recovery
+//! completion marker (optionally with its exact queue-prompt echo between the
+//! heading and digest, or one of the legacy fixed/bodyless forms). Recovery
 //! and closeout classifiers use [`completion_cell_line_ranges`] to keep these
 //! cells out of "agent response" reasoning: they are not a direct patchback, not
 //! a pending response to replay, and not a replayed heading.
@@ -154,8 +155,8 @@ pub fn is_marker_line(line: &str) -> bool {
 }
 
 /// Line ranges (0-based, over `text.lines()`) of every binary-attested
-/// completion cell: heading, attested response or optional legacy fixed body,
-/// keyed marker.
+/// completion cell: heading, optional matching queue-prompt echo, attested
+/// response or optional legacy fixed body, keyed marker.
 pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ranges = Vec::new();
@@ -165,14 +166,17 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
             index += 1;
             continue;
         }
+        let digest_index = completion_response_digest_index(&lines, index);
         let next = lines.get(index + 1).copied();
-        let end = if let Some(expected_digest) = next.and_then(response_digest) {
-            let marker_index = lines[index + 2..]
+        let end = if let Some(digest_index) = digest_index {
+            let expected_digest = response_digest(lines[digest_index])
+                .expect("completion response digest index must name a digest");
+            let marker_index = lines[digest_index + 1..]
                 .iter()
                 .position(|line| is_marker_line(line))
-                .map(|offset| index + 2 + offset);
+                .map(|offset| digest_index + 1 + offset);
             marker_index.and_then(|marker_index| {
-                let body = lines[index + 2..marker_index].join("\n");
+                let body = lines[digest_index + 1..marker_index].join("\n");
                 (!body.is_empty() && agent_doc_hash::content_hash(&body) == expected_digest)
                     .then_some(marker_index + 1)
             })
@@ -194,6 +198,50 @@ pub fn completion_cell_line_ranges(text: &str) -> Vec<Range<usize>> {
         }
     }
     ranges
+}
+
+/// Digest line for a current completion cell. Ordinarily it immediately
+/// follows the heading. A historic queue-response canonicalizer inserted the
+/// cell's own `> **Queue prompt:**` echo between those two lines; accept that
+/// shape only when the quoted prompt matches the item encoded in the heading.
+fn completion_response_digest_index(lines: &[&str], heading_index: usize) -> Option<usize> {
+    let next_index = heading_index.checked_add(1)?;
+    if lines.get(next_index).copied().and_then(response_digest).is_some() {
+        return Some(next_index);
+    }
+
+    let (_, heading_item) = completion_heading_owner_item(lines.get(heading_index)?.trim())?;
+    let mut index = next_index;
+    while lines.get(index).is_some_and(|line| line.trim().is_empty()) {
+        index += 1;
+    }
+    if lines.get(index)?.trim() != "> **Queue prompt:**" {
+        return None;
+    }
+    index += 1;
+
+    let mut prompt_lines = Vec::new();
+    loop {
+        let line = *lines.get(index)?;
+        if response_digest(line).is_some() {
+            break;
+        }
+        if line.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        let quoted = line.trim_start().strip_prefix('>')?.trim_start();
+        if !quoted.is_empty() {
+            prompt_lines.push(quoted);
+        }
+        index += 1;
+    }
+    if prompt_lines.is_empty() {
+        return None;
+    }
+    let prompt = heading_item_text(&prompt_lines.join(" "));
+    let prompt = agent_doc_element_queue::strip_queue_report_state_annotation(&prompt);
+    (prompt == heading_item).then_some(index)
 }
 
 fn response_digest(line: &str) -> Option<&str> {
@@ -232,9 +280,9 @@ pub fn completion_response(text: &str, expected_key: &str) -> Option<String> {
         if evidence.key != expected_key {
             continue;
         }
-        let digest_line = lines.get(range.start + 1)?;
-        response_digest(digest_line)?;
-        let body = lines.get(range.start + 2..range.end.checked_sub(1)?)?;
+        let digest_index = completion_response_digest_index(&lines, range.start)?;
+        response_digest(lines.get(digest_index)?)?;
+        let body = lines.get(digest_index + 1..range.end.checked_sub(1)?)?;
         let first = body.first()?.trim();
         if first != "> **Subagent response:**" {
             return None;
@@ -266,6 +314,11 @@ fn completion_evidence_for_range(
         .strip_prefix(MARKER_PREFIX)?
         .strip_suffix(" -->")?
         .to_string();
+    let (owner, item) = completion_heading_owner_item(heading)?;
+    (!owner.is_empty() && !item.is_empty()).then_some(CompletionEvidence { owner, item, key })
+}
+
+fn completion_heading_owner_item(heading: &str) -> Option<(String, String)> {
     let detail = if let Some(detail) = heading
         .strip_prefix(HEADING_PREFIX)
         .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
@@ -283,7 +336,7 @@ fn completion_evidence_for_range(
         .split_once('”')?
         .0
         .to_string();
-    (!owner.is_empty() && !item.is_empty()).then_some(CompletionEvidence { owner, item, key })
+    (!owner.is_empty() && !item.is_empty()).then_some((owner, item))
 }
 
 /// 0-based line indices of the headings that open a binary-attested cell.
@@ -475,6 +528,44 @@ mod tests {
         );
         assert!(completion_response(&edited, "k1").is_none());
         assert!(completion_response(&cell("subagent:a", "finish a", "k1"), "k1").is_none());
+    }
+
+    /// `#completion-cell-queue-echo`: an older canonicalizer could place the
+    /// queue prompt echo between the binary heading and its response digest.
+    /// The cell remains binary evidence only when the echo names the same item
+    /// and the worker response still satisfies its digest.
+    #[test]
+    fn recognizes_attested_completion_with_matching_queue_prompt_echo() {
+        let item = "enforce hidden-game visibility before credential signing";
+        let current = cell_with_response(
+            "subagent:game-visibility",
+            item,
+            "k1",
+            "Implemented and verified.",
+        )
+        .unwrap();
+        let with_echo = current.replacen(
+            "\n<!-- agent-doc-subagent-response",
+            &format!(
+                "\n\n> **Queue prompt:**\n>\n> {item} ⟦local⟧\n\n<!-- agent-doc-subagent-response"
+            ),
+            1,
+        );
+
+        assert_eq!(completion_evidence(&with_echo)[0].item, item);
+        assert_eq!(
+            completion_response(&with_echo, "k1").as_deref(),
+            Some("Implemented and verified.")
+        );
+        assert_eq!(strip_completion_cells(&with_echo), "");
+
+        let mismatched = with_echo.replace(
+            "> enforce hidden-game visibility before credential signing ⟦local⟧",
+            "> publish unrelated work ⟦local⟧",
+        );
+        assert!(completion_cell_line_ranges(&mismatched).is_empty());
+        let edited = with_echo.replace("> Implemented and verified.", "> Edited by operator.");
+        assert!(completion_cell_line_ranges(&edited).is_empty());
     }
 
     #[test]

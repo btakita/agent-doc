@@ -2253,13 +2253,21 @@ Closes #lostid.
     #[test]
     fn direct_response_patchback_heading_policy_ignores_binary_completion_cells() {
         let before = "## Exchange\n\n### Re: durable answer — gpt-5\n\nDone.\n";
+        let item = "finish the delegated work";
         let cell = agent_doc_document::subagent_completion::cell_with_response(
             "subagent:worker",
-            "finish the delegated work",
+            item,
             "completion-key",
             "Implemented and verified.",
         )
-        .unwrap();
+        .unwrap()
+        .replacen(
+            "\n<!-- agent-doc-subagent-response",
+            &format!(
+                "\n\n> **Queue prompt:**\n>\n> {item} ⟦local⟧\n\n<!-- agent-doc-subagent-response"
+            ),
+            1,
+        );
         let after = format!("{before}\n{cell}\n");
 
         assert!(

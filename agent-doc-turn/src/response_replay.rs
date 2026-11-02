@@ -1476,19 +1476,28 @@ fn normalize_response_line(line: &str) -> Option<String> {
     {
         return None;
     }
-    Some(strip_transient_response_head_marker(raw))
+    Some(strip_response_heading_projection_metadata(raw))
 }
 
-fn strip_transient_response_head_marker(line: &str) -> String {
-    if let Some(stripped) = line.strip_suffix(" (HEAD)") {
+fn strip_response_heading_projection_metadata(line: &str) -> String {
+    let without_head = if let Some(stripped) = line.strip_suffix(" (HEAD)") {
         let trimmed = stripped.trim_start();
         let is_re_heading = trimmed.starts_with("### Re:");
         let is_bold_re_heading = trimmed.starts_with("**Re:") && trimmed.ends_with("**");
         if is_re_heading || is_bold_re_heading {
-            return stripped.to_string();
+            stripped
+        } else {
+            line
         }
+    } else {
+        line
+    };
+    let trimmed = without_head.trim_start();
+    if trimmed.starts_with("### ") || trimmed == "###" {
+        agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(without_head)
+    } else {
+        without_head.to_string()
     }
-    line.to_string()
 }
 
 #[cfg(test)]
@@ -1767,6 +1776,32 @@ mod tests {
         );
 
         assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn patch_wrapped_response_matches_identity_neutral_heading_ids_and_head_marker() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: visible body — gpt-5\n\n",
+            "The document contains the applied body only.\n\n",
+            "### Verification\n\n",
+            "The focused regression passed.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: visible body — gpt-5 [#r-0123456789ab] (HEAD)\n\n",
+            "The document contains the applied body only.\n\n",
+            "### Verification [#r-0123456789ab]\n\n",
+            "The focused regression passed.\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+        assert!(response_materialized_in_exchange_response_cell(
+            response, content
+        ));
     }
 
     #[test]

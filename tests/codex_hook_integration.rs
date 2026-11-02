@@ -390,7 +390,14 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         .stdout(predicate::str::contains("do [#smoke] verify checkout"));
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("### Re: do [#seopdp] deploy product page — gpt-5"));
+    let response_heading = content
+        .lines()
+        .find(|line| line.starts_with("### Re: do [#seopdp] deploy product page — gpt-5"))
+        .expect("recovered queue response heading");
+    assert!(
+        agent_doc_markdown_ast::exchange_tree::response_id_from_heading(response_heading).is_some(),
+        "the durable response id must remain on the materialized heading: {content}"
+    );
     assert!(content.contains("Completed the queue task."));
     assert!(content.contains("Verification: reproduced the sampleorders Codex stop-hook shape."));
     assert!(

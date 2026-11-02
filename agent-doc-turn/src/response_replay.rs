@@ -1209,6 +1209,17 @@ fn dedupe_responses_with_report(content: &str) -> (String, Option<String>) {
             let b2_corrupt = block_has_prompt_prefixed_body(&lines[s2..e2]);
             let (skip_s, skip_e) = if b1_corrupt && !b2_corrupt {
                 (s1, e1)
+            } else if !b1_corrupt
+                && !b2_corrupt
+                && agent_doc_markdown_ast::exchange_tree::response_id_from_heading(lines[s1].trim())
+                    .is_none()
+                && agent_doc_markdown_ast::exchange_tree::response_id_from_heading(lines[s2].trim())
+                    .is_some()
+            {
+                // `#indexedheadpatchback`: both blocks carry the same response,
+                // but only one is linked from the response index. Keep that
+                // canonical block regardless of replay order.
+                (s1, e1)
             } else {
                 (s2, e2)
             };
@@ -1306,8 +1317,8 @@ fn normalized_response_block(block_lines: &[&str]) -> String {
 /// * a `> **Queue prompt:**` / `> **Queue prompts:**` echo block — the label
 ///   line plus every contiguous `>` line under it (`#queue-prompt-echo-in-response`),
 /// * a `❯ ` prompt prefix on a body line (repair's prompt-prefix normalization),
-/// * `<!-- agent:boundary:… -->` markers, the `(HEAD)` heading suffix, and
-///   blank-line spacing.
+/// * `<!-- agent:boundary:… -->` markers, the `(HEAD)` heading suffix, compact
+///   response ids (`[#r-*]`), and blank-line spacing.
 ///
 /// Observed 2026-10-15 on `tasks/agent-doc/agent-doc-bugs.md`
 /// (`#closeoutduplicatedcommit`): the live copy of a response carried a
@@ -1372,12 +1383,7 @@ fn normalize_response_block_line(line: &str) -> Option<String> {
         return None;
     }
     if trimmed.starts_with("### Re:") {
-        return Some(
-            trimmed
-                .strip_suffix(" (HEAD)")
-                .unwrap_or(trimmed)
-                .to_string(),
-        );
+        return Some(strip_response_heading_projection_metadata(trimmed));
     }
     let unprefixed = trimmed
         .strip_prefix('❯')
@@ -2595,6 +2601,51 @@ Content.
             first_duplicate_response_heading(content).as_deref(),
             Some("### Re: Foo — gpt-5 (HEAD)")
         );
+    }
+
+    #[test]
+    fn indexedheadpatchback_dedupe_keeps_the_canonical_indexed_response() {
+        let content = concat!(
+            "### Re: persisting latency — codex [#r-fdbb1cda0dd7]\n",
+            "Response body.\n",
+            "### Re: persisting latency — codex (HEAD)\n",
+            "Response body.\n",
+            "<!-- agent:boundary:latest -->\n",
+        );
+
+        let deduped = dedupe_responses(content);
+
+        assert_eq!(
+            deduped,
+            concat!(
+                "### Re: persisting latency — codex [#r-fdbb1cda0dd7]\n",
+                "Response body.\n",
+                "<!-- agent:boundary:latest -->\n",
+            )
+        );
+        assert_eq!(deduped.matches("Response body.").count(), 1);
+        assert_eq!(deduped.matches("agent:boundary:").count(), 1);
+        assert!(!deduped.contains("(HEAD)"));
+        assert_eq!(dedupe_responses(&deduped), deduped);
+    }
+
+    #[test]
+    fn indexedheadpatchback_dedupe_keeps_the_indexed_response_in_reverse_order() {
+        let content = concat!(
+            "### Re: persisting latency — codex (HEAD)\n",
+            "Response body.\n",
+            "### Re: persisting latency — codex [#r-fdbb1cda0dd7]\n",
+            "Response body.\n",
+            "<!-- agent:boundary:latest -->\n",
+        );
+
+        let deduped = dedupe_responses(content);
+
+        assert_eq!(deduped.matches("### Re: persisting latency").count(), 1);
+        assert!(deduped.contains("[#r-fdbb1cda0dd7]"), "{deduped}");
+        assert!(!deduped.contains("(HEAD)"), "{deduped}");
+        assert_eq!(deduped.matches("Response body.").count(), 1);
+        assert_eq!(deduped.matches("agent:boundary:").count(), 1);
     }
 
     #[test]

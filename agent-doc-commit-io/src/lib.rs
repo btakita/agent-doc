@@ -1973,9 +1973,10 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
 /// Collapse committed duplicate queue response projections to one canonical
 /// response node and inert backlinks.
 ///
-/// The pure projection preserves operator-authored descendants. This commit
-/// boundary accepts only the committed source or its exact deterministic
-/// repair, then records that repair through the normal private-index CAS path.
+/// The pure projection preserves operator-authored descendants. Committed
+/// duplicates are the proof boundary, while the deterministic repair is
+/// applied to the current authority so newer operator/editor changes survive.
+/// The result is recorded through the normal private-index CAS path.
 pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path) -> Result<bool> {
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let authority = commit_current_document_content(
@@ -1999,17 +2000,9 @@ pub fn canonicalize_and_commit_duplicate_queue_response_projections(file: &Path)
         }
         let target =
             agent_doc_queue::queue_consume::canonicalize_duplicate_queue_response_projections(
-                &head,
+                &authority,
             )?;
-        if target == head {
-            return Ok(false);
-        }
-        anyhow::ensure!(
-            authority == head || authority == target,
-            "refusing duplicate queue response-projection migration for {}: authority is neither the committed source nor its exact repair",
-            file.display(),
-        );
-        if authority == head {
+        if authority != target {
             commit_atomic_write(file, &target)?;
             agent_doc_document_realtime_io::invalidate_current_document_projection(file);
         }

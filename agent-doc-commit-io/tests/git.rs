@@ -1065,6 +1065,67 @@ Duplicate replay should stay live.
     }
 
     #[test]
+    fn committed_duplicate_projection_repair_preserves_newer_authority_changes() {
+        const RESPONSE_ID: &str = "[#r-0123456789ab]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let document = format!(
+            concat!(
+                "Operator content.\n",
+                "<!-- agent:queue -->\n",
+                "- ~~canonical~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Summary:** Shared result.\n",
+                "- ~~duplicate~~ — auto-struck: response: {0}\n",
+                "  - **Response {0}**\n",
+                "    - **Summary:** Shared result.\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            RESPONSE_ID,
+        );
+        th::commit_file(
+            root,
+            "session.md",
+            &document,
+            "committed duplicate projections",
+        );
+        let doc = root.join("session.md");
+        let newer_authority = document.replace("Operator content.", "Operator content updated.");
+        fs::write(&doc, &newer_authority).unwrap();
+
+        assert!(
+            canonicalize_and_commit_duplicate_queue_response_projections(&doc)
+                .expect("the committed duplicates should migrate over current authority")
+        );
+        let repaired = fs::read_to_string(&doc).unwrap();
+        assert!(
+            repaired.contains("Operator content updated.\n"),
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Response {RESPONSE_ID}**"))
+                .count(),
+            1,
+            "{repaired}"
+        );
+        assert_eq!(
+            repaired
+                .matches(&format!("- **Closed by:** {RESPONSE_ID}"))
+                .count(),
+            1,
+            "{repaired}"
+        );
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(head.stdout).unwrap(), repaired);
+    }
+
+    #[test]
     fn orphaned_projection_under_open_queue_work_is_not_detached() {
         const STALE: &str = "[#r-fedcba987654]";
         let dir = tempfile::TempDir::new().unwrap();

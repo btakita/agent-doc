@@ -5037,7 +5037,11 @@ fn render_waiting_child(todo: &WaitingTodo, packet: Option<&WaitingOperatorPacke
     out.push(' ');
     out.push_str(WAITING_ON_YOU_METADATA_MARKER);
     out.push_str("~~\n");
-    out
+    // A Todo may discuss agent-doc's own exchange syntax (for example the
+    // exact Queue-prompt echo token). The waiting tree is a generated queue
+    // projection, not conversation content, so encode that boundary token in
+    // the mirror while leaving the Todo authority untouched.
+    out.replace("> **Queue prompt:**", "&gt; **Queue prompt:**")
 }
 
 #[cfg(test)]
@@ -5190,6 +5194,35 @@ mod tests {
             project_waiting_on_you_tree(&projected, response).unwrap(),
             None,
             "the closeout projection must be replay-idempotent"
+        );
+    }
+
+    #[test]
+    fn waiting_tree_encodes_conversation_scaffold_mentioned_by_a_todo() {
+        let document = waiting_tree_document(
+            "",
+            "- [ ] [#echo-guard] Fix the `> **Queue prompt:**` steering false positive.\n",
+            "",
+        );
+
+        let projected = project_waiting_on_you_tree(&document, "")
+            .unwrap()
+            .expect("the open Todo should create the waiting tree");
+
+        assert!(
+            projected.contains("`&gt; **Queue prompt:**`"),
+            "{projected}"
+        );
+        let queue = element::parse(&projected)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        assert!(
+            !queue
+                .content(&projected)
+                .contains("> **Queue prompt:**"),
+            "generated queue content must not contain the exchange boundary token: {projected}"
         );
     }
 

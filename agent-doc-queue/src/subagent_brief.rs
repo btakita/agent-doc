@@ -112,6 +112,31 @@ pub struct SubagentAuthorization {
     pub prompt_context: Option<agent_doc_prompt_context::lineage::PromptContextPacket>,
     /// Paste this verbatim at the top of the subagent's prompt.
     pub subagent_prompt_preamble: String,
+    /// `#goalpresetterminal`: the interrupted goal-loop attempt this row was
+    /// requeued after. Its hand-back is also appended to the preamble as data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_goal_attempt: Option<crate::goal_preset_terminal::GoalLoopHandoff>,
+}
+
+impl SubagentAuthorization {
+    /// Carry `handoff` (an interrupted attempt on this same row) to the next
+    /// worker: record it and append its data-framed section to the preamble.
+    pub fn attach_prior_goal_attempt(
+        &mut self,
+        handoff: crate::goal_preset_terminal::GoalLoopHandoff,
+    ) {
+        if self.prior_goal_attempt.as_ref() == Some(&handoff) {
+            return;
+        }
+        if !self.subagent_prompt_preamble.is_empty()
+            && !self.subagent_prompt_preamble.ends_with('\n')
+        {
+            self.subagent_prompt_preamble.push('\n');
+        }
+        self.subagent_prompt_preamble
+            .push_str(&crate::goal_preset_terminal::prior_attempt_brief_section(&handoff));
+        self.prior_goal_attempt = Some(handoff);
+    }
 }
 
 const TRACKED_COMPONENTS: &[&str] = &["backlog", "review", "pending"];
@@ -388,6 +413,7 @@ pub fn subagent_authorization_with_presets(
         effort,
         prompt_context: None,
         subagent_prompt_preamble: String::new(),
+        prior_goal_attempt: None,
     };
     let computed;
     let attached;

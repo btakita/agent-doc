@@ -201,6 +201,14 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
         return queue_skip_diagnostic_for_content(content);
     };
     let queue_head_display = display_queue_prompt_text(&queue_head);
+    if crate::queue_response::latest_echo_cell_lacks_goal_final_state(content, response, &queue_head)
+    {
+        let states = crate::goal_preset_terminal::head_final_states(content, &queue_head);
+        return Ok(format!(
+            "[queue] kept goal-loop head `{queue_head_display}` live because its preset declares final states ({}) and the response cell for its echo has no line that begins with one (#goalpresetterminal). A posted review or pushed fix is a step, not the row's result. Next: `agent-doc queue report-complete` requeues an interrupted worker attempt; redispatch the same row to continue the loop, and close it only with a response line that begins with a declared final state.",
+            states.join(", ")
+        ));
+    }
     if crate::queue_response::response_defers_queue_head(content, response, &queue_head) {
         return Ok(format!(
             "[queue] kept free-text head `{queue_head_display}` pending because the response explicitly defers that quoted head. Next: resolve the blocker named in `**Deferred:**`, then run `agent-doc <FILE>` again; an active `go` queue schedules that retry automatically. Remove the adjacent deferral marker only after the work is complete."

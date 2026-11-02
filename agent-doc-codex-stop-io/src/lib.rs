@@ -3006,6 +3006,8 @@ fn try_recover_repeated_queue_head_response(
         };
     let content_before_repair =
         current_document_content(file, "codex_stop_repeated_queue_before_repair")?;
+    let _goal_presets =
+        agent_doc_queue_io::goal_terminal_presets_guard(file, &content_before_repair);
     let queue_completion_ids =
         agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
             file,
@@ -3877,6 +3879,8 @@ fn attempt_stop_closeout(
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
                 let content_before_repair =
                     current_document_content(file, "codex_stop_auto_close_before_repair")?;
+                let _goal_presets =
+                    agent_doc_queue_io::goal_terminal_presets_guard(file, &content_before_repair);
                 agent_doc_queue::queue_consume::queue_targeted_completion_id_for_current_head(
                     file,
                     None,

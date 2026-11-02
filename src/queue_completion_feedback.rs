@@ -38,6 +38,36 @@ pub(crate) struct CompletionFeedbackRepairOutcome {
     pub accepted: bool,
 }
 
+/// `#goalpresetterminal`: before reporting, requeue a goal-loop row's
+/// hand-back that does not open on a declared final state. Serialized with
+/// `report-complete` under the same completion-feedback lock and resolved
+/// against the same live document cut. `Ok(None)` means the ordinary report
+/// path applies.
+pub(crate) fn requeue_nonterminal_goal_hand_back(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    response: &str,
+) -> Result<Option<agent_doc_queue_io::goal_loop_handoff::GoalLoopRequeue>> {
+    let lock_path = agent_doc_queue_io::queue_claim::completion_feedback_lock_path(file)?;
+    let lock = agent_doc_sync_io::acquire_sync_lock(&lock_path, COMPLETION_LOCK_WAIT, |_| {});
+    let agent_doc_sync_io::SyncLockAcquire::Acquired(_lock) = lock else {
+        bail!(
+            "timed out after {}ms waiting to report subagent completion for {}; no document mutation was attempted",
+            COMPLETION_LOCK_WAIT.as_millis(),
+            file.display(),
+        );
+    };
+    let resolved =
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, SOURCE)?;
+    let current =
+        agent_doc_document_realtime_io::deferred_document_write_reconnect_content(file, &resolved)?
+            .unwrap_or(resolved);
+    agent_doc_queue_io::goal_loop_handoff::requeue_nonterminal_hand_back(
+        file, &current, item, generation, response,
+    )
+}
+
 pub(crate) fn report_complete(
     file: &Path,
     item: &str,
@@ -796,6 +826,154 @@ mod tests {
             change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget
                 && change.text.contains("Please review this")
         }));
+    }
+
+    /// `#goalpresetterminal` regression (anonymized): a project-preset `/goal`
+    /// review loop's worker handed back after posting one review with an
+    /// actionable P2. The hand-back did not open on a declared final state, so
+    /// it must keep the SAME row open, requeue the attempt, and carry the
+    /// worker's worktree and remaining findings to the next worker's brief,
+    /// without adding a duplicate row. A later hand-back that opens on
+    /// `REVIEW-CLEAN` takes the ordinary report path.
+    #[test]
+    fn goal_loop_hand_back_without_final_state_requeues_the_same_row() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Bring the pull request to an independently review-clean exact\n",
+                "    remote head. Start a separate fixer using #address, then a fresh\n",
+                "    independent reviewer of the new exact head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: prior — gpt-5\n\nDone.\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review1", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review1",
+            "worker:pr12-review1",
+            600,
+            1,
+        )
+        .unwrap();
+
+        let interrupted = concat!(
+            "Posted one plain COMMENTED review at ",
+            "https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000001 ",
+            "against head aaaa111.\n\n",
+            "Verdict: changes needed. One P2 finding remains: reconnect drops the retained outbox.\n",
+            "Delivery worktree: /work/sample-repo/pr12-loop",
+        );
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), interrupted)
+            .unwrap()
+            .expect("a hand-back without a final state is an interrupted loop");
+        assert_eq!(requeue.final_states, vec!["REVIEW-CLEAN", "BLOCKED"]);
+        assert_eq!(requeue.claim.generation, 1);
+
+        // The same row is open, undisturbed, and not duplicated; no completion
+        // cell claims the loop finished.
+        let content = fs::read_to_string(&doc).unwrap();
+        assert_eq!(content.matches("pull/12: #adversarial-pr").count(), 1, "{content}");
+        assert!(!content.contains("~~"), "{content}");
+        assert!(!content.contains("### Re: Subagent completed"), "{content}");
+
+        // The attempt no longer blocks dispatch: the same row can be claimed
+        // again, and its next brief carries the interrupted hand-back.
+        let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger.claims.iter().all(|claim| !claim.state.blocks_dispatch()),
+            "{ledger:?}"
+        );
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review2", 600)
+                .expect("the requeued row is dispatchable again");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned,
+            "the same row gets a new attempt generation"
+        );
+        let brief =
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+                .unwrap();
+        let prior = brief
+            .prior_goal_attempt
+            .as_ref()
+            .expect("the brief carries the interrupted attempt");
+        assert_eq!(prior.owner, "subagent:pr12-review1");
+        assert!(brief.subagent_prompt_preamble.contains("Prior goal-loop attempt"));
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("> Delivery worktree: /work/sample-repo/pr12-loop")
+        );
+        assert!(
+            brief
+                .subagent_prompt_preamble
+                .contains("> Verdict: changes needed. One P2 finding remains")
+        );
+
+        // A final-state hand-back takes the ordinary report path and retires
+        // the recorded hand-off.
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-review2")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:pr12-review2",
+            "worker:pr12-review2",
+            600,
+            generation,
+        )
+        .unwrap();
+        let clean = concat!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002 ",
+            "base=cccc333 head=bbbb222 cycles=2\n\nFresh independent review: zero surviving findings.",
+        );
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), clean)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            agent_doc_queue_io::goal_loop_handoff::load(&doc)
+                .unwrap()
+                .handoffs
+                .is_empty()
+        );
+        let reported = report_complete(&doc, ROW, Some(generation), None, clean)
+            .unwrap()
+            .expect("the final-state hand-back is reported normally");
+        assert!(reported.appended);
     }
 
     #[test]

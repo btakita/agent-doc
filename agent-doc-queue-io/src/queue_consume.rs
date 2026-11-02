@@ -1640,6 +1640,8 @@ fn strike_free_text_queue_heads_with_proof(
     // reported, never struck.
     let dispatch_owned_heads =
         crate::subagent_dispatch::inline_answer_vetoed_heads_for_content(file, &content);
+    // `#goalpresetterminal`: project-inherited goal presets gate the strike.
+    let _goal_presets = crate::goal_terminal_presets_guard(file, &content);
     // `#ftstrikeclaimedmention`: a claimed head strikes only on an exact
     // agent-authored echo, never on a mention or preset-body quote.
     let addressed_at = addressed_at_for_current_cycle(file);
@@ -2885,6 +2887,7 @@ fn plan_queue_prompt_consumption_inner(
     requested_free_text_count: usize,
     echo: ConsumedPromptEcho,
 ) -> Result<Option<QueueConsumptionPlan>> {
+    let _goal_presets = crate::goal_terminal_presets_guard(file, content);
     let caller_named_done_ids = !done_ids.is_empty();
     let eligible_done_ids =
         agent_doc_queue::queue_closeout_guard::done_ids_for_unchanged_queue_revisions(

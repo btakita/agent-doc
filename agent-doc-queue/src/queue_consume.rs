@@ -5475,6 +5475,196 @@ mod tests {
         );
     }
 
+    /// `#goalpresetterminal` project preset: a `/goal` review loop declared only
+    /// in `.agent-doc/project.md` (installed through the IO guard), whose body
+    /// declares its final states.
+    const GOAL_LOOP_PRESET: &str = concat!(
+        "---\npresets:\n",
+        "  '#adversarial-pr': >-\n",
+        "    /goal Bring the pull request named by this queue item to an\n",
+        "    independently review-clean exact remote head. Each cycle: 1. Review.\n",
+        "    Start a fresh independent reviewer against the exact current head.\n",
+        "    2. Decide. 3. Address. Start a separate fixer using #address.\n",
+        "    4. Fetch the newly published remote head and start the next cycle.\n\n",
+        "    Final states. Your final message must begin with exactly one of these\n",
+        "    lines:\n",
+        "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+        "    Use it only when a fresh posted review on the latest unchanged remote\n",
+        "    head has zero surviving findings.\n",
+        "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`,\n",
+        "    followed by the exact review URLs.\n\n",
+        "    Coordinator: a hand-back that does not begin with REVIEW-CLEAN or\n",
+        "    BLOCKED is an interrupted loop, not a completion.\n",
+        "  '#address': 'Address every actionable review item on the exact current head.'\n",
+        "---\n",
+    );
+
+    fn goal_loop_project_presets() -> agent_doc_frontmatter::frontmatter::PromptPresets {
+        agent_doc_frontmatter::frontmatter::parse(GOAL_LOOP_PRESET)
+            .unwrap()
+            .0
+            .prompt_presets
+    }
+
+    /// The session document of the regression: the preset is NOT in its
+    /// frontmatter (it is project-inherited), and the goal row is a nested
+    /// leaf under its pull request, claimed by a worker, beside a sibling pull
+    /// request's identical leaf.
+    fn goal_loop_session(row_12: &str) -> String {
+        format!(
+            "---\nqueue_active: true\n---\n\n\
+             <!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n\
+             <!-- agent:run id=\"sample-prs\" subagents priority go -->\n\
+             - https://github.com/sample-org/sample-repo/pull/12\n\
+             \x20 - ~~#address ⟦effect:1⟧ ⟦published⟧~~\n\
+             \x20 - {row_12}\n\
+             - https://github.com/sample-org/sample-repo/pull/13\n\
+             \x20 - 🚧 [#subagent:pr13-review1#1] #adversarial-pr\n\
+             <!-- /agent:run -->\n"
+        )
+    }
+
+    const PR12_ECHO: &str =
+        "> **Queue prompt:** https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr";
+
+    fn goal_loop_response(body: &str) -> String {
+        format!(
+            "### Re: sample-repo PR 12 goal loop\n\n\
+             > **Queue prompt:**\n>\n> https://github.com/sample-org/sample-repo/pull/13: #adversarial-pr\n\n\n\
+             {PR12_ECHO}\n\n{body}\n"
+        )
+    }
+
+    fn goal_loop_row_strikes(content: &str, response: &str) -> bool {
+        let claims = vec![
+            "https://github.com/sample-org/sample-repo/pull/12: #adversarial-pr".to_string(),
+            "#adversarial-pr".to_string(),
+        ];
+        let decision = answered_free_text_strike_decision(
+            content,
+            response,
+            Some(content),
+            &claims,
+            &claims,
+            &[],
+        )
+        .unwrap();
+        !decision.node_keys.is_empty()
+    }
+
+    /// `#goalpresetterminal` regression (anonymized from a live incident): one
+    /// posted review whose result is an actionable P2 struck a project-preset
+    /// `/goal` review-loop row before its fixer ran. The binary now derives the
+    /// preset's final states (`REVIEW-CLEAN`, `BLOCKED`) and closes the row only
+    /// on a response line that begins with one, while the ordinary deferral
+    /// guards still apply on top.
+    #[test]
+    fn goal_loop_preset_row_closes_only_on_a_declared_final_state() {
+        let content = goal_loop_session("🚧 [#subagent:pr12-review1#1] #adversarial-pr");
+        const LEAF: &str = "#adversarial-pr";
+        // A paraphrase none of the nonterminal-review phrases catches.
+        let review_with_p2 = goal_loop_response(
+            "Posted one plain COMMENTED review at \
+             https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000001 \
+             against exact head `aaaa111`.\n\n\
+             Verdict: changes needed. One P2 finding: reconnect drops the retained outbox.\n\n\
+             The review effect is published.",
+        );
+
+        // Without the project presets installed the row reads as plain free
+        // text, which is exactly how the paraphrased review struck it.
+        assert!(
+            goal_loop_row_strikes(&content, &review_with_p2),
+            "precondition: the deny-list alone misses the paraphrased P2"
+        );
+
+        let _project = crate::goal_preset_terminal::InheritedPresetsGuard::install(
+            &goal_loop_project_presets(),
+        );
+
+        // 1. A posted review with an actionable finding does not strike the row.
+        assert!(!goal_loop_row_strikes(&content, &review_with_p2));
+        assert!(crate::queue_response::response_defers_queue_head(
+            &content,
+            &review_with_p2,
+            LEAF
+        ));
+        assert!(crate::queue_response::latest_queue_head_echo_is_deferral(
+            &content,
+            &review_with_p2,
+            LEAF
+        ));
+        assert!(
+            !crate::queue_heads::free_text_queue_head_is_completed_residue_with_claim(
+                &content,
+                &review_with_p2,
+                LEAF,
+                true
+            ),
+            "session-check must not demand a strike of the still-live loop row"
+        );
+
+        // 2. The interrupted attempt is requeued (no claim marker), and the
+        // same unstruck row stays the dispatchable work: still not struck, and
+        // the queue still holds exactly one PR 12 goal row.
+        let requeued = goal_loop_session(LEAF);
+        assert!(!goal_loop_row_strikes(&requeued, &review_with_p2));
+        assert_eq!(
+            requeued
+                .lines()
+                .filter(|line| line.trim() == "- #adversarial-pr")
+                .count(),
+            1
+        );
+
+        // 3. A published fix without a fresh independent review of the new
+        // head is a step, not the result.
+        let fix_published = goal_loop_response(
+            "The fixer pushed `bbbb222` to the pull-request head branch and replied to the \
+             review; all repository checks passed on the new head.",
+        );
+        assert!(!goal_loop_row_strikes(&content, &fix_published));
+        let clean_word_in_prose = goal_loop_response(
+            "A fresh review of `bbbb222` looks clean so far; the final re-query is pending.",
+        );
+        assert!(!goal_loop_row_strikes(&content, &clean_word_in_prose));
+
+        // 4. Only a declared final state on the latest unchanged head closes it.
+        let review_clean = goal_loop_response(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002 \
+             base=cccc333 head=bbbb222 cycles=2\n\n\
+             A fresh independent review of the unchanged head has zero surviving findings.",
+        );
+        assert!(goal_loop_row_strikes(&content, &review_clean));
+        assert!(!crate::queue_response::latest_queue_head_echo_is_deferral(
+            &content,
+            &review_clean,
+            LEAF
+        ));
+        let blocked = goal_loop_response(
+            "`BLOCKED restore the hosted runner budget base=cccc333 head=bbbb222 cycles=2`\n\n\
+             Review URLs: https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002",
+        );
+        assert!(goal_loop_row_strikes(&content, &blocked));
+
+        // The ordinary deferral guards still veto a final-state line.
+        let deferred_clean = goal_loop_response(
+            "**Deferred:** waiting on the final remote-head re-query.\n\n\
+             REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1000000002 \
+             base=cccc333 head=bbbb222 cycles=2",
+        );
+        assert!(!goal_loop_row_strikes(&content, &deferred_clean));
+
+        // The latest echo is the current statement: an older clean cell does
+        // not close a row whose newest cell reports another actionable review.
+        let accumulated = format!("{review_clean}\n{review_with_p2}");
+        assert!(crate::queue_response::latest_queue_head_echo_is_deferral(
+            &content,
+            &accumulated,
+            LEAF
+        ));
+    }
+
     #[test]
     fn preset_incidental_status_words_do_not_create_a_deferral_veto() {
         let content = upgrade_preset_document();

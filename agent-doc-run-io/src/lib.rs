@@ -738,6 +738,8 @@ pub fn run_once(
                 file,
                 "direct_run_queue_guard",
             )?;
+        let _goal_presets =
+            agent_doc_queue_io::goal_terminal_presets_guard(file, &queue_guard_content);
         if queue_synthetic_diff
             || agent_doc_queue::queue_consume::should_consume_queue_prompt_for_diff_content(
                 file,

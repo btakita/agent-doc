@@ -388,6 +388,10 @@ fn continuation_head_skipping_answered_residue(
     head_echo_scope: &HeadEchoScopeFor<'_>,
     presets: &frontmatter::PromptPresets,
 ) -> Option<QueuePrompt> {
+    // `#goalpresetterminal`: the caller's effective presets include the
+    // project-inherited goal presets whose final states gate the residue test.
+    let _goal_presets = (!presets.is_empty())
+        .then(|| crate::goal_preset_terminal::InheritedPresetsGuard::install(presets));
     let (queue_facts, activation) = active_queue_for_supervisor_start(content, false)?;
     let exchange_text = crate::queue_head_entry::exchange_component_text(content);
     let answered_residue = |head: &str| -> bool {

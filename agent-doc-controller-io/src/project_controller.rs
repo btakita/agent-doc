@@ -5827,6 +5827,10 @@ struct QueueAuthorityObservation {
     /// `#subagentinlineveto`: live heads a `subagents` attribute owns for
     /// dispatch with no worker attempt behind them.
     dispatch_owned_heads: Vec<String>,
+    /// `#goalpresetterminal`: the document's effective prompt presets
+    /// (frontmatter plus `.agent-doc/project.md` inheritance), so a goal-like
+    /// project preset gates the strike on its declared final states.
+    goal_presets: agent_doc_queue::goal_preset_terminal::ResolvedPresets,
 }
 
 /// Live queue heads of `content` held by an active worker claim, read from the
@@ -7689,6 +7693,11 @@ impl ControllerDocumentGraphs {
             dispatch_owned_heads: runtime_effects()
                 .map(|effects| effects.subagent_inline_veto_heads(file, &content))
                 .unwrap_or_default(),
+            goal_presets: agent_doc_queue::goal_preset_terminal::resolved_presets(
+                &agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(
+                    &content, file,
+                ),
+            ),
             content,
         };
         self.queue_authority
@@ -7789,6 +7798,10 @@ impl ControllerDocumentGraphs {
                     return AnsweredFreeTextQueueStrikeProjection::default();
                 }
                 let addressed_at = addressed_at_for_cycle_id(&captured.cycle_id);
+                let _goal_presets =
+                    agent_doc_queue::goal_preset_terminal::InheritedPresetsGuard::install_resolved(
+                        observation.goal_presets.clone(),
+                    );
                 match agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                     &observation.content,
                     &captured.response_body,

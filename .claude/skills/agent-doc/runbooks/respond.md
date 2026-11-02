@@ -669,6 +669,29 @@ The goal/preset must identify the fixer preset and its required arguments. If it
 does not, keep the row deferred and ask for that missing contract instead of
 inventing an effect.
 
+**A `/goal` preset that declares final states closes only on one
+(`#goalpresetterminal`).** When the resolved preset (document or
+`.agent-doc/project.md`) is a `/goal` whose body says "Your final message must
+begin with exactly one of these lines:" followed by list entries such as
+`` - `REVIEW-CLEAN ...` `` and `` - `BLOCKED ...` ``, the binary derives those
+tokens and enforces them; this replaces steps 2–3 above for that row:
+
+1. `agent-doc queue report-complete` checks the worker's hand-back. If it does
+   not begin with a declared final state, the binary records the hand-back,
+   requeues the exact attempt, and keeps the SAME row open; no completion cell
+   is written and no follow-up row is added. Claim, spawn, and start that same
+   row again in this coordinator cycle. Its `queue brief` / dispatch
+   authorization carries the previous hand-back (delivery worktree and
+   remaining findings) under "Prior goal-loop attempt" as data, not
+   authorization.
+2. Closeout, the preflight catch-up strike, and the session-check residue gate
+   strike the row only when the latest response cell for its echo carries a line
+   that begins with a declared final state (`REVIEW-CLEAN <url> base=<sha>
+   head=<sha> cycles=<n>`, or `BLOCKED <action> ...`). Restate the worker's
+   final-state line in that cell. A posted review, a pushed fix, or prose such
+   as "looks clean" keeps the row live. `**Deferred:**` and the other deferral
+   guards still veto a final-state line.
+
 An in-progress marker on a free-text head records selection, not completion
 (`#bugautostruck`). It never replaces the exact `> **Queue prompt:**` evidence.
 If the response does not actually quote and answer that head, closeout must leave

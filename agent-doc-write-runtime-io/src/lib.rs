@@ -406,6 +406,7 @@ fn queue_skip_diagnostic_for_current_document(
     } else {
         resolve_current_document(file, "queue_skip_diagnostic")?.into_content()
     };
+    let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(file, &content);
     agent_doc_queue::queue_heads::queue_skip_diagnostic_for_response(&content, response)
 }
 
@@ -4112,6 +4113,10 @@ fn run_command_inner_within_pass(
             &options.review_resolve,
         );
         queue_resolution_ids.extend(options.queue_completion_ids.iter().cloned());
+        let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(
+            file,
+            current_content_for_queue.as_ref(),
+        );
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),

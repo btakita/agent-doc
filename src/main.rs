@@ -478,6 +478,8 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                             else {
                                 return Ok(());
                             };
+                            let _goal_presets =
+                                agent_doc_queue_io::goal_terminal_presets_guard(&file, &snapshot);
                             let Some(snapshot_target) =
                                 agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
                                     &snapshot,
@@ -8722,46 +8724,80 @@ fn try_main() -> anyhow::Result<()> {
                 publication_state,
                 response,
             } => {
-                match queue_completion_feedback::report_complete(
+                anyhow::ensure!(
+                    !response.trim().is_empty(),
+                    "subagent completion response must not be empty"
+                );
+                // `#goalpresetterminal`: a goal-loop row's hand-back without a
+                // declared final state is an interrupted loop. Keep the same
+                // row open, requeue the attempt, and carry the hand-back to the
+                // next worker instead of reporting it as complete.
+                if let Some(requeue) = queue_completion_feedback::requeue_nonterminal_goal_hand_back(
                     &file,
                     &item,
                     generation,
-                    publication_state,
                     &response,
                 )? {
-                    Some(outcome) => eprintln!(
-                        "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. Next: {}{}",
-                        if outcome.appended {
-                            "accepted"
-                        } else {
-                            "already present"
-                        },
-                        outcome.claim.item_text,
-                        outcome.claim.owner,
-                        outcome.claim.generation,
-                        agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                    let queue_effects = CliQueueCommandEffects;
+                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                        &queue_effects,
+                        &file,
+                        Some(requeue.claim.item_text.as_str()),
+                    )?;
+                    eprintln!(
+                        "[queue] goal-loop hand-back for {:?} (owner {}, generation {}) does not begin with a declared final state ({}); the row stays open and the attempt was requeued, so it is dispatchable again (#goalpresetterminal). Next: {} and dispatch the same row; its brief carries this hand-back. Do not close the row until a response line begins with a declared final state.",
+                        requeue.claim.item_text,
+                        requeue.claim.owner,
+                        requeue.claim.generation,
+                        requeue.final_states.join(", "),
+                        agent_doc_queue_io::subagent_dispatch::claim_command(
                             &file.display().to_string(),
-                            &outcome.claim.item_text,
+                            &requeue.claim.item_text,
                         ),
-                        if outcome.projection_pending {
-                            format!(
-                                "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
-                                outcome
-                                    .intent_id
-                                    .as_deref()
-                                    .map(|intent| format!(" (intent {intent})"))
-                                    .unwrap_or_default(),
-                                file,
-                            )
-                        } else {
-                            String::new()
-                        },
-                    ),
-                    None => eprintln!(
-                        "[queue] no subagent claim on {item:?}; no completion feedback written"
-                    ),
+                    );
+                    Ok(())
+                } else {
+                    match queue_completion_feedback::report_complete(
+                        &file,
+                        &item,
+                        generation,
+                        publication_state,
+                        &response,
+                    )? {
+                        Some(outcome) => eprintln!(
+                            "[queue] subagent completion feedback {} for {:?} (owner {}, generation {}); awaiting integration. Next: {}{}",
+                            if outcome.appended {
+                                "accepted"
+                            } else {
+                                "already present"
+                            },
+                            outcome.claim.item_text,
+                            outcome.claim.owner,
+                            outcome.claim.generation,
+                            agent_doc_queue::claim_release_receipt::queue_line_closeout(
+                                &file.display().to_string(),
+                                &outcome.claim.item_text,
+                            ),
+                            if outcome.projection_pending {
+                                format!(
+                                    "; visible projection pending{} — open the document in the active editor/project, then run `agent-doc queue repair-projection {:?}`",
+                                    outcome
+                                        .intent_id
+                                        .as_deref()
+                                        .map(|intent| format!(" (intent {intent})"))
+                                        .unwrap_or_default(),
+                                    file,
+                                )
+                            } else {
+                                String::new()
+                            },
+                        ),
+                        None => eprintln!(
+                            "[queue] no subagent claim on {item:?}; no completion feedback written"
+                        ),
+                    }
+                    Ok(())
                 }
-                Ok(())
             }
             QueueAction::RepairCompletionFeedback { file } => {
                 let outcome = queue_completion_feedback::repair_legacy_completion_feedback(&file)?;

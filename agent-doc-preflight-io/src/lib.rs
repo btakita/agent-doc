@@ -6465,6 +6465,9 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
         );
         let claimed =
             agent_doc_queue::queue_claim::ClaimedQueueItems::none().with_heads(&claimed_heads);
+        // `#goalpresetterminal`: project-inherited goal presets gate this catch-up.
+        let _goal_presets =
+            agent_doc_queue_io::goal_terminal_presets_guard(file, &current_content);
         // `#subagentinlineveto`: a head the queue's `subagents` attribute owns
         // for dispatch, with no worker attempt behind it, is dispatch work even
         // when an earlier response answered it inline. Never catch it up here;

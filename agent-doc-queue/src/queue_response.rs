@@ -232,6 +232,15 @@ pub fn queue_prompt_preset_expansions_with_presets(
     text: &str,
     presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> Vec<(String, String)> {
+    queue_prompt_preset_expansions_from(text, presets.iter())
+}
+
+/// [`queue_prompt_preset_expansions_with_presets`] over resolved
+/// `(name, body)` pairs.
+pub fn queue_prompt_preset_expansions_from<'a>(
+    text: &str,
+    presets: impl Iterator<Item = (&'a String, &'a String)> + Clone,
+) -> Vec<(String, String)> {
     let text = strip_priority_markers(text);
     let text = crate::queue_continuation::mask_inline_code(&text);
     let referenced = text
@@ -240,7 +249,7 @@ pub fn queue_prompt_preset_expansions_with_presets(
     let mut expansions = Vec::new();
     for token in referenced {
         let Some((name, body)) = presets
-            .iter()
+            .clone()
             .find(|(name, _)| token.eq_ignore_ascii_case(name))
         else {
             continue;
@@ -2052,8 +2061,70 @@ pub fn response_defers_queue_head(content: &str, response_body: &str, head_text:
     if response_defers_free_text_head(response_body, head_text) {
         return true;
     }
-    nest_vector_in_document(content, head_text)
+    if nest_vector_in_document(content, head_text)
         .is_some_and(|vector| response_defers_free_text_head(response_body, &vector))
+    {
+        return true;
+    }
+    latest_echo_cell_lacks_goal_final_state(content, response_body, head_text)
+}
+
+/// `#goalpresetterminal`: true when `head_text` resolves to a `/goal` preset
+/// that declares final states and the LATEST echo of the head (bare or as its
+/// nest vector) in `text` opens a response cell with no final-state line.
+///
+/// A goal-like preset owns the whole review → fix → fresh-review loop. A
+/// posted review, a pushed fix, or any other phase result is a step, so only a
+/// declared final state (`REVIEW-CLEAN ...`, `BLOCKED ...`) lets the row close.
+/// The cell runs from the echo to the next `### Re:` heading or queue-prompt
+/// echo. A text that never echoes the head is not a deferral of it (the head is
+/// simply unanswered). Returning `true` only ever prevents a strike.
+pub fn latest_echo_cell_lacks_goal_final_state(
+    content: &str,
+    text: &str,
+    head_text: &str,
+) -> bool {
+    let states = crate::goal_preset_terminal::head_final_states(content, head_text);
+    if states.is_empty() {
+        return false;
+    }
+    let text = direct_response_text(text);
+    let mut heads = vec![head_text.to_string()];
+    if let Some(vector) = nest_vector_in_document(content, head_text)
+        && nest_row_work_differs(&vector, head_text)
+    {
+        heads.push(vector);
+    }
+    let blocks: Vec<&str> = text.split("\n\n").collect();
+    let Some(index) = blocks.iter().rposition(|block| {
+        heads
+            .iter()
+            .any(|head| block_quotes_free_text_head(block, head))
+    }) else {
+        return false;
+    };
+    let cell_states_final = blocks
+        .iter()
+        .enumerate()
+        .skip(index)
+        .take_while(|(offset, block)| *offset == index || !block_opens_response_cell(block))
+        .any(|(offset, block)| {
+            block.lines().any(|line| {
+                // The echo's own quote lines restate the head, not its result.
+                (offset != index || !line.trim_start().starts_with('>'))
+                    && crate::goal_preset_terminal::line_states_final_state(line, &states)
+            })
+        });
+    !cell_states_final
+}
+
+/// True when `block` starts another response cell: a `### Re:` heading or a
+/// `> **Queue prompt:**` echo.
+fn block_opens_response_cell(block: &str) -> bool {
+    block.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("### Re:") || line.starts_with("> **Queue prompt:**")
+    })
 }
 
 /// [`latest_free_text_head_echo_is_deferral`] across the bare head and its nest vector.
@@ -2077,6 +2148,7 @@ pub fn latest_queue_head_echo_is_deferral(content: &str, text: &str, head_text: 
         return false;
     };
     deferral_scope_has_marker(&blocks, index)
+        || latest_echo_cell_lacks_goal_final_state(content, &text, head_text)
 }
 
 fn nest_row_work_differs(vector: &str, head_text: &str) -> bool {

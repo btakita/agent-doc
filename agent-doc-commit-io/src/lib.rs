@@ -224,6 +224,7 @@ fn late_answered_free_text_strike_capture(
     committed_content: &str,
     current_content: &str,
 ) -> Result<Option<LateAnsweredFreeTextStrike>> {
+    let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(file, committed_content);
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let addressed_at = state
         .as_ref()

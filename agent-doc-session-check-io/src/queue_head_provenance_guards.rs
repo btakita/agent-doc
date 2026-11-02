@@ -219,6 +219,7 @@ pub fn check_free_text_queue_head_provenance(
     // exact `> **Queue prompt:**` echo, the same proof its strike requires.
     let claimed_heads =
         agent_doc_queue_io::queue_claim::claimed_live_head_texts_for_content(file, &content);
+    let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(file, &content);
     let Some(mut decision) =
         agent_doc_queue::queue_closeout_guard::free_text_queue_head_provenance_decision_with_claims(
             &state.active_free_text_queue_heads,

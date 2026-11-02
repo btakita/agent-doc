@@ -754,11 +754,14 @@ fn committed_deferred_queue_cycle(path: &Path, head: &str) -> Option<String> {
     // A nested leaf is deferred by a quote of its nest vector (`#nestvector`).
     // The document is optional: a missing read keeps the head-only check.
     let deferred = match std::fs::read_to_string(path) {
-        Ok(content) => agent_doc_queue::queue_response::response_defers_queue_head(
-            &content,
-            &capture.response_body,
-            head,
-        ),
+        Ok(content) => {
+            let _goal_presets = agent_doc_queue_io::goal_terminal_presets_guard(path, &content);
+            agent_doc_queue::queue_response::response_defers_queue_head(
+                &content,
+                &capture.response_body,
+                head,
+            )
+        }
         Err(_) => agent_doc_queue::queue_response::response_defers_free_text_head(
             &capture.response_body,
             head,

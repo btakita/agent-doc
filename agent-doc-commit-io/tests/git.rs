@@ -4,7 +4,8 @@ use std::process::Command;
 
 use agent_doc_commit_io::{
     commit, commit_document_only_drift, commit_proven_response_replay_canonicalization,
-    commit_with_authoritative_compaction, restore_and_commit_historical_response_evidence,
+    commit_with_authoritative_compaction, detach_and_commit_orphaned_queue_response_projections,
+    restore_and_commit_historical_response_evidence,
 };
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 
@@ -913,6 +914,145 @@ Duplicate replay should stay live.
             !restore_and_commit_historical_response_evidence(&doc)
                 .expect("indexed response should be idempotent")
         );
+    }
+
+    #[test]
+    fn committed_orphaned_struck_queue_projection_is_detached_and_committed() {
+        const STALE: &str = "[#r-0123456789ab]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let separator = " — auto-struck: ";
+        let document = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~first answered prompt~~{separator}response: {stale}\n",
+                "  - **Response {stale}**\n",
+                "    - **Timestamp:** 2026-11-01T03:40:12.000Z\n",
+                "- ~~duplicate answered prompt~~{separator}answered this cycle (#ftstrike); response: {stale}\n",
+                "- open prompt\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            separator = separator,
+            stale = STALE,
+        );
+        th::commit_file(
+            root,
+            "session.md",
+            &document,
+            "committed stale queue projection",
+        );
+        let doc = root.join("session.md");
+
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc)
+                .expect("a lookup-only projection has no response body to restore")
+        );
+        assert!(
+            detach_and_commit_orphaned_queue_response_projections(&doc)
+                .expect("the binary-owned struck projection should be detached")
+        );
+
+        let repaired = fs::read_to_string(&doc).unwrap();
+        assert!(!repaired.contains(STALE), "{repaired}");
+        assert!(
+            repaired.contains("- ~~first answered prompt~~\n"),
+            "{repaired}"
+        );
+        assert!(
+            repaired.contains(&format!(
+                "- ~~duplicate answered prompt~~{separator}answered this cycle (#ftstrike)\n"
+            )),
+            "{repaired}"
+        );
+        assert!(repaired.contains("- open prompt\n"), "{repaired}");
+        let head = Command::new("git")
+            .current_dir(root)
+            .args(["show", "HEAD:session.md"])
+            .output()
+            .unwrap();
+        assert!(head.status.success());
+        assert_eq!(String::from_utf8(head.stdout).unwrap(), repaired);
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, &repaired)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !detach_and_commit_orphaned_queue_response_projections(&doc)
+                .expect("the repair is idempotent")
+        );
+    }
+
+    #[test]
+    fn orphaned_projection_under_open_queue_work_is_not_detached() {
+        const STALE: &str = "[#r-fedcba987654]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let document = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- open prompt\n",
+                "  - **Response {stale}**\n",
+                "    - **Timestamp:** 2026-11-01T03:40:12.000Z\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            stale = STALE,
+        );
+        th::commit_file(
+            root,
+            "session.md",
+            &document,
+            "committed open queue projection",
+        );
+        let doc = root.join("session.md");
+
+        assert!(
+            !detach_and_commit_orphaned_queue_response_projections(&doc)
+                .expect("open work is not an eligible detach target")
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), document);
+    }
+
+    #[test]
+    fn decision_pinned_orphaned_queue_projection_is_not_detached() {
+        const PINNED: &str = "[#r-123456789abc]";
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        let document = format!(
+            concat!(
+                "<!-- agent:queue -->\n",
+                "- ~~answered decision prompt~~ — auto-struck: response: {pinned}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            pinned = PINNED,
+        );
+        th::commit_file(root, "session.md", &document, "committed pinned queue projection");
+        let decision = agent_doc_decision_io::DecisionRecord {
+            id: "DEC-pinned-response".to_string(),
+            state: agent_doc_decision_io::DecisionState::Accepted,
+            decision: "Keep the response evidence pinned.".to_string(),
+            rationale: "The decision still depends on it.".to_string(),
+            evidence_response_ids: vec![PINNED.to_string()],
+            updated_at: "2026-11-01T03:40:12Z".to_string(),
+            supersedes: Vec::new(),
+        };
+        fs::write(
+            root.join(agent_doc_decision_io::REGISTRY_FILE),
+            agent_doc_decision_io::render_registry(&agent_doc_decision_io::Registry {
+                records: std::collections::BTreeMap::from([(decision.id.clone(), decision)]),
+            }),
+        )
+        .unwrap();
+        let doc = root.join("session.md");
+
+        assert!(
+            !detach_and_commit_orphaned_queue_response_projections(&doc)
+                .expect("decision evidence is never an automatic detach target")
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), document);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 //! This module owns entry-level consume planning helpers. Callers still own
 //! file IO, snapshot persistence, IPC transport, and editor convergence.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
 
 use agent_doc_document::queue_projection::{
@@ -2090,6 +2090,178 @@ fn strip_response_projection_children(body: &str) -> String {
     without_projection
 }
 
+/// Detach binary-owned response projections for response ids whose durable
+/// evidence no longer exists.
+///
+/// Only generated metadata beneath `agent:queue` is eligible: response detail
+/// or summary children, canonical lookup rows, and `response: [#r-…]`
+/// annotations on already-struck rows. Open queue work and operator-authored
+/// descendants remain byte-identical. Callers must independently prove that
+/// every supplied id is absent from live/indexed response evidence and is not
+/// pinned by a decision before publishing this projection.
+pub fn detach_struck_queue_response_projections(
+    content: &str,
+    response_ids: &BTreeSet<String>,
+) -> Result<String> {
+    if response_ids.is_empty() {
+        return Ok(content.to_string());
+    }
+    let components = element::parse(content)?;
+    let Some(queue) = components
+        .iter()
+        .find(|component| component.name == "queue")
+    else {
+        return Ok(content.to_string());
+    };
+    let body = queue.content(content);
+    let mut generated_ranges = response_lookup_projection_ranges(body, response_ids);
+    generated_ranges.extend(
+        agent_doc_markdown_ast::overlay::response_details_child_ranges(body)
+            .into_iter()
+            .filter(|(start, end)| {
+                response_ids.iter().any(|response_id| {
+                    generated_projection_owns_response_id(&body[*start..*end], response_id)
+                })
+            }),
+    );
+    generated_ranges.sort_unstable();
+    generated_ranges.dedup();
+
+    let mut detached = body.to_string();
+    for (start, end) in generated_ranges.into_iter().rev() {
+        if generated_projection_has_struck_parent(body, start) {
+            detached.replace_range(start..end, "");
+        }
+    }
+
+    let detached = detached
+        .split_inclusive('\n')
+        .map(|line| detach_response_annotations_from_struck_line(line, response_ids))
+        .collect::<String>();
+    Ok(queue.replace_content(content, &detached))
+}
+
+fn response_lookup_projection_ranges(
+    body: &str,
+    response_ids: &BTreeSet<String>,
+) -> Vec<(usize, usize)> {
+    let lines = body.split_inclusive('\n').collect::<Vec<_>>();
+    let mut offsets = Vec::with_capacity(lines.len() + 1);
+    offsets.push(0);
+    for line in &lines {
+        offsets.push(offsets.last().copied().unwrap_or_default() + line.len());
+    }
+    let mut ranges = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        let line = lines[index];
+        let trimmed = line.trim().strip_prefix("- ").unwrap_or_else(|| line.trim());
+        let owns_target = response_ids.iter().any(|response_id| {
+            agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+                .as_deref()
+                == Some(trimmed)
+        });
+        if !owns_target {
+            index += 1;
+            continue;
+        }
+        let indent = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let mut end = index + 1;
+        while end < lines.len() {
+            let next = lines[end];
+            if next.trim().is_empty() {
+                end += 1;
+                continue;
+            }
+            let next_indent = next.len() - next.trim_start_matches([' ', '\t']).len();
+            if next_indent <= indent {
+                break;
+            }
+            end += 1;
+        }
+        ranges.push((offsets[index], offsets[end]));
+        index = end;
+    }
+    ranges
+}
+
+fn generated_projection_owns_response_id(projection: &str, response_id: &str) -> bool {
+    let first = projection
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .strip_prefix("- ")
+        .unwrap_or_else(|| projection.lines().next().unwrap_or_default().trim());
+    let lookup = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id);
+    if lookup.as_deref() == Some(first) {
+        return true;
+    }
+    let Some(attribute_id) = response_id.strip_prefix("[#").and_then(|id| id.strip_suffix(']'))
+    else {
+        return false;
+    };
+    first.starts_with("<details ")
+        && first.contains(&format!("data-agent-doc-response-id=\"{attribute_id}\""))
+}
+
+fn generated_projection_has_struck_parent(body: &str, projection_start: usize) -> bool {
+    let projection_line = body[projection_start..].lines().next().unwrap_or_default();
+    let projection_indent =
+        projection_line.len() - projection_line.trim_start_matches([' ', '\t']).len();
+    body[..projection_start].lines().rev().find_map(|line| {
+        let trimmed = line.trim_start_matches([' ', '\t']);
+        let indent = line.len() - trimmed.len();
+        ((trimmed.starts_with("- ") || trimmed.starts_with("* ") || trimmed.starts_with("+ "))
+            && indent < projection_indent)
+            .then_some(line_is_struck_queue_row(line))
+    }) == Some(true)
+}
+
+fn line_is_struck_queue_row(line: &str) -> bool {
+    let trimmed = line.trim_start_matches([' ', '\t']);
+    let body = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("* "))
+        .or_else(|| trimmed.strip_prefix("+ "))
+        .unwrap_or(trimmed)
+        .trim_start();
+    body.strip_prefix("~~")
+        .is_some_and(|struck| struck.contains("~~"))
+}
+
+fn detach_response_annotations_from_struck_line(
+    line: &str,
+    response_ids: &BTreeSet<String>,
+) -> String {
+    let (core, newline) = line
+        .strip_suffix('\n')
+        .map_or((line, ""), |core| (core, "\n"));
+    if !line_is_struck_queue_row(core) {
+        return line.to_string();
+    }
+    let Some(strike_end) = core.rfind("~~").map(|offset| offset + 2) else {
+        return line.to_string();
+    };
+    let mut repaired = core.to_string();
+    for response_id in response_ids {
+        let needle = format!("{RESPONSE_ID_NOTE_PREFIX}{response_id}");
+        let Some(note_start) = repaired[strike_end..].find(&needle).map(|i| strike_end + i) else {
+            continue;
+        };
+        if !repaired[note_start + needle.len()..].trim().is_empty() {
+            continue;
+        }
+        let prefix = &repaired[strike_end..note_start];
+        if prefix.ends_with("; ") {
+            repaired.truncate(note_start - 2);
+        } else if prefix == agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR {
+            repaired.truncate(strike_end);
+        }
+    }
+    format!("{repaired}{newline}")
+}
+
 fn is_response_id_lookup_child(line: &str) -> bool {
     let marker = line
         .trim()
@@ -4068,6 +4240,65 @@ mod tests {
 
     fn active_queue_doc(body: &str) -> String {
         format!("---\nqueue: go\n---\n\n<!-- agent:queue go -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn stale_response_detach_removes_only_generated_projections_under_struck_rows() {
+        const STALE: &str = "[#r-0123456789ab]";
+        const KEPT: &str = "[#r-abcdef012345]";
+        let separator = agent_doc_markdown_ast::overlay::STRUCK_ANNOTATION_SEPARATOR;
+        let document = queue_doc(&format!(
+            concat!(
+                "- ~~first completed~~{separator}response: {stale}\n",
+                "  - **Response {stale}**\n",
+                "    - **Timestamp:** 2026-11-01T00:00:00.000Z\n",
+                "- ~~second completed~~{separator}answered this cycle (#ftstrike); response: {stale}\n",
+                "- ~~kept completed~~{separator}response: {kept}\n",
+                "  - **Response {kept}**\n",
+                "    - **Timestamp:** 2026-11-01T00:00:00.000Z\n",
+                "    - **Summary:** discusses {stale} as plain prose\n",
+                "- open work\n",
+                "  - **Response {stale}**\n",
+                "    - **Timestamp:** 2026-11-01T00:00:00.000Z\n",
+                "- discuss ~~old~~ syntax{separator}response: {stale}\n",
+            ),
+            separator = separator,
+            stale = STALE,
+            kept = KEPT,
+        ));
+
+        let detached = detach_struck_queue_response_projections(
+            &document,
+            &BTreeSet::from([STALE.to_string()]),
+        )
+        .unwrap();
+
+        assert!(detached.contains("- ~~first completed~~\n"), "{detached}");
+        assert!(
+            detached.contains(&format!(
+                "- ~~second completed~~{separator}answered this cycle (#ftstrike)\n"
+            )),
+            "{detached}"
+        );
+        assert!(
+            detached.contains(&format!("response: {KEPT}")),
+            "{detached}"
+        );
+        assert!(
+            detached.contains(&format!("- open work\n  - **Response {STALE}**")),
+            "an open row must remain byte-identical:\n{detached}"
+        );
+        assert!(
+            detached.contains(&format!(
+                "- discuss ~~old~~ syntax{separator}response: {STALE}\n"
+            )),
+            "inline strikethrough is not a completed queue row:\n{detached}"
+        );
+        assert_eq!(
+            detached.matches(STALE).count(),
+            3,
+            "only valid response prose and the two open-row forms retain the id:\n{detached}"
+        );
     }
 
     #[test]

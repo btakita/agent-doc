@@ -406,10 +406,11 @@ pub trait SessionCheckEffects {
     fn settle_response_replay_canonicalization(&self, _file: &Path) -> Result<()> {
         anyhow::bail!("response-replay canonicalization settlement is unavailable")
     }
-    /// Restore a canonical inline response summary from bounded committed Git
-    /// history into the tracked archive/index. The default is inert; production
-    /// owns the exact archive-only commit and must leave the session document
-    /// byte-identical.
+    /// Reconcile committed response evidence before enforcing the orphan guard.
+    /// Production first restores a canonical inline response summary from
+    /// bounded Git history into the tracked archive/index. When no evidence is
+    /// recoverable, it may instead detach only a stale binary-owned projection
+    /// from an already-struck queue row and commit that exact repair.
     fn restore_committed_response_evidence(&self, _file: &Path) -> Result<bool> {
         Ok(false)
     }
@@ -1737,9 +1738,10 @@ impl<E: SessionCheckEffects> SessionCheckEffects for ReadOnlySessionCheckEffects
 /// retained `write_applied` closeout, and resume that exact already-captured
 /// cycle after the save is proven exact. It may also apply and commit the one
 /// lossless response-replay canonicalization proven from `HEAD`, authority,
-/// and disk, or an archive-only response-index restoration proven by bounded
-/// committed history. It cannot replace, repair, replay, or commit unrelated
-/// document content.
+/// and disk, restore an archive-only response index from bounded committed
+/// history, or detach an unpinned orphan response projection from an
+/// already-struck queue row. It cannot replace, repair, replay, or commit
+/// unrelated document content.
 pub fn run_read_only_with_options(
     file: &Path,
     codex_final_gate: bool,

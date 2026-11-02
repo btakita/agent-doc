@@ -82,7 +82,7 @@ fn source_free_text_identity(component: &str, text: &str) -> String {
 pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> {
     use agent_doc_element::element;
     use agent_doc_element::todo::{TodoState, parse_todo_line};
-    use agent_doc_queue::document_queue;
+    use agent_doc_queue::document_queue::{self, QueueEntry};
 
     let components = element::parse(content).context("status open items: parse components")?;
     let mut items = Vec::new();
@@ -91,20 +91,28 @@ pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> 
     // Queue order is operational priority, so queue identities establish the
     // outer ordering. Parent/group labels are intentionally excluded by the
     // canonical executable-leaf selector.
-    for component in components.iter().filter(|component| {
-        element::canonical_component_name(&component.name) == element::QUEUE_COMPONENT
-    }) {
-        let entries = document_queue::parse(component.content(content))?;
-        for prompt in document_queue::prompts(&entries) {
-            let display_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt.text);
+    let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
+    for block in queue_set.blocks() {
+        let entries =
+            agent_doc_queue::nested_claim_steer::expand_slice_if_installed(&block.entries);
+        for index in document_queue::executable_prompt_indexes(entries.as_ref()) {
+            let Some(QueueEntry::Prompt(prompt)) = entries.get(index) else {
+                continue;
+            };
+            let prompt_text =
+                agent_doc_document::queue_projection::strip_in_progress_marker(prompt.text.trim());
+            if prompt_text.trim().is_empty() {
+                continue;
+            }
+            let display_id = agent_doc_element_queue::queue_prompt_stable_id(&prompt_text);
             let identity = display_id.clone().unwrap_or_else(|| {
                 source_free_text_identity(
                     "queue",
-                    &agent_doc_element_queue::normalize_multiline_dedup_text(&prompt.text),
+                    &agent_doc_element_queue::normalize_multiline_dedup_text(&prompt_text),
                 )
             });
             let summary = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(
-                &agent_doc_element_queue::strip_priority_markers(&prompt.text),
+                &agent_doc_element_queue::strip_priority_markers(&prompt_text),
             );
             push_managed_open_item(
                 &mut items,
@@ -298,5 +306,40 @@ mod tests {
             .expect("stale row removed");
         assert!(updated.contains("- **Open items** (0)"));
         assert!(!updated.contains("`[#live]`"));
+    }
+
+    #[test]
+    fn status_drops_queue_free_identity_after_executable_leaf_is_consumed() {
+        let stale_identity =
+            source_free_text_identity("queue", "Complete the remaining work for the parent item.");
+        let content = format!(
+            concat!(
+                "## Status <!-- agent:status -->\n",
+                "<!-- status:open-items -->\n",
+                "- **Open items** (1)\n",
+                "  - `{}` — Complete the remaining work for the parent item.\n",
+                "    - **Sources:** queue (open)\n",
+                "<!-- /status:open-items -->\n",
+                "<!-- /agent:status -->\n",
+                "## Run <!-- agent:run -->\n",
+                "- Waiting on you — answer by adding a child line under an item\n",
+                "  - [#ctg7] Verify the live pane transition\n",
+                "    - ~~Complete the remaining work for the parent item.~~\n",
+                "<!-- /agent:run -->\n",
+            ),
+            stale_identity
+        );
+
+        let items = managed_status_open_items(&content).unwrap();
+        assert!(
+            items.is_empty(),
+            "non-executable queue ancestry must not remain in status: {items:#?}"
+        );
+
+        let reconciled = reconcile_managed_status_open_items(&content)
+            .unwrap()
+            .expect("stale queue-free status row must be removed");
+        assert!(reconciled.contains("- **Open items** (0)"));
+        assert!(!reconciled.contains(&stale_identity));
     }
 }

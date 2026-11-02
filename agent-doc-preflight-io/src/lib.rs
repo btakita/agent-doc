@@ -18338,6 +18338,63 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
     }
 
     #[test]
+    fn pending_maintenance_drops_queue_free_status_after_leaf_is_consumed() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "## Status\n\n",
+            "<!-- agent:status patch=replace -->\n",
+            "<!-- status:open-items -->\n",
+            "- **Open items** (1)\n",
+            "  - `queue-free:af254a8505f2` — Complete the remaining work for the parent item.\n",
+            "    - **Sources:** queue (open)\n",
+            "<!-- /status:open-items -->\n",
+            "<!-- /agent:status -->\n\n",
+            "## Run\n\n",
+            "<!-- agent:run -->\n",
+            "- Waiting on you — answer by adding a child line under an item\n",
+            "  - [#ctg7] Verify the live pane transition\n",
+            "    - ~~Complete the remaining work for the parent item.~~\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let direct_reconcile =
+            agent_doc_work_projection::reconcile_managed_status_open_items(content)
+                .unwrap()
+                .expect("the stale queue-free projection must require reconciliation");
+        assert!(
+            direct_reconcile.contains("- **Open items** (0)"),
+            "{direct_reconcile}"
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
+
+        let file_after = std::fs::read_to_string(&doc).unwrap();
+        assert!(file_after.contains("- **Open items** (0)"), "{file_after}");
+        assert!(!file_after.contains("queue-free:"), "{file_after}");
+
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            snapshot_after.contains("- **Open items** (0)"),
+            "{snapshot_after}"
+        );
+        assert!(!snapshot_after.contains("queue-free:"), "{snapshot_after}");
+    }
+
+    #[test]
     fn pending_maintenance_defers_stale_supervisor_marker_when_authority_unavailable() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");

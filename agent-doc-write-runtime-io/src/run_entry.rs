@@ -3658,6 +3658,63 @@ mod tests {
         .expect("--done of the head's leading directive id is its completion evidence");
     }
 
+    /// Binary-owned duplicate-effect identity is queue metadata, not an
+    /// operator annotation. Genuine prose appended after the identity remains
+    /// steering and is still protected by the same pre-write gate.
+    #[test]
+    fn effect_identity_metadata_is_not_operator_steering_but_real_notes_are() {
+        let current = concat!(
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- 🚧 do [#adtypingdupsiblings] ⟦effect:1⟧\n",
+            "- 🚧 do [#adtypingdupsiblings] ⟦effect:2⟧\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let flags = WriteFlags {
+            strict_closeout: true,
+            commit_requested: true,
+            pending_done_ids: vec!["adtypingdupsiblings".to_string()],
+            ..Default::default()
+        };
+        let response = concat!(
+            "### Re: duplicate sibling effects\n\n",
+            "Effect 1 verified the first duplicate lifecycle. ",
+            "Effect 2 verified the second duplicate lifecycle."
+        );
+        enforce_selected_queue_response_contract(None, None, current, response, &flags)
+            .expect("effect identity is binary metadata, not an operator note");
+
+        let genuinely_annotated = current.replace(
+            "do [#adtypingdupsiblings] ⟦effect:2⟧",
+            "do [#adtypingdupsiblings] ⟦effect:2⟧: also verify the archived sibling",
+        );
+        let err = enforce_selected_queue_response_contract(
+            None,
+            None,
+            &genuinely_annotated,
+            response,
+            &flags,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("operator annotation"), "{err}");
+        assert!(err.contains("also verify the archived sibling"), "{err}");
+
+        let answered = concat!(
+            "### Re: duplicate sibling effects\n\n",
+            "> **Operator note:** also verify the archived sibling\n\n",
+            "The archived sibling was verified too."
+        );
+        enforce_selected_queue_response_contract(
+            None,
+            None,
+            &genuinely_annotated,
+            answered,
+            &flags,
+        )
+        .expect("a genuine note after effect metadata remains addressable steering");
+    }
+
     /// `#qheadannotation` (sdk.md, 2026-10-02): an id-completing closeout must
     /// answer the operator text appended to the `do [#id]` head; quoting the head
     /// as a `> **Queue prompt:**` echo is not an answer.

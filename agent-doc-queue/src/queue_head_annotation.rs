@@ -59,7 +59,12 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
         return None;
     }
     let stripped = strip_priority_markers(head);
-    let text = stripped.trim().trim_start_matches('❯').trim();
+    let visible_head = stripped.trim().trim_start_matches('❯').trim();
+    // `⟦effect:N⟧` is binary-owned queue identity, not operator prose. Strip a
+    // canonical trailing token before applying the authored annotation grammar;
+    // this also preserves genuine prose that precedes the token.
+    let authored = crate::document_queue::strip_queue_effect_annotation(visible_head);
+    let text = authored.trim();
     if text.is_empty() || text.lines().next().is_some_and(|line| line.contains("~~")) {
         return None;
     }
@@ -105,6 +110,10 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
         break;
     }
     let first = ids.first()?.clone();
+    // An operator can append steering after the binary has projected an effect
+    // id (`do [#id] ⟦effect:1⟧: note`). Ignore the exact metadata token but
+    // keep everything after it subject to the normal annotation contract.
+    rest = strip_leading_effect_identity(rest);
     if rest.trim().is_empty() {
         return None;
     }
@@ -120,9 +129,28 @@ pub fn queue_head_annotation(head: &str) -> Option<QueueHeadAnnotation> {
     Some(QueueHeadAnnotation {
         id: first,
         ids,
-        head: text.to_string(),
+        head: visible_head.to_string(),
         annotation_verbatim: annotation.to_string(),
     })
+}
+
+fn strip_leading_effect_identity(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    let Some(after_prefix) =
+        trimmed.strip_prefix(crate::document_queue::QUEUE_EFFECT_ANNOTATION_PREFIX)
+    else {
+        return text;
+    };
+    let Some((raw_effect, rest)) = after_prefix.split_once('⟧') else {
+        return text;
+    };
+    let Ok(effect) = raw_effect.parse::<usize>() else {
+        return text;
+    };
+    if effect == 0 {
+        return text;
+    }
+    rest
 }
 
 fn strip_leading_separator(text: &str) -> &str {
@@ -416,6 +444,29 @@ mod tests {
         ] {
             assert_eq!(annotation(head), None, "{head}");
         }
+    }
+
+    #[test]
+    fn binary_effect_identity_is_not_an_operator_annotation() {
+        for head in [
+            "do [#adtypingdupsiblings] ⟦effect:1⟧",
+            "do [#adtypingdupsiblings] ⟦effect:2⟧",
+            "🚧 do [#adtypingdupsiblings] ⟦effect:2⟧",
+        ] {
+            assert_eq!(annotation(head), None, "{head}");
+        }
+    }
+
+    #[test]
+    fn genuine_operator_annotation_survives_effect_identity() {
+        assert_eq!(
+            annotation("do [#a]: keep the old API ⟦effect:1⟧").as_deref(),
+            Some("keep the old API")
+        );
+        assert_eq!(
+            annotation("do [#a] ⟦effect:2⟧: keep the old API").as_deref(),
+            Some("keep the old API")
+        );
     }
 
     #[test]

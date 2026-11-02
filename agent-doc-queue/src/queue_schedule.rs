@@ -534,6 +534,9 @@ fn head_carries_drain_lifecycle_marker(text: &str) -> bool {
                 | QueueLifecycleMarker::Running
                 | QueueLifecycleMarker::Reported
                 | QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::LostClaimed
+                | QueueLifecycleMarker::LostRunning
+                | QueueLifecycleMarker::LostReported
                 | QueueLifecycleMarker::Unknown
                 | QueueLifecycleMarker::Skipped
                 | QueueLifecycleMarker::AwaitingOperator

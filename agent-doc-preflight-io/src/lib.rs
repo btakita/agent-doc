@@ -7641,7 +7641,7 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
             if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
                 && claim.is_expired(now)
             {
-                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+                claim.mark_lost();
             }
             claim
         })
@@ -7793,6 +7793,8 @@ pub fn run_queue_maintenance_with_coin_gate_and_snapshot(
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Running
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Reported
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
+                    | agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Reconciling
                     | agent_doc_document::queue_projection::QueueLifecycleMarker::Unknown
@@ -16685,15 +16687,15 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(
-            "- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️ [#subagent:d#1] do [#d]"
+            "- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️🚧 [#subagent:d#1] do [#d]"
         ));
         assert_eq!(
             queue_line(&updated, "d"),
-            "- ⚠️ [#subagent:d#1] do [#d]",
+            "- ⚠️🚧 [#subagent:d#1] do [#d]",
             "the queue row carries attempt lifecycle, not a second GFM checkbox:\n{updated}"
         );
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
-        assert!(updated.contains("- [ ] ⚠️ [#d] later work"));
+        assert!(updated.contains("- [ ] ⚠️🚧 [#d] later work"));
 
         let (_, replacement) =
             agent_doc_queue_io::queue_claim::claim(&doc, "#d", "subagent:d2", 3600).unwrap();

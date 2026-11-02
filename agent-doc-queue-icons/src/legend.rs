@@ -46,13 +46,15 @@ pub enum QueueMarker {
 }
 
 /// Legend order. Matches [`QueueIconSet::entries`] one-to-one.
-pub const ALL_QUEUE_MARKERS: [QueueMarker; 14] = [
+pub const ALL_QUEUE_MARKERS: [QueueMarker; 16] = [
     QueueMarker::Lifecycle(QueueLifecycleMarker::Pending),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Blocked),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Claimed),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Running),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Reported),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Lost),
+    QueueMarker::Lifecycle(QueueLifecycleMarker::LostClaimed),
+    QueueMarker::Lifecycle(QueueLifecycleMarker::LostRunning),
     QueueMarker::Lifecycle(QueueLifecycleMarker::LostReported),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Reconciling),
     QueueMarker::Lifecycle(QueueLifecycleMarker::Unknown),
@@ -74,6 +76,8 @@ impl QueueMarker {
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "reported",
                 QueueLifecycleMarker::Lost => "lost",
+                QueueLifecycleMarker::LostClaimed => "lost_claimed",
+                QueueLifecycleMarker::LostRunning => "lost_running",
                 QueueLifecycleMarker::LostReported => "lost_reported",
                 QueueLifecycleMarker::Reconciling => "reconciling",
                 QueueLifecycleMarker::Unknown => "unknown",
@@ -106,6 +110,8 @@ impl QueueMarker {
                 QueueLifecycleMarker::Running => "running",
                 QueueLifecycleMarker::Reported => "keep: worker done",
                 QueueLifecycleMarker::Lost => "lost",
+                QueueLifecycleMarker::LostClaimed => "lost + claimed",
+                QueueLifecycleMarker::LostRunning => "lost + running",
                 QueueLifecycleMarker::LostReported => "lost + worker done",
                 QueueLifecycleMarker::Reconciling => "needs reconcile",
                 QueueLifecycleMarker::Unknown => "unknown",
@@ -139,6 +145,12 @@ impl QueueMarker {
                 }
                 QueueLifecycleMarker::Lost => {
                     "The claim expired or was abandoned; retry only when durable evidence proves this exact attempt never started, otherwise reconcile it."
+                }
+                QueueLifecycleMarker::LostClaimed => {
+                    "The attempt was lost while reserved for dispatch; the claimed state remains visible until durable evidence proves whether it started."
+                }
+                QueueLifecycleMarker::LostRunning => {
+                    "The attempt was lost after a worker was bound; reconcile its effects and response before retrying."
                 }
                 QueueLifecycleMarker::LostReported => {
                     "Urgent nonterminal debt: the attempt was lost, then exact completion evidence was recovered. Recover the response and effects, integrate and close it in this turn; never silently delete or retry it. Keep it open with explicit missing-response or integration debt when blocked."
@@ -321,6 +333,8 @@ mod tests {
             running,
             reported,
             lost,
+            lost_claimed,
+            lost_running,
             lost_reported,
             reconciling,
             unknown,
@@ -337,6 +351,8 @@ mod tests {
             running,
             reported,
             lost,
+            lost_claimed,
+            lost_running,
             lost_reported,
             reconciling,
             unknown,
@@ -377,6 +393,8 @@ mod tests {
             QueueLifecycleMarker::Running,
             QueueLifecycleMarker::Reported,
             QueueLifecycleMarker::Lost,
+            QueueLifecycleMarker::LostClaimed,
+            QueueLifecycleMarker::LostRunning,
             QueueLifecycleMarker::LostReported,
             QueueLifecycleMarker::Reconciling,
             QueueLifecycleMarker::Unknown,
@@ -390,6 +408,8 @@ mod tests {
                 | QueueLifecycleMarker::Running
                 | QueueLifecycleMarker::Reported
                 | QueueLifecycleMarker::Lost
+                | QueueLifecycleMarker::LostClaimed
+                | QueueLifecycleMarker::LostRunning
                 | QueueLifecycleMarker::LostReported
                 | QueueLifecycleMarker::Reconciling
                 | QueueLifecycleMarker::Unknown
@@ -407,7 +427,7 @@ mod tests {
                 state.default_prefix()
             );
         }
-        assert_eq!(ALL_LIFECYCLE_STATES.len(), 11);
+        assert_eq!(ALL_LIFECYCLE_STATES.len(), 13);
     }
 
     #[test]

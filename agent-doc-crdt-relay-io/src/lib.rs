@@ -1312,7 +1312,7 @@ fn durable_queue_attempt_projection(file: &Path, current: &str) -> Result<String
             if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
                 && claim.is_expired(now_secs)
             {
-                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+                claim.mark_lost();
             }
             (claim.identity.clone(), claim)
         })

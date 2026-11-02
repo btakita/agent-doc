@@ -1096,6 +1096,18 @@ fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) 
             (QueueLifecycleMarker::Reported, icons.reported.as_str()),
             (QueueLifecycleMarker::Lost, icons.lost.as_str()),
             (
+                QueueLifecycleMarker::LostClaimed,
+                icons.lost_claimed.as_str(),
+            ),
+            (
+                QueueLifecycleMarker::LostRunning,
+                icons.lost_running.as_str(),
+            ),
+            (
+                QueueLifecycleMarker::LostReported,
+                icons.lost_reported.as_str(),
+            ),
+            (
                 QueueLifecycleMarker::Reconciling,
                 icons.reconciling.as_str(),
             ),
@@ -1112,6 +1124,9 @@ fn consume_lifecycle_marker(text: &str) -> (Option<QueueLifecycleMarker>, &str) 
             (QueueLifecycleMarker::Reported, "📫"),
             (QueueLifecycleMarker::Reported, "📤"),
             (QueueLifecycleMarker::Lost, "⚠️"),
+            (QueueLifecycleMarker::LostClaimed, "⚠️🟡"),
+            (QueueLifecycleMarker::LostRunning, "⚠️🚧"),
+            (QueueLifecycleMarker::LostReported, "⚠️☑️"),
             (QueueLifecycleMarker::Reconciling, "🔄"),
             (QueueLifecycleMarker::Unknown, "❔"),
             (QueueLifecycleMarker::Skipped, "⏭️"),

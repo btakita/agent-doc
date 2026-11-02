@@ -69,6 +69,10 @@ pub const OLDER_REPORTED_MARKER: &str = "📤";
 /// The attempt was lost or expired. Durable evidence decides whether it may be
 /// retried; the marker alone never authorizes redispatch.
 pub const LOST_MARKER: &str = "⚠️";
+/// A lost attempt that never advanced past claimed/dispatching.
+pub const LOST_CLAIMED_MARKER: &str = "⚠️🟡";
+/// A lost attempt that had a concrete worker binding.
+pub const LOST_RUNNING_MARKER: &str = "⚠️🚧";
 /// The exact completion outbox for a lost attempt was recovered. This remains
 /// one typed lifecycle prefix while visibly retaining both facts.
 pub const LOST_REPORTED_MARKER: &str = "⚠️☑️";
@@ -1636,6 +1640,8 @@ mod tests {
             (QueueLifecycleMarker::Running, RUNNING_MARKER),
             (QueueLifecycleMarker::Reported, REPORTED_MARKER),
             (QueueLifecycleMarker::Lost, LOST_MARKER),
+            (QueueLifecycleMarker::LostClaimed, LOST_CLAIMED_MARKER),
+            (QueueLifecycleMarker::LostRunning, LOST_RUNNING_MARKER),
             (QueueLifecycleMarker::LostReported, LOST_REPORTED_MARKER),
             (QueueLifecycleMarker::Reconciling, RECONCILING_MARKER),
         ] {
@@ -1996,6 +2002,9 @@ mod tests {
             QueueLifecycleMarker::Running,
             QueueLifecycleMarker::Reported,
             QueueLifecycleMarker::Lost,
+            QueueLifecycleMarker::LostClaimed,
+            QueueLifecycleMarker::LostRunning,
+            QueueLifecycleMarker::LostReported,
         ];
         for bound in bound_states {
             for receipt in [false, true] {

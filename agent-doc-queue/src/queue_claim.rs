@@ -132,6 +132,12 @@ pub struct QueueClaim {
     /// Typed lifecycle for this exact `(identity, owner, generation)` attempt.
     #[serde(default)]
     pub state: QueueClaimState,
+    /// Lifecycle phase immediately preceding `Lost`. New transitions persist
+    /// it so loss remains an additive boundary instead of erasing whether the
+    /// attempt was claimed, running, or already reported. Legacy records omit
+    /// it and fall back to their durable worker binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lost_from: Option<QueueClaimState>,
     /// Exact, generation-fenced completion evidence was recovered only after
     /// this attempt had already entered `Lost`. The attempt is now reportable
     /// and closeable, while this bit preserves the loss boundary for a
@@ -355,8 +361,14 @@ pub fn diagnose_lifecycle(
     now_secs: u64,
     dispatch_grace_secs: u64,
 ) -> Option<QueueLifecycleDiagnosis> {
-    let expected = if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
-        agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+    let expected = if claim.state == QueueClaimState::Lost {
+        claim.projection_marker()
+    } else if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
+        if claim.worker.is_some() {
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+        } else {
+            agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
+        }
     } else {
         claim.projection_marker()
     };
@@ -446,12 +458,38 @@ impl QueueClaimState {
 }
 
 impl QueueClaim {
+    /// Move this attempt into lost state without erasing its previous phase.
+    pub fn mark_lost(&mut self) {
+        if self.state != QueueClaimState::Lost {
+            self.lost_from = Some(self.state);
+            self.state = QueueClaimState::Lost;
+        }
+    }
+
     /// Visible lifecycle projection for this exact attempt. A completion
     /// recovered after loss remains reported state for closeout, but keeps the
     /// lost boundary visible instead of silently rewriting history.
     pub fn projection_marker(&self) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
         if self.state == QueueClaimState::Reported && self.completion_recovered_after_loss {
             agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
+        } else if self.state == QueueClaimState::Lost {
+            match self.lost_from {
+                Some(QueueClaimState::Reported) => {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::LostReported
+                }
+                Some(QueueClaimState::Running) => {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+                }
+                Some(QueueClaimState::Claimed) => {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
+                }
+                Some(QueueClaimState::Lost) | None if self.worker.is_some() => {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::LostRunning
+                }
+                Some(QueueClaimState::Lost) | None => {
+                    agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
+                }
+            }
         } else {
             self.state.projection_marker()
         }
@@ -1157,6 +1195,7 @@ impl QueueClaimLedger {
             owner: owner.trim().to_string(),
             generation: 1,
             state: QueueClaimState::Claimed,
+            lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
             worker: None,
@@ -2303,7 +2342,7 @@ impl QueueClaimLedger {
         let mut kept = Vec::with_capacity(self.claims.len());
         for mut claim in std::mem::take(&mut self.claims) {
             if claim.state != QueueClaimState::Lost && claim.is_expired(now_secs) {
-                claim.state = QueueClaimState::Lost;
+                claim.mark_lost();
                 pruned.push((claim.clone(), ClaimPruneCause::Expired));
                 kept.push(claim);
             } else if live_heads.is_some_and(|live| !live.contains(&claim.identity)) {
@@ -2335,7 +2374,7 @@ impl QueueClaimLedger {
         for claim in std::mem::take(&mut self.claims) {
             let mut adjusted = claim.clone();
             if adjusted.is_expired(now_secs) {
-                adjusted.state = QueueClaimState::Lost;
+                adjusted.mark_lost();
             }
             if struck.contains(&claim.identity)
                 && !live.contains(&claim.identity)
@@ -2962,6 +3001,76 @@ impl ClaimedQueueItems {
 mod tests {
     use super::*;
 
+    /// A lost attempt retains the lifecycle phase that preceded loss. The
+    /// durable worker binding distinguishes a claimed/dispatching attempt from
+    /// one whose concrete worker had already started.
+    #[test]
+    fn lost_projection_preserves_previous_lifecycle_phase() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#lost-phase]", "subagent:worker", 10, 60);
+        let claim = &mut ledger.claims[0];
+        claim.mark_lost();
+
+        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostClaimed);
+        assert_eq!(claim.projection_marker().prefix(), "⚠️🟡");
+
+        claim.state = QueueClaimState::Running;
+        claim.lost_from = None;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "worker-1".into(),
+            started_at_secs: 20,
+        });
+        claim.mark_lost();
+        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostRunning);
+        assert_eq!(claim.projection_marker().prefix(), "⚠️🚧");
+
+        claim.state = QueueClaimState::Reported;
+        claim.lost_from = None;
+        claim.completion_recovered_after_loss = false;
+        claim.mark_lost();
+        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostReported);
+        assert_eq!(claim.projection_marker().prefix(), "⚠️☑️");
+
+        let diagnosis = diagnose_lifecycle(
+            claim,
+            Some(QueueLifecycleMarker::LostRunning),
+            100,
+            DISPATCH_EVIDENCE_GRACE_SECS,
+        )
+        .expect("the visible running-loss marker drifted from lost report state");
+        assert_eq!(diagnosis.expected, QueueLifecycleMarker::LostReported);
+
+        claim.state = QueueClaimState::Reported;
+        claim.completion_recovered_after_loss = true;
+        assert_eq!(claim.projection_marker(), QueueLifecycleMarker::LostReported);
+        assert_eq!(claim.projection_marker().prefix(), "⚠️☑️");
+
+    }
+
+    #[test]
+    fn expiry_projection_preserves_claimed_or_running_phase() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("do [#expired-phase]", "subagent:worker", 10, 60);
+        let claim = &mut ledger.claims[0];
+
+        let claimed = diagnose_lifecycle(claim, None, 100, DISPATCH_EVIDENCE_GRACE_SECS)
+            .expect("expired claim needs a lost projection");
+        assert_eq!(claimed.expected, QueueLifecycleMarker::LostClaimed);
+
+        claim.state = QueueClaimState::Running;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "worker-1".into(),
+            started_at_secs: 20,
+        });
+        let running = diagnose_lifecycle(claim, None, 100, DISPATCH_EVIDENCE_GRACE_SECS)
+            .expect("expired running attempt needs a lost projection");
+        assert_eq!(running.expected, QueueLifecycleMarker::LostRunning);
+    }
+
     /// `#nestlistlineage`: the contracts/162 `#rebase` child is not the
     /// haiven-api PR 767 `#rebase` child. Its `push` leaf owns the deeper key.
     /// A top-level `#rebase` and a nested `do [#id]` stay id-backed.
@@ -3567,6 +3676,7 @@ mod tests {
                     owner: "subagent:a".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
                     worker: None,
@@ -3586,6 +3696,7 @@ mod tests {
                     owner: "subagent:b".into(),
                     generation: 0,
                     state: QueueClaimState::Claimed,
+                    lost_from: None,
                     completion_recovered_after_loss: false,
                     publication_state: None,
                     worker: None,

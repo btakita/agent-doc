@@ -150,6 +150,7 @@ impl ClaimReleaseReceipt {
             owner: self.owner.clone(),
             generation: self.generation,
             state: crate::queue_claim::QueueClaimState::Reported,
+            lost_from: None,
             completion_recovered_after_loss: self.completion_recovered_after_loss,
             publication_state: self.publication_state,
             worker: self.worker_id.as_ref().map(|worker_id| {
@@ -482,6 +483,7 @@ mod tests {
             owner: owner.to_string(),
             generation: 1,
             state: crate::queue_claim::QueueClaimState::Reported,
+            lost_from: None,
             completion_recovered_after_loss: false,
             publication_state: None,
             worker: Some(crate::queue_claim::QueueWorkerBinding {

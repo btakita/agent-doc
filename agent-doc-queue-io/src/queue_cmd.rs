@@ -348,7 +348,7 @@ fn derive_runtime_projection_scoped(
             if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
                 && claim.is_expired(now)
             {
-                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+                claim.mark_lost();
             }
             (claim.identity.clone(), claim)
         })

@@ -2399,7 +2399,11 @@ pub fn settle_inert_group_parents(
                 Some(QueueLifecycleMarker::Blocked) => {
                     "Resolve the blockers and complete the remaining work for the parent item."
                 }
-                Some(QueueLifecycleMarker::Lost) => {
+                Some(
+                    QueueLifecycleMarker::Lost
+                    | QueueLifecycleMarker::LostClaimed
+                    | QueueLifecycleMarker::LostRunning,
+                ) => {
                     "Retry the lost work and complete the parent item."
                 }
                 Some(QueueLifecycleMarker::Claimed | QueueLifecycleMarker::Running) => {
@@ -2546,6 +2550,9 @@ pub fn set_prompts_lifecycle_markers(
                             | qp::QueueLifecycleMarker::Running
                             | qp::QueueLifecycleMarker::Reported
                             | qp::QueueLifecycleMarker::Lost
+                            | qp::QueueLifecycleMarker::LostClaimed
+                            | qp::QueueLifecycleMarker::LostRunning
+                            | qp::QueueLifecycleMarker::LostReported
                             | qp::QueueLifecycleMarker::Reconciling
                             | qp::QueueLifecycleMarker::Unknown
                     )

@@ -23,7 +23,7 @@ pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation fo
 pub fn normalize_claims_for_queue_sync(claims: &mut [QueueClaim], now_secs: u64) {
     for claim in claims {
         if claim.state != QueueClaimState::Reported && claim.is_expired(now_secs) {
-            claim.state = QueueClaimState::Lost;
+            claim.mark_lost();
         }
     }
 }
@@ -722,7 +722,12 @@ fn classify_lifecycle(item: &str, claim: Option<&QueueClaim>) -> QueueSyncLifecy
         Some(QueueLifecycleMarker::Reported) => QueueSyncLifecycle::ReportedCheckmark,
         // A visible loss without its durable attempt is provenance-unknown. It
         // must be reconciled, never treated as retry authorization.
-        Some(QueueLifecycleMarker::Lost | QueueLifecycleMarker::LostReported) => {
+        Some(
+            QueueLifecycleMarker::Lost
+            | QueueLifecycleMarker::LostClaimed
+            | QueueLifecycleMarker::LostRunning
+            | QueueLifecycleMarker::LostReported,
+        ) => {
             QueueSyncLifecycle::ReconcileUnknown
         }
         Some(QueueLifecycleMarker::AwaitingOperator) => QueueSyncLifecycle::OperatorGated,

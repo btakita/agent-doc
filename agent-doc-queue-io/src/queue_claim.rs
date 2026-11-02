@@ -1261,7 +1261,7 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
         }
         let released = ledger.release(&target).or_else(|| ledger.release(item));
         Ok(released.map(|mut claim| {
-            claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            claim.mark_lost();
             ledger.claims.push(claim.clone());
             claim
         }))
@@ -1290,7 +1290,7 @@ pub fn abandon_attempt(
             None => ledger.release_fenced(item, generation)?,
         };
         Ok(released.map(|mut claim| {
-            claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+            claim.mark_lost();
             ledger.claims.push(claim.clone());
             claim
         }))
@@ -1569,7 +1569,7 @@ pub fn claim_states_for_content(file: &Path, content: &str) -> Result<Vec<QueueC
             if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
                 && claim.is_expired(now)
             {
-                claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+                claim.mark_lost();
             }
             claim
         })

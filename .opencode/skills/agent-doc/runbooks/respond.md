@@ -413,7 +413,21 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      dispatch. Let already-running atomic operations and workers finish, keep
      later dispatch candidates out of the inline drain loop, and resume fresh
      dispatch only after the reported debt closes or its concrete blocker is
-     recorded. A publication annotation alone is not proof. For an
+     recorded. A publication annotation alone is not proof. For an agent-doc
+     project, a worker commit must be reachable from the named integration
+     branch (or `main` when that is the designated sink); for a PR-delivered
+     project, the exact commit must be present on the PR branch. A side
+     worktree, local worker branch, pushed side branch, or handback that merely
+     says "done" is not terminal completion. If reachability/delivery cannot be
+     verified, keep the row live and put the exact next integration command,
+     conflict, or external blocker in the response structure. Never describe
+     that state as done. For repository work, record the verified edge before
+     closeout with `agent-doc queue lineage-record <FILE> --item <ITEM>
+     --generation <N> --event integrated --repo <REPO> --source-sha <WORKER_SHA>
+     --integration-sha <SINK_SHA> --integration-ref <INTEGRATION_OR_PR_REF>
+     --method <merge|fast-forward|cherry-pick|rebase>`; the command verifies the
+     mapping and that `<SINK_SHA>` remains reachable from the named sink ref.
+     `other` is not a mechanically verifiable integration method. For an
      id-backed row whose tracked item must remain open, run
      `agent-doc queue consume <FILE> --ack-id <id>` immediately.
      This closeout is valid because the worker has Reported evidence. Never use

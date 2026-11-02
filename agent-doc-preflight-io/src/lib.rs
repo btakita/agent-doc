@@ -20187,17 +20187,21 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             "queue: pause\n",
             "---\n\n",
             "<!-- agent:queue -->\n",
-            "- parent one\n",
+            "- ~~do [#providecontextdecisions]~~\n",
             "  - 📥 **Response [#r-3bb63500aa30]:** First summary.\n",
+            "- ~~do [#privateinfohaiven]~~\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Second summary.\n",
+            "- parent one\n",
+            "  - 📥 **Response [#r-3bb63500aa30]:** Choice summary.\n",
             "    - 📥 **Choices:**\n",
             "      - 📥 **staging**: Publish to staging.\n",
             "        - 📥 I choose staging; continue.\n",
-            "- parent two\n",
-            "  - 📥 **Response [#r-3bb63500aa30]:** Second summary.\n",
             "- parent three\n",
             "  - 📥 **Response [#r-3bb63500aa30]:** Third summary.\n",
             "- parent four\n",
             "  - 📥 **Response [#r-3bb63500aa30]:** Fourth summary.\n",
+            "- 📥 fixture access [#tdcraigunityhandoff]\n",
+            "  - 🙋 [#subagent-operator-request-craig-access] choose repository access\n",
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
@@ -20214,6 +20218,24 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(!updated.contains("📥 **Response"), "{updated}");
         assert!(!updated.contains("📥 **Choices:**"), "{updated}");
         assert!(!updated.contains("📥 **staging**"), "{updated}");
+        assert!(
+            updated.contains("- ~~do [#providecontextdecisions]~~"),
+            "a completed row must not reopen while response metadata is normalized: {updated}"
+        );
+        assert!(
+            updated.contains("- ~~do [#privateinfohaiven]~~"),
+            "a completed row must keep its explicit --done strike: {updated}"
+        );
+        assert!(
+            updated.contains("- fixture access [#tdcraigunityhandoff]"),
+            "a group parent must not inherit its waiting leaf's pending marker: {updated}"
+        );
+        assert!(
+            updated.contains(
+                "  - 📥 choose repository access [#subagent-operator-request-craig-access]"
+            ),
+            "the actual waiting leaf, not its parent, must remain actionable: {updated}"
+        );
         assert!(
             updated.contains("📥 I choose staging; continue."),
             "operator-authored descendants must keep their lifecycle and remain promptable: {updated}"

@@ -3055,8 +3055,8 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
 
     let mut edits = Vec::new();
     // A blocking request is one decision even when an aggregate response is
-    // projected below several completed queue rows. Render its full choices
-    // once, then retain an inert request reference below later parents.
+    // projected below several queue rows. Render its choices only on the first
+    // row that owns the request; unrelated or duplicate rows receive nothing.
     let mut rendered_choice_packet_ids = HashSet::<String>::new();
     for node in &nodes {
         let Some((response_body, response_id, annotate_inline_id, shared_batch)) =
@@ -3338,25 +3338,33 @@ fn response_summary_row_child(
     } else {
         response_next_actions(response_body)
     };
-    let packets = if shared_batch {
-        Vec::new()
-    } else {
-        crate::operator_request_packet::blocking_operator_request_packets(response_body)
-    };
+    // Even when this response closed a batch, operator requests remain scoped
+    // to their own live origin rows. Batch prose is intentionally replaced by
+    // the generic per-row summary above, but suppressing the matching request
+    // would hide the only active operator decision.
+    let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body)
+        .into_iter()
+        .filter(|packet| operator_request_packet_belongs_to_row(packet, queue_item))
+        .collect::<Vec<_>>();
     let has_blocking_request = !packets.is_empty()
         || response_body
             .lines()
             .any(|line| line.trim() == "**Operator input needed**");
     let mut choice_projections = Vec::new();
     for packet in packets {
+        // A request is one live operator decision. If duplicate queue
+        // occurrences match its origin, only the first owner receives the
+        // inert choice tree; later rows receive no queue-shaped reference.
+        if !rendered_choice_packet_ids.insert(packet.id.clone()) {
+            continue;
+        }
         if !summary.contains(&packet.request) {
             if !summary.is_empty() {
                 summary.push(' ');
             }
             summary.push_str(&packet.request);
         }
-        let canonical = rendered_choice_packet_ids.insert(packet.id.clone());
-        choice_projections.push((packet.id, packet.choice_rows, canonical));
+        choice_projections.push((packet.id, packet.choice_rows));
     }
     let decision_projection =
         structured_choice_projection(source_document, queue_item, response_body);
@@ -3450,23 +3458,17 @@ fn response_summary_row_child(
             }
         }
     } else {
-        for (index, (packet_id, packet_choices, canonical)) in
-            choice_projections.into_iter().enumerate()
-        {
+        for (index, (packet_id, packet_choices)) in choice_projections.into_iter().enumerate() {
             child.push_str("\n- **Choices:**");
-            if canonical {
-                child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
-                let choices = if index == 0 {
-                    decision_choices.clone().unwrap_or(packet_choices)
-                } else {
-                    packet_choices
-                };
-                for choice in choices {
-                    child.push_str("\n  - ");
-                    child.push_str(&choice);
-                }
+            child.push_str(&format!("\n  - **Request**: [#{packet_id}]"));
+            let choices = if index == 0 {
+                decision_choices.clone().unwrap_or(packet_choices)
             } else {
-                child.push_str(&format!("\n  - **Reference**: [#{packet_id}]"));
+                packet_choices
+            };
+            for choice in choices {
+                child.push_str("\n  - ");
+                child.push_str(&choice);
             }
         }
     }
@@ -3487,6 +3489,20 @@ fn response_summary_row_child(
         }
     }
     Some(child)
+}
+
+fn operator_request_packet_belongs_to_row(
+    packet: &crate::operator_request_packet::BlockingOperatorRequestPacket,
+    queue_item: &str,
+) -> bool {
+    agent_doc_document::queue_projection::operator_action_ids(queue_item)
+        .iter()
+        .any(|id| id.eq_ignore_ascii_case(&packet.id))
+        || packet.queue_item.as_deref().is_some_and(|origin| {
+            agent_doc_document::queue_projection::operator_request_item_matches_row(
+                queue_item, origin,
+            )
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -4657,7 +4673,7 @@ mod tests {
         let response = format!(
             "### Re: release target — test\n\n{long_state}\n\n\
 [#subagent-operator-request-release-target] subagent operator request\n\
-- *queue_item:*\n  - publish release\n\
+- *queue_item:*\n  - do [#release]\n\
 - *kind:* question\n\
 - *blocking:* true\n\
 - *request:*\n  - Which release target should be used?\n\
@@ -4751,6 +4767,68 @@ mod tests {
                 .unwrap(),
             annotated,
             "replaying the durable request evidence must not duplicate its subtree"
+        );
+    }
+
+    #[test]
+    fn multiple_operator_requests_project_only_beside_their_own_waiting_rows() {
+        let craig_item = "publish Craig fixture [#q-craig]";
+        let dillon_item = "publish Dillon fixture [#q-dillon]";
+        let craig_request = "subagent-operator-request-craig-access";
+        let dillon_request = "subagent-operator-request-dillon-followup";
+        let response = format!(
+            "### Re: fixture access choices — test\n\n\
+**Current state:** Both fixture changes are ready, but each needs its own operator decision.\n\n\
+[#{craig_request}] subagent operator request\n\
+- *queue_item:*\n  - {craig_item}\n\
+- *kind:* permission\n\
+- *blocking:* true\n\
+- *request:*\n  - Grant repository access for the Craig fixture?\n\
+- *choices:*\n  - **Grant both**: Run both PUTs.\n  - **Do not grant**: Leave access unchanged.\n\n\
+[#{dillon_request}] subagent operator request\n\
+- *queue_item:*\n  - {dillon_item}\n\
+- *kind:* question\n\
+- *blocking:* true\n\
+- *request:*\n  - How should Dillon be added?\n\
+- *choices:*\n  - **Add Dillon by follow-up PR**: Open a separate PR.\n  - **Keep current PR only**: Do not add Dillon.\n"
+        );
+        let before = queue_doc(&format!("- {craig_item}\n- {dillon_item}\n"));
+        let after = doc_with_queue_and_exchange(
+            &format!(
+                "- 🙋 [#{craig_request}] {craig_item}\n- 🙋 [#{dillon_request}] {dillon_item}\n"
+            ),
+            &response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue_body = queue.content(&annotated);
+        let craig_start = queue_body
+            .find(&format!("- 🙋 [#{craig_request}]"))
+            .unwrap();
+        let dillon_start = queue_body
+            .find(&format!("- 🙋 [#{dillon_request}]"))
+            .unwrap();
+        let craig_scope = &queue_body[craig_start..dillon_start];
+        let dillon_scope = &queue_body[dillon_start..];
+
+        assert!(
+            craig_scope.contains("**Grant both**: Run both PUTs."),
+            "{queue_body}"
+        );
+        assert!(!craig_scope.contains("Add Dillon by follow-up PR"));
+        assert!(dillon_scope.contains("**Add Dillon by follow-up PR**: Open a separate PR."));
+        assert!(!dillon_scope.contains("**Grant both**"));
+        assert!(!queue_body.contains("**Reference**:"), "{queue_body}");
+        let entries = document_queue::parse(queue_body).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "offered choices and waiting rows are not dispatchable queue work:\n{entries:#?}"
         );
     }
 
@@ -4857,7 +4935,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_operator_request_projects_one_choice_tree_and_stable_references() {
+    fn shared_operator_request_projects_one_row_scoped_choice_tree() {
         let response = concat!(
             "### Re: aggregate repair — test\n\n",
             "> **Queue prompt:** repair alpha [#q-alpha]\n\n",
@@ -4867,7 +4945,7 @@ mod tests {
             "> **Queue prompt:** repair gamma [#q-gamma]\n\n",
             "Gamma is repaired.\n\n",
             "[#subagent-operator-request-shared-release] subagent operator request\n",
-            "- *queue_item:*\n  - publish the aggregate repair\n",
+            "- *queue_item:*\n  - repair gamma [#q-gamma]\n",
             "- *kind:* permission\n",
             "- *blocking:* true\n",
             "- *request:*\n  - Choose whether to publish the aggregate repair.\n",
@@ -4894,7 +4972,7 @@ mod tests {
                 .matches("**Request**: [#subagent-operator-request-shared-release]")
                 .count(),
             1,
-            "one request id must own the one canonical choice tree:\n{annotated}"
+            "one matching row must own the one canonical choice tree:\n{annotated}"
         );
         assert_eq!(
             annotated

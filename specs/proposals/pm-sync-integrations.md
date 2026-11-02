@@ -10,8 +10,9 @@
 > and the hide design under [Hidden rows](#hidden-rows). Nothing here
 > is implemented. Normative behavior stays in [`SPEC.md`](../../SPEC.md) and the
 > numbered `specs/` files. A phase becomes normative only when its queue item
-> lands spec + tests. What is still undecided is listed under
-> [Still open](#still-open).
+> lands spec + tests. The provider defaults and non-blocking implementation
+> fallbacks were re-checked on 2026-11-02; the remaining implementation-time
+> probes are listed under [Still open](#still-open).
 
 ## Request
 
@@ -419,7 +420,15 @@ Recorded from the operator's answers to `#pmsyncstillopen` (2026-10-28).
     my pending GitLab to-dos for a mention. Jira:
     `(assignee = currentUser() OR reporter = currentUser() OR creator = currentUser() OR watcher = currentUser()) AND resolution = Unresolved`.
     Neither provider can match "I commented" exactly; what each default misses
-    is listed in the research section.
+    is listed in the research section. Re-checked on 2026-11-02: keep both
+    defaults. GitLab's to-do leg is deliberately an inbox approximation (only
+    pending `mentioned` / `directly_addressed` to-dos, including issue-like
+    `WorkItem` targets). Jira's `watcher` leg is deliberately a current-
+    relationship approximation: it covers comments only when the operator's
+    **Watch your work items** setting auto-watches commented items. Do not add
+    `updatedBy()` to the default: it also matches non-comment field edits, has
+    day-granularity date bounds, and its documented argument is a literal user,
+    not `currentUser()`.
 13. **A hidden row is kept in the document, as a sub-item of one ordinary list
     item.** Deleting a row hides it (Decision 5); agent-doc moves it under a
     list item it titles `Hidden` (or the `hidden=` title), adding that item
@@ -490,18 +499,30 @@ as a non-blocking signal, so an agent turn knows when it is reading old rows.
 frequent polling than configured, for example GitHub's `X-Poll-Interval`
 header on endpoints that send it.
 
-**Provider facts.** Verified: GitHub REST returns `ETag` and supports
-`If-None-Match`, and an authorized 304 does not count against the primary rate
-limit; the authenticated REST primary limit is 5,000 requests per hour.
-Unverified, to confirm before implementation: whether the GitHub REST search
-endpoint returns usable ETags; the GitHub GraphQL point cost of one `search`
-query of 50 nodes (expected to be about 1 point of 5,000 per hour; GraphQL has
-no conditional requests); GitLab.com's current authenticated rate limit and
-whether its list endpoints honor `If-None-Match`; and Jira Cloud's current
-rate-limit model and search endpoint (Atlassian has been moving from
-`/rest/api/3/search` to `/rest/api/3/search/jql`). At `interval=5m`, one
-component makes 12 ticks an hour, which is far inside any of these limits even
-when every tick reaches rung 3.
+**Provider facts (re-checked 2026-11-02).** GitHub REST supports conditional
+requests generally, and an authorized 304 does not count against the primary
+rate limit, but a live authenticated issues/PR search response returned no
+`ETag`; the GitHub search rung must therefore use its update cursor and content
+digest unless a later response actually supplies a validator. The same live
+probe reported the search-specific budget (`30` requests per minute), separate
+from the ordinary authenticated REST budget. A live GraphQL `search` query of
+50 PR nodes reported cost `1` out of the documented 5,000 points per hour.
+
+GitLab.com's current documented authenticated API ceiling is plan-aware, with
+the current general authenticated API limit capped at 2,000 requests per
+minute. A live unauthenticated MR-list probe returned a weak `ETag`, and
+repeating it with `If-None-Match` returned `304`, so conditional requests are a
+valid first rung when the concrete list response supplies a validator.
+
+Jira Cloud's enhanced JQL endpoint is `/rest/api/3/search/jql`; the former
+`/rest/api/3/search` operations are deprecated/being removed. API-token traffic
+continues under burst limits rather than the app points quota. The documented
+default REST burst limit is 100 requests per second for `GET`; writes also have
+per-issue limits (20 writes per 2 seconds and 100 per 30 seconds). Atlassian
+recommends ETags and conditional headers, but search-specific validator support
+still needs a tenant probe. At `interval=5m`, one component makes 12 ticks an
+hour, comfortably below every confirmed limit even when every tick reaches
+rung 3.
 
 ## Recommendation: status updates
 
@@ -629,6 +650,13 @@ fields because those are marked experiment. What it misses compared with
   to. Both are opt-in through `query=` (`approved_by_usernames[]`, GraphQL
   `subscribed`).
 
+This default was confirmed on 2026-11-02. The to-do API still documents
+`mentioned` and `directly_addressed` actions and Issue, MergeRequest and
+WorkItem target types. Commenting makes a user a notification participant, but
+the provider docs do not establish that it creates an
+`EXPLICITLY_SUBSCRIBED` GraphQL subscription. Keep subscriptions opt-in and do
+not infer them from comments.
+
 **Jira Cloud.** `currentUser()` works with Assignee, Reporter, Voter, Watcher,
 Creator and user-type custom fields, with `=` and `!=` only. The `comment`
 field supports only text search (`~`, `!~`), so JQL has no "commented by"
@@ -659,31 +687,50 @@ through auto-watch. What it misses:
   operator. `updatedBy()` would add items the operator touched, but it also
   matches any field edit, and it is not in the default.
 
-**Not verified, to confirm before implementation:**
+This default was confirmed on 2026-11-02 as the highest-precision built-in
+approximation. Jira documents `watcher = currentUser()` and documents that
+**Watch your work items** makes the current user a watcher of items they create
+or comment on. That personal setting is optional, so the component guidance
+must disclose the resulting comment-coverage gap rather than implying the
+default is a complete comment history. The `updatedBy(user, ...)` documentation
+shows literal-user examples and does not list `currentUser()` as its argument;
+if a custom query uses it, resolve the authenticated account explicitly and
+accept its broader "any update" semantics.
 
-- whether GitHub keeps advanced search for PRs (observed, not documented);
-- whether GitLab's `UnionedIssueFilterInput` ORs *across* its author and
-  assignee fields or only within each list;
-- whether commenting on a GitLab item creates an `EXPLICITLY_SUBSCRIBED`
-  subscription;
-- whether Jira's `updatedBy()` accepts `currentUser()` as its user argument
-  (the docs show only literal users);
-- the community workaround for Jira mentions,
-  `text ~ "\"[~accountid:<id>]\""` (from Atlassian Community, not the docs);
-- the Jira Service Management "Request participants" field, which is not in
-  the Jira Software JQL field reference.
+**Confirmed boundaries (2026-11-02):**
+
+- GitHub advanced-search PR union remains a live-probe capability with a
+  two-query merge fallback because the provider documentation still describes
+  the feature in issue terms.
+- GitLab documents `or:` as inclusive OR and its issue union input contains
+  both author and assignee fields, but those GraphQL fields remain experimental;
+  the stable REST union remains the default.
+- GitLab comments establish notification participation, not a documented
+  `EXPLICITLY_SUBSCRIBED` record; subscriptions remain opt-in.
+- Jira does not document `currentUser()` as an `updatedBy()` argument. Use an
+  explicit account identity only in a custom query.
+- The community Jira mention-text workaround and Jira Service Management
+  Request participants are product/site-specific opt-ins, not default clauses.
 
 ## Still open
 
-1. **Confirm the GitLab and Jira defaults** recommended in
-   [Research: "related to me" on each provider](#research-related-to-me-on-each-provider)
-   (Decision 12), in particular the GitLab to-do rule and Jira's reliance on
-   auto-watch, along with the unverified points listed there.
-2. **Provider-native idempotency and compare-and-set.** Whether GitHub, GitLab
-   or Jira accept an idempotency key or a conditional write. This does not
-   block Phase 3: until it is verified, the local send ledger plus a provider
-   re-read before any retry is the accepted guard (Decision 14), and the
-   pre-send stale check covers state verbs
-   ([Recommendation: status updates](#recommendation-status-updates)).
-3. **The unverified provider facts** listed under
-   [Recommendation: refresh cadence](#recommendation-refresh-cadence).
+No product decision remains open for the read-only defaults. The following are
+non-blocking implementation-time probes with fail-safe defaults:
+
+1. **Per-endpoint validators.** Use `ETag` / `If-None-Match` only when the
+   concrete response supplies a validator. GitHub search did not in the live
+   probe; GitLab MR lists did; Jira search must be checked against the configured
+   tenant. The update cursor plus deterministic digest is always the fallback.
+2. **Provider-native write deduplication and compare-and-set.** The current
+   GitHub comment, GitLab note and Jira issue/transition documentation does not
+   advertise a general idempotency-key or conditional-write contract for the
+   Phase 3 verbs. GitLab documents a head-SHA guard for the special MR merge
+   quick action, but merge is outside this proposal's first write verbs. Keep
+   Decision 14's local send ledger, provider re-read before retry, and pre-send
+   stale-state check as the required behavior. A provider-native guard may
+   strengthen one verb only after an integration test proves that exact
+   endpoint's semantics; never infer it from webhook `Idempotency-Key` headers.
+3. **Tenant/account capability probes.** Report whether Jira's configured
+   account has auto-watch enabled and whether a configured GitLab/Jira custom
+   query adds subscriptions, mentions, Request participants, or historical
+   involvement. Absence never broadens the built-in default silently.

@@ -2995,6 +2995,48 @@ pub fn id_backed_head_node_keys(content: &str, target_id: &str) -> Result<Vec<St
     Ok(keys)
 }
 
+/// Node keys for the exact reported worker-attempt projection nested beneath
+/// an open waiting/Todo parent identified by `target_id` (`#nestedechostrike`).
+///
+/// Waiting-tree parents are intentionally free text while their generated
+/// waiting metadata is present, and the child owns a distinct subagent id. The
+/// ordinary id-backed selector therefore finds neither row for
+/// `--ack-id <parent>`. This selector admits only the binary-owned Reported row
+/// whose durable owner/generation was proved by the IO guard and which cites
+/// the exact parent id.
+pub fn reported_attempt_projection_node_keys_for_parent_id(
+    content: &str,
+    target_id: &str,
+    owner: &str,
+    generation: u64,
+) -> Result<Vec<String>> {
+    let target_id =
+        agent_doc_element_backlog::backlog::normalize_pending_id(target_id).to_ascii_lowercase();
+    if target_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let nodes =
+        agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue").map_err(|err| {
+            anyhow::anyhow!("reported-attempt reap: failed to derive queue node keys: {err}")
+        })?;
+    Ok(nodes
+        .into_iter()
+        .filter(|node| !node.item.struck)
+        .filter(|node| {
+            let text = node.item.text.trim();
+            agent_doc_document::queue_projection::lifecycle_marker(text)
+                == Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Reported)
+                && agent_doc_document::queue_projection::owner_projection(text).is_some_and(
+                    |projection| projection.owner == owner && projection.generation == generation,
+                )
+                && agent_doc_element_backlog::backlog::extract_pending_hash_ids(text)
+                    .iter()
+                    .any(|id| id.eq_ignore_ascii_case(&target_id))
+        })
+        .map(|node| node.node_key)
+        .collect())
+}
+
 /// True when `target_id` names a NON-done item in any `agent:backlog` component —
 /// live work that should drain through the normal `--done` lifecycle rather than
 /// the orphan escape hatch.
@@ -9160,6 +9202,48 @@ Old.
             "{updated}"
         );
         assert!(updated.contains("- do [#other]\n"), "{updated}");
+    }
+
+    #[test]
+    fn reported_attempt_projection_keys_target_only_the_proved_waiting_parent_child() {
+        let content = concat!(
+            "<!-- agent:run subagents -->\n",
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#smoke] Provide a workspace <!-- agent-doc:waiting-item -->\n",
+            "    - **Response:** Still gated. <!-- agent-doc:waiting-metadata -->\n",
+            "    - 🙋☑️ [#subagent:smoke#2] Resolve the parent. [#smoke]\n",
+            "    - 🙋☑️ [#subagent:smoke-old#1] Stale duplicate. [#smoke]\n",
+            "  - [#other] Keep another item open <!-- agent-doc:waiting-item -->\n",
+            "    - 🙋🚧 [#subagent:other#1] Still running. [#other]\n",
+            "    - ☑️ This prose cites [#smoke] without an owner projection\n",
+            "<!-- /agent:run -->\n",
+        );
+
+        assert!(
+            id_backed_head_node_keys(content, "smoke")
+                .unwrap()
+                .is_empty()
+        );
+        let keys = reported_attempt_projection_node_keys_for_parent_id(
+            content,
+            "smoke",
+            "subagent:smoke",
+            2,
+        )
+        .expect("the generated reported child is addressable through its parent id");
+        assert_eq!(keys.len(), 1);
+        let updated = consume_queue_nodes_by_key(content, &keys).unwrap();
+        assert!(
+            updated.contains("  - [#smoke] Provide a workspace <!-- agent-doc:waiting-item -->\n"),
+            "{updated}"
+        );
+        assert!(!updated.contains("[#subagent:smoke#2]"), "{updated}");
+        assert!(updated.contains("[#subagent:smoke-old#1]"), "{updated}");
+        assert!(updated.contains("[#subagent:other#1]"), "{updated}");
+        assert!(
+            updated.contains("☑️ This prose cites [#smoke] without an owner projection"),
+            "{updated}"
+        );
     }
 
     /// `#adnestedclaimedidrow`: ID closeout must inspect every runnable

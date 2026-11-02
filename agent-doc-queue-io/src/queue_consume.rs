@@ -24,7 +24,7 @@ use agent_doc_queue::{
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
-        strike_all_noise_queue_heads,
+        reported_attempt_projection_node_keys_for_parent_id, strike_all_noise_queue_heads,
     },
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
@@ -2381,6 +2381,7 @@ pub fn strike_orphan_id_backed_queue_head(
         &content,
         &target_id,
         &keys,
+        guard.reported.as_ref(),
         "orphan_id_head_strike",
     )? {
         return Ok(false);
@@ -2565,6 +2566,7 @@ fn converge_id_backed_head_strike(
     content: &str,
     target_id: &str,
     keys: &[String],
+    reported_attempt: Option<&(String, u64)>,
     source: &str,
 ) -> Result<bool> {
     let content = content.to_string();
@@ -2583,7 +2585,17 @@ fn converge_id_backed_head_strike(
     // keys so required closeouts prove both sides converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "orphan id head snapshot sync") {
         Some(snap) => match (|| -> Result<Option<String>> {
-            let snap_keys = id_backed_head_node_keys(&snap, target_id)?;
+            let mut snap_keys = id_backed_head_node_keys(&snap, target_id)?;
+            if snap_keys.is_empty()
+                && let Some((owner, generation)) = reported_attempt
+            {
+                snap_keys = reported_attempt_projection_node_keys_for_parent_id(
+                    &snap,
+                    target_id,
+                    owner,
+                    *generation,
+                )?;
+            }
             if snap_keys.is_empty() {
                 Ok(None)
             } else {
@@ -2652,6 +2664,15 @@ fn converge_id_backed_head_strike(
         &content,
         source,
     );
+    if let Some((owner, generation)) = reported_attempt {
+        crate::queue_claim::retire_exact_reported_attempt(
+            file,
+            target_id,
+            owner,
+            *generation,
+            source,
+        )?;
+    }
     Ok(true)
 }
 
@@ -2711,7 +2732,20 @@ pub fn acknowledge_open_id_backed_queue_head(
             file.display()
         );
     }
-    let keys = id_backed_head_node_keys(&content, &target_id)?;
+    let mut evidence = None;
+    let mut keys = id_backed_head_node_keys(&content, &target_id)?;
+    if keys.is_empty() {
+        let candidate = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
+        if let Some((owner, generation)) = candidate.reported.as_ref() {
+            keys = reported_attempt_projection_node_keys_for_parent_id(
+                &content,
+                &target_id,
+                owner,
+                *generation,
+            )?;
+        }
+        evidence = Some(candidate);
+    }
     if keys.is_empty() {
         if id_backed_head_was_already_struck(&content, &target_id)? {
             // A retry after the exact strike is a successful no-op. In
@@ -2736,7 +2770,10 @@ pub fn acknowledge_open_id_backed_queue_head(
             file.display()
         );
     }
-    let evidence = id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?;
+    let evidence = match evidence {
+        Some(evidence) => evidence,
+        None => id_head_dispatch_guard(file, &content, &target_id, &keys, "--ack-id")?,
+    };
     let correction_head = exact_top_level_correction_head(&content, &target_id, &keys)?;
     let proof = OpenIdAckProof::from_evidence(&evidence, correction_head).ok_or_else(|| {
         let tracked = if open_backlog { "backlog" } else { "Todo" };
@@ -2757,6 +2794,7 @@ pub fn acknowledge_open_id_backed_queue_head(
         &content,
         &target_id,
         &keys,
+        evidence.reported.as_ref(),
         "open_id_head_ack",
     )? {
         return Ok(false);
@@ -9752,6 +9790,87 @@ Old.
                     "claim_outcome=reported_attempt_closed owner=subagent:ahfe generation=1"
                 ),
             "{ops_log}"
+        );
+    }
+
+    #[test]
+    fn nestedechostrike_ack_id_reaps_nested_reported_attempt_and_keeps_waiting_parent_open() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        let parent = concat!(
+            "[#vscodecodersmoke] Run the remote smoke on a real Coder workspace ",
+            "<!-- agent-doc:waiting-item -->"
+        );
+        let content = format!(
+            concat!(
+                "---\nsession: sid\nagent_doc_format: template\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n### Re: worker report\n\n",
+                "The worker is gated on a real Coder workspace.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Run <!-- agent:run subagents priority go -->\n",
+                "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
+                "  - {parent}\n",
+                "    - **Response:** Provide the missing workspace. <!-- agent-doc:waiting-metadata -->\n",
+                "    - 🙋☑️ [#subagent:vscode_smoke#1] Resolve the open operator action to complete the parent item. [#vscodecodersmoke]\n",
+                "  - [#later] keep later work live\n",
+                "<!-- /agent:run -->\n\n",
+                "## Todo <!-- agent:todo priority -->\n",
+                "- [ ] {parent}\n",
+                "<!-- /agent:todo -->\n",
+            ),
+            parent = parent,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let generation = running_claim(&doc, parent, "subagent:vscode_smoke");
+        crate::queue_claim::report_attempt(&doc, parent, Some(generation)).unwrap();
+
+        assert!(
+            id_backed_head_node_keys(&content, "vscodecodersmoke")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            reported_attempt_projection_node_keys_for_parent_id(
+                &content,
+                "vscodecodersmoke",
+                "subagent:vscode_smoke",
+                generation,
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+
+        assert!(acknowledge_open_id_backed_queue_head(&doc, "vscodecodersmoke").unwrap());
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert!(result.contains(&format!("  - {parent}\n")), "{result}");
+        assert!(
+            result.contains(&format!("- [ ] {parent}\n")),
+            "the Todo stays open:\n{result}"
+        );
+        assert!(
+            !result.contains("[#subagent:vscode_smoke#1]"),
+            "the completed nested attempt is reaped:\n{result}"
+        );
+        assert!(
+            result.contains("  - [#later] keep later work live\n"),
+            "{result}"
+        );
+        let ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        assert!(
+            ledger
+                .claims
+                .iter()
+                .all(|claim| claim.owner != "subagent:vscode_smoke"),
+            "the reported attempt ended: {ledger:?}"
         );
     }
 

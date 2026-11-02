@@ -863,6 +863,22 @@ fn queue_identity(norm: &str) -> String {
     format!("{:?}", agent_doc_element_queue::queue_head_identity(norm))
 }
 
+/// Whether `new` is a newly executable descendant of `old`, rather than an
+/// edit of the same executable row.
+///
+/// Nested free-text leaves key claims by their full lineage (`parent: leaf`).
+/// When a formerly executable parent gains its first child, the generic text
+/// matcher sees the old parent as a substring of that lineage and would pair
+/// the child as an edit. The visible row proves the structural boundary: the
+/// suffix added to the old lineage is exactly the new visible leaf. A real
+/// row edit has the edited text as its visible row instead.
+fn is_lineage_descendant(old: &str, new: &QueueItem) -> bool {
+    new.norm
+        .strip_prefix(old)
+        .and_then(|suffix| suffix.strip_prefix(": "))
+        .is_some_and(|suffix| normalize_queue_text(suffix) == normalize_queue_text(&new.raw))
+}
+
 /// Whether the queue item selected for this cycle is still present in the
 /// live document. Its continued presence is the queue lifecycle's typed proof
 /// that the active head has not closed, even if stale-lock repair prematurely
@@ -1030,10 +1046,25 @@ fn queue_alignment(
     // follows exactly the edits steering reports.
     let new_norms: Vec<String> = new.iter().map(|item| item.norm.clone()).collect();
     let agent_doc_queue::queue_head_alignment::QueueHeadPairing {
-        pair_of_new,
-        old_paired,
+        mut pair_of_new,
+        mut old_paired,
         ops,
     } = agent_doc_queue::queue_head_alignment::pair_queue_heads(old, &new_norms);
+
+    // `#nestedclaimsteer`: lineage is claim identity, not editable prose. A
+    // parent becoming context and exposing a child is a parent deletion plus
+    // child insertion even though `parent: child` contains `parent`. Detach
+    // only similarity pairs; exact work-identity pairs still denote the same
+    // row. Claim following independently applies the same context-parent rule.
+    for n in 0..new.len() {
+        let Some((o, true)) = pair_of_new[n] else {
+            continue;
+        };
+        if is_lineage_descendant(&old[o], &new[n]) {
+            pair_of_new[n] = None;
+            old_paired[o] = false;
+        }
+    }
 
     let emit_new = |alignment: &mut QueueAlignment, n: usize| match pair_of_new[n] {
         Some((o, true)) if binary_owned_line(&new[n].norm, binary_owned_ids) => {
@@ -1578,6 +1609,13 @@ pub fn append_claimed_queue_removals(
         .into_iter()
         .map(|item| agent_doc_queue::queue_claim::claim_identity(&item.norm))
         .collect();
+    let context_identities: std::collections::HashSet<_> =
+        agent_doc_queue::queue_claim::ClaimQueueView::from_content(current)
+            .into_iter()
+            .flat_map(|view| view.queues)
+            .flat_map(|queue| queue.context_claim_texts)
+            .map(|text| agent_doc_queue::queue_claim::claim_identity(&text))
+            .collect();
     let alignment = queue_alignment(
         watermark,
         current,
@@ -1594,6 +1632,13 @@ pub fn append_claimed_queue_removals(
             .iter()
             .any(|current| current == &identity)
         {
+            continue;
+        }
+        // The row still exists as structural context after gaining live
+        // children. It ceased to be executable, but the operator did not
+        // delete it, so cancelling its worker would be false removal
+        // steering. The children are independently added above.
+        if context_identities.contains(&identity) {
             continue;
         }
         let Some(claim) = claim_of(&old) else {
@@ -2290,6 +2335,30 @@ pub fn subagent_dispatch_heads_with_presets(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lineage_expansion_is_a_new_descendant_not_a_parent_edit() {
+        let parent = "Sync PR and Jira state into this document.";
+        let leaf = "First steer child stays with the parent.";
+        let descendant = QueueItem {
+            raw: leaf.to_string(),
+            norm: format!("{parent}: {leaf}"),
+        };
+        assert!(is_lineage_descendant(parent, &descendant));
+
+        let edited = QueueItem {
+            raw: format!("{parent}: now include Jira comments"),
+            norm: format!("{parent}: now include Jira comments"),
+        };
+        assert!(!is_lineage_descendant(parent, &edited));
+
+        let grandparent = "Release: Validate";
+        let grandchild = QueueItem {
+            raw: "Publish".to_string(),
+            norm: "Release: Validate: Publish".to_string(),
+        };
+        assert!(is_lineage_descendant(grandparent, &grandchild));
+    }
 
     #[test]
     fn route_sync_steering_carries_the_diff_since_the_last_send() {

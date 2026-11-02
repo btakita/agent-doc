@@ -18,9 +18,8 @@ pub const STALE_SUPERVISOR_STATUS_MARKER: &str = "🔴 (restart/recycle your sup
 pub const REPORTED_QUEUE_STATUS_PREFIX: &str = "📤 Queue handoff:";
 const LEGACY_REPORTED_QUEUE_STATUS_PREFIX: &str = "📥 Queue handoff:";
 
-/// Delimiters for the binary-owned open-work projection nested in
-/// `agent:status`. The source work remains owned by its queue, todo, backlog,
-/// review, or icebox component; this block is a read-only index of that work.
+/// Legacy delimiters for the binary-owned open-work projection formerly nested
+/// in `agent:status`. Preflight migrates this block into `agent:open-items`.
 pub const STATUS_OPEN_ITEMS_OPEN_MARKER: &str = "<!-- status:open-items -->";
 pub const STATUS_OPEN_ITEMS_CLOSE_MARKER: &str = "<!-- /status:open-items -->";
 
@@ -1097,46 +1096,84 @@ fn managed_open_items_block(status_body: &str) -> Result<Option<ManagedOpenItems
     Ok(found)
 }
 
-/// Reconcile the binary-owned managed nested list inside a status body.
+/// Reconcile the binary-owned `agent:open-items` component.
 ///
-/// `nested_list` is rendered by the work-graph layer from authoritative source
-/// components. This function owns only the bounded block and preserves all
-/// status prose, sync payloads, handoff telemetry, and the queue legend.
-pub fn apply_open_items_status(status_body: &str, nested_list: &str) -> Result<Option<String>> {
-    let payload = nested_list.trim_end();
-    let expected =
-        format!("{STATUS_OPEN_ITEMS_OPEN_MARKER}\n{payload}\n{STATUS_OPEN_ITEMS_CLOSE_MARKER}\n");
-    if let Some(block) = managed_open_items_block(status_body)? {
-        if status_body[block.start..block.end] == expected {
-            return Ok(None);
-        }
-        let mut out = String::with_capacity(status_body.len() + expected.len());
-        out.push_str(&status_body[..block.start]);
-        out.push_str(&expected);
-        out.push_str(&status_body[block.end..]);
-        return Ok(Some(out));
-    }
-
-    let rest = status_body.strip_prefix('\n').unwrap_or(status_body);
-    Ok(Some(format!("\n{expected}\n{rest}")))
-}
-
-/// Reconcile the managed open-items list in the document's status component.
-pub fn reconcile_open_items_status_content(
+/// The full component body is derived observer state. Authoritative queue,
+/// todo, backlog, review, and icebox components retain lifecycle ownership.
+/// A legacy `status:open-items` block is removed while every byte outside that
+/// bounded block remains untouched. Duplicate owned components and malformed
+/// legacy ownership markers fail closed.
+pub fn reconcile_open_items_component_content(
     content: &str,
     nested_list: &str,
 ) -> Result<Option<String>> {
     let components = element::parse(content).context("failed to parse components")?;
-    let Some(status) = components
+    let open_items = components
+        .iter()
+        .filter(|component| component.name == element::OPEN_ITEMS_COMPONENT)
+        .collect::<Vec<_>>();
+    if open_items.len() > 1 {
+        bail!("document contains duplicate agent:open-items components");
+    }
+
+    let mut migrated = content.to_string();
+    if let Some(status) = components
         .iter()
         .find(|component| component.name == "status")
-    else {
-        return Ok(None);
-    };
-    match apply_open_items_status(status.content(content), nested_list)? {
-        Some(new_body) => Ok(Some(status.replace_content(content, &new_body))),
-        None => Ok(None),
+        && let Some(block) = managed_open_items_block(status.content(content))?
+    {
+        let body = status.content(content);
+        let mut new_body = String::with_capacity(body.len() - (block.end - block.start));
+        new_body.push_str(&body[..block.start]);
+        new_body.push_str(&body[block.end..]);
+        migrated = status.replace_content(content, &new_body);
+    } else if let Some(status) = components
+        .iter()
+        .find(|component| component.name == "status")
+    {
+        // Validate hidden/orphaned legacy delimiters even when no complete block exists.
+        managed_open_items_block(status.content(content))?;
     }
+
+    let migrated_components =
+        element::parse(&migrated).context("failed to parse migrated components")?;
+    let mut migrated_open_items = migrated_components
+        .iter()
+        .filter(|component| component.name == element::OPEN_ITEMS_COMPONENT);
+    let existing = migrated_open_items.next();
+    if migrated_open_items.next().is_some() {
+        bail!("document contains duplicate agent:open-items components");
+    }
+    let expected_body = format!("{}\n", nested_list.trim_end());
+    if let Some(component) = existing {
+        if component.content(&migrated) != expected_body {
+            return Ok(Some(component.replace_content(&migrated, &expected_body)));
+        }
+        return Ok((migrated != content).then_some(migrated));
+    }
+
+    // Preserve the historical compatibility boundary: documents with neither
+    // status nor an established open-items component do not gain a new shell.
+    if !migrated_components
+        .iter()
+        .any(|component| component.name == "status")
+    {
+        return Ok((migrated != content).then_some(migrated));
+    }
+
+    let insert_at = element::canonical_managed_component_insertion_offset(
+        &migrated,
+        &migrated_components,
+        element::OPEN_ITEMS_COMPONENT,
+    );
+    let component = format!(
+        "\n## Open items <!-- agent:open-items -->\n{expected_body}<!-- /agent:open-items -->\n"
+    );
+    let mut out = String::with_capacity(migrated.len() + component.len());
+    out.push_str(&migrated[..insert_at]);
+    out.push_str(&component);
+    out.push_str(&migrated[insert_at..]);
+    Ok(Some(out))
 }
 
 #[cfg(test)]
@@ -1157,33 +1194,52 @@ mod tests {
     }
 
     #[test]
-    fn open_items_projection_owns_only_its_bounded_block() {
+    fn open_items_projection_migrates_out_of_status_and_is_idempotent() {
         let doc = concat!(
             "## Status <!-- agent:status sync=\"release\" -->\n",
             "operator prose\n",
+            "<!-- status:open-items -->\n- **Open items** (1)\n  - stale\n<!-- /status:open-items -->\n",
             "<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->\n",
             "Queue markers: retained legend\n",
             "<!-- /agent:status -->\n",
         );
         let one =
-            reconcile_open_items_status_content(doc, "- **Open items** (1)\n  - `[#a]` — first")
+            reconcile_open_items_component_content(doc, "- **Open items** (1)\n  - `[#a]` — first")
                 .unwrap()
                 .expect("projection inserted");
         assert!(one.contains("operator prose"));
         assert!(one.contains("<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->"));
         assert!(one.contains("Queue markers: retained legend"));
-        assert!(one.contains("<!-- status:open-items -->\n- **Open items** (1)"));
+        assert!(one.contains("## Open items <!-- agent:open-items -->\n- **Open items** (1)"));
+        assert!(!one.contains(STATUS_OPEN_ITEMS_OPEN_MARKER));
+        let status = element::parse(&one)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "status")
+            .unwrap();
+        assert_eq!(
+            status.content(&one),
+            concat!(
+                "operator prose\n",
+                "<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->\n",
+                "Queue markers: retained legend\n",
+            ),
+            "migration must preserve every status byte outside the owned legacy cell"
+        );
         assert!(
-            reconcile_open_items_status_content(&one, "- **Open items** (1)\n  - `[#a]` — first",)
-                .unwrap()
-                .is_none()
+            reconcile_open_items_component_content(
+                &one,
+                "- **Open items** (1)\n  - `[#a]` — first",
+            )
+            .unwrap()
+            .is_none()
         );
 
-        let two = reconcile_open_items_status_content(&one, "- **Open items** (0)")
+        let two = reconcile_open_items_component_content(&one, "- **Open items** (0)")
             .unwrap()
             .expect("projection updated");
         assert!(!two.contains("`[#a]`"));
-        assert_eq!(two.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 1);
+        assert_eq!(two.matches("<!-- agent:open-items -->").count(), 1);
     }
 
     #[test]
@@ -1194,7 +1250,7 @@ mod tests {
             "<!-- /agent:status -->\n",
         );
         let err =
-            reconcile_open_items_status_content(malformed, "- **Open items** (0)").unwrap_err();
+            reconcile_open_items_component_content(malformed, "- **Open items** (0)").unwrap_err();
         assert!(err.to_string().contains("unclosed status:open-items"));
     }
 
@@ -1205,11 +1261,12 @@ mod tests {
             "```md\n<!-- status:open-items -->\n<!-- /status:open-items -->\n```\n",
             "<!-- /agent:status -->\n",
         );
-        let updated = reconcile_open_items_status_content(doc, "- **Open items** (0)")
+        let updated = reconcile_open_items_component_content(doc, "- **Open items** (0)")
             .unwrap()
             .expect("real projection inserted");
-        assert_eq!(updated.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 2);
+        assert_eq!(updated.matches(STATUS_OPEN_ITEMS_OPEN_MARKER).count(), 1);
         assert!(updated.contains("```md\n<!-- status:open-items -->"));
+        assert!(updated.contains("<!-- agent:open-items -->"));
     }
 
     #[test]
@@ -1219,8 +1276,29 @@ mod tests {
             "<div>\n<!-- status:open-items -->\n</div>\n",
             "<!-- /agent:status -->\n",
         );
-        let err = reconcile_open_items_status_content(doc, "- **Open items** (0)").unwrap_err();
+        let err = reconcile_open_items_component_content(doc, "- **Open items** (0)").unwrap_err();
         assert!(err.to_string().contains("inside an HTML block"));
+    }
+
+    #[test]
+    fn open_items_projection_refuses_duplicate_owned_components() {
+        let doc = concat!(
+            "<!-- agent:status -->\nconcise\n<!-- /agent:status -->\n",
+            "<!-- agent:open-items -->\nold one\n<!-- /agent:open-items -->\n",
+            "<!-- agent:open-items -->\nold two\n<!-- /agent:open-items -->\n",
+        );
+        let err = reconcile_open_items_component_content(doc, "- **Open items** (0)").unwrap_err();
+        assert!(err.to_string().contains("duplicate agent:open-items"));
+    }
+
+    #[test]
+    fn open_items_projection_preserves_documents_without_status_or_component() {
+        let doc = "<!-- agent:run -->\n- work\n<!-- /agent:run -->\n";
+        assert!(
+            reconcile_open_items_component_content(doc, "- **Open items** (1)")
+                .unwrap()
+                .is_none()
+        );
     }
 
     fn queue_doc(status_marker: &str, status: &str) -> String {

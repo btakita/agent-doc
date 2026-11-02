@@ -52,6 +52,24 @@ pub const TODO_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
     realtime: true,
 };
 
+/// Binary-owned projection of the document's authoritative open work.
+///
+/// Unlike `agent:status`, this component is informational: its contents must
+/// not become an independent scheduling trigger or executable queue source.
+pub const OPEN_ITEMS_DESCRIPTOR: ElementDescriptor = ElementDescriptor {
+    name: "open-items",
+    aliases: &[],
+    source: ElementSource::BuiltIn,
+    shape: ElementShape::Component,
+    authority: ElementAuthority::DerivedProjection,
+    write_policy: ElementWritePolicy::ProjectionOnly,
+    scheduling_role: ElementSchedulingRole::None,
+    turn_role: ElementTurnRole::Informational,
+    realtime_model: ElementRealtimeModel::None,
+    composition_role: ElementCompositionRole::Observer,
+    realtime: true,
+};
+
 pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_exchange::DESCRIPTOR,
     agent_doc_element_boundary::DESCRIPTOR,
@@ -61,6 +79,7 @@ pub const BUILT_IN_ELEMENTS: &[ElementDescriptor] = &[
     agent_doc_element_icebox::DESCRIPTOR,
     agent_doc_element_done::DESCRIPTOR,
     agent_doc_element_status::DESCRIPTOR,
+    OPEN_ITEMS_DESCRIPTOR,
     agent_doc_element_signals::DESCRIPTOR,
     TODO_DESCRIPTOR,
     NOTES_DESCRIPTOR,
@@ -134,6 +153,7 @@ mod tests {
         assert_eq!(find_built_in("backlog").unwrap().name, "backlog");
         assert_eq!(find_built_in("pending").unwrap().name, "backlog");
         assert_eq!(find_built_in("signals").unwrap().name, "signals");
+        assert_eq!(find_built_in("open-items").unwrap().name, "open-items");
         assert_eq!(find_built_in("boundary").unwrap().name, "boundary");
         assert_eq!(find_built_in("todo").unwrap().name, "todo");
         assert_eq!(find_built_in("notes").unwrap().name, "notes");
@@ -175,6 +195,17 @@ mod tests {
         assert_eq!(backlog.realtime_model, ElementRealtimeModel::TrackedItems);
         assert_eq!(queue.composition_role, ElementCompositionRole::Consumer);
         assert_eq!(queue.realtime_model, ElementRealtimeModel::Queue);
+    }
+
+    #[test]
+    fn open_items_is_an_informational_derived_projection() {
+        let open_items = find_built_in("open-items").unwrap();
+        assert_eq!(open_items.authority, ElementAuthority::DerivedProjection);
+        assert_eq!(open_items.write_policy, ElementWritePolicy::ProjectionOnly);
+        assert_eq!(open_items.scheduling_role, ElementSchedulingRole::None);
+        assert_eq!(open_items.turn_role, ElementTurnRole::Informational);
+        assert_eq!(open_items.realtime_model, ElementRealtimeModel::None);
+        assert_eq!(open_items.composition_role, ElementCompositionRole::Observer);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use agent_doc_element_backlog::backlog::{self, PendingState};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
-/// One authoritative location contributing to the status open-items index.
+/// One authoritative location contributing to the open-items index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedOpenItemSource {
     pub component: String,
@@ -79,7 +79,7 @@ fn source_free_text_identity(component: &str, text: &str) -> String {
 /// Runnable queue leaves, open/gated todos, and open/gated tracked work are
 /// included. Completed/struck rows, queue group labels, and the done archive
 /// are excluded. Shared ids fold into one row with all source states retained.
-pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> {
+pub fn managed_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> {
     use agent_doc_element::element;
     use agent_doc_element::todo::{TodoState, parse_todo_line};
     use agent_doc_queue::document_queue::{self, QueueEntry};
@@ -191,8 +191,8 @@ pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> 
     Ok(items)
 }
 
-/// Render the status open-items index as one deterministic managed nested list.
-pub fn render_managed_status_open_items(items: &[ManagedOpenItem]) -> String {
+/// Render the open-items index as one deterministic managed nested list.
+pub fn render_managed_open_items(items: &[ManagedOpenItem]) -> String {
     let mut out = format!("- **Open items** ({})\n", items.len());
     for item in items {
         let identity = item
@@ -212,11 +212,13 @@ pub fn render_managed_status_open_items(items: &[ManagedOpenItem]) -> String {
     out
 }
 
-/// Re-derive and reconcile the binary-owned open-items projection in status.
-pub fn reconcile_managed_status_open_items(content: &str) -> Result<Option<String>> {
-    let items = managed_status_open_items(content)?;
-    let rendered = render_managed_status_open_items(&items);
-    agent_doc_document::status_projection::reconcile_open_items_status_content(content, &rendered)
+/// Re-derive and reconcile the binary-owned `agent:open-items` projection.
+pub fn reconcile_managed_open_items(content: &str) -> Result<Option<String>> {
+    let items = managed_open_items(content)?;
+    let rendered = render_managed_open_items(&items);
+    agent_doc_document::status_projection::reconcile_open_items_component_content(
+        content, &rendered,
+    )
 }
 
 #[cfg(test)]
@@ -250,7 +252,7 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
 
-        let items = managed_status_open_items(content).unwrap();
+        let items = managed_open_items(content).unwrap();
         assert_eq!(items.len(), 6);
         let shared = items.iter().find(|item| item.identity == "shared").unwrap();
         assert_eq!(shared.summary, "authoritative tracked summary");
@@ -272,7 +274,7 @@ mod tests {
         assert!(!items.iter().any(|item| item.identity == "todo-done"));
         assert!(!items.iter().any(|item| item.identity == "backlog-done"));
 
-        let rendered = render_managed_status_open_items(&items);
+        let rendered = render_managed_open_items(&items);
         assert!(rendered.starts_with("- **Open items** (6)\n"));
         assert!(rendered.contains("`[#shared]` — authoritative tracked summary"));
         assert!(rendered.contains("**Sources:** queue (open); backlog (open)"));
@@ -291,17 +293,17 @@ mod tests {
             "- [ ] [#live] still open\n",
             "<!-- /agent:backlog -->\n",
         );
-        let one = reconcile_managed_status_open_items(doc)
+        let one = reconcile_managed_open_items(doc)
             .unwrap()
             .expect("projection inserted");
-        assert!(one.contains("<!-- status:open-items -->"));
+        assert!(one.contains("<!-- agent:open-items -->"));
         assert!(one.contains("`[#live]` — still open"));
         assert!(one.contains("operator prose"));
         assert!(one.contains("<!-- status:sync -->\nrelease prose\n<!-- /status:sync -->"));
-        assert!(reconcile_managed_status_open_items(&one).unwrap().is_none());
+        assert!(reconcile_managed_open_items(&one).unwrap().is_none());
 
         let closed = one.replace("- [ ] [#live] still open", "- [x] [#live] still open");
-        let updated = reconcile_managed_status_open_items(&closed)
+        let updated = reconcile_managed_open_items(&closed)
             .unwrap()
             .expect("stale row removed");
         assert!(updated.contains("- **Open items** (0)"));
@@ -330,13 +332,13 @@ mod tests {
             stale_identity
         );
 
-        let items = managed_status_open_items(&content).unwrap();
+        let items = managed_open_items(&content).unwrap();
         assert!(
             items.is_empty(),
             "non-executable queue ancestry must not remain in status: {items:#?}"
         );
 
-        let reconciled = reconcile_managed_status_open_items(&content)
+        let reconciled = reconcile_managed_open_items(&content)
             .unwrap()
             .expect("stale queue-free status row must be removed");
         assert!(reconciled.contains("- **Open items** (0)"));

@@ -60,10 +60,12 @@ The body contains named components delimited by HTML comment markers:
 <!-- /agent:exchange -->
 ```
 
-New scaffolds use this queue-centric order: status, run, review, todo, backlog,
-icebox, notes, done, then exchange last. Missing-component repairs use the same
-relative slots without moving established components; valid documents in the
-previous order are not silently reordered.
+New scaffolds use this queue-centric order:
+status, open-items, run, review, todo, backlog,
+icebox, notes, done, then exchange last. `open-items` is a
+binary-owned informational projection; it is never an executable work source.
+Missing-component repairs use the same relative slots without moving
+established components; valid documents in the previous order are not silently reordered.
 
 ### Conventional component names
 

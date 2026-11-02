@@ -388,7 +388,11 @@ pub fn normalize_top_level_navigation_headings(body: &str) -> Option<String> {
         }
 
         let normalized = split_list_item(line).and_then(|(indent, marker, content)| {
-            if indent != 0 || content.trim().is_empty() || content.starts_with("### ") {
+            if indent != 0
+                || content.trim().is_empty()
+                || content.starts_with("### ")
+                || agent_doc_markdown_ast::overlay::is_ignored_list_comment(content)
+            {
                 return None;
             }
             let marker = marker.as_deref().unwrap_or("-");
@@ -6510,6 +6514,15 @@ mod tests {
                 "- ### real queue row\n",
             )
         );
+    }
+
+    #[test]
+    fn heading_sync_keeps_whole_item_comments_inert() {
+        let receipt = "- %% Queue completed and cleared at 2026-11-02T04:38:54.000Z. %%\n";
+        assert!(normalize_top_level_navigation_headings(receipt).is_none());
+        let entries = parse(receipt).unwrap();
+        assert!(prompts(&entries).is_empty());
+        assert_eq!(render(&entries), receipt);
     }
 
     #[test]

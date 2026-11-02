@@ -9902,7 +9902,7 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(queue_work_texts(&state.queue_prompts), vec!["#upgrade"]);
         let authoritative = state.authoritative_content.as_deref().unwrap();
-        assert!(authoritative.contains("- 📥 #upgrade"), "{authoritative}");
+        assert!(authoritative.contains("- ### 📥 #upgrade"), "{authoritative}");
         let pending =
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
                 &doc,
@@ -10645,12 +10645,12 @@ mod tests {
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert_eq!(
                 queue_line(&updated, "claimed"),
-                "- 🟡 [#subagent:worker#1] do [#claimed]",
+                "- ### 🟡 [#subagent:worker#1] do [#claimed]",
                 "pass {pass}: a live claim keeps its in-flight marker:\n{updated}"
             );
             assert_eq!(
                 queue_line(&updated, "verify"),
-                "- ⏳ do [#verify]",
+                "- ### ⏳ do [#verify]",
                 "pass {pass}: a head waiting on the operator is not unstarted:\n{updated}"
             );
             assert!(
@@ -10687,7 +10687,7 @@ mod tests {
             !queue_line(&updated, "claimed").contains('\u{23f3}'),
             "an open (not operator-verify) item never shows awaiting:\n{updated}"
         );
-        assert_eq!(queue_line(&updated, "verify"), "- ⏳ do [#verify]");
+        assert_eq!(queue_line(&updated, "verify"), "- ### ⏳ do [#verify]");
     }
 
     /// `#queueawaitop`: a claim held on a head whose item already waits on the
@@ -10702,7 +10702,7 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "verify"),
-            "- 🟡 [#subagent:worker#1] do [#verify]",
+            "- ### 🟡 [#subagent:worker#1] do [#verify]",
             "{updated}"
         );
         let warning = state
@@ -10889,12 +10889,12 @@ mod tests {
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "stg"),
-            "- ⛔ ⟦blocked by sbx⟧ do [#stg]",
+            "- ### ⛔ ⟦blocked by sbx⟧ do [#stg]",
             "{updated}"
         );
         assert_eq!(
             queue_line(&updated, "sbx"),
-            "- ⛔ ⟦blocked by deploy⟧ do [#sbx]",
+            "- ### ⛔ ⟦blocked by deploy⟧ do [#sbx]",
             "{updated}"
         );
         assert_eq!(
@@ -10930,7 +10930,11 @@ mod tests {
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
         // #sbx is the first runnable row again, so this pass selects it.
-        assert_eq!(queue_line(&updated, "sbx"), "- 🚧 do [#sbx]", "{updated}");
+        assert_eq!(
+            queue_line(&updated, "sbx"),
+            "- ### 🚧 do [#sbx]",
+            "{updated}"
+        );
         assert_eq!(
             state.selected_queue_prompts,
             vec!["do [#sbx]".to_string()],
@@ -10938,7 +10942,7 @@ mod tests {
         );
         assert_eq!(
             queue_line(&updated, "stg"),
-            "- ⛔ ⟦blocked by sbx⟧ do [#stg]",
+            "- ### ⛔ ⟦blocked by sbx⟧ do [#stg]",
             "{updated}"
         );
     }
@@ -11105,7 +11109,7 @@ mod tests {
             let updated = std::fs::read_to_string(&doc).unwrap();
             assert_eq!(
                 queue_line(&updated, "claimrowmigrate"),
-                "- 🟡 [#subagent:claimrowmigrate#1] do [#claimrowmigrate]",
+                "- ### 🟡 [#subagent:claimrowmigrate#1] do [#claimrowmigrate]",
                 "pass {pass}: a claimed mirror row is live work, not an operator delete:\n{updated}"
             );
             assert!(
@@ -16640,7 +16644,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_drainable_head_count, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 do [#a]\n- 🟡 [#subagent:b#1] do [#b]\n- 🚧 [#subagent:c#1] do [#c]\n- 📥 do [#d]"),
+            updated.contains(
+                "- ### 🚧 do [#a]\n- ### 🟡 [#subagent:b#1] do [#b]\n- ### 🚧 [#subagent:c#1] do [#c]\n- ### 📥 do [#d]"
+            ),
             "selected, claimed, and running queue heads must carry typed state:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#a] inline work"));
@@ -16653,7 +16659,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- ☑️ [#subagent:c#1] do [#c]"));
+        assert!(updated.contains("- ### ☑️ [#subagent:c#1] do [#c]"));
         assert!(
             updated.contains("- [ ] ☑️ [#c] worker two"),
             "reported work must replace stale running state in backlog:\n{updated}"
@@ -16665,8 +16671,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated
-                .contains("- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- 📥 do [#d]")
+            updated.contains(
+                "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### 📥 do [#d]"
+            )
         );
         assert!(updated.contains("- [ ] [#b] worker one"));
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
@@ -16687,11 +16694,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.selected_queue_prompts, vec!["do [#a]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(updated.contains(
-            "- 🚧 do [#a]\n- 📥 do [#b]\n- ☑️ [#subagent:c#1] do [#c]\n- ⚠️🚧 [#subagent:d#1] do [#d]"
+            "- ### 🚧 do [#a]\n- ### 📥 do [#b]\n- ### ☑️ [#subagent:c#1] do [#c]\n- ### ⚠️🚧 [#subagent:d#1] do [#d]"
         ));
         assert_eq!(
             queue_line(&updated, "d"),
-            "- ⚠️🚧 [#subagent:d#1] do [#d]",
+            "- ### ⚠️🚧 [#subagent:d#1] do [#d]",
             "the queue row carries attempt lifecycle, not a second GFM checkbox:\n{updated}"
         );
         assert!(updated.contains("- [ ] ☑️ [#c] worker two"));
@@ -16713,7 +16720,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
             queue_line(&updated, "d"),
-            "- 🚧 [#subagent:d2#2] do [#d]",
+            "- ### 🚧 [#subagent:d2#2] do [#d]",
             "only the replacement generation becomes running:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#d] later work"));
@@ -17418,7 +17425,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             .unwrap();
         for (label, text) in [("document", &updated), ("snapshot", &snap)] {
             assert!(
-                text.contains("- ~~Track pull request~~\n"),
+                text.contains("- ### ~~Track pull request~~\n"),
                 "{label}: all terminal leaves lazily close the context parent: {text}"
             );
             assert!(
@@ -17714,11 +17721,11 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert_eq!(state.queue_prompts, vec!["do [#beta]".to_string()]);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ~~do [#alpha]~~"),
+            updated.contains("- ### ~~do [#alpha]~~"),
             "a head archived in the default archive must be struck: {updated}"
         );
         assert!(
-            updated.contains("- 🚧 do [#beta]"),
+            updated.contains("- ### 🚧 do [#beta]"),
             "the misplaced legacy archive is not completed history: {updated}"
         );
     }
@@ -20256,15 +20263,15 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(!updated.contains("📥 **Choices:**"), "{updated}");
         assert!(!updated.contains("📥 **staging**"), "{updated}");
         assert!(
-            updated.contains("- ~~do [#providecontextdecisions]~~"),
+            updated.contains("- ### ~~do [#providecontextdecisions]~~"),
             "a completed row must not reopen while response metadata is normalized: {updated}"
         );
         assert!(
-            updated.contains("- ~~do [#privateinfohaiven]~~"),
+            updated.contains("- ### ~~do [#privateinfohaiven]~~"),
             "a completed row must keep its explicit --done strike: {updated}"
         );
         assert!(
-            updated.contains("- fixture access [#tdcraigunityhandoff]"),
+            updated.contains("- ### fixture access [#tdcraigunityhandoff]"),
             "a group parent must not inherit its waiting leaf's pending marker: {updated}"
         );
         assert!(
@@ -20524,7 +20531,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         assert!(
             state.queue_supervisor_drainable
                 && state.queue_supervisor_continuation_head.is_some()
-                && updated.contains("- 📥 Persist the remote game session"),
+                && updated.contains("- ### 📥 Persist the remote game session"),
             "released work must immediately resume or become pending again: {state:?}\n{updated}"
         );
     }
@@ -21125,12 +21132,12 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            without_admitted_queue_ids(&updated).contains(&format!("- ~~{done}~~")),
+            without_admitted_queue_ids(&updated).contains(&format!("- ### ~~{done}~~")),
             "{updated}"
         );
         assert!(
             without_admitted_queue_ids(&updated)
-                .contains(&format!("- 🟡 [#subagent:palette#1] {pending}\n")),
+                .contains(&format!("- ### 🟡 [#subagent:palette#1] {pending}\n")),
             "{updated}"
         );
         let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
@@ -21314,7 +21321,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
             };
             for head in [before, after, orphan] {
                 assert!(
-                    main_body.contains(&format!("- ~~{head}~~\n")),
+                    main_body.contains(&format!("- ### ~~{head}~~\n")),
                     "pass {pass}: a struck reported row must stay struck: {head:?}\n{main_body}"
                 );
                 for resurrected in ["❔", "🔄", "☑️"] {
@@ -21419,7 +21426,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(&format!("- ~~{item}~~\n")),
+            updated.contains(&format!("- ### ~~{item}~~\n")),
             "the residue strike closes the answered row:\n{updated}"
         );
         assert!(
@@ -21445,8 +21452,8 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         // A later operator request with the same text is new work.
         let readded = updated.replace(
-            &format!("- ~~{item}~~\n"),
-            &format!("- ~~{item}~~\n- {item}\n"),
+            &format!("- ### ~~{item}~~\n"),
+            &format!("- ### ~~{item}~~\n- {item}\n"),
         );
         assert!(
             agent_doc_queue_io::queue_claim::completion_evidence_head_texts(&readded).is_empty()
@@ -21552,14 +21559,17 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains(&format!("- ~~{item}~~")),
+            updated.contains(&format!("- ### ~~{item}~~")),
             "the done strike closes the reported row:\n{updated}"
         );
         assert!(
             claim_texts(&doc).is_empty(),
             "the strike ends the reported claim"
         );
-        let readded = updated.replace("- 🚧 do [#beta]\n", &format!("- 🚧 do [#beta]\n- {item}\n"));
+        let readded = updated.replace(
+            "- ### 🚧 do [#beta]\n",
+            &format!("- ### 🚧 do [#beta]\n- {item}\n"),
+        );
         assert_ne!(readded, updated, "{updated}");
         assert_readded_row_stays_reported_without_gc_proof(&doc, &readded, item);
     }
@@ -21622,8 +21632,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        let struck =
-            format!("- ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n");
+        let struck = format!(
+            "- ### ~~{item} — auto-struck: completed by #jbcache (#qftbklgstrike)~~\n"
+        );
         assert!(
             updated.contains(&struck),
             "the backlog/done strike closes the reported row:\n{updated}"
@@ -21895,7 +21906,7 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             without_admitted_queue_ids(&updated).contains(&format!(
-                "- ☑️ [#subagent:queue-state#{}] {head}",
+                "- ### ☑️ [#subagent:queue-state#{}] {head}",
                 running.generation
             )),
             "worker completion feedback must remain a reported handoff:\n{updated}"

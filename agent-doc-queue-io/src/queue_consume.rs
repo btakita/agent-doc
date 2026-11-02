@@ -2690,6 +2690,7 @@ pub fn id_head_dispatch_guard_for_caller(
 /// completion cells, the ended reported claims and their release receipts, in
 /// the document and the recovery snapshot. Shared by `queue consume --id` and
 /// `--ack-id`. Returns `false` when the strike changes nothing.
+#[allow(clippy::too_many_arguments)]
 fn converge_id_backed_head_strike(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,

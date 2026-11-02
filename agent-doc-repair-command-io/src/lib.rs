@@ -59,6 +59,7 @@ pub fn run_write_command_with_empty_response_recovery(
     commit_mode: agent_doc_write_command_io::CommitMode,
 ) -> Result<()> {
     let file = options.file.clone();
+    let force_disk = options.force_disk;
     // `#respondsettle`: remember the cycle this command is closing BEFORE it
     // runs, so a later settle can prove it was THIS cycle that committed.
     let closing_cycle = if commit_mode == agent_doc_write_command_io::CommitMode::None {
@@ -75,7 +76,9 @@ pub fn run_write_command_with_empty_response_recovery(
         recover_empty_response_for_strict_closeout,
     );
     match (outcome, closing_cycle) {
-        (Err(error), Some(closing)) => settle_failed_strict_closeout(&file, &closing, error),
+        (Err(error), Some(closing)) => {
+            settle_failed_strict_closeout(&file, &closing, force_disk, error)
+        }
         (outcome, _) => outcome,
     }
 }
@@ -98,6 +101,7 @@ pub fn run_write_command_with_empty_response_recovery(
 fn settle_failed_strict_closeout(
     file: &Path,
     closing: &agent_doc_cycle_state_io::CycleState,
+    force_disk: bool,
     error: anyhow::Error,
 ) -> Result<()> {
     let settled = poll_closing_cycle(
@@ -127,6 +131,26 @@ fn settle_failed_strict_closeout(
         },
     ) {
         CommittedCloseoutRecheck::Clean => {}
+        CommittedCloseoutRecheck::StillInterrupted(message)
+            if force_disk
+                && agent_doc_session_check_io::is_committed_head_response_missing_interruption(
+                    &message,
+                ) =>
+        {
+            // The force-disk command committed this response to HEAD. Its
+            // controller projection can still show the pre-closeout replica
+            // until the VCS-refresh handoff completes; that specific visible
+            // lag cannot invalidate the durable closeout.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "strict_closeout_force_disk_visible_projection_lag_superseded file={} cycle={} session_check={}",
+                    file.display(),
+                    closing.cycle_id,
+                    message.replace('\n', " ")
+                ),
+            );
+        }
         CommittedCloseoutRecheck::StillInterrupted(message) => {
             agent_doc_ops_log_io::log_op(
                 file,

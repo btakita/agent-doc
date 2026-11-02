@@ -1609,8 +1609,10 @@ fn queue_auto_clear_counts_an_item_committed_before_the_watch_first_observes() {
     let background = scenario.background_pids();
     scenario.answer_head("answer item one");
     let committed = std::fs::read_to_string(&scenario.doc).unwrap();
+    // Navigation headings are presentation metadata; the strike plus stable id
+    // is the durable completion identity this watcher consumes.
     assert!(
-        committed.contains("- ~~answer item one [#q-"),
+        committed.contains("~~answer item one [#q-"),
         "item one is committed before the watch observes: {committed}\n--- ops.log tail ---\n{}",
         scenario.ops_log_tail(),
     );

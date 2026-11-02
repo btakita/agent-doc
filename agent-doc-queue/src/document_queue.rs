@@ -3575,6 +3575,15 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
             {
                 Some(idx)
             }
+            // A generated Waiting-on-you item is a selector, not work, until
+            // an operator-authored response edge selects the durable parent.
+            QueueEntry::Prompt(prompt)
+                if prompt
+                    .text
+                    .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER) =>
+            {
+                None
+            }
             // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
             // epic/group LABEL and is never executable, so it must not surface
             // as a runnable head.
@@ -4380,9 +4389,23 @@ pub fn restore_missing_nested_claim_row(
         .map(|(entry, _)| entry.clone())
         .collect::<Vec<_>>();
     if entries.iter().enumerate().any(|(index, entry)| {
-        matches!(entry, QueueEntry::Prompt(_) | QueueEntry::Completed(_))
-            && crate::queue_claim::claim_identity_at(&entries, index).as_ref()
-                == Some(&claim.identity)
+        let Some(prompt) = prompt_of(entry) else {
+            return false;
+        };
+        if crate::queue_claim::claim_identity_at(&entries, index).as_ref() == Some(&claim.identity)
+        {
+            return true;
+        }
+        // Preflight can assign a generated q-id after a nested row was claimed.
+        // That annotation identifies the same physical row; it must not make
+        // missing-row recovery append the claim-time spelling as a duplicate.
+        let bare = strip_in_progress_marker(prompt.text.trim());
+        let canonical = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&bare);
+        if canonical == bare {
+            return false;
+        }
+        let lineage = nest_vector_claim_at(&entries, index, &canonical).unwrap_or(canonical);
+        crate::queue_claim::claim_identity(&lineage) == claim.identity
     }) {
         return Ok(None);
     }
@@ -6773,6 +6796,27 @@ mod tests {
 
     fn ids(value: &[&str]) -> Vec<String> {
         value.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn nested_claim_row_with_a_later_generated_q_id_is_not_restored_twice() {
+        let parent = "Sync PR and Jira state into this document.";
+        let child = "So this is the first subtask.";
+        let body = format!("- {parent}\n  - {child} [#q-592e61bff8dc]\n");
+        let claim: crate::queue_claim::QueueClaim = serde_json::from_value(serde_json::json!({
+            "identity": crate::queue_claim::claim_identity(&format!("{parent}: {child}")),
+            "item_text": format!("{parent}: {child}"),
+            "owner": "subagent:pmsync",
+            "claimed_at_secs": 1,
+            "expires_at_secs": 2,
+            "claim_time_row": child,
+        }))
+        .unwrap();
+
+        assert_eq!(
+            restore_missing_nested_claim_row(&body, &claim).unwrap(),
+            None
+        );
     }
 
     #[test]
@@ -13195,6 +13239,23 @@ mod tests {
                 .contains(&id)
         );
         assert!(executable_prompt_indexes(&waiting).is_empty());
+    }
+
+    #[test]
+    fn unanswered_waiting_item_is_not_executable_queue_work() {
+        let entries = parse(concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#yeja] Choose the project-root policy. <!-- agent-doc:waiting-item -->\n",
+            "    - ~~**Response:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - ~~**Next actions:** <!-- agent-doc:waiting-metadata -->~~\n",
+            "        - ~~**Action:** Choose policy. <!-- agent-doc:waiting-metadata -->~~\n",
+        ))
+        .unwrap();
+
+        assert!(
+            executable_prompt_indexes(&entries).is_empty(),
+            "an unanswered generated waiting selector is not executable: {entries:#?}"
+        );
     }
 
     #[test]

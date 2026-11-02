@@ -369,13 +369,24 @@ pub fn closed_cycle_steering_between(
     baseline: Option<&str>,
     current: &str,
 ) -> RealtimeSteeringSet {
-    if let Some(head) = head {
-        let set_from_head = realtime_steering_all_between(head, current);
+    // Binary-attested worker completion cells are controller feedback, not an
+    // operator directive. Strip them from every side of this admission
+    // comparison so real operator prose added beside a cell remains visible
+    // without the cell's response-shaped heading swallowing the diff hunk.
+    let strip = agent_doc_document::subagent_completion::strip_completion_cells;
+    let head = head.map(strip);
+    let baseline = baseline.map(strip);
+    let current = strip(current);
+    if let Some(head) = head.as_ref() {
+        let set_from_head = realtime_steering_all_between(head, &current);
         if !set_from_head.is_present() {
             return set_from_head;
         }
     }
-    realtime_steering_all_between(baseline.or(head).unwrap_or_default(), current)
+    realtime_steering_all_between(
+        baseline.as_deref().or(head.as_deref()).unwrap_or_default(),
+        &current,
+    )
 }
 
 /// Exchange-only half of [`realtime_steering_all_between`]: every unstarted
@@ -1146,6 +1157,36 @@ mod tests {
         // With no HEAD the snapshot is the baseline; with neither, everything is new.
         assert!(closed_cycle_steering_between(None, Some(&head), &current).is_present());
         assert!(closed_cycle_steering_between(None, None, &current).is_present());
+    }
+
+    #[test]
+    fn closed_cycle_steering_ignores_completion_cell_but_keeps_adjacent_operator_prose() {
+        let baseline = doc("");
+        let cell = agent_doc_document::subagent_completion::cell(
+            "subagent:review",
+            "finish the review",
+            "completion-key",
+        );
+        let completion_only = doc(&format!("{cell}\n"));
+        assert!(
+            !closed_cycle_steering_between(
+                Some(&baseline),
+                Some(&baseline),
+                &completion_only,
+            )
+            .is_present()
+        );
+
+        let operator_prose = doc(&format!(
+            "{cell}\n\nWhy did the clear never fire? Add a task for it.\n"
+        ));
+        let set = closed_cycle_steering_between(
+            Some(&baseline),
+            Some(&baseline),
+            &operator_prose,
+        );
+        assert_eq!(set.len(), 1);
+        assert!(set.verbatim_aggregate().unwrap().contains("Add a task"));
     }
 
     #[test]

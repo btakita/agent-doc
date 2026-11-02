@@ -3466,8 +3466,9 @@ Duplicate replay should stay live.
         agent_doc_capture_io::mark_committed(&doc).unwrap();
 
         // The operator keeps typing while the commit is blocked, so disk never
-        // equals HEAD and the repair takes the `basis=head_local_drift` branch on
-        // every pass — the shape the live trace ran in a loop.
+        // equals HEAD. The first repair takes the `basis=head_local_drift`
+        // branch; once the baseline equals HEAD, later passes have no forward
+        // historical edge to repair and must no-op without advancing it.
         fs::write(
             &doc,
             head.replace(
@@ -3490,7 +3491,11 @@ Duplicate replay should stay live.
             .expect("the converged baseline is projected");
 
         for pass in 0..3 {
-            agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc).unwrap();
+            assert_eq!(
+                agent_doc_repair_io::repair_committed_historical_snapshot_drift(&doc).unwrap(),
+                None,
+                "blocked-commit retry {pass} must not reassert an already-converged baseline"
+            );
             assert_eq!(
                 agent_doc_snapshot_io::load_document_baseline_generation(&doc).unwrap(),
                 Some(converged_generation),
@@ -3508,10 +3513,6 @@ Duplicate replay should stay live.
         assert!(
             log.contains("reason=committed_capture") && log.contains("basis=head_local_drift"),
             "the fixture must run the branch that churned the generation live:\n{log}"
-        );
-        assert!(
-            log.contains("document_baseline_checkpoint_unchanged"),
-            "a re-assertion of unchanged baseline content must audit itself:\n{log}"
         );
         assert!(
             !log.contains(&format!(

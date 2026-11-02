@@ -2,6 +2,14 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.566
+
+- **Managed work now projects into one repairable Active view.** Queue, backlog, review, Todo, and response state share stable identities and explicit operator-resolution actions; legacy `## Active` headings migrate without losing authored text, missing-replica housekeeping defers safely, and cleared or orphaned owners no longer revive stale work.
+- **Closeout recovery preserves the exact response and finishes interrupted chat turns.** Indexed response headings, timestamped replay, completion cells, archived evidence, and reported effects reconcile without duplicate prompt projections or permanent drift. Codex Stop now recognizes unmarked post-commit chat edits as active-session debt, reopens the successor turn, and captures the final template response instead of leaving the hook stopped.
+- **Nested and reported queue work converges before closeout.** Nested reported attempts are reaped, claimed child rows and lifecycle phases survive projection repair, terminal request Todos settle, lost claims remain actionable, and every queue closeout requires proof that its result reached the designated integration sink.
+- **Live routing and editor handoff are faster and more dependable.** An explicit Run Agent Doc during a proven busy persisting turn delivers steering immediately, JetBrains waits for the retained route terminal result, supervisors keep the claimed-head memo hot, and context-free slash goals dispatch without borrowing stale prompt context.
+- **Release validation is clean again.** The queue-consume convergence helper carries a narrow, documented Clippy exception for its lifecycle context, restoring the strict all-target lint gate for the integrated release batch.
+
 ## 0.35.565
 
 - **Queue responses are promptable subitems by default.** A queue without an explicit `response` attribute renders an actionable summary child with enough context, choices, and next steps; `response="inline"` adds the full GFM `<details data-agent-doc-response-id="r-…">` response, while `response="lookup"` keeps the compact response-id reference. Authored descendants remain executable prompts, retained response children stay inert, and stable prompt/response identities survive reparenting.

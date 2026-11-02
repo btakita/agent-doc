@@ -1436,6 +1436,13 @@ fn commit_compacted_authoritative(
     // does not land the compacted content.
     let outcome = closeout_compact_with_commit(file)?;
     verify_compact_head_landed(file, authoritative_snapshot)?;
+    if let Some(head) = agent_doc_git_io::revision::show_head(file)? {
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &head,
+            agent_doc_ops_log_io::log_op,
+        )?;
+    }
     settle_exchange_archive_durability(file)?;
     Ok(outcome)
 }
@@ -1584,9 +1591,18 @@ fn ensure_compact_live_relay_target(file: &Path, live_target: &str) -> Result<()
 fn verify_compact_head_landed(file: &Path, authoritative_snapshot: &str) -> Result<()> {
     use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
     let head = agent_doc_git_io::revision::show_head(file)?;
+    // Commit re-derives the binary-owned Active index from the compacted
+    // sources immediately before staging. Verify against that deterministic
+    // projection as well as the byte-identical compact target.
+    let projected = agent_doc_work_projection::reconcile_managed_active_items(
+        authoritative_snapshot,
+    )?;
     let landed = head.as_deref().is_some_and(|head| {
-        normalize_transient_agent_doc_markers(head)
-            == normalize_transient_agent_doc_markers(authoritative_snapshot)
+        let normalized_head = normalize_transient_agent_doc_markers(head);
+        normalized_head == normalize_transient_agent_doc_markers(authoritative_snapshot)
+            || projected.as_deref().is_some_and(|projected| {
+                normalized_head == normalize_transient_agent_doc_markers(projected)
+            })
     });
     if !landed {
         agent_doc_ops_log_io::log_op(
@@ -6411,6 +6427,38 @@ mod tests {
                     .get("patch_id")
                     .and_then(|value| value.as_str())
                     .unwrap_or("unknown");
+                if payload.get("type").and_then(|value| value.as_str()) == Some("refresh_vcs") {
+                    return Some(
+                        serde_json::json!({"type": "receipt", "status": "applied", "id": "refresh_vcs"})
+                            .to_string(),
+                    );
+                }
+                if matches!(
+                    payload.get("type").and_then(|value| value.as_str()),
+                    Some("observe_lazily_current" | "deliver_crdt_remote")
+                ) {
+                    let file_path = payload.get("file").and_then(|value| value.as_str())?;
+                    for _ in 0..200 {
+                        if matches!(
+                            agent_doc_crdt_relay_io::current_text_for_file(Path::new(file_path)),
+                            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                                delivery_converged: true,
+                                ..
+                            })
+                        ) {
+                            let receipt_id = payload
+                                .get("type")
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("delivery");
+                            return Some(
+                                serde_json::json!({"type": "receipt", "status": "applied", "id": receipt_id})
+                                    .to_string(),
+                            );
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    return None;
+                }
                 if payload.get("type").and_then(|value| value.as_str()) == Some("save_document") {
                     let file_path = payload.get("file").and_then(|value| value.as_str())?;
                     let content =

@@ -80,7 +80,7 @@ use agent_doc_turn::op_log::{
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::{Context, Result};
 use lazily::{Computed, Source};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::{
@@ -704,7 +704,9 @@ fn log_three_way_merge_steering_observation(file: &Path) {
 /// authority, only the disk projection lagged, and every paragraph of that
 /// committed response was relayed as "5 concurrent operator steering
 /// directives". Text already in `committed` (HEAD) is not unanswered operator
-/// steering, so it is filtered out; with no HEAD the old behaviour stands.
+/// steering, so it is filtered out. The underlying prompt classifier can
+/// independently reject response-shaped artifacts; HEAD remains the durable
+/// proof for any paragraph it still classifies as prompt-bearing.
 ///
 /// `#retainedsteeringecho`: the same echo happens one step earlier, while the
 /// response is captured and delivered to the editor but NOT yet committed —
@@ -715,7 +717,7 @@ fn log_three_way_merge_steering_observation(file: &Path) {
 /// instruction to answer its own reply. So `binary_authored` carries every
 /// text the binary itself wrote — HEAD and the active capture's response —
 /// and a directive contained in any of them is not operator steering. An
-/// empty slice keeps the old unfiltered behaviour.
+/// empty slice applies no additional binary-authored containment filter.
 pub fn unmerged_editor_steering_note(
     authority_content: &str,
     disk_content: &str,
@@ -774,7 +776,66 @@ fn unsaved_operator_steering_verbatim(
                 .collect(),
         )
     };
-    steering.verbatim_aggregate()
+    if let Some(verbatim) = steering.verbatim_aggregate() {
+        return Some(verbatim);
+    }
+    if binary_authored.is_empty() {
+        return None;
+    }
+
+    // A new response heading can make the generic prompt classifier treat the
+    // whole trailing hunk as one response artifact, including operator prose
+    // typed after that response but before a boundary refresh lands. Rebuild a
+    // comparison from only authority-added lines that are absent from every
+    // binary-authored source. This is a fallback, not a second primary policy:
+    // it runs only when ordinary steering classification found nothing.
+    let mut disk_counts = BTreeMap::<&str, usize>::new();
+    for line in disk_content.lines() {
+        *disk_counts.entry(line).or_default() += 1;
+    }
+    let binary_lines = binary_authored
+        .iter()
+        .flat_map(|text| text.lines())
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<BTreeSet<_>>();
+    let mut operator_lines = Vec::new();
+    for line in authority_content.lines() {
+        let count = disk_counts.entry(line).or_default();
+        if *count > 0 {
+            *count -= 1;
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("<!-- agent:")
+            || trimmed.starts_with("<!-- /agent:")
+            || binary_lines.contains(trimmed)
+        {
+            continue;
+        }
+        operator_lines.push(line);
+    }
+    if operator_lines.is_empty() {
+        return None;
+    }
+    let addition = format!("\n{}\n", operator_lines.join("\n"));
+    let synthetic = if let Some(close) = disk_content.rfind("<!-- /agent:exchange -->") {
+        format!(
+            "{}{}{}",
+            &disk_content[..close],
+            addition,
+            &disk_content[close..]
+        )
+    } else {
+        format!("{disk_content}{addition}")
+    };
+    agent_doc_document_realtime::baseline_comparison::BaselineComparison::new(
+        disk_content,
+        &synthetic,
+    )
+    .realtime_steering_all()
+    .verbatim_aggregate()
 }
 
 /// `#operatorleadpendingsave`: whether an authority/disk divergence is only the
@@ -2908,6 +2969,12 @@ pub fn inspect_read_only(
 ) -> Result<SessionCheckStatus> {
     let read_only = ReadOnlySessionCheckEffects { inner: effects };
     inspect(file, &read_only)
+}
+
+pub fn is_committed_head_response_missing_interruption(message: &str) -> bool {
+    message.starts_with("[session-check] INTERRUPTED:")
+        && message
+            .contains("current visible document is missing the latest committed HEAD response")
 }
 
 pub fn inspect_with_warnings(

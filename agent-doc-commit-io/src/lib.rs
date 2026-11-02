@@ -3146,6 +3146,11 @@ where
                 .as_str()
                 .eq(head_doc.as_deref().unwrap_or_default()))
         && let Some(reason) = classify_safe_out_of_band_agent_doc_mutation(snapshot, &file_content)
+        // A status delta after the baseline has already reached HEAD is not a
+        // generic snapshot adoption: it may be an operator edit. Leave it for
+        // the exact cycle/ledger-derived late-projection proofs below.
+        && !(snapshot_matched_head_before_absorb
+            && reason.split('+').any(|part| part == "status"))
     {
         if reason.contains("exchange")
             && exchange_has_unanswered_disk_only_prompt_target_for_commit(
@@ -3843,6 +3848,7 @@ where
     // metadata. Re-derive only that binary-owned component from the snapshot's
     // own sources before staging; operator descendants (for example `- close`)
     // are preserved by the projection reconciler.
+    let mut snapshot_active_projection_reconciled = false;
     if let Some(reconciled) = snapshot_content
         .as_deref()
         .map(agent_doc_work_projection::reconcile_managed_active_items)
@@ -3857,6 +3863,7 @@ where
             ),
         );
         snapshot_content = Some(reconciled);
+        snapshot_active_projection_reconciled = true;
     }
     agent_doc_git_io::live_buffer_guard::ensure_no_live_editor_buffer_ahead_of_disk(
         ports.live_buffer_guard,
@@ -4068,6 +4075,19 @@ where
                 &git_root,
                 &resolved,
             )?;
+            if snapshot_active_projection_reconciled
+                && let Some(committed) = agent_doc_git_io::revision::show_head(file)?
+            {
+                // The active projection was staged from a derived snapshot.
+                // Advance its durable baseline only after the commit succeeds;
+                // a pre-stage checkpoint would strand the baseline ahead of
+                // HEAD when commit later refuses.
+                agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &committed,
+                    agent_doc_ops_log_io::log_op,
+                )?;
+            }
             agent_doc_git_io::post_commit_cleanup::finalize_successful_commit(
                 ports.post_commit_cleanup,
                 file,

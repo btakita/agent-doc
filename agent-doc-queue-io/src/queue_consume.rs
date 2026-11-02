@@ -4544,7 +4544,8 @@ mod core_tests {
             "{updated}"
         );
         assert!(
-            updated.contains("- ~~https://github.com/haiven-dev/haiven-sdk/pull/172: #address~~"),
+            updated
+                .contains("- ### ~~https://github.com/haiven-dev/haiven-sdk/pull/172: #address~~"),
             "{updated}"
         );
     }
@@ -4625,7 +4626,10 @@ mod core_tests {
         let updated = fs::read_to_string(&doc).unwrap();
         assert_eq!(outcome.consumed_count, 1);
         assert_eq!(outcome.remaining, 1);
-        assert!(updated.contains(&format!("- ~~{target}~~")), "{updated}");
+        assert!(
+            updated.contains(&format!("- ### ~~{target}~~")),
+            "{updated}"
+        );
         assert!(
             updated.contains(&format!("- ☑️ [#subagent:typing_effect2#1] {sibling}")),
             "{updated}"
@@ -4840,7 +4844,7 @@ mod core_tests {
             updated.contains("<!-- agent:queue subagents priority -->"),
             "{updated}"
         );
-        assert!(updated.contains(&format!("- ~~{head}~~")), "{updated}");
+        assert!(updated.contains(&format!("- ### ~~{head}~~")), "{updated}");
         assert!(!updated.contains("queue_active: true"), "{updated}");
         assert!(
             updated.contains(&format!("> **Queue prompt:**\n>\n> {head}")),
@@ -5220,7 +5224,7 @@ mod core_tests {
         let updated = fs::read_to_string(&doc).unwrap();
         assert!(!updated.contains("sdk-key"), "{updated}");
         assert!(updated.contains("dev-key"), "{updated}");
-        assert!(updated.contains("- ~~finish sdk~~"), "{updated}");
+        assert!(updated.contains("- ### ~~finish sdk~~"), "{updated}");
         assert!(updated.contains("- finish dev"), "{updated}");
         assert!(updated.contains("### Re: integrated sdk — gpt-5"));
     }
@@ -5357,8 +5361,8 @@ mod core_tests {
         .expect("the immediate one-shot sync should refill the queue");
         let refilled = fs::read_to_string(&doc).unwrap();
         assert!(refilled.contains("queue: go"));
-        assert!(refilled.contains("- do [#follow-up-a]"));
-        assert!(refilled.contains("- do [#follow-up-b]"));
+        assert!(refilled.contains("- ### do [#follow-up-a]"));
+        assert!(refilled.contains("- ### do [#follow-up-b]"));
         assert!(!refilled.contains("> **Queue prompt:**"));
     }
 
@@ -6179,7 +6183,7 @@ mod core_tests {
         assert_eq!(marked, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- ### can the *.h files be generated from the contract as well?\n"),
+            updated.contains("- can the *.h files be generated from the contract as well?\n"),
             "{updated}"
         );
         assert!(updated.contains("~~do [#sdkrestemitnative]"), "{updated}");
@@ -6211,12 +6215,12 @@ mod core_tests {
         assert_eq!(marked, 1);
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- ### do [#head]\n"), "{updated}");
+        assert!(updated.contains("- do [#head]\n"), "{updated}");
         assert!(
             updated.contains("- ### ~~do [#opportunistic]~~\n"),
             "{updated}"
         );
-        assert!(updated.contains("- ### do [#tail]\n"), "{updated}");
+        assert!(updated.contains("- do [#tail]\n"), "{updated}");
         let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .unwrap();
@@ -7836,7 +7840,7 @@ mod core_tests {
         assert!(strike_orphan_id_backed_queue_head(&doc, "orphanclaimed").unwrap());
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~do [#orphanclaimed]~~\n- do [#tail]\n"),
+            result.contains("- ### ~~do [#orphanclaimed]~~\n- do [#tail]\n"),
             "the strike wraps only the work text:\n{result}"
         );
         assert!(
@@ -8636,7 +8640,7 @@ mod core_tests {
         let after = std::fs::read_to_string(&doc).unwrap();
         assert!(
             after.contains(&format!(
-                "- ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
+                "- ### ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
             )),
             "{after}"
         );
@@ -8723,7 +8727,7 @@ mod core_tests {
         let after = std::fs::read_to_string(&doc).unwrap();
         assert!(
             after.contains(&format!(
-                "- ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
+                "- ### ~~{CLAIMSTRIKE_HEAD}~~ — auto-struck: answered this cycle (#ftstrike)"
             )),
             "{after}"
         );
@@ -8807,7 +8811,10 @@ mod core_tests {
                 .unwrap();
         assert_eq!(marked, 1);
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- ~~do [#altshiftmenu]~~\n"), "{updated}");
+        assert!(
+            updated.contains("- ### ~~do [#altshiftmenu]~~\n"),
+            "{updated}"
+        );
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
         assert!(
             crate::queue_claim::load_ledger(&doc)
@@ -8818,8 +8825,8 @@ mod core_tests {
         );
 
         let readded = updated.replace(
-            "- ~~do [#altshiftmenu]~~\n",
-            "- ~~do [#altshiftmenu]~~\n- do [#altshiftmenu]\n",
+            "- ### ~~do [#altshiftmenu]~~\n",
+            "- ### ~~do [#altshiftmenu]~~\n- do [#altshiftmenu]\n",
         );
         std::fs::write(&doc, &readded).unwrap();
         let (_, fresh) =
@@ -9334,7 +9341,7 @@ Old.
         assert!(acknowledge_open_id_backed_queue_head(&doc, "ahfe").unwrap());
 
         let result = std::fs::read_to_string(&doc).unwrap();
-        assert!(result.contains("- ~~do [#ahfe]~~"), "{result}");
+        assert!(result.contains("- ### ~~do [#ahfe]~~"), "{result}");
         assert!(
             !result.contains("☑️"),
             "the struck row carries no lifecycle marker:\n{result}"
@@ -9397,7 +9404,7 @@ Old.
         assert!(acknowledge_open_id_backed_queue_head(&doc, "reported").unwrap());
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("- ~~do [#reported]~~"), "{updated}");
+        assert!(updated.contains("- ### ~~do [#reported]~~"), "{updated}");
         assert!(
             updated.contains("- keep the sibling worker running"),
             "the unrelated free-text row stays live:\n{updated}"
@@ -9462,7 +9469,7 @@ Old.
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~#review [#adr0043-publish]~~"),
+            result.contains("- ### ~~#review [#adr0043-publish]~~"),
             "{result}"
         );
         assert!(!result.contains("☑️"), "{result}");
@@ -9641,7 +9648,7 @@ Old.
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            result.contains("- ~~do [#publish-session-contracts]~~"),
+            result.contains("- ### ~~do [#publish-session-contracts]~~"),
             "{result}"
         );
         assert!(

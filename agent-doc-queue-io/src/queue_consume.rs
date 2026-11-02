@@ -3913,8 +3913,12 @@ mod core_tests {
             .collect::<Vec<_>>();
         assert_eq!(response_ids.len(), 2, "{updated}");
         assert_ne!(response_ids[0], response_ids[1]);
-        for response_id in response_ids {
-            assert!(updated.contains(&format!("**Response {response_id}**")));
+        for (topic, response_id) in ["alpha", "beta"].into_iter().zip(response_ids) {
+            assert!(updated.contains(&format!("### Re: {topic} — test {response_id}")));
+            assert!(
+                updated.contains(&format!("**Response {response_id}**")),
+                "{updated}"
+            );
         }
         assert_eq!(updated.matches("    - **Timestamp:** ").count(), 2, "{updated}");
     }

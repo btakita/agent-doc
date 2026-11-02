@@ -95,6 +95,72 @@ fn is_h3_heading(trimmed: &str) -> bool {
     trimmed.starts_with("### ") || trimmed == "###"
 }
 
+fn compact_response_id_range(text: &str) -> Option<Range<usize>> {
+    let mut offset = 0usize;
+    while let Some(relative_start) = text[offset..].find("[#r-") {
+        let start = offset + relative_start;
+        let Some(relative_end) = text[start..].find(']') else {
+            break;
+        };
+        let end = start + relative_end + 1;
+        if is_compact_response_id(&text[start..end]) {
+            return Some(start..end);
+        }
+        offset = start + 1;
+    }
+    None
+}
+
+/// Return the public response id embedded in an H3 response heading.
+///
+/// The id is durable operator-facing attribution. It is nevertheless excluded
+/// from the response node's content-derived identity because the id is derived
+/// from that identity.
+pub fn response_id_from_heading(trimmed: &str) -> Option<&str> {
+    is_h3_heading(trimmed)
+        .then(|| compact_response_id_range(trimmed))
+        .flatten()
+        .map(|range| &trimmed[range])
+}
+
+/// Remove one canonical public response id from a heading while preserving the
+/// remaining text and attribution verbatim.
+pub fn strip_response_id_from_heading(heading: &str) -> String {
+    let Some(range) = compact_response_id_range(heading) else {
+        return heading.to_string();
+    };
+    let mut start = range.start;
+    let mut end = range.end;
+    if start > 0 && heading.as_bytes()[start - 1].is_ascii_whitespace() {
+        start -= 1;
+    } else if end < heading.len() && heading.as_bytes()[end].is_ascii_whitespace() {
+        end += 1;
+    }
+    format!("{}{}", &heading[..start], &heading[end..])
+}
+
+fn annotate_response_heading(line: &str, response_id: &str) -> String {
+    let content_end = line.trim_end_matches(['\n', '\r']).len();
+    let ending = &line[content_end..];
+    let heading = strip_response_id_from_heading(&line[..content_end]);
+    let trimmed_end = heading.trim_end().len();
+    let before_head = heading[..trimmed_end]
+        .strip_suffix(" (HEAD)")
+        .map(str::trim_end)
+        .unwrap_or(&heading[..trimmed_end]);
+    let insert_at = if before_head.ends_with("~~") {
+        before_head.len() - 2
+    } else {
+        before_head.len()
+    };
+    format!(
+        "{} {response_id}{}{}",
+        &heading[..insert_at],
+        &heading[insert_at..],
+        ending
+    )
+}
+
 /// A caret prompt line (`❯ …`) — the canonical operator prompt marker.
 fn is_caret_prompt(trimmed: &str) -> bool {
     trimmed.starts_with('❯')
@@ -126,13 +192,13 @@ fn is_salient_close_marker(trimmed: &str) -> bool {
 fn normalize_heading_key(trimmed: &str) -> String {
     let body = trimmed.strip_prefix("###").unwrap_or(trimmed).trim();
     let mut t = body.trim();
-    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
-        t = t[2..t.len() - 2].trim();
-    }
     if let Some(stripped) = t.strip_suffix("(HEAD)") {
         t = stripped.trim_end();
     }
-    t.to_string()
+    if t.len() >= 4 && t.starts_with("~~") && t.ends_with("~~") {
+        t = t[2..t.len() - 2].trim();
+    }
+    strip_response_id_from_heading(t).trim().to_string()
 }
 
 /// Is `trimmed` a transient `<!-- agent:boundary:… -->` marker line? Boundary
@@ -373,7 +439,10 @@ pub fn response_lookup_id(inner: &str, policy: &ResponseTurnCellPolicy) -> Strin
     if let Some(existing) = nodes[target.clone()]
         .iter()
         .flat_map(|node| &node.lines)
-        .find_map(|line| response_id_from_lookup_marker(line.trim()))
+        .find_map(|line| {
+            response_id_from_lookup_marker(line.trim())
+                .or_else(|| response_id_from_heading(line.trim()))
+        })
     {
         return existing.to_string();
     }
@@ -383,7 +452,10 @@ pub fn response_lookup_id(inner: &str, policy: &ResponseTurnCellPolicy) -> Strin
         .enumerate()
         .filter(|(index, _)| !target.contains(index))
         .flat_map(|(_, node)| &node.lines)
-        .filter_map(|line| response_id_from_lookup_marker(line.trim()))
+        .filter_map(|line| {
+            response_id_from_lookup_marker(line.trim())
+                .or_else(|| response_id_from_heading(line.trim()))
+        })
         .collect::<HashSet<_>>();
     let full_hash_len = content_hash(&policy.cell_id).len();
     (12..=full_hash_len)
@@ -397,10 +469,15 @@ pub fn response_lookup_id(inner: &str, policy: &ResponseTurnCellPolicy) -> Strin
 /// changes the response cell's identity.
 pub fn normalize_response_order_line(line: &str) -> String {
     let normalized = line.trim().trim_start_matches('❯').trim();
-    normalized
+    let normalized = normalized
         .strip_suffix(" (HEAD)")
         .unwrap_or(normalized)
-        .to_string()
+        .trim_end();
+    if is_h3_heading(normalized) {
+        strip_response_id_from_heading(normalized)
+    } else {
+        normalized.to_string()
+    }
 }
 
 /// Split a string into lines that each retain their trailing `\n` (unlike
@@ -507,9 +584,10 @@ pub fn render_exchange_nodes(nodes: &[ExchangeNode]) -> String {
     nodes.iter().map(ExchangeNode::render).collect()
 }
 
-/// Add one compact public id to the matching response cell as a terse lookup
-/// marker. Multi-section cells receive one marker on their final response node.
-/// The internal ordered node identity selects the cell but is never rendered.
+/// Add one compact public id to every heading in the matching response cell.
+/// Multi-section cells repeat the id in each subsection heading so every visible
+/// section retains its own durable attribution. The internal ordered node
+/// identity selects the cell but is never rendered.
 pub fn annotate_response_with_lookup_id(
     inner: &str,
     policy: &ResponseTurnCellPolicy,
@@ -518,9 +596,6 @@ pub fn annotate_response_with_lookup_id(
     if !is_compact_response_id(response_id) {
         return inner.to_string();
     }
-    let Some(marker) = response_id_lookup_marker(response_id) else {
-        return inner.to_string();
-    };
     let mut nodes = parse_exchange_nodes(inner);
     let Some(target) = response_cell_node_range(&nodes, policy) else {
         return inner.to_string();
@@ -528,15 +603,14 @@ pub fn annotate_response_with_lookup_id(
     for node in &mut nodes[target.clone()] {
         node.lines
             .retain(|line| !is_response_id_lookup_marker(line.trim()));
+        if let Some(heading) = node
+            .lines
+            .iter_mut()
+            .find(|line| is_h3_heading(line.trim()))
+        {
+            *heading = annotate_response_heading(heading, response_id);
+        }
     }
-    let node = &mut nodes[target.end - 1];
-    let insert_at = node
-        .lines
-        .iter()
-        .rposition(|line| !line.trim().is_empty())
-        .map(|index| index + 1)
-        .unwrap_or(node.lines.len());
-    node.lines.insert(insert_at, format!("{marker}\n"));
     render_exchange_nodes(&nodes)
 }
 
@@ -1000,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn response_lookup_marker_is_searchable_but_identity_neutral() {
+    fn response_heading_id_is_searchable_but_identity_neutral() {
         let inner = "### Re: lookup\n\nCompleted the work.\n\n❯ Next prompt.\n";
         let policy =
             ResponseTurnCellPolicy::from_response(Some("### Re: lookup\n\nCompleted the work.\n"));
@@ -1009,9 +1083,10 @@ mod tests {
         let annotated = annotate_response_with_lookup_id(inner, &policy, &response_id);
 
         assert!(
-            annotated.contains(&format!("**Response {response_id}**\n\n❯ Next prompt.")),
+            annotated.contains(&format!("### Re: lookup {response_id}\n")),
             "{annotated}"
         );
+        assert!(!annotated.contains("**Response [#r-"), "{annotated}");
         assert!(is_compact_response_id(&response_id));
         assert!(!annotated.contains(policy.cell_id()));
         assert_eq!(
@@ -1026,6 +1101,15 @@ mod tests {
         assert_eq!(
             annotate_response_with_lookup_id(&annotated, &policy, &response_id),
             annotated
+        );
+        assert_eq!(
+            response_id_from_heading(
+                annotated
+                    .lines()
+                    .next()
+                    .expect("annotated response heading")
+            ),
+            Some(response_id.as_str())
         );
     }
 
@@ -1064,14 +1148,19 @@ mod tests {
         let response_id = response_lookup_id(&inner, &policy);
         let annotated = annotate_response_with_lookup_id(&inner, &policy, &response_id);
 
-        assert_eq!(annotated.matches(&response_id).count(), 1, "{annotated}");
+        assert_eq!(annotated.matches(&response_id).count(), 2, "{annotated}");
         assert!(
-            annotated.contains(&format!(
-                "All focused tests pass.\n**Response {response_id}**\n\n❯ Next prompt."
-            )),
+            annotated.contains(&format!("### Re: lookup — test {response_id}\n")),
             "{annotated}"
         );
+        assert!(
+            annotated.contains(&format!("### Verification {response_id}\n")),
+            "every subsection heading must carry the aggregate response id: {annotated}"
+        );
+        assert!(!annotated.contains("**Response [#r-"), "{annotated}");
         assert!(!annotated.contains(policy.cell_id()));
+        assert!(response_cell_materialized(&annotated, &policy));
+        assert_eq!(response_lookup_id(&annotated, &policy), response_id);
     }
 
     #[test]

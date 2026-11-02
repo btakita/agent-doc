@@ -2158,6 +2158,22 @@ fn strip_struck_free_text_annotations(content: &str) -> Result<String> {
     Ok(queue_normalized
         .split_inclusive('\n')
         .filter(|line| !is_response_id_lookup_child(line.trim_end_matches(['\n', '\r'])))
+        .map(|line| {
+            let (core, newline) = line
+                .strip_suffix('\n')
+                .map_or((line, ""), |core| (core, "\n"));
+            if agent_doc_markdown_ast::exchange_tree::response_id_from_heading(core.trim())
+                .is_some()
+            {
+                format!(
+                    "{}{}",
+                    agent_doc_markdown_ast::exchange_tree::strip_response_id_from_heading(core),
+                    newline
+                )
+            } else {
+                line.to_string()
+            }
+        })
         .collect())
 }
 
@@ -4669,19 +4685,27 @@ mod tests {
             )),
             "{annotated}"
         );
+        assert!(
+            annotated.contains(&format!("### Re: alpha — test {}\n", ids[0])),
+            "{annotated}"
+        );
+        assert!(
+            annotated.contains(&format!("### Re: beta — test {}\n", ids[1])),
+            "{annotated}"
+        );
         assert_eq!(
             annotated
                 .matches(&format!("**Response {}**", ids[0]))
                 .count(),
-            2,
-            "the exchange lookup and queue parent share one public id"
+            1,
+            "the queue response parent remains while the exchange marker moves to its heading"
         );
         assert_eq!(
             annotated
                 .matches(&format!("**Response {}**", ids[1]))
                 .count(),
-            2,
-            "the exchange lookup and queue parent share one public id"
+            1,
+            "the queue response parent remains while the exchange marker moves to its heading"
         );
         assert!(!annotated.contains(&format!(
             "Investigate alpha [#q-alpha]~~ — auto-struck: response: {}",
@@ -5243,6 +5267,89 @@ mod tests {
             4,
             "legacy generated summaries remain visible but lose executable lifecycle state"
         );
+    }
+
+    #[test]
+    fn each_addressed_response_heading_carries_its_own_response_id() {
+        let prompts = [
+            "lossless lost-work reconciliation [#q-111111111111]",
+            "explicit queue acknowledgement guardrails [#q-222222222222]",
+            "integration, verification, and installation [#q-333333333333]",
+        ];
+        let before = doc_with_queue_and_exchange(
+            &prompts
+                .iter()
+                .map(|prompt| format!("- {prompt}\n"))
+                .collect::<String>(),
+            "",
+        );
+        let response = prompts
+            .iter()
+            .map(|prompt| {
+                let topic = prompt
+                    .split_once(" [#q-")
+                    .map(|(topic, _)| topic)
+                    .unwrap();
+                format!(
+                    "> **Queue prompt:** {prompt}\n\n### Re: {topic} — gpt-5 · 2026-10-31T17:18-04:00\n\nCompleted {topic}.\n\n"
+                )
+            })
+            .collect::<String>();
+        let after = doc_with_queue_and_exchange(
+            &prompts
+                .iter()
+                .map(|prompt| format!("- ~~{prompt}~~\n"))
+                .collect::<String>(),
+            &response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let sections = agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(&response)
+            .into_iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        let ids = sections
+            .iter()
+            .map(|node| {
+                response_lookup_id_for_document(
+                    &annotated,
+                    &agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
+                        std::slice::from_ref(node),
+                    ),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids.iter().collect::<HashSet<_>>().len(), prompts.len());
+        for ((prompt, node), response_id) in prompts.iter().zip(&sections).zip(&ids) {
+            let topic = prompt.split_once(" [#q-").map(|(topic, _)| topic).unwrap();
+            assert!(
+                annotated.contains(&format!(
+                    "### Re: {topic} — gpt-5 · 2026-10-31T17:18-04:00 {response_id}"
+                )),
+                "the section must expose the id of its own response cell: {annotated}"
+            );
+            assert!(
+                annotated.contains(&format!(
+                    "~~{prompt}~~ — auto-struck: response: {response_id}"
+                )),
+                "the completed prompt and its heading must share one id: {annotated}"
+            );
+            assert_eq!(
+                agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
+                    std::slice::from_ref(node),
+                )
+                .response_id(),
+                response_id
+            );
+        }
     }
 
     #[test]
@@ -5974,10 +6081,15 @@ mod tests {
             .find(|component| component.name == "queue")
             .unwrap()
             .content(&annotated);
-        let lookup_marker =
-            agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id).unwrap();
-
-        assert_eq!(exchange.matches(&lookup_marker).count(), 1, "{exchange}");
+        assert_eq!(exchange.matches(response_id).count(), 2, "{exchange}");
+        assert!(
+            exchange.contains(&format!("### Re: nested {response_id}")),
+            "{exchange}"
+        );
+        assert!(
+            exchange.contains(&format!("### Verification {response_id}")),
+            "{exchange}"
+        );
         assert!(
             queue.contains(&format!("**Response {response_id}**")),
             "{queue}"

@@ -74,9 +74,8 @@ pub enum SteeringDispatch {
     DrainAfterCurrent,
     /// Dispatch now to a new background subagent (one per item).
     Subagent,
-    /// Subagent intent discovered while a worker report awaits coordinator
-    /// integration. Keep it queued and worker-owned, but do not admit fresh
-    /// dispatch until the reported writeback closes.
+    /// Legacy routing retained for decoding steering envelopes emitted before
+    /// Reported handbacks stopped holding unrelated dispatch.
     AwaitReportedCloseout,
     /// The item is already claimed by a worker (`agent-doc queue claim`):
     /// forward the operator's change to that owner, never dispatch a new
@@ -1667,11 +1666,9 @@ pub fn apply_release_receipts(
     }
 }
 
-/// Hold newly discovered subagent work behind first-class Reported writeback.
-///
-/// The queue remains the durable source of the later dispatch. This routing
-/// only prevents a mid-turn steering envelope from contradicting the queue
-/// admission barrier by instructing the coordinator to dispatch it now.
+/// Legacy compatibility transform for callers replaying the former global
+/// Reported-writeback admission barrier. Current routing must keep a Reported
+/// row excluded from redispatch without applying this to independent work.
 pub fn hold_subagent_dispatch_for_reported(items: &mut [SteeringItem]) {
     for item in items.iter_mut() {
         if item.source == SteeringSource::Queue && item.dispatch == SteeringDispatch::Subagent {

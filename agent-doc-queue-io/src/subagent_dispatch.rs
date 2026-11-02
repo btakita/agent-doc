@@ -191,12 +191,7 @@ pub fn reported_writeback_pending_for_content(file: &Path, content: &str) -> Res
 }
 
 pub fn pending_subagent_dispatch_for_content(file: &Path, content: &str) -> Result<Vec<String>> {
-    let candidates = subagent_dispatch_candidates_for_content(file, content)?;
-    if candidates.is_empty() || !reported_writeback_pending_for_content(file, content)? {
-        return Ok(candidates);
-    }
-
-    Ok(Vec::new())
+    subagent_dispatch_candidates_for_content(file, content)
 }
 
 /// Document-wide coordinator boundary projection (`#coordinatordrain`).
@@ -264,11 +259,26 @@ fn queue_attr_subagent_plan_with_presets(
     // Do not call `claimed_items_for_content` here: it folds this plan's held
     // heads back in and would recurse.
     let schedule_held = crate::queue_schedule::schedule_held_heads(file, content);
-    let mut claimed = crate::queue_claim::ledger_claimed_items_for_content(file, content)
+    let mut excluded = crate::queue_claim::ledger_claimed_items_for_content(file, content)
         .with_heads(&schedule_held)
-        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content));
-    let lost = crate::queue_claim::claim_states_for_content(file, content)
-        .ok()?
+        .with_heads(&crate::queue_claim::completion_evidence_hold_texts(content))
+        .with_claimed(&crate::claim_release_receipt::reported_items_for_content(
+            file, content,
+        ));
+    let claim_states = crate::queue_claim::claim_states_for_content(file, content).ok()?;
+    let occupied = agent_doc_queue::queue_claim::ClaimedQueueItems::from_identities(
+        claim_states
+            .iter()
+            .filter(|claim| {
+                matches!(
+                    claim.state,
+                    agent_doc_queue::queue_claim::QueueClaimState::Claimed
+                        | agent_doc_queue::queue_claim::QueueClaimState::Running
+                )
+            })
+            .map(|claim| claim.identity.clone()),
+    );
+    let lost = claim_states
         .into_iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
@@ -284,7 +294,7 @@ fn queue_attr_subagent_plan_with_presets(
         })
         .map(|claim| claim.item_text)
         .collect::<Vec<_>>();
-    claimed = claimed.with_heads(&unsafe_lost);
+    excluded = excluded.with_heads(&unsafe_lost);
     let evidence_items = agent_doc_document::subagent_completion::completion_evidence(content)
         .into_iter()
         .map(|evidence| evidence.item)
@@ -325,7 +335,7 @@ fn queue_attr_subagent_plan_with_presets(
                 }
             }
         }
-        claimed = claimed.with_heads(&matched);
+        excluded = excluded.with_heads(&matched);
     }
     let after_deps = agent_doc_queue::backlog_sync::collect_after_deps(&components, content);
     let queue_control = agent_doc_queue::queue_continuation::document_queue_control(content);
@@ -341,7 +351,7 @@ fn queue_attr_subagent_plan_with_presets(
             continue;
         }
         let owner_state =
-            block.state_excluding_claimed_with_control(&claimed, queue_control.as_deref());
+            block.state_excluding_claimed_with_control(&excluded, queue_control.as_deref());
         let Some((mode, eligible, live)) =
             core::queue_component_subagent_heads(content, block.component, prompt_presets)
         else {
@@ -373,7 +383,8 @@ fn queue_attr_subagent_plan_with_presets(
             mode,
             &eligible,
             &live,
-            &claimed,
+            &excluded,
+            &occupied,
             &after_deps,
         );
         combined.dispatch.extend(plan.dispatch);
@@ -441,9 +452,8 @@ pub fn out_of_loop_items_for_content(
     let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, content);
     let worker_owned = crate::queue_claim::worker_owned_items_for_content(file, content);
     let claimed = in_flight.with_claimed(&worker_owned);
-    // A Reported attempt suppresses fresh dispatch at the safe coordinator
-    // boundary, but those candidates remain worker-owned and out of the
-    // inline drain loop until the coordinator persists the closeout.
+    // Fresh candidates remain worker-owned and out of the inline drain loop
+    // while the coordinator persists any independent Reported closeout.
     let dispatch = subagent_dispatch_candidates_or_warn(file, content);
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
     let keys = executable_row_keys(content);
@@ -1656,12 +1666,19 @@ queue: go
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
         let question = "Does the page status enum have an archived value?";
-        let content = attr_doc("subagents", &[question, "other question"]);
+        let content = attr_doc(
+            "subagents",
+            &[question, "pinned follow-up", "pull 9 continuation"],
+        );
         std::fs::write(&file, &content).unwrap();
-        let both = vec![question.to_string(), "other question".to_string()];
+        let all = vec![
+            question.to_string(),
+            "pinned follow-up".to_string(),
+            "pull 9 continuation".to_string(),
+        ];
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            both
+            all
         );
 
         crate::queue_claim::claim(&file, question, "subagent:page-status-enum", 3600).unwrap();
@@ -1684,13 +1701,16 @@ queue: go
         release(&file, question, ReleaseKind::Reported).unwrap();
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            Vec::<String>::new(),
-            "reported writeback debt must block fresh worker admission"
+            vec![
+                "pinned follow-up".to_string(),
+                "pull 9 continuation".to_string()
+            ],
+            "reported writeback debt excludes only its own row"
         );
         let held = out_of_loop_items_for_content(&file, &content);
         assert!(
-            held.claims("other question"),
-            "fresh work remains held out of the inline loop during reported closeout"
+            held.claims("pinned follow-up") && held.claims("pull 9 continuation"),
+            "fresh dispatch remains held out of the inline loop while awaiting spawn"
         );
         let excluded = crate::queue_claim::claimed_items_for_content(&file, &content);
         assert!(
@@ -1702,22 +1722,22 @@ queue: go
         release(&file, question, ReleaseKind::Requeue).unwrap();
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            both,
+            all,
             "a requeued line is dispatchable again"
         );
     }
 
     /// `#reportedwritebackdebt`: `report-complete` retains the attempt as
     /// Reported until verified coordinator closeout. At the next safe
-    /// boundary it suppresses new dispatch without making later worker-owned
-    /// rows eligible for inline drain.
+    /// boundary it keeps its own row fenced without suppressing independent
+    /// dispatch or making later worker-owned rows eligible for inline drain.
     #[test]
-    fn active_reported_attempt_blocks_fresh_dispatch_but_holds_candidates() {
+    fn active_reported_attempt_stays_open_while_fresh_dispatch_proceeds() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("task.md");
         let question = "Integrate the completed worker change";
-        let content = attr_doc("subagents", &[question, "later worker task"]);
+        let content = attr_doc("subagents=1", &[question, "later worker task"]);
         std::fs::write(&file, &content).unwrap();
 
         crate::queue_claim::claim(&file, question, "subagent:integrated-change", 3600).unwrap();
@@ -1734,13 +1754,21 @@ queue: go
 
         assert_eq!(
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
-            Vec::<String>::new(),
-            "an active Reported attempt is first-class continuation work"
+            vec!["later worker task".to_string()],
+            "a Reported attempt no longer occupies the queue's only worker slot"
+        );
+        let claims = crate::queue_claim::claim_states_for_content(&file, &content).unwrap();
+        assert!(
+            claims.iter().any(|claim| {
+                claim.item_text == question
+                    && claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported
+            }),
+            "the reported row remains open for coordinator integration: {claims:?}"
         );
         let held = out_of_loop_items_for_content(&file, &content);
         assert!(
             held.claims("later worker task"),
-            "fresh candidates remain held until reported closeout is persisted"
+            "fresh dispatch stays out of the inline loop while awaiting spawn"
         );
         assert!(
             held.claims(question),

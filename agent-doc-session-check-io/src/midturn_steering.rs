@@ -553,10 +553,6 @@ fn route_claimed_items(
                 .cloned()
         });
     }
-    if agent_doc_queue_io::subagent_dispatch::reported_writeback_pending_for_content(file, content)?
-    {
-        core::hold_subagent_dispatch_for_reported(items);
-    }
     Ok(struck_removals)
 }
 
@@ -4787,8 +4783,8 @@ mod tests {
     }
 
     /// A reported leaf worker cannot receive more steering. A later sibling or
-    /// descendant remains independent at every depth, but fresh dispatch is
-    /// held until the coordinator closes the Reported attempt
+    /// descendant remains independent at every depth and dispatches while the
+    /// coordinator keeps the Reported attempt open for integration
     /// (`#nestedclaimsteer`, `#reportedwritebackdebt`).
     #[test]
     fn reported_nested_claim_routes_the_first_later_child_at_every_depth() {
@@ -4844,21 +4840,20 @@ mod tests {
         assert_eq!(routed.change, core::SteeringChange::Added);
         assert_eq!(
             routed.dispatch,
-            core::SteeringDispatch::AwaitReportedCloseout
+            core::SteeringDispatch::Subagent
         );
         assert_eq!(routed.owner, None);
-        let context = hook.render().expect("held steering context");
-        assert!(
-            context.contains("Do NOT dispatch or drain it inline now"),
-            "{context}"
-        );
-        assert!(!context.contains("DISPATCH NOW"), "{context}");
+        let context = hook.render().expect("dispatch steering context");
+        assert!(context.contains("dispatch this item NOW"), "{context}");
         let dispatch =
             agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
                 &file, &edited,
             )
             .unwrap();
-        assert!(dispatch.is_empty(), "{dispatch:?}");
+        assert!(
+            dispatch.iter().any(|head| head == follow_up),
+            "{dispatch:?}"
+        );
 
         let parent = "https://github.com/haiven-dev/haiven-contracts/pull/174";
         let first = "Review the pull request.";

@@ -141,13 +141,18 @@ pub struct QueueSubagentPlan {
 /// Eligibility comes from the current state, not from "new since the last
 /// seed", so a head whose dispatch was missed is offered again next cycle.
 /// `eligible` are the unclaimed-or-claimed subagent-intent heads in queue
-/// order, `live_heads` every live queue head, `claimed` the worker claims,
-/// and `after_deps` the `after=` / ordered-list predecessors keyed by id.
+/// order, `live_heads` every live queue head, `excluded` the heads that must
+/// not be dispatched again, `occupied` the claims whose workers still occupy
+/// a capacity slot, and `after_deps` the `after=` / ordered-list predecessors
+/// keyed by id. Keeping exclusion separate from occupancy lets a Reported
+/// handback stay open for coordinator integration without blocking unrelated
+/// ready work.
 pub fn plan_queue_subagent_dispatch(
     mode: QueueSubagentsMode,
     eligible: &[String],
     live_heads: &[String],
-    claimed: &crate::queue_claim::ClaimedQueueItems,
+    excluded: &crate::queue_claim::ClaimedQueueItems,
+    occupied: &crate::queue_claim::ClaimedQueueItems,
     after_deps: &std::collections::HashMap<String, Vec<String>>,
 ) -> QueueSubagentPlan {
     let live_ids: std::collections::HashSet<String> = live_heads
@@ -156,12 +161,12 @@ pub fn plan_queue_subagent_dispatch(
         .collect();
     let in_flight = live_heads
         .iter()
-        .filter(|head| claimed.claims(head))
+        .filter(|head| occupied.claims(head))
         .count();
     let mut remaining = mode.capacity.remaining_after(in_flight);
     let mut plan = QueueSubagentPlan::default();
     for head in eligible {
-        if claimed.claims(head) {
+        if excluded.claims(head) {
             continue;
         }
         let blocked = crate::queue_claim::referenced_queue_ids(head)
@@ -278,10 +283,32 @@ mod tests {
             &heads,
             &heads,
             &claimed,
+            &claimed,
             &Default::default(),
         );
         assert_eq!(plan.dispatch, strings(&["do [#b]"]));
         assert_eq!(plan.held, strings(&["do [#c]", "do [#d]"]));
+    }
+
+    #[test]
+    fn excluded_reported_head_does_not_occupy_a_capacity_slot() {
+        let heads = strings(&["do [#reported]", "do [#ready]", "do [#later]"]);
+        let excluded = crate::queue_claim::ClaimedQueueItems::from_identities([
+            crate::queue_claim::claim_identity("do [#reported]"),
+        ]);
+        let occupied = crate::queue_claim::ClaimedQueueItems::none();
+        let plan = plan_queue_subagent_dispatch(
+            QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(1).unwrap()),
+            },
+            &heads,
+            &heads,
+            &excluded,
+            &occupied,
+            &Default::default(),
+        );
+        assert_eq!(plan.dispatch, strings(&["do [#ready]"]));
+        assert_eq!(plan.held, strings(&["do [#later]"]));
     }
 
     #[test]
@@ -296,6 +323,7 @@ mod tests {
             },
             &heads,
             &heads,
+            &claimed,
             &claimed,
             &Default::default(),
         );
@@ -315,6 +343,7 @@ mod tests {
             &heads,
             &heads,
             &none,
+            &none,
             &deps,
         );
         assert_eq!(plan.dispatch, strings(&["do [#a]"]));
@@ -328,6 +357,7 @@ mod tests {
             },
             &remaining,
             &remaining,
+            &none,
             &none,
             &deps,
         );
@@ -356,6 +386,7 @@ mod tests {
             &heads,
             &heads,
             &none,
+            &none,
             &deps,
         );
         assert_eq!(
@@ -375,6 +406,7 @@ mod tests {
             },
             &after_address,
             &after_address,
+            &none,
             &none,
             &deps,
         );

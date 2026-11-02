@@ -454,10 +454,17 @@ pub fn dangling_response_references_with_pins(
     let resolved = live.union(&indexed).cloned().collect::<BTreeSet<_>>();
     let mut dangling = refs.difference(&resolved).cloned().collect::<Vec<_>>();
     dangling.retain(|response_id| {
-        compatibility_git_history_response(doc, response_id)
+        let Some(compatibility) = compatibility_git_history_response(doc, response_id)
             .ok()
             .flatten()
-            .is_none()
+        else {
+            return true;
+        };
+        let Some(historical_summary) = compatibility.inline_summary else {
+            return false;
+        };
+        let current_summaries = inline_response_summaries(content, response_id);
+        !current_summaries.is_empty() && current_summaries != [historical_summary]
     });
     Ok(dangling)
 }
@@ -842,7 +849,7 @@ fn compatibility_git_history_response(
                 content,
                 commit: commit.to_string(),
                 candidates_checked: checked,
-                inline_projection: false,
+                inline_summary: None,
             }));
         }
 
@@ -868,7 +875,7 @@ fn compatibility_git_history_response(
                 content,
                 commit: commit.to_string(),
                 candidates_checked: checked,
-                inline_projection: false,
+                inline_summary: None,
             }));
         }
 
@@ -878,7 +885,7 @@ fn compatibility_git_history_response(
                 content: inline_summary_response_cell(response_id, summary),
                 commit: commit.to_string(),
                 candidates_checked: checked,
-                inline_projection: true,
+                inline_summary: Some(summary.clone()),
             }));
         }
     }
@@ -890,7 +897,7 @@ struct CompatibilityGitHistoryResponse {
     content: String,
     commit: String,
     candidates_checked: usize,
-    inline_projection: bool,
+    inline_summary: Option<String>,
 }
 
 fn inline_response_summaries(content: &str, response_id: &str) -> Vec<String> {
@@ -934,6 +941,7 @@ struct StructuredInlineResponse {
     indent: usize,
     timestamp_seen: bool,
     summary: Option<String>,
+    nested_metadata_allowed: bool,
     invalid: bool,
 }
 
@@ -958,9 +966,12 @@ fn finish_structured_inline_response(
 /// ```
 ///
 /// The timestamp is deliberately not response identity. Only one non-empty,
-/// direct `Summary` child proves content. Identical copies in several prompt
-/// trees collapse to one value; conflicting summaries remain multiple values
-/// and are rejected by the caller's exact-one compatibility gate.
+/// direct `Summary` child proves content. The binary's later structured
+/// metadata (`State`, `Guidance`, integration coordinates, decision fields,
+/// choices, and next actions) may follow that summary without changing its
+/// identity. Identical copies in several prompt trees collapse to one value;
+/// conflicting summaries remain multiple values and are rejected by the
+/// caller's exact-one compatibility gate.
 fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTreeSet<String> {
     let response_item = format!("**Response {response_id}**");
     let mut summaries = BTreeSet::new();
@@ -1012,6 +1023,7 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                 );
             } else if let Some(item) = item {
                 if indent == active.indent + 2 {
+                    active.nested_metadata_allowed = false;
                     if let Some(summary) = item.strip_prefix("**Summary:**") {
                         let summary = summary.trim();
                         if !active.timestamp_seen || summary.is_empty() || active.summary.is_some()
@@ -1029,9 +1041,39 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                         } else {
                             active.timestamp_seen = true;
                         }
+                    } else if active.timestamp_seen && active.summary.is_some() {
+                        let metadata = item.trim();
+                        let has_value = [
+                            "**State:**",
+                            "**Guidance:**",
+                            "**Worktree:**",
+                            "**Branch:**",
+                            "**Integration:**",
+                            "**Context:**",
+                            "**Question:**",
+                            "**Selected:**",
+                        ]
+                        .into_iter()
+                        .any(|prefix| {
+                            metadata
+                                .strip_prefix(prefix)
+                                .is_some_and(|value| !value.trim().is_empty())
+                        });
+                        if has_value {
+                            // Canonical scalar response metadata is evidence
+                            // context, not part of the response identity.
+                        } else if matches!(metadata, "**Choices:**" | "**Next actions:**") {
+                            active.nested_metadata_allowed = true;
+                        } else {
+                            active.invalid = true;
+                        }
                     } else {
                         active.invalid = true;
                     }
+                } else if indent > active.indent + 2 && active.nested_metadata_allowed {
+                    // Choice and next-action descendants are binary-owned
+                    // response context. Their prose is deliberately not used
+                    // to reconstruct the response identity.
                 } else if !raw_line.trim().is_empty() {
                     active.invalid = true;
                 }
@@ -1047,6 +1089,7 @@ fn structured_inline_response_summaries(content: &str, response_id: &str) -> BTr
                 indent,
                 timestamp_seen: false,
                 summary: None,
+                nested_metadata_allowed: false,
                 invalid: false,
             });
         }
@@ -1093,6 +1136,47 @@ pub fn restore_inline_response_references_from_git(
     content: &str,
 ) -> Result<Vec<String>> {
     let refs = extract_response_reference_ids(content);
+    restore_inline_response_references_from_git_for_ids(doc, content, &refs)
+}
+
+/// Restore only response evidence that is both committed and still referenced
+/// by current document authority.
+///
+/// This is the live-editor-safe migration path. Unrelated operator edits may
+/// make the current document differ from `HEAD`, but they do not prevent the
+/// binary from indexing an older response whose exact evidence is already in
+/// Git. A current structured response projection may be removed (leaving only
+/// backlinks), or remain byte-equivalent in its summary. If current authority
+/// changes that summary, recovery fails closed and leaves the reference for an
+/// explicit decision instead of indexing stale evidence.
+pub fn restore_committed_inline_response_references_from_git(
+    doc: &Path,
+    authority: &str,
+    committed: &str,
+) -> Result<Vec<String>> {
+    let authority_refs = extract_response_reference_ids(authority);
+    let committed_refs = extract_response_reference_ids(committed);
+    let safe_refs = authority_refs
+        .intersection(&committed_refs)
+        .filter(|response_id| {
+            let authority_summaries = inline_response_summaries(authority, response_id);
+            let committed_summaries = inline_response_summaries(committed, response_id);
+            authority_summaries.is_empty() || authority_summaries == committed_summaries
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    restore_inline_response_references_from_git_for_ids(doc, committed, &safe_refs)
+}
+
+fn restore_inline_response_references_from_git_for_ids(
+    doc: &Path,
+    content: &str,
+    eligible: &BTreeSet<String>,
+) -> Result<Vec<String>> {
+    let refs = extract_response_reference_ids(content)
+        .intersection(eligible)
+        .cloned()
+        .collect::<BTreeSet<_>>();
     ensure!(
         refs.len() <= 64,
         "document references {} response ids; bounded compatibility recovery limit is 64",
@@ -1113,7 +1197,7 @@ pub fn restore_inline_response_references_from_git(
         let Some(compatibility) = compatibility_git_history_response(doc, &response_id)? else {
             continue;
         };
-        if compatibility.inline_projection {
+        if compatibility.inline_summary.is_some() {
             recovered.push((response_id, compatibility.content));
         }
     }
@@ -1824,6 +1908,19 @@ mod tests {
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
                 "    - **Summary:** {summary}\n",
+                "    - **State:** Integrated\n",
+                "    - **Guidance:** No operator action remains.\n",
+                "    - **Worktree:** `/tmp/response-worktree`\n",
+                "    - **Branch:** `fix/response-index`\n",
+                "    - **Integration:** `main`\n",
+                "    - **Context:** Preserved response evidence.\n",
+                "    - **Question:** Keep the repaired projection?\n",
+                "    - **Selected:** keep\n",
+                "    - **Choices:**\n",
+                "      - **keep**: Keep the repaired projection.\n",
+                "        - Operator-authored choice context.\n",
+                "    - **Next actions:**\n",
+                "      - Run the next admission.\n",
                 "- second prompt\n",
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:02:30.000Z\n",
@@ -1880,6 +1977,9 @@ mod tests {
             format!(
                 "- **Response {RESPONSE_ID}**\n  - **Summary:** wrong order\n  - **Timestamp:** now\n"
             ),
+            format!(
+                "- **Response {RESPONSE_ID}**\n  - **Timestamp:** now\n  - **Summary:** valid\n  - **Unknown:** must fail closed\n"
+            ),
             concat!(
                 "- **Response [#r-deadbeefcafe]**\n",
                 "  - **Timestamp:** now\n",
@@ -1934,10 +2034,14 @@ mod tests {
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
                 "    - **Summary:** {summary}\n",
+                "    - **State:** Integrated\n",
+                "    - **Guidance:** No operator action remains.\n",
                 "- ~~second prompt~~ — auto-struck: response: {id}\n",
                 "  - **Response {id}**\n",
                 "    - **Timestamp:** 2026-11-01T20:01:15.000Z\n",
                 "    - **Summary:** {summary}\n",
+                "    - **State:** Integrated\n",
+                "    - **Guidance:** No operator action remains.\n",
                 "<!-- /agent:queue -->\n",
                 "~~~md\n",
                 "- **Response {id}**\n",

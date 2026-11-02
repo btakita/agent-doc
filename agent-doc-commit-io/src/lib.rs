@@ -1846,19 +1846,13 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
         if agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty() {
             return Ok(false);
         }
-        let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(
-            file,
-            "commit_historical_response_evidence_disk",
-        )?;
         let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
             return Ok(false);
         };
-        if authority != disk || disk != head {
-            return Ok(false);
-        }
 
-        let restored =
-            agent_doc_archive_io::restore_inline_response_references_from_git(file, &authority)?;
+        let restored = agent_doc_archive_io::restore_committed_inline_response_references_from_git(
+            file, &authority, &head,
+        )?;
         let referenced = agent_doc_archive_io::extract_response_reference_ids(&authority);
         let mut affected =
             agent_doc_archive_io::affected_response_ids_for_commit(file, Some(&head), &head)?;

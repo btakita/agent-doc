@@ -3559,6 +3559,13 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         let descendant_end = descendant_region_end(&after, node.item.end_byte, indent);
         let owned_scope_end = descendant_end.max(node.item.end_byte);
         let owned_scope = &after[node.item.start_byte..owned_scope_end];
+        // The addressed-at timestamp is metadata for this response projection,
+        // not part of its public identity. A detached replay can recompute the
+        // same response/request after the wall clock crosses a second boundary.
+        // Compare the complete rendered subtree with only generated timestamp
+        // lines normalized so choices, summaries, details, and response ids
+        // must still match exactly.
+        let normalized_owned_scope = normalize_response_projection_timestamp_metadata(owned_scope);
         let child_indent = " ".repeat(indent + 2);
         let response_mode = queue_response_ranges
             .iter()
@@ -3608,7 +3615,9 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         let missing_children = lookup_children
             .iter()
             .filter(|child| {
-                !owned_scope.contains(&render_response_lookup_child(child, &child_indent))
+                let rendered = render_response_lookup_child(child, &child_indent);
+                !normalized_owned_scope
+                    .contains(&normalize_response_projection_timestamp_metadata(&rendered))
             })
             .cloned()
             .collect::<Vec<_>>();
@@ -4455,6 +4464,26 @@ fn render_response_lookup_child(child: &str, child_indent: &str) -> String {
         rendered.push('\n');
     }
     rendered
+}
+
+fn normalize_response_projection_timestamp_metadata(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    for line in content.split_inclusive('\n') {
+        let (core, newline) = line
+            .strip_suffix("\r\n")
+            .map(|core| (core, "\r\n"))
+            .or_else(|| line.strip_suffix('\n').map(|core| (core, "\n")))
+            .unwrap_or((line, ""));
+        let trimmed = core.trim_start_matches([' ', '\t']);
+        if trimmed.starts_with("- **Timestamp:** ") {
+            normalized.push_str(&core[..core.len() - trimmed.len()]);
+            normalized.push_str("- **Timestamp:** <response-timestamp>");
+            normalized.push_str(newline);
+        } else {
+            normalized.push_str(line);
+        }
+    }
+    normalized
 }
 
 fn descendant_region_end(document: &str, item_end: usize, parent_indent: usize) -> usize {
@@ -6199,8 +6228,13 @@ mod tests {
         let after =
             doc_with_queue_and_exchange(&format!("- 🙋 [#{request_id}] {queue_item}\n"), &response);
 
-        let annotated =
-            annotate_newly_struck_queue_items_with_response_id(&before, &after, &response).unwrap();
+        let annotated = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &after,
+            &response,
+            "2026-11-02T05:05:08Z",
+        )
+        .unwrap();
         let queue = element::parse(&annotated)
             .unwrap()
             .into_iter()
@@ -6236,10 +6270,33 @@ mod tests {
             "the operator-gated origin and generated response subtree must stay inert:\n{queue_body}"
         );
         assert_eq!(
-            annotate_newly_struck_queue_items_with_response_id(&before, &annotated, &response)
-                .unwrap(),
+            annotate_newly_struck_queue_items_with_response_id_at(
+                &before,
+                &annotated,
+                &response,
+                "2026-11-02T05:05:09Z",
+            )
+            .unwrap(),
             annotated,
-            "replaying the durable request evidence must not duplicate its subtree"
+            "replaying the durable request evidence across a timestamp boundary must not duplicate its subtree"
+        );
+
+        let distinct_response = response.replace(
+            "publication needs an operator choice.",
+            "publication still needs an operator choice.",
+        );
+        let distinct_after = doc_with_queue_and_exchange(queue_body, &distinct_response);
+        let distinct = annotate_newly_struck_queue_items_with_response_id_at(
+            &before,
+            &distinct_after,
+            &distinct_response,
+            "2026-11-02T05:05:10Z",
+        )
+        .unwrap();
+        assert_eq!(
+            distinct.matches("- **Response [#r-").count(),
+            2,
+            "a genuinely different response keeps its distinct identity: {distinct}"
         );
     }
 

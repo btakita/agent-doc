@@ -10932,21 +10932,17 @@ mod tests {
         assert_eq!(
             component_names,
             [
-                "status",
-                "open-items",
-                "queue",
-                "review",
-                "todo",
-                "backlog",
-                "icebox",
-                "notes",
-                "done",
-                "exchange",
+                "status", "active", "queue", "review", "todo", "backlog", "icebox", "notes",
+                "done", "exchange",
             ],
             "sync must render the same complete scaffold as claim"
         );
         assert_eq!(components[0].patch_mode(), Some("replace"));
         assert_eq!(components[9].patch_mode(), Some("append"));
+        assert_eq!(
+            components[1].attrs.get("priority").map(String::as_str),
+            Some("")
+        );
         assert_eq!(
             components[2].attrs.get("priority").map(String::as_str),
             Some("")
@@ -10978,7 +10974,7 @@ mod tests {
                 .filter(|component| component.name != "exchange")
                 .all(|component| component.attrs.is_empty())
         );
-        assert_eq!(components[1].content(&content), "- **Open items** (0)\n");
+        assert_eq!(components[1].content(&content), "");
     }
     /// Non-.md files should never be scaffolded even if empty.
     #[test]

@@ -164,7 +164,7 @@ pub fn build_project_queue_sync_payload(
                 // evidence, not proof that a worker is still in flight. Keep
                 // the row fenced by the claim, but do not advertise it as a
                 // fresh pending/claimed/running execution obligation. This is
-                // especially important after derived open-items maintenance:
+                // especially important after derived active maintenance:
                 // the selected-row projection must not resurrect the same
                 // cleared-session claim as runnable work.
                 reclassify_ended_owner_claims(&document, &claims, &mut document_payload);

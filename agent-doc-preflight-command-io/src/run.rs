@@ -4154,8 +4154,13 @@ mod tests {
         );
         let maintained = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            maintained.contains("<!-- agent:open-items -->"),
-            "the derived open-items projection must not reactivate the claim: {maintained}"
+            maintained.contains("<!-- agent:active priority -->"),
+            "the derived active projection must not reactivate the claim: {maintained}"
+        );
+        assert!(
+            maintained.contains("`[#runctrlclaude]` — Fix background supervisor thrash")
+                && maintained.contains("**Sources:** queue (claimed); backlog (claimed)"),
+            "the active projection must retain stale-claim reconciliation and its tracked source: {maintained}"
         );
         let fact = &parsed["no_changes_explanation"]["claimed_queue_items"][0];
         assert_eq!(

@@ -100,6 +100,13 @@ pub fn build_project_queue_sync_payload(
             }
         }
         normalize_claims_for_queue_sync(&mut claims, now_secs);
+        let committed_content = match agent_doc_git_io::revision::show_head(&document) {
+            Ok(content) => content,
+            Err(error) => {
+                payload.scan_errors.push(scan_error(&document, error));
+                None
+            }
+        };
         let lineage = if claims.is_empty() {
             None
         } else {
@@ -145,6 +152,7 @@ pub fn build_project_queue_sync_payload(
                 apply_response_evidence(
                     &mut document_payload,
                     &content,
+                    committed_content.as_deref(),
                     &claims,
                     &durable_response_receipts,
                     &retained_capture_targets,
@@ -175,6 +183,7 @@ enum HistoryResponse {
 fn apply_response_evidence(
     payload: &mut QueueSyncPayload,
     content: &str,
+    committed_content: Option<&str>,
     claims: &[agent_doc_queue::queue_claim::QueueClaim],
     durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
     retained_capture_targets: &[String],
@@ -183,13 +192,14 @@ fn apply_response_evidence(
     apply_response_evidence_with(
         payload,
         content,
+        committed_content,
         claims,
         durable_receipts,
         retained_capture_targets,
         |claim| {
-        home.as_deref().map_or(HistoryResponse::Missing, |home| {
-            recover_agent_history_response_from(home, claim)
-        })
+            home.as_deref().map_or(HistoryResponse::Missing, |home| {
+                recover_agent_history_response_from(home, claim)
+            })
         },
     );
 }
@@ -197,6 +207,7 @@ fn apply_response_evidence(
 fn apply_response_evidence_with(
     payload: &mut QueueSyncPayload,
     content: &str,
+    committed_content: Option<&str>,
     claims: &[agent_doc_queue::queue_claim::QueueClaim],
     durable_receipts: &[agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt],
     retained_capture_targets: &[String],
@@ -230,17 +241,23 @@ fn apply_response_evidence_with(
             )
         });
         item.response_id = key.clone();
-        item.response_capture_sha256 = matching_response_capture(claim, key.as_deref(), durable_receipts);
+        item.response_capture_sha256 =
+            matching_response_capture(claim, key.as_deref(), durable_receipts);
         let has_outbox_receipt = outbox_response.is_some()
-            || key
-                .as_deref()
-                .is_some_and(|key| completion_cell_has_response(content, key));
+            || key.as_deref().is_some_and(|key| {
+                completion_cell_has_response(content, key)
+                    || committed_content.is_some_and(|head| completion_cell_has_response(head, key))
+            });
         item.completion_response_receipt = has_outbox_receipt;
+        let committed_queue_response = key.as_deref().and_then(|key| {
+            committed_content.and_then(|head| committed_queue_response_for_claim(head, key, claim))
+        });
         apply_completed_response_evidence(
             item,
             &root_exchange,
             outbox_response,
             recover(claim),
+            committed_queue_response,
         );
         // Keep any recovery failure as the terminal blocker. The separate
         // receipt bit preserves the valid completion evidence without letting
@@ -271,11 +288,13 @@ fn apply_response_evidence_with(
             )
         });
         item.response_id = key.clone();
-        item.response_capture_sha256 = matching_response_capture(claim, key.as_deref(), durable_receipts);
+        item.response_capture_sha256 =
+            matching_response_capture(claim, key.as_deref(), durable_receipts);
         let has_outbox_receipt = outbox_response.is_some()
-            || key
-                .as_deref()
-                .is_some_and(|key| completion_cell_has_response(content, key));
+            || key.as_deref().is_some_and(|key| {
+                completion_cell_has_response(content, key)
+                    || committed_content.is_some_and(|head| completion_cell_has_response(head, key))
+            });
         let history = recover(claim);
         let completed = has_outbox_receipt
             || matches!(
@@ -289,7 +308,16 @@ fn apply_response_evidence_with(
         item.lifecycle = agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReportedCheckmark;
         item.operation = QueueSyncOperation::IntegrateClose;
         item.completion_response_receipt = has_outbox_receipt;
-        apply_completed_response_evidence(&mut item, &root_exchange, outbox_response, history);
+        let committed_queue_response = key.as_deref().and_then(|key| {
+            committed_content.and_then(|head| committed_queue_response_for_claim(head, key, claim))
+        });
+        apply_completed_response_evidence(
+            &mut item,
+            &root_exchange,
+            outbox_response,
+            history,
+            committed_queue_response,
+        );
         payload.reported_checkmark.push(item);
     }
     payload.running = waiting;
@@ -300,7 +328,26 @@ fn apply_completed_response_evidence(
     root_exchange: &str,
     outbox_response: Option<String>,
     history: HistoryResponse,
+    committed_queue_response: Option<CommittedQueueResponse>,
 ) {
+    match committed_queue_response {
+        Some(CommittedQueueResponse::Terminal) => {
+            item.response_evidence = QueueSyncResponseEvidence::CommittedQueuePrompt;
+            item.recovered_response = None;
+            item.missing_response_debt = false;
+            item.operation = QueueSyncOperation::IntegrateClose;
+            return;
+        }
+        Some(CommittedQueueResponse::Blocked) => {
+            item.response_evidence = QueueSyncResponseEvidence::CommittedQueuePromptBlocked;
+            item.recovered_response = None;
+            item.missing_response_debt = false;
+            item.lifecycle = agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::OperatorGated;
+            item.operation = QueueSyncOperation::OperatorGate;
+            return;
+        }
+        Some(CommittedQueueResponse::Ambiguous) | None => {}
+    }
     if let Some(response) = outbox_response {
         if response_is_consolidated(root_exchange, &response) {
             item.response_evidence = QueueSyncResponseEvidence::ConsolidatedExchange;
@@ -338,6 +385,121 @@ fn apply_completed_response_evidence(
             item.missing_response_debt = true;
             item.operation = QueueSyncOperation::Reconcile;
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommittedQueueResponse {
+    Terminal,
+    Blocked,
+    Ambiguous,
+}
+
+fn committed_queue_response_for_claim(
+    committed_content: &str,
+    completion_key: &str,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+) -> Option<CommittedQueueResponse> {
+    let marker = agent_doc_document::subagent_completion::marker(completion_key);
+    let marker_end = committed_content.rfind(&marker)? + marker.len();
+    let responses =
+        committed_queue_prompt_responses_after_completion(&committed_content[marker_end..]);
+    responses
+        .get(&normalize_response_comparison(&claim.item_text))
+        .copied()
+}
+
+/// Derive exact prompt -> coordinator outcome evidence after the current
+/// attempt's generation-specific completion marker in committed exchange
+/// order. The marker is both the generation fence and the lower time bound;
+/// this parser supplies only the missing root-delivery association after a
+/// retained-state/controller timeout.
+fn committed_queue_prompt_responses_after_completion(
+    content: &str,
+) -> std::collections::HashMap<String, CommittedQueueResponse> {
+    let exchange = agent_doc_document::subagent_completion::strip_completion_cells(content);
+    committed_queue_prompt_responses_from_exchange(&exchange)
+}
+
+fn committed_queue_prompt_responses_from_exchange(
+    exchange: &str,
+) -> std::collections::HashMap<String, CommittedQueueResponse> {
+    let mut responses = std::collections::HashMap::new();
+    for node in agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(exchange) {
+        if !matches!(
+            node.kind,
+            agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+        ) {
+            continue;
+        }
+        let lines = node.lines;
+        for (index, line) in lines.iter().enumerate() {
+            let Some(prompt) = queue_prompt_echo(line) else {
+                continue;
+            };
+            let end = lines[index + 1..]
+                .iter()
+                .position(|candidate| queue_prompt_echo(candidate).is_some())
+                .map_or(lines.len(), |offset| index + 1 + offset);
+            let Some(outcome) = classify_committed_queue_response(&lines[index + 1..end]) else {
+                continue;
+            };
+            let key = normalize_response_comparison(prompt);
+            if !key.is_empty() {
+                merge_committed_queue_response(&mut responses, key, outcome);
+            }
+        }
+    }
+    responses
+}
+
+fn merge_committed_queue_response(
+    responses: &mut std::collections::HashMap<String, CommittedQueueResponse>,
+    key: String,
+    outcome: CommittedQueueResponse,
+) {
+    responses
+        .entry(key)
+        .and_modify(|existing| {
+            if *existing != outcome {
+                *existing = CommittedQueueResponse::Ambiguous;
+            }
+        })
+        .or_insert(outcome);
+}
+
+fn queue_prompt_echo(line: &str) -> Option<&str> {
+    let line = line.trim_start();
+    let line = line.strip_prefix('>').unwrap_or(line).trim_start();
+    line.strip_prefix("**Queue prompt:** ").map(str::trim)
+}
+
+fn classify_committed_queue_response(lines: &[String]) -> Option<CommittedQueueResponse> {
+    let first = lines
+        .iter()
+        .map(|line| {
+            let line = line.trim_start();
+            line.strip_prefix('>').unwrap_or(line).trim()
+        })
+        .find(|line| !line.is_empty() && !line.starts_with("<!--"))?;
+    let lower = first.to_ascii_lowercase();
+    if lower.starts_with("**deferred:**")
+        || lower.starts_with("**blocked:**")
+        || lower.starts_with("**pending:**")
+        || lower.starts_with("**waiting:**")
+    {
+        return Some(CommittedQueueResponse::Blocked);
+    }
+    let outcome = lower.strip_prefix("**outcome:**")?;
+    if ["blocked", "deferred", "pending", "waiting", "incomplete"]
+        .iter()
+        .any(|marker| outcome.trim_start().starts_with(marker))
+    {
+        Some(CommittedQueueResponse::Blocked)
+    } else if outcome.trim().is_empty() {
+        None
+    } else {
+        Some(CommittedQueueResponse::Terminal)
     }
 }
 
@@ -1303,9 +1465,15 @@ mod tests {
         )
         .unwrap();
 
-        apply_response_evidence_with(&mut payload, &content, &claims, &[], &[], |claim| {
-            recover_agent_history_response_from(home.path(), claim)
-        });
+        apply_response_evidence_with(
+            &mut payload,
+            &content,
+            Some(&content),
+            &claims,
+            &[],
+            &[],
+            |claim| recover_agent_history_response_from(home.path(), claim),
+        );
 
         assert_eq!(payload.reported_checkmark.len(), 2);
         let first = payload
@@ -1374,9 +1542,15 @@ mod tests {
         .unwrap();
         assert_eq!(payload.running.len(), 1);
 
-        apply_response_evidence_with(&mut payload, content, &claims, &[], &[], |claim| {
-            recover_agent_history_response_from(home.path(), claim)
-        });
+        apply_response_evidence_with(
+            &mut payload,
+            content,
+            Some(content),
+            &claims,
+            &[],
+            &[],
+            |claim| recover_agent_history_response_from(home.path(), claim),
+        );
 
         assert!(payload.running.is_empty());
         assert_eq!(payload.reported_checkmark.len(), 1);
@@ -1432,6 +1606,7 @@ mod tests {
         apply_response_evidence_with(
             &mut payload,
             content,
+            Some(content),
             &claims,
             &receipts.receipts,
             &[],
@@ -1484,11 +1659,19 @@ mod tests {
                 &claims,
             )
             .unwrap();
-            apply_response_evidence_with(&mut payload, &content, &claims, &[], &[], |_| match &history {
-                HistoryResponse::Unsupported => HistoryResponse::Unsupported,
-                HistoryResponse::Ambiguous => HistoryResponse::Ambiguous,
-                _ => unreachable!(),
-            });
+            apply_response_evidence_with(
+                &mut payload,
+                &content,
+                Some(&content),
+                &claims,
+                &[],
+                &[],
+                |_| match &history {
+                    HistoryResponse::Unsupported => HistoryResponse::Unsupported,
+                    HistoryResponse::Ambiguous => HistoryResponse::Ambiguous,
+                    _ => unreachable!(),
+                },
+            );
             let item = &payload.reported_checkmark[0];
             assert!(item.completion_response_receipt);
             assert!(item.missing_response_debt);
@@ -1594,7 +1777,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_response_evidence(&mut payload, content, &ledger.claims, &[], &[]);
+        apply_response_evidence(&mut payload, content, None, &ledger.claims, &[], &[]);
         let item = &payload.lost_reported[0];
         assert!(item.missing_response_debt);
         assert_eq!(item.operation, QueueSyncOperation::Reconcile);
@@ -1603,6 +1786,203 @@ mod tests {
             QueueSyncResponseEvidence::UnsupportedHistory
         );
         assert!(!item.retry_safe);
+    }
+
+    #[test]
+    fn committed_queue_prompt_receipts_close_terminal_outcomes_but_keep_deferred_live() {
+        let terminal_prompt = concat!(
+            "Waiting on you — answer by adding a child line under an item ",
+            "<!-- agent-doc:waiting-on-you -->: #done: Complete the remaining work for the parent item."
+        );
+        let blocked_prompt = concat!(
+            "Waiting on you — answer by adding a child line under an item ",
+            "<!-- agent-doc:waiting-on-you -->: #blocked: Complete the remaining work for the parent item."
+        );
+        let terminal = reported_claim(terminal_prompt, "subagent:done", "worker-done", "parent");
+        let blocked = reported_claim(
+            blocked_prompt,
+            "subagent:blocked",
+            "worker-blocked",
+            "parent",
+        );
+        let terminal_cell = agent_doc_document::subagent_completion::cell_with_response(
+            &terminal.owner,
+            &terminal.item_text,
+            &crate::queue_claim::completion_feedback_key(&terminal).unwrap(),
+            "Done.",
+        )
+        .unwrap();
+        let blocked_cell = agent_doc_document::subagent_completion::cell_with_response(
+            &blocked.owner,
+            &blocked.item_text,
+            &crate::queue_claim::completion_feedback_key(&blocked).unwrap(),
+            "Blocked.",
+        )
+        .unwrap();
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "{terminal_cell}\n\n{blocked_cell}\n\n",
+                "### Re: recovered coordinator closeout — agent\n\n",
+                "> **Queue prompt:** {terminal_prompt}\n\n",
+                "**Outcome:** Complete and integrated. No operator decision remains.\n\n",
+                "> **Queue prompt:** {blocked_prompt}\n\n",
+                "**Deferred:** A live operator verification is still required.\n\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:run id=run subagents -->\n",
+                "- ☑️ {terminal_prompt}\n",
+                "- ☑️ {blocked_prompt}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            terminal_prompt = terminal_prompt,
+            blocked_prompt = blocked_prompt,
+            terminal_cell = terminal_cell,
+            blocked_cell = blocked_cell,
+        );
+        // Model a retained-state/controller timeout whose live projection lost
+        // the completion cells even though committed HEAD kept both cells and
+        // the coordinator's exact prompt/outcome associations.
+        let current = agent_doc_document::subagent_completion::strip_completion_cells(&content);
+        let claims = vec![terminal, blocked];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/committed-closeout.md",
+            QueueSyncDocumentScope::Current,
+            &current,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        apply_response_evidence_with(
+            &mut payload,
+            &current,
+            Some(&content),
+            &claims,
+            &[],
+            &[],
+            |_| HistoryResponse::Missing,
+        );
+
+        let terminal = payload
+            .reported_checkmark
+            .iter()
+            .find(|item| item.item.contains("#done"))
+            .unwrap();
+        assert_eq!(terminal.operation, QueueSyncOperation::IntegrateClose);
+        assert_eq!(
+            terminal.response_evidence,
+            QueueSyncResponseEvidence::CommittedQueuePrompt
+        );
+        assert!(!terminal.missing_response_debt);
+
+        let blocked = payload
+            .reported_checkmark
+            .iter()
+            .find(|item| item.item.contains("#blocked"))
+            .unwrap();
+        assert_eq!(blocked.operation, QueueSyncOperation::OperatorGate);
+        assert_eq!(
+            blocked.lifecycle,
+            agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::OperatorGated
+        );
+        assert_eq!(
+            blocked.response_evidence,
+            QueueSyncResponseEvidence::CommittedQueuePromptBlocked
+        );
+        assert!(!blocked.missing_response_debt);
+    }
+
+    #[test]
+    fn queue_prompt_echo_without_committed_or_completion_proof_never_closes() {
+        let prompt = "reported work";
+        let claim = reported_claim(prompt, "subagent:reported", "worker", "parent");
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: uncommitted synthesis — agent\n\n",
+            "> **Queue prompt:** reported work\n\n",
+            "**Outcome:** Complete.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:run id=run subagents -->\n",
+            "- ☑️ reported work\n",
+            "<!-- /agent:run -->\n",
+        );
+        let claims = vec![claim];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/uncommitted-closeout.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        apply_response_evidence_with(
+            &mut payload,
+            content,
+            Some(content),
+            &claims,
+            &[],
+            &[],
+            |_| HistoryResponse::Missing,
+        );
+
+        let item = &payload.reported_checkmark[0];
+        assert_eq!(item.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(item.response_evidence, QueueSyncResponseEvidence::Missing);
+        assert!(item.missing_response_debt);
+    }
+
+    #[test]
+    fn queue_prompt_echo_before_current_completion_marker_never_closes() {
+        let prompt = "repeated reported work";
+        let claim = reported_claim(prompt, "subagent:reported", "worker", "parent");
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            &claim.owner,
+            &claim.item_text,
+            &crate::queue_claim::completion_feedback_key(&claim).unwrap(),
+            "New generation returned a different result.",
+        )
+        .unwrap();
+        let content = format!(
+            concat!(
+                "<!-- agent:exchange -->\n",
+                "### Re: stale coordinator synthesis — agent\n\n",
+                "> **Queue prompt:** {prompt}\n\n",
+                "**Outcome:** Complete.\n\n",
+                "{cell}\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:run id=run subagents -->\n",
+                "- ☑️ {prompt}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            prompt = prompt,
+            cell = cell,
+        );
+        let current = agent_doc_document::subagent_completion::strip_completion_cells(&content);
+        let claims = vec![claim];
+        let mut payload = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "/tmp/stale-closeout.md",
+            QueueSyncDocumentScope::Current,
+            &current,
+            None,
+            &claims,
+        )
+        .unwrap();
+
+        apply_response_evidence_with(
+            &mut payload,
+            &current,
+            Some(&content),
+            &claims,
+            &[],
+            &[],
+            |_| HistoryResponse::Missing,
+        );
+
+        let item = &payload.reported_checkmark[0];
+        assert_eq!(item.operation, QueueSyncOperation::Reconcile);
+        assert_eq!(item.response_evidence, QueueSyncResponseEvidence::Missing);
+        assert!(item.missing_response_debt);
     }
 
     #[test]

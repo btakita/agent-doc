@@ -5123,7 +5123,7 @@ fn split_queue_effect_projection(
     (base.to_string(), Some(effect), state, prompt_id)
 }
 
-fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
+pub(crate) fn split_queue_effect_annotation(text: &str) -> (String, Option<usize>) {
     let (base, effect, _, prompt_id) = split_queue_effect_projection(text);
     let base = prompt_id.map_or(base.clone(), |id| {
         render_queue_prompt_id_annotation(&base, &id)

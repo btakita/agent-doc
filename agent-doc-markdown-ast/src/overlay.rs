@@ -519,6 +519,22 @@ fn response_summary_child_end(
     response_metadata_child_end(lines, opener_index, item_indent, "**Summary:** ")
 }
 
+fn response_state_metadata_child_end(
+    lines: &[&str],
+    opener_index: usize,
+    item_indent: usize,
+) -> Option<usize> {
+    [
+        "**State:** ",
+        "**Guidance:** ",
+        "**Worktree:** ",
+        "**Branch:** ",
+        "**Integration:** ",
+    ]
+    .into_iter()
+    .find_map(|prefix| response_metadata_child_end(lines, opener_index, item_indent, prefix))
+}
+
 fn nearest_prior_line_with_smaller_indent(
     lines: &[&str],
     opener_index: usize,
@@ -660,6 +676,7 @@ pub fn inert_list_child_end(
         .or_else(|| response_row_child_end(lines, opener_index, item_indent))
         .or_else(|| response_timestamp_child_end(lines, opener_index, item_indent))
         .or_else(|| response_summary_child_end(lines, opener_index, item_indent))
+        .or_else(|| response_state_metadata_child_end(lines, opener_index, item_indent))
         .or_else(|| response_choices_label_child_end(lines, opener_index, item_indent))
         .or_else(|| response_choice_child_end(lines, opener_index, item_indent))
         .or_else(|| response_next_actions_label_child_end(lines, opener_index, item_indent))
@@ -701,6 +718,7 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
             || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
             || response_summary_child_end(&normalized_lines, index, item_indent).is_some()
+            || response_state_metadata_child_end(&normalized_lines, index, item_indent).is_some()
             || response_choices_label_child_end(&normalized_lines, index, item_indent).is_some()
             || response_choice_child_end(&normalized_lines, index, item_indent).is_some()
             || response_next_actions_label_child_end(&normalized_lines, index, item_indent)
@@ -808,6 +826,7 @@ pub fn response_row_child_ranges(source: &str) -> Vec<(usize, usize)> {
         if let Some(end) = response_row_child_end(&lines, index, item_indent)
             .or_else(|| response_timestamp_child_end(&lines, index, item_indent))
             .or_else(|| response_summary_child_end(&lines, index, item_indent))
+            .or_else(|| response_state_metadata_child_end(&lines, index, item_indent))
             .or_else(|| response_choices_label_child_end(&lines, index, item_indent))
             .or_else(|| response_choice_child_end(&lines, index, item_indent))
             .or_else(|| response_next_actions_label_child_end(&lines, index, item_indent))
@@ -1941,6 +1960,11 @@ mod tests {
             "  - **Response [#r-0123456789ab]**\n",
             "    - **Timestamp:** 2026-11-01T14:43:00.000Z\n",
             "    - **Summary:** Deployment is blocked. Which target?\n",
+            "    - **State:** Unpublished local work remains.\n",
+            "    - **Guidance:** Keep this tree until integration.\n",
+            "    - **Worktree:** /worktrees/deploy\n",
+            "    - **Branch:** fix/deploy\n",
+            "    - **Integration:** pending named integration branch\n",
             "    - **Choices:**\n",
             "      - **staging**: Deploy to staging.\n",
             "        - Use staging and run the smoke test.\n",
@@ -1966,7 +1990,7 @@ mod tests {
             ]
         );
         let ranges = response_row_child_ranges(source);
-        assert_eq!(ranges.len(), 8, "{ranges:?}");
+        assert_eq!(ranges.len(), 13, "{ranges:?}");
         assert!(ranges.iter().any(|&(start, end)| {
             source[start..end].contains("**Timestamp:** 2026-11-01T14:43:00.000Z")
         }));

@@ -2717,6 +2717,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     struct ResponseCandidate {
         body: String,
         policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy,
+        binding_key: usize,
     }
 
     let normalized_after =
@@ -2733,13 +2734,20 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         })
         .collect::<Vec<_>>();
     let mut response_node_cursor = 0usize;
-    let response_candidates = queue_addressed_response_cells(response_body)
+    let mut inherited_policy = None;
+    let mut response_candidates = Vec::new();
+    for (binding_key, cell) in queue_addressed_response_cells(response_body)
         .into_iter()
-        .filter_map(|cell| {
-            if cell.heading_count == 0
-                || response_node_cursor + cell.heading_count > response_nodes.len()
-            {
-                return None;
+        .enumerate()
+    {
+        let policy = if cell.heading_count == 0 {
+            let Some(policy) = inherited_policy.clone() else {
+                continue;
+            };
+            policy
+        } else {
+            if response_node_cursor + cell.heading_count > response_nodes.len() {
+                continue;
             }
             let nodes =
                 &response_nodes[response_node_cursor..response_node_cursor + cell.heading_count];
@@ -2748,12 +2756,21 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response_nodes(
                     nodes,
                 );
-            (!policy.response_id().is_empty()).then_some(ResponseCandidate {
+            inherited_policy = Some(policy.clone());
+            policy
+        };
+        let has_scoped_outcome = cell.body.lines().any(|line| {
+            let line = line.trim();
+            !line.is_empty() && !response_summary_structural_line(line)
+        });
+        if !policy.response_id().is_empty() && has_scoped_outcome {
+            response_candidates.push(ResponseCandidate {
                 body: cell.body,
                 policy,
-            })
-        })
-        .collect::<Vec<_>>();
+                binding_key,
+            });
+        }
+    }
     let explicitly_addressed_sections = response_candidates
         .iter()
         .filter(|candidate| {
@@ -2771,6 +2788,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         policy: agent_doc_markdown_ast::exchange_tree::ResponseTurnCellPolicy::from_response(Some(
             response_body,
         )),
+        binding_key: usize::MAX,
     };
     if composite_candidate.policy.response_id().is_empty() {
         return Ok(after.to_string());
@@ -2850,8 +2868,16 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // decisions indistinguishable. Preserve intentional one-section batch
     // closeouts (for example several explicit `--done` ids), but a closeout
     // that supplies distinct sections must map those sections one-to-one.
-    let mut candidates_by_node_key = Vec::<(String, ResponseCandidate, bool)>::new();
-    let mut claimed_sections = HashSet::<usize>::new();
+    type ProjectionIdentity = (agent_doc_element_queue::QueueItemIdentity, Option<usize>);
+    let projection_identity = |text: &str| -> ProjectionIdentity {
+        let (base, effect) = document_queue::split_queue_effect_annotation(text);
+        (
+            agent_doc_element_queue::queue_prompt_stable_identity(&base),
+            effect,
+        )
+    };
+    let mut candidates_by_node_key =
+        Vec::<(String, ResponseCandidate, bool, ProjectionIdentity)>::new();
     for node in &newly_struck {
         // Queue rows can move between parents while an editor cut and a
         // retained closeout converge. The response echo then names the row's
@@ -2860,14 +2886,10 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         // normalized work-text identity. If duplicate text existed in the old
         // cut, the candidate set below still has to collapse to exactly one
         // response section; ambiguity remains a refusal.
-        let stable_identity =
-            agent_doc_element_queue::queue_prompt_stable_identity(node.item.work_text());
+        let stable_identity = projection_identity(node.item.work_text());
         let prior_spellings = before_nodes
             .iter()
-            .filter(|prior| {
-                agent_doc_element_queue::queue_prompt_stable_identity(prior.item.work_text())
-                    == stable_identity
-            })
+            .filter(|prior| projection_identity(prior.item.work_text()) == stable_identity)
             .map(|prior| prior.item.text.as_str())
             .collect::<Vec<_>>();
         let matching = response_candidates
@@ -2896,26 +2918,38 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .collect::<Vec<_>>();
 
         let candidate = match matching.as_slice() {
-            [index] if response_candidates.len() <= 1 || claimed_sections.insert(*index) => {
-                response_candidates[*index].clone()
-            }
-            [] if response_candidates.len() <= 1 || explicitly_addressed_sections <= 1 => {
+            [index] => response_candidates[*index].clone(),
+            [] if stable_identity.1.is_none()
+                && (response_candidates.len() <= 1 || explicitly_addressed_sections <= 1) =>
+            {
                 composite_candidate.clone()
             }
+            [] if explicitly_addressed_sections == 0 => composite_candidate.clone(),
             [] => anyhow::bail!(
                 "newly completed queue prompt has no unique response section: {}",
                 node.item.text.trim()
-            ),
-            [index] => anyhow::bail!(
-                "response section {} answers more than one newly completed queue prompt",
-                index + 1
             ),
             _ => anyhow::bail!(
                 "newly completed queue prompt matches multiple response sections: {}",
                 node.item.text.trim()
             ),
         };
-        candidates_by_node_key.push((node.node_key.clone(), candidate, true));
+        let has_local_report_state =
+            agent_doc_element_queue::queue_report_state_annotation(node.item.work_text())
+                .is_some_and(|(_, state)| {
+                    matches!(
+                        state,
+                        agent_doc_element_queue::QueueReportState::Local
+                            | agent_doc_element_queue::QueueReportState::PublishedLocal
+                    )
+                });
+        if has_local_report_state || response_has_unpublished_work_evidence(&candidate.body) {
+            anyhow::bail!(
+                "refusing to terminalize unpublished queue work: {}. Keep the row live until it has a scoped commit; when commit authorization is absent, retain the row with a blocking operator request. After commit, retain a tracked integration action until a PR or named integration-branch receipt exists",
+                node.item.text.trim()
+            );
+        }
+        candidates_by_node_key.push((node.node_key.clone(), candidate, true, stable_identity));
     }
 
     for node in operator_request_nodes {
@@ -2961,23 +2995,46 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
         };
         if !candidates_by_node_key
             .iter()
-            .any(|(node_key, _, _)| node_key == &node.node_key)
+            .any(|(node_key, _, _, _)| node_key == &node.node_key)
         {
             // Live request rows get the child subtree only. The inline
             // `; response: [#r-…]` completion note belongs to terminal rows.
-            candidates_by_node_key.push((node.node_key.clone(), candidate, false));
+            candidates_by_node_key.push((
+                node.node_key.clone(),
+                candidate,
+                false,
+                projection_identity(node.item.work_text()),
+            ));
         }
     }
 
     let mut after = after.to_string();
-    let mut projection_by_node_key = HashMap::<String, (String, String, bool)>::new();
-    for (node_key, candidate, annotate_inline_id) in candidates_by_node_key {
+    let mut identities_by_binding = HashMap::<usize, HashSet<ProjectionIdentity>>::new();
+    for (_, candidate, _, identity) in &candidates_by_node_key {
+        identities_by_binding
+            .entry(candidate.binding_key)
+            .or_default()
+            .insert(identity.clone());
+    }
+    let mut projection_by_node_key = HashMap::<String, (String, String, bool, bool)>::new();
+    for (node_key, candidate, annotate_inline_id, _) in candidates_by_node_key {
         let response_id = response_lookup_id_for_document(&after, &candidate.policy)?;
         if response_id.is_empty() {
             continue;
         }
         after = annotate_exchange_response_with_lookup_id(&after, &candidate.policy, &response_id)?;
-        projection_by_node_key.insert(node_key, (candidate.body, response_id, annotate_inline_id));
+        let shared_batch = identities_by_binding
+            .get(&candidate.binding_key)
+            .is_some_and(|identities| identities.len() > 1);
+        projection_by_node_key.insert(
+            node_key,
+            (
+                candidate.body,
+                response_id,
+                annotate_inline_id,
+                shared_batch,
+            ),
+        );
     }
 
     let nodes = match agent_doc_markdown_ast::mutations::item_nodes_all(&after, "queue") {
@@ -3002,7 +3059,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
     // once, then retain an inert request reference below later parents.
     let mut rendered_choice_packet_ids = HashSet::<String>::new();
     for node in &nodes {
-        let Some((response_body, response_id, annotate_inline_id)) =
+        let Some((response_body, response_id, annotate_inline_id, shared_batch)) =
             projection_by_node_key.get(&node.node_key)
         else {
             continue;
@@ -3018,12 +3075,15 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .find(|&&(start, end, _)| node.item.start_byte >= start && node.item.start_byte < end)
             .map_or(QueueResponseMode::Summary, |&(_, _, mode)| mode);
         let lookup_children = response_lookup_children(
-            before,
-            &node.item.text,
-            response_body,
-            response_id,
+            ResponseLookupContext {
+                source_document: before,
+                queue_item: &node.item.text,
+                response_body,
+                response_id,
+                addressed_at,
+                shared_batch: *shared_batch,
+            },
             response_mode,
-            addressed_at,
             &mut rendered_choice_packet_ids,
         );
         let missing_children = lookup_children
@@ -3135,13 +3195,18 @@ impl QueueResponseMode {
     }
 }
 
+struct ResponseLookupContext<'a> {
+    source_document: &'a str,
+    queue_item: &'a str,
+    response_body: &'a str,
+    response_id: &'a str,
+    addressed_at: &'a str,
+    shared_batch: bool,
+}
+
 fn response_lookup_children(
-    source_document: &str,
-    queue_item: &str,
-    response_body: &str,
-    response_id: &str,
+    context: ResponseLookupContext<'_>,
     mode: QueueResponseMode,
-    addressed_at: &str,
     rendered_choice_packet_ids: &mut HashSet<String>,
 ) -> Vec<String> {
     // `patch:exchange` is the response transport envelope. The exchange
@@ -3149,39 +3214,40 @@ fn response_lookup_children(
     // captured payload so it must cross the same visibility boundary explicitly.
     // Strip only one complete outer pair; literal examples inside an ordinary
     // response remain operator-visible.
-    let response_body = response_body_without_exchange_transport(response_body);
+    let response_body = response_body_without_exchange_transport(context.response_body);
     let mut children = Vec::new();
     match mode {
         QueueResponseMode::Summary => children.push(
             response_summary_row_child(
-                source_document,
-                queue_item,
+                context.source_document,
+                context.queue_item,
                 response_body,
-                response_id,
-                addressed_at,
+                context.response_id,
+                context.addressed_at,
                 rendered_choice_packet_ids,
+                context.shared_batch,
             )
             .expect("response lookup ids are canonical response ids"),
         ),
         QueueResponseMode::Inline => {
             let marker =
-                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(context.response_id)
                     .expect("response lookup ids are canonical response ids");
-            let details = response_details_child(response_body, response_id)
+            let details = response_details_child(response_body, context.response_id)
                 .expect("response lookup ids are canonical response ids");
             children.push(format!(
                 "{marker}\n- **Timestamp:** {}\n{}",
-                addressed_at.trim(),
+                context.addressed_at.trim(),
                 render_nested_response_content(&details)
             ));
         }
         QueueResponseMode::Lookup => {
             let marker =
-                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)
+                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(context.response_id)
                     .expect("response lookup ids are canonical response ids");
             children.push(format!(
                 "{marker}\n- **Timestamp:** {}",
-                addressed_at.trim()
+                context.addressed_at.trim()
             ));
         }
     }
@@ -3256,13 +3322,31 @@ fn response_summary_row_child(
     response_id: &str,
     addressed_at: &str,
     rendered_choice_packet_ids: &mut HashSet<String>,
+    shared_batch: bool,
 ) -> Option<String> {
     if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
         return None;
     }
-    let mut summary = response_summary_lead(response_body);
-    let next_actions = response_next_actions(response_body);
-    let packets = crate::operator_request_packet::blocking_operator_request_packets(response_body);
+    let mut summary = if shared_batch {
+        "This item was completed as part of a shared batch; no unrelated batch prose was copied into this row."
+            .to_string()
+    } else {
+        response_summary_lead(response_body)
+    };
+    let next_actions = if shared_batch {
+        Vec::new()
+    } else {
+        response_next_actions(response_body)
+    };
+    let packets = if shared_batch {
+        Vec::new()
+    } else {
+        crate::operator_request_packet::blocking_operator_request_packets(response_body)
+    };
+    let has_blocking_request = !packets.is_empty()
+        || response_body
+            .lines()
+            .any(|line| line.trim() == "**Operator input needed**");
     let mut choice_projections = Vec::new();
     for packet in packets {
         if !summary.contains(&packet.request) {
@@ -3280,10 +3364,69 @@ fn response_summary_row_child(
         .as_ref()
         .map(|projection| projection.choices.clone());
     let marker = agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(response_id)?;
+    let has_local_report_state = agent_doc_element_queue::queue_report_state_annotation(queue_item)
+        .is_some_and(|(_, state)| {
+            matches!(
+                state,
+                agent_doc_element_queue::QueueReportState::Local
+                    | agent_doc_element_queue::QueueReportState::PublishedLocal
+            )
+        });
+    let has_unpublished_response_evidence =
+        !shared_batch && response_has_unpublished_work_evidence(response_body);
+    let has_unpublished_work = has_local_report_state || has_unpublished_response_evidence;
+    let metadata_value = |label: &str| {
+        response_body.lines().find_map(|line| {
+            let line = line.trim().strip_prefix("- ").unwrap_or(line.trim());
+            line.strip_prefix(label)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+    };
     let mut child = format!(
         "{marker}\n- **Timestamp:** {}\n- **Summary:** {summary}",
         addressed_at.trim()
     );
+    child.push_str("\n- **State:** ");
+    if has_unpublished_work {
+        child.push_str("Unpublished local work remains.");
+    } else if has_blocking_request {
+        child.push_str("Waiting on operator input.");
+    } else if !next_actions.is_empty() {
+        child.push_str("Follow-up work remains.");
+    } else {
+        child.push_str("Complete.");
+    }
+    child.push_str("\n- **Guidance:** ");
+    if has_unpublished_work {
+        child.push_str(
+            "More work remains. Keep this tree until commit/install/publication receipts resolve the local work, or create a tracked follow-up carrying its worktree, branch, and required next action.",
+        );
+        child.push_str("\n- **Worktree:** ");
+        child.push_str(
+            &metadata_value("**Worktree:**")
+                .unwrap_or_else(|| "not recorded; add it to the tracked follow-up".to_string()),
+        );
+        child.push_str("\n- **Branch:** ");
+        child.push_str(
+            &metadata_value("**Branch:**")
+                .unwrap_or_else(|| "not recorded; add it to the tracked follow-up".to_string()),
+        );
+        child.push_str("\n- **Integration:** ");
+        child.push_str(&metadata_value("**Integration:**").unwrap_or_else(|| {
+            "pending; retain a tracked action until a PR or named integration-branch receipt exists"
+                .to_string()
+        }));
+    } else if has_blocking_request {
+        child.push_str("More work remains. Keep this tree and answer the operator request below.");
+    } else if !next_actions.is_empty() {
+        child.push_str("More work remains. Keep this tree and follow the next actions below.");
+    } else {
+        child.push_str(
+            "Safe to delete this completed tree; the item is complete and has no remaining tracked or unpublished work.",
+        );
+    }
     if let Some(projection) = decision_projection {
         if let Some(context) = projection.context {
             child.push_str("\n- **Context:** ");
@@ -3417,6 +3560,24 @@ fn normalized_choice_label(label: &str) -> String {
         .trim_end_matches("(Recommended)")
         .trim()
         .to_ascii_lowercase()
+}
+
+fn response_has_unpublished_work_evidence(response_body: &str) -> bool {
+    let normalized = response_body.to_ascii_lowercase();
+    [
+        "remains uncommitted",
+        "still uncommitted",
+        "is uncommitted",
+        "uncommitted and uninstalled",
+        "remains uninstalled",
+        "still uninstalled",
+        "is uninstalled",
+        "not committed",
+        "not installed",
+        "remains local",
+    ]
+    .into_iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 fn response_next_actions(response_body: &str) -> Vec<String> {
@@ -3850,6 +4011,140 @@ mod tests {
         assert!(
             document_queue::prompts(&entries).is_empty(),
             "generated response and choice descendants must stay inert:\n{entries:#?}\n{annotated}"
+        );
+    }
+
+    #[test]
+    fn one_heading_batch_scopes_each_echo_and_leaves_delete_or_continue_guidance() {
+        let response = concat!(
+            "### Re: batch closeout — test\n\n",
+            "> **Queue prompt:** Publish alpha [#q-alpha] ⟦published⟧\n\n",
+            "**Outcome:** Alpha shipped and its pull request is merged.\n\n",
+            "> **Queue prompt:** Fix beta [#q-beta] ⟦published⟧\n\n",
+            "**Current state:** Beta is fixed and published.\n",
+            "**Next action:** Verify beta in production.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- Publish alpha [#q-alpha] ⟦published⟧\n- Fix beta [#q-beta] ⟦published⟧\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ~~Publish alpha [#q-alpha] ⟦published⟧~~\n- ~~Fix beta [#q-beta] ⟦published⟧~~\n",
+            response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        let queue = element::parse(&annotated)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let queue = queue.content(&annotated);
+        let alpha_start = queue.find("- ~~Publish alpha").unwrap();
+        let beta_start = queue.find("- ~~Fix beta").unwrap();
+        let alpha = &queue[alpha_start..beta_start];
+        let beta = &queue[beta_start..];
+
+        assert!(alpha.contains("**Summary:** **Outcome:** Alpha shipped"), "{alpha}");
+        assert!(
+            alpha.contains("**Guidance:** Safe to delete this completed tree"),
+            "{alpha}"
+        );
+        assert!(!alpha.contains("Beta is fixed"), "{alpha}");
+        assert!(
+            beta.contains("**Summary:** **Current state:** Beta is fixed and published."),
+            "{beta}"
+        );
+        assert!(
+            beta.contains("**Guidance:** More work remains. Keep this tree and follow the next actions below."),
+            "{beta}"
+        );
+        assert!(!beta.contains("Alpha shipped"), "{beta}");
+        let entries = document_queue::parse(queue).unwrap();
+        assert!(
+            document_queue::prompts(&entries).is_empty(),
+            "generated state and guidance must stay inert:\n{entries:#?}\n{queue}"
+        );
+    }
+
+    #[test]
+    fn uncommitted_uninstalled_outcome_cannot_terminalize_the_queue_row() {
+        let response = concat!(
+            "### Re: state drift repair — test\n\n",
+            "> **Queue prompt:** do [#adadvprstatedrift]\n\n",
+            "**Current state:** The patch remains uncommitted and uninstalled.\n",
+            "**Worktree:** `/worktrees/adadvprstatedrift`\n",
+            "**Branch:** `fix/adadvprstatedrift`\n",
+        );
+        let before = queue_doc("- do [#adadvprstatedrift]\n");
+        let after = queue_doc("- ~~do [#adadvprstatedrift]~~\n");
+
+        let error = annotate_newly_struck_queue_items_with_response_id(&before, &after, response)
+            .expect_err("a dirty isolated worktree is not terminal completion");
+        let error = error.to_string();
+        assert!(error.contains("Keep the row live until it has a scoped commit"), "{error}");
+        assert!(error.contains("blocking operator request"), "{error}");
+        assert!(error.contains("PR or named integration-branch receipt"), "{error}");
+    }
+
+    #[test]
+    fn canonical_duplicate_rows_share_one_response_lifecycle_projection() {
+        let response = concat!(
+            "### Re: canonical item — test\n\n",
+            "> **Queue prompt:** do [#canonical-work]\n\n",
+            "**Outcome:** The canonical work is complete and verified.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- ### docs\n  - do [#canonical-work]\n- ### main\n  - do [#canonical-work]\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ### docs\n  - ~~do [#canonical-work]~~\n- ### main\n  - ~~do [#canonical-work]~~\n",
+            response,
+        );
+
+        let annotated =
+            annotate_newly_struck_queue_items_with_response_id(&before, &after, response).unwrap();
+        assert_eq!(
+            annotated
+                .matches("**Summary:** **Outcome:** The canonical work is complete and verified.")
+                .count(),
+            2,
+            "both projections must follow the canonical item:\n{annotated}"
+        );
+        assert_eq!(
+            annotated
+                .matches("**Guidance:** Safe to delete this completed tree")
+                .count(),
+            2,
+            "both terminal leaves need explicit deletion guidance:\n{annotated}"
+        );
+    }
+
+    #[test]
+    fn one_effect_echo_cannot_close_a_distinct_effect_row() {
+        let response = concat!(
+            "### Re: publish effect one — test\n\n",
+            "> **Queue prompt:** release + publish ⟦effect:1⟧\n\n",
+            "**Outcome:** Effect one is published.\n",
+        );
+        let before = doc_with_queue_and_exchange(
+            "- release + publish ⟦effect:1⟧\n- release + publish ⟦effect:2⟧\n",
+            "",
+        );
+        let after = doc_with_queue_and_exchange(
+            "- ~~release + publish ⟦effect:1⟧~~\n- ~~release + publish ⟦effect:2⟧~~\n",
+            response,
+        );
+
+        let error = annotate_newly_struck_queue_items_with_response_id(&before, &after, response)
+            .expect_err("effect:2 is a separate stable effect and was not answered");
+        assert!(
+            error
+                .to_string()
+                .contains("newly completed queue prompt has no unique response section"),
+            "{error:#}"
         );
     }
 
@@ -4450,8 +4745,8 @@ mod tests {
             annotated
                 .matches("**Reference**: [#subagent-operator-request-shared-release]")
                 .count(),
-            1,
-            "the second composite parent must link to the canonical request:\n{annotated}"
+            0,
+            "a row-scoped request must not appear under unrelated completed rows:\n{annotated}"
         );
         assert_eq!(
             annotated

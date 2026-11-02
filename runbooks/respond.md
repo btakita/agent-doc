@@ -18,6 +18,17 @@ and the pending granular-flags-only rule. This runbook carries the rest.
   `response="summary"` projection; do not put essential action after it. A
   blocking operator-request packet remains separate and canonical so the
   binary can append its complete request and every choice to that summary.
+- **Make every terminal queue leaf self-contained (`#adrollupsummaryscope`).** Give
+  each queue prompt its own substantive outcome/current-state paragraph and
+  explicit next step. Do not use one cumulative rollup as several rows' summary;
+  `agent:exchange` is archival and cannot be the only place that explains
+  whether a tree is safe to delete. A completed leaf must say either that it is
+  safe to delete or that more work remains. When work remains, keep a tracked
+  action in the live tree with its worktree, branch, required next action, and
+  integration target. Do not terminalize a dirty isolated worktree: require a
+  scoped commit first, keep a blocking operator request when commit authority is
+  missing, then retain integration work until a haiven-dev PR or an agent-doc
+  named integration-branch receipt exists.
 - **Native choice prompts are document-visible (`#choicecheckpoint`).** Before
   invoking a harness-native choice UI (Claude Code `AskUserQuestion`, Codex
   `request_user_input`, or the active harness's equivalent), materialize the

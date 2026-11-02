@@ -872,26 +872,56 @@ pub fn run_closeout_pending_maintenance(
     if !commit_required {
         return Ok(());
     }
-    if !closeout_pending_maintenance_required(file, force_disk)? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "closeout_pending_maintenance_skipped file={} basis=no_tracked_work_closeout",
-                file.display()
-            ),
-        );
+    let need = closeout_pending_maintenance_required(file, force_disk)?;
+    if need == CloseoutPendingMaintenanceNeed::None {
+        log_closeout_pending_maintenance_skip(file);
         return Ok(());
     }
-    run_pending_maintenance(file, force_disk)
+    match run_pending_maintenance(file, force_disk) {
+        Ok(()) => Ok(()),
+        Err(err)
+            if need == CloseoutPendingMaintenanceNeed::StatusOnly
+                && !force_disk
+                && editor_authority_resolution_unavailable(&err) =>
+        {
+            // Managed status is derived housekeeping. Try to land it in the
+            // response commit when the authority is writable, but never turn
+            // a listener without a registered replica into a new closeout
+            // refusal. A later admission can reconcile the projection.
+            log_closeout_pending_maintenance_skip(file);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
-fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Result<bool> {
+fn log_closeout_pending_maintenance_skip(file: &Path) {
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "closeout_pending_maintenance_skipped file={} basis=no_tracked_work_closeout",
+            file.display()
+        ),
+    );
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseoutPendingMaintenanceNeed {
+    None,
+    StatusOnly,
+    Required,
+}
+
+fn closeout_pending_maintenance_required(
+    file: &Path,
+    force_disk: bool,
+) -> Result<CloseoutPendingMaintenanceNeed> {
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
         // An abandoned cycle has no captured response to publish. Preserve the
         // final-gate refusal instead of letting derived status maintenance
         // start a new write/controller path ahead of that refusal.
         if state.phase == agent_doc_turn::CyclePhase::Abandoned {
-            return Ok(false);
+            return Ok(CloseoutPendingMaintenanceNeed::None);
         }
         if state.had_pending_mutations
             || state.pending_added_this_cycle
@@ -900,10 +930,10 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
             || !state.pending_gated_ids.is_empty()
             || !state.pending_added_ids.is_empty()
         {
-            return Ok(true);
+            return Ok(CloseoutPendingMaintenanceNeed::Required);
         }
         if state.tracked_work_maintenance_required_at_preflight == Some(true) {
-            return Ok(true);
+            return Ok(CloseoutPendingMaintenanceNeed::Required);
         }
     }
 
@@ -935,17 +965,31 @@ fn closeout_pending_maintenance_required(file: &Path, force_disk: bool) -> Resul
         }
         Err(err) => return Err(err),
     };
-    content_requires_closeout_pending_maintenance(&content)
+    content_closeout_pending_maintenance_need(&content)
 }
 
-fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> {
-    Ok(agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
+fn content_closeout_pending_maintenance_need(
+    content: &str,
+) -> Result<CloseoutPendingMaintenanceNeed> {
+    if agent_doc_document::tracked_work_projection::tracked_work_maintenance_required(content)
         || agent_doc_element_done::prune_proven_redundant_terminal_debris(content).is_some()
-        // The managed open-items status is derived from queue and tracked-work
-        // state that this closeout may have changed. Reconcile it before the
-        // closeout commit even when no legacy tracked-work maintenance is due,
-        // so status never lands in a second recovery commit.
-        || agent_doc_work_projection::reconcile_managed_status_open_items(content)?.is_some())
+    {
+        return Ok(CloseoutPendingMaintenanceNeed::Required);
+    }
+    // The managed open-items status is derived from queue and tracked-work
+    // state that this closeout may have changed. Reconcile it before the
+    // closeout commit when possible, while retaining its weaker housekeeping
+    // classification for an unavailable editor replica.
+    if agent_doc_work_projection::reconcile_managed_status_open_items(content)?.is_some() {
+        return Ok(CloseoutPendingMaintenanceNeed::StatusOnly);
+    }
+    Ok(CloseoutPendingMaintenanceNeed::None)
+}
+
+#[cfg(test)]
+fn content_requires_closeout_pending_maintenance(content: &str) -> Result<bool> {
+    Ok(content_closeout_pending_maintenance_need(content)?
+        != CloseoutPendingMaintenanceNeed::None)
 }
 fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
     let detail = err
@@ -956,6 +1000,7 @@ fn editor_authority_resolution_unavailable(err: &anyhow::Error) -> bool {
     detail.contains("editor_attached_model_missing")
         || detail.contains("editor_sync_pending")
         || detail.contains("recovery=retry_without_disk_write")
+        || detail.contains("recovery=await_editor_replica_no_disk_write")
 }
 
 fn editor_authority_resolution_reason(err: &anyhow::Error) -> &'static str {

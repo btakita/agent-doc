@@ -383,8 +383,9 @@ fn a_row_added_under_a_struck_parent_is_dispatched_as_a_leaf() {
     );
     assert!(dispatch.iter().all(|item| item != parent), "{dispatch:#?}");
     assert!(
-        without_admitted_queue_ids(&run_body(&doc, "run"))
-            .starts_with(&format!("- {parent}\n  - ~~{answered}~~\n  - 📥 {added}\n")),
+        without_admitted_queue_ids(&run_body(&doc, "run")).starts_with(&format!(
+            "- ### {parent}\n  - ~~{answered}~~\n  - 📥 {added}\n"
+        )),
         "{}",
         run_body(&doc, "run")
     );
@@ -444,7 +445,7 @@ fn a_struck_parent_over_an_unstruck_child_is_lazily_reopened() {
     );
     assert!(
         without_admitted_queue_ids(&run_body(&doc, "run"))
-            .starts_with(&format!("- {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
+            .starts_with(&format!("- ### {PARENT}\n  - 📥 {}\n", CHILDREN[0])),
         "{}",
         run_body(&doc, "run")
     );
@@ -711,7 +712,7 @@ fn ack_id_closes_a_reported_todo_backed_row_and_keeps_the_todo_open() {
     assert_ok(&closed, "queue consume --ack-id on the reported row");
     let after = fs::read_to_string(&doc).unwrap();
     let body = run_body(&doc, "run");
-    assert!(body.starts_with("- ~~do [#ahfe]~~"), "{body}");
+    assert!(body.starts_with("- ### ~~do [#ahfe]~~"), "{body}");
     assert!(body.contains("separate flat head\n"), "{body}");
     assert!(
         after.contains("- [ ] [#ahfe] live-check the IDE\n"),
@@ -807,7 +808,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     );
     let body = without_admitted_queue_ids(&run_body(&doc, "run"));
     assert!(
-        body.contains(&format!("- [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
+        body.contains(&format!("- ### [#{REQUEST_ID}]\n  - 📥 {ANSWER}\n")),
         "the live answer leaf reopens only its context parent:\n{body}"
     );
     assert!(
@@ -822,7 +823,7 @@ fn a_live_answer_leaf_lazily_reopens_its_struck_parent() {
     assert_ok(&output, "respond");
     let body = run_body(&doc, "run");
     assert!(
-        body.starts_with(&format!("- ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
+        body.starts_with(&format!("- ### ~~{PAUSED_ROW} [#{REQUEST_ID}]~~")),
         "the exact echo strikes the row once its request is closed:\n{body}"
     );
     let state = preflight_json(dir.path(), &doc);

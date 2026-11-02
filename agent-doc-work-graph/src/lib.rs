@@ -139,14 +139,9 @@ fn push_managed_open_item(
     identity: String,
     display_id: Option<String>,
     text: &str,
-    component: &str,
-    state: &str,
+    source: ManagedOpenItemSource,
     summary_priority: u8,
 ) {
-    let source = ManagedOpenItemSource {
-        component: component.to_string(),
-        state: state.to_string(),
-    };
     if let Some(index) = indexes.get(&identity).copied() {
         let item = &mut items[index];
         if !item.sources.contains(&source) {
@@ -214,8 +209,10 @@ pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> 
                 identity,
                 display_id,
                 &summary,
-                "queue",
-                "open",
+                ManagedOpenItemSource {
+                    component: "queue".to_string(),
+                    state: "open".to_string(),
+                },
                 3,
             );
         }
@@ -244,8 +241,10 @@ pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> 
                 identity,
                 display_id,
                 todo.action,
-                "todo",
-                state,
+                ManagedOpenItemSource {
+                    component: "todo".to_string(),
+                    state: state.to_string(),
+                },
                 2,
             );
         }
@@ -269,8 +268,10 @@ pub fn managed_status_open_items(content: &str) -> Result<Vec<ManagedOpenItem>> 
                     item.id.clone(),
                     Some(item.id),
                     &item.text,
-                    component_name,
-                    state,
+                    ManagedOpenItemSource {
+                        component: component_name.to_string(),
+                        state: state.to_string(),
+                    },
                     1,
                 );
             }

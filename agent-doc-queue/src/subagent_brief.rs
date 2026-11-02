@@ -421,11 +421,15 @@ pub fn subagent_authorization_with_presets(
         Some(prompt) if agent_doc_prompt_context::lineage::split(prompt).0.is_some() => prompt,
         Some(prompt) => {
             computed = crate::queue_response::submitted_queue_prompt_with_context(content, item);
-            let packet = agent_doc_prompt_context::lineage::split(&computed)
-                .0
-                .expect("canonical queue prompt has context");
-            attached = agent_doc_prompt_context::lineage::attach(&packet, prompt);
-            attached.as_str()
+            if let Some(packet) = agent_doc_prompt_context::lineage::split(&computed).0 {
+                attached = agent_doc_prompt_context::lineage::attach(&packet, prompt);
+                attached.as_str()
+            } else {
+                // Queue slash commands such as `/goal ...` intentionally have no
+                // lineage envelope. Preserve the submitted command verbatim
+                // instead of assuming every canonical queue prompt has context.
+                prompt
+            }
         }
         None => {
             computed = crate::queue_response::submitted_queue_prompt_with_context(content, item);
@@ -899,6 +903,28 @@ mod tests {
         assert!(p.contains("without asking the operator to repeat those words"));
         assert!(p.contains("does not itself grant a harness-native tool permission"));
         assert!(!p.contains(UNRESOLVED_AUTHORIZATION_MARKER));
+    }
+
+    #[test]
+    fn slash_command_queue_prompt_without_context_builds_a_subagent_brief() {
+        let item = "/goal Extract target haiven-sdk-* repos from the haiven-sdk repo.";
+        let content = doc("", "subagents", &[item], &[]);
+
+        let auth = subagent_authorization("sdk-release.md", &content, item);
+
+        assert_eq!(auth.item, item);
+        assert!(auth.prompt_context.is_none());
+        assert!(
+            auth.subagent_prompt_preamble
+                .contains(&format!("Queue item (verbatim):\n> {item}\n")),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
+        assert!(
+            auth.subagent_prompt_preamble.contains(item),
+            "{}",
+            auth.subagent_prompt_preamble
+        );
     }
 
     #[test]

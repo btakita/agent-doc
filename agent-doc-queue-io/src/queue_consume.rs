@@ -721,6 +721,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
             std::slice::from_ref(&row.lineage),
             response_first_line.as_deref(),
         );
+        require_integrated_reported_repo_work_for_heads(
+            file,
+            &content,
+            std::slice::from_ref(&row.lineage),
+        )?;
         let plan = QueueConsumptionPlan {
             consumed_text: row.lineage.clone(),
             consumed_texts: vec![row.lineage.clone()],
@@ -880,6 +885,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_selector_and_outcome(
         std::slice::from_ref(&observed_head),
         response_first_line.as_deref(),
     );
+    require_integrated_reported_repo_work_for_heads(
+        file,
+        &content,
+        std::slice::from_ref(&observed_head),
+    )?;
 
     let plan = QueueConsumptionPlan {
         consumed_text: observed_head.clone(),
@@ -1102,6 +1112,8 @@ fn consume_queue_prompts_with_options_fenced(
         );
         return Ok(None);
     }
+
+    require_integrated_reported_repo_work_for_heads(file, &content, &plan.consumed_texts)?;
 
     // `#subagentcompletionfeedback`: report-complete's cell is a transient
     // recovery placeholder, not the integrated response. Retire only cells for
@@ -1824,6 +1836,7 @@ fn strike_free_text_queue_heads_with_proof(
     let keys = projected.node_keys;
     let new_document =
         annotate_newly_struck_rows(&content, &projected.target_content, &addressed_at)?;
+    require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
     // strike them by the snapshot's own node keys (keys are position/hash derived
@@ -1993,6 +2006,98 @@ fn release_claims_on_struck_heads(file: &Path, before: &str, struck_heads: &[Str
     }
 }
 
+/// Refuse every queue mutation that would close a reported repository-work
+/// attempt before its durable lineage proves the worker result reached the
+/// designated sink (`#subagentintegrationproof`). Reported attempts consume no
+/// worker capacity, but they remain coordinator-owned closeout debt until this
+/// check succeeds. Attempts whose lineage has no repository facts are
+/// explicitly prose-only and remain closable.
+pub fn require_integrated_reported_repo_work_for_heads(
+    file: &Path,
+    content: &str,
+    heads: &[String],
+) -> Result<()> {
+    if heads.is_empty() {
+        return Ok(());
+    }
+    let identities = heads
+        .iter()
+        .map(|head| agent_doc_queue::queue_claim::claim_identity(head))
+        .collect::<Vec<_>>();
+    let mut verified = Vec::new();
+    for claim in crate::queue_claim::claim_states_for_content(file, content)? {
+        if claim.state != agent_doc_queue::queue_claim::QueueClaimState::Reported
+            || !identities.contains(&claim.identity)
+        {
+            continue;
+        }
+        crate::queue_lineage::require_integrated_repo_work(
+            file,
+            &claim.item_text,
+            claim.generation,
+        )?;
+        verified.push((claim.identity, claim.generation));
+    }
+
+    // `queue release` intentionally removes the live claim after a reported
+    // handback. Its exact-attempt receipt still governs the row and therefore
+    // carries the same integration obligation. Generation-zero legacy receipts
+    // predate lineage and remain prose-only compatibility evidence.
+    let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
+    if reported.is_empty() {
+        return Ok(());
+    }
+    let receipts = crate::claim_release_receipt::load(file)?.receipts;
+    for (head, identity) in heads.iter().zip(&identities) {
+        if !reported.claims(head) {
+            continue;
+        }
+        let Some(receipt) = receipts
+            .iter()
+            .filter(|receipt| receipt.identity == *identity && receipt.generation > 0)
+            .max_by_key(|receipt| receipt.generation)
+        else {
+            continue;
+        };
+        if verified
+            .iter()
+            .any(|(seen, generation)| seen == identity && *generation == receipt.generation)
+        {
+            continue;
+        }
+        crate::queue_lineage::require_integrated_repo_work_if_recorded(
+            file,
+            &receipt.item_text,
+            receipt.generation,
+        )?;
+    }
+    Ok(())
+}
+
+/// Apply the reported-repository-work guard to every row a terminal successor
+/// projection closes. Non-retaining queues delete their completed final row
+/// instead of keeping a struck tombstone, so this deliberately compares live
+/// identities rather than using `heads_struck_by_successor`, whose cancellation
+/// semantics exclude deleted rows. Call this only for a projection already
+/// classified as a completion/strike target.
+pub fn require_integrated_reported_repo_work_for_successor(
+    file: &Path,
+    before: &str,
+    after: &str,
+) -> Result<()> {
+    let after_live = agent_doc_queue::queue_consume::live_work_identities(after);
+    let mut seen = HashSet::new();
+    let closed = agent_doc_queue::queue_continuation::live_queue_head_texts(before)
+        .context("integration closeout guard: failed to parse live queue heads")?
+        .into_iter()
+        .filter(|head| {
+            let identity = agent_doc_queue::queue_claim::claim_identity(head);
+            !after_live.contains(&identity) && seen.insert(identity)
+        })
+        .collect::<Vec<_>>();
+    require_integrated_reported_repo_work_for_heads(file, before, &closed)
+}
+
 /// Recover an answered-head projection from the durable captured response.
 ///
 /// This is the explicit recovery counterpart to the controller subscription:
@@ -2119,6 +2224,7 @@ pub fn prune_noise_queue_heads(
     );
     let new_document = retirement.content;
     let struck_heads = retirement.struck_heads;
+    require_integrated_reported_repo_work_for_heads(file, &content, &struck_heads)?;
 
     // Snapshot sync: clear the same noise heads in the snapshot (its own node keys /
     // spans, derived independently) so required closeouts prove both sides converge.
@@ -2437,6 +2543,7 @@ fn converge_id_backed_head_strike(
     // re-add of the same `[#id]` cannot inherit `🔄` / `☑️` from this attempt.
     let struck_heads =
         agent_doc_queue::queue_consume::heads_struck_by_successor(&content, &new_document);
+    require_integrated_reported_repo_work_for_heads(file, &content, &struck_heads)?;
     // Snapshot sync: strike the same id-backed head in the snapshot by its own node
     // keys so required closeouts prove both sides converge on the struck state.
     let new_snapshot = match load_snapshot_recovery_only(file, "orphan id head snapshot sync") {
@@ -2813,6 +2920,7 @@ pub fn mark_completed_queue_prompts_for_done_ids(
     if marked_texts.is_empty() {
         return Ok(0);
     }
+    require_integrated_reported_repo_work_for_heads(file, &content, &marked_texts)?;
     let (new_document, marked_count) =
         agent_doc_queue::queue_consume::mark_queue_prompts_completed_by_done_ids_in_content(
             &content, done_ids,
@@ -9329,6 +9437,189 @@ Old.
         )
         .unwrap();
         claimed.generation
+    }
+
+    fn reported_committed_repo_work(
+        root: &Path,
+        doc: &Path,
+        item: &str,
+        owner: &str,
+    ) -> (u64, String, String) {
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {} failed: {}",
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "queue-test@example.com"]);
+        git(&["config", "user.name", "Queue Test"]);
+        std::fs::write(root.join("base.txt"), "base\n").unwrap();
+        git(&["add", "base.txt"]);
+        git(&["commit", "-qm", "base"]);
+        let base = git(&["rev-parse", "HEAD"]);
+        let branch = git(&["branch", "--show-current"]);
+        let generation = running_claim(doc, item, owner);
+        crate::queue_lineage::record(
+            doc,
+            item,
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Attached,
+                worker_id: Some(format!("worker:{owner}")),
+                repo_path: Some(root.to_path_buf()),
+                worktree_path: Some(root.to_path_buf()),
+                branch: Some(branch.clone()),
+                base_sha: Some(base),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        std::fs::write(root.join("work.txt"), format!("{item}\n")).unwrap();
+        git(&["add", "work.txt"]);
+        git(&["commit", "-qm", "worker work"]);
+        let source = git(&["rev-parse", "HEAD"]);
+        crate::queue_lineage::record(
+            doc,
+            item,
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Committed,
+                source_sha: Some(source.clone()),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+        crate::queue_claim::report_attempt(doc, item, Some(generation)).unwrap();
+        (generation, source, branch)
+    }
+
+    fn record_integrated_repo_work(
+        doc: &Path,
+        item: &str,
+        generation: u64,
+        source: &str,
+        sink_ref: &str,
+    ) {
+        crate::queue_lineage::record(
+            doc,
+            item,
+            generation,
+            crate::queue_lineage::RecordRequest {
+                kind: crate::queue_lineage::QueueLineageEventKind::Integrated,
+                source_sha: Some(source.to_string()),
+                integration_sha: Some(source.to_string()),
+                sink_ref: Some(sink_ref.to_string()),
+                integration_method: Some(crate::queue_lineage::IntegrationMethod::FastForward),
+                ..crate::queue_lineage::RecordRequest::default()
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn done_id_keeps_reported_repository_work_live_until_sink_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("done.md");
+        let content = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:queue subagents priority go -->\n",
+            "- do [#repo-done]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (generation, source, sink_ref) = reported_committed_repo_work(
+            dir.path(),
+            &doc,
+            "#repo-done",
+            "subagent:repo-done",
+        );
+
+        let refusal = mark_completed_queue_prompts_for_done_ids(
+            &doc,
+            &["repo-done".to_string()],
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(refusal.contains("is not integrated"), "{refusal}");
+        assert!(std::fs::read_to_string(&doc).unwrap().contains("- do [#repo-done]"));
+
+        record_integrated_repo_work(&doc, "#repo-done", generation, &source, &sink_ref);
+        assert_eq!(
+            mark_completed_queue_prompts_for_done_ids(
+                &doc,
+                &["repo-done".to_string()],
+                false,
+            )
+            .unwrap(),
+            1
+        );
+        assert!(std::fs::read_to_string(&doc).unwrap().contains("~~do [#repo-done]~~"));
+    }
+
+    #[test]
+    fn automatic_answered_strike_keeps_reported_repository_work_live_until_sink_proof() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
+        let doc = dir.path().join("auto.md");
+        let item = "integrate the completed repository patch";
+        let response = format!(
+            "### Re: integration\n\n> **Queue prompt:** {item}\n\nIntegrated and verified.\n"
+        );
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents priority go -->\n",
+                "- {}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response, item,
+        );
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (generation, source, sink_ref) = reported_committed_repo_work(
+            dir.path(),
+            &doc,
+            item,
+            "subagent:auto-repo",
+        );
+
+        let refusal = strike_answered_free_text_queue_heads(&doc, &response, true)
+            .unwrap_err()
+            .to_string();
+        assert!(refusal.contains("is not integrated"), "{refusal}");
+        assert!(std::fs::read_to_string(&doc).unwrap().contains(&format!("- {item}\n")));
+
+        record_integrated_repo_work(&doc, item, generation, &source, &sink_ref);
+        assert_eq!(
+            strike_answered_free_text_queue_heads(&doc, &response, true).unwrap(),
+            1
+        );
+        let closed = std::fs::read_to_string(&doc).unwrap();
+        assert!(!closed.contains(&format!("- {item}\n")), "{closed}");
+        assert!(!closed.contains("queue_active: true"), "{closed}");
     }
 
     #[test]

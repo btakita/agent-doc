@@ -2543,6 +2543,11 @@ fn apply_pending_and_status_mutations_with_mode(
                                     planned,
                                     &queue_resolution_ids,
                                 )?;
+                                queue_consume::require_integrated_reported_repo_work_for_successor(
+                                    file,
+                                    content,
+                                    &projected,
+                                )?;
                                 let consumed_count = plan
                                     .as_ref()
                                     .map(|plan| plan.consumed_texts.len())

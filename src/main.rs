@@ -459,17 +459,23 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         actor.submit(
             agent_doc_document_realtime::session_ops::SessionOpKind::QueueHead,
             move |_ctx| {
-                let result = agent_doc_document_realtime_io::with_controller_document_mutation(
-                    || {
-                        agent_doc_write_converge_io::converge_document_or_disk(
-                            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
-                            &file,
-                            &invocation.target_content,
-                            &invocation.expected_content,
-                            "answered_free_text_projection",
-                        )
-                    },
-                );
+                let result =
+                    agent_doc_queue_io::queue_consume::require_integrated_reported_repo_work_for_successor(
+                        &file,
+                        &invocation.expected_content,
+                        &invocation.target_content,
+                    )
+                    .and_then(|()| {
+                        agent_doc_document_realtime_io::with_controller_document_mutation(|| {
+                            agent_doc_write_converge_io::converge_document_or_disk(
+                                &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+                                &file,
+                                &invocation.target_content,
+                                &invocation.expected_content,
+                                "answered_free_text_projection",
+                            )
+                        })
+                    });
                 match &result {
                     Ok(()) => {
                         let snapshot_projection = (|| -> anyhow::Result<()> {

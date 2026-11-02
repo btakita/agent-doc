@@ -996,6 +996,28 @@ pub fn query(
 /// mechanically verified `Integrated` receipt (`#subagentintegrationproof`).
 /// Attempts with no repository/worktree/source facts are explicitly prose-only.
 pub fn require_integrated_repo_work(file: &Path, item: &str, generation: u64) -> Result<()> {
+    require_integrated_repo_work_inner(file, item, generation, true)
+}
+
+/// Apply [`require_integrated_repo_work`] when durable lineage exists for an
+/// older released attempt. A legacy prose-only release receipt may predate the
+/// lineage ledger entirely; absence therefore remains explicitly prose-only at
+/// this compatibility boundary, while any recorded repository facts still
+/// fail closed until their integration receipt verifies.
+pub fn require_integrated_repo_work_if_recorded(
+    file: &Path,
+    item: &str,
+    generation: u64,
+) -> Result<()> {
+    require_integrated_repo_work_inner(file, item, generation, false)
+}
+
+fn require_integrated_repo_work_inner(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    require_attempt: bool,
+) -> Result<()> {
     let identity = claim_identity(item);
     let ledger = load(file)?;
     let attempt = ledger
@@ -1003,14 +1025,17 @@ pub fn require_integrated_repo_work(file: &Path, item: &str, generation: u64) ->
         .iter()
         .find(|attempt| {
             attempt.generation == generation && attempt.matches_identity(&identity)
-        })
-        .with_context(|| {
-            format!(
-                "no queue lineage attempt for {item:?} generation {generation}; keep the reported row live and inspect `agent-doc queue lineage {} --item {:?} --generation {generation}`",
-                file.display(),
-                item,
-            )
-        })?;
+        });
+    let Some(attempt) = attempt else {
+        if !require_attempt {
+            return Ok(());
+        }
+        return Err(anyhow::anyhow!(
+            "no queue lineage attempt for {item:?} generation {generation}; keep the reported row live and inspect `agent-doc queue lineage {} --item {:?} --generation {generation}`",
+            file.display(),
+            item,
+        ));
+    };
     let carries_repo_work = attempt.events.iter().any(|event| {
         event.repo_path.is_some()
             || event.worktree_path.is_some()

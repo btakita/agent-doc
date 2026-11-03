@@ -379,7 +379,9 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      unique `mktemp` path (one subagent's commit once carried a sibling's
      message).
   7. As soon as a subagent reports back, run
-     `agent-doc queue report-complete <FILE> --item <...> --generation <N> --response '<worker response>'`.
+     `agent-doc queue report-complete <FILE> --item <...> --generation <N> --prose-only --response '<worker response>'`
+     for prose-only work. For repository work replace `--prose-only` with explicit
+     `--source-repo`, `--source-sha`, `--sink-repo`, and designated `--sink-ref`.
      Pass the worker's complete handback verbatim; an empty response is refused,
      and there is no placeholder-only completion mode.
      Before treating the handback as complete, compare it with the queue item,

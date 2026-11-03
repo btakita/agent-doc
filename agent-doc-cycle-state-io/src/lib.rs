@@ -1152,28 +1152,58 @@ pub fn load_latest_document_authority(
         Err(_) => return Ok(None),
     };
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
-    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
-        return Ok(None);
-    }
     let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
-    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    let Some(row) = agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
-        &conn,
-        &document_hash,
-        "document_authority_observed",
-        1,
-    )?
-    .into_iter()
-    .next() else {
-        return Ok(None);
+    let durable_event = if agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+        agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+            &conn,
+            &document_hash,
+            "document_authority_observed",
+            1,
+        )?
+        .into_iter()
+        .next()
+        .map(|row| {
+            serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&row.payload_json)
+                .with_context(|| format!("decode document authority event {}", row.event_id))
+        })
+        .transpose()?
+    } else {
+        None
     };
-    let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
-        .with_context(|| format!("decode document authority event {}", row.event_id))?;
-    let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    ledger.append(event);
-    Ok(ledger
-        .project_document(&document_hash)
-        .and_then(|projection| projection.document.latest_authority))
+    let handoff_event =
+        agent_doc_sqlite::state_store::load_document_authority_handoff(
+            &project_root,
+            &document_hash,
+        )?
+        .map(|handoff| {
+            serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&handoff.payload_json)
+                .with_context(|| {
+                    format!(
+                        "decode pending document authority handoff for {}",
+                        handoff.document_hash
+                    )
+                })
+        })
+        .transpose()?;
+
+    let project = |event: agent_doc_state_backbone::StateEvent| {
+        let mut ledger = agent_doc_state_backbone::EventLedger::new();
+        ledger.append(event);
+        ledger
+            .project_document(&document_hash)
+            .and_then(|projection| projection.document.latest_authority)
+    };
+    let durable = durable_event.and_then(project);
+    let handoff = handoff_event.and_then(project);
+    Ok(match (durable, handoff) {
+        (Some(durable), Some(handoff)) => Some(if handoff.authority_epoch >= durable.authority_epoch {
+            handoff
+        } else {
+            durable
+        }),
+        (durable, handoff) => durable.or(handoff),
+    })
 }
 
 /// Load the newest durable agent-doc disk-write observation for `file`.
@@ -4081,6 +4111,72 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         dir
+    }
+
+    #[test]
+    fn pending_editor_handoff_outranks_stale_durable_disk_authority() {
+        let dir = setup_project();
+        let file = dir.path().join("session.md");
+        fs::write(&file, "body\n").unwrap();
+        let canonical = file.canonicalize().unwrap();
+        let document_hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
+        let event = |event_id: &str, authority, authority_epoch| {
+            agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                    document_hash: document_hash.clone(),
+                    authority,
+                    authority_epoch,
+                    source: event_id.to_string(),
+                    reason: "test".to_string(),
+                    content_hash: Some(format!("cut-{authority_epoch}")),
+                    editor_id: None,
+                },
+            )
+        };
+        let disk = event(
+            "stale-disk",
+            agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            10,
+        );
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        let payload = serde_json::to_string(&disk).unwrap();
+        agent_doc_sqlite::state_store::insert_state_event_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::StateEventInsert {
+                event_id: &disk.event_id,
+                document_hash: &document_hash,
+                domain: disk.domain().label(),
+                fact_type: disk.fact.label(),
+                payload_json: &payload,
+            },
+        )
+        .unwrap();
+        let editor = event(
+            "pending-editor",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            11,
+        );
+        agent_doc_sqlite::state_store::enqueue_document_authority_handoff(
+            dir.path(),
+            &agent_doc_sqlite::state_store::DocumentAuthorityHandoff {
+                document_hash,
+                authority_epoch: 11,
+                controller_generation: 2,
+                payload_json: serde_json::to_string(&editor).unwrap(),
+            },
+        )
+        .unwrap();
+
+        let latest = load_latest_document_authority(&file)
+            .unwrap()
+            .expect("pending durable handoff is authority evidence");
+        assert_eq!(latest.authority_epoch, 11);
+        assert_eq!(
+            latest.authority,
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            "detached-disk admission must fail closed on the newer editor handoff"
+        );
     }
 
     #[test]

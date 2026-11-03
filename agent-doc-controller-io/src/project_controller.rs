@@ -1498,6 +1498,19 @@ thread_local! {
     > = const { std::cell::RefCell::new(None) };
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Runs after the durable projection clone while the shared memory lock is
+    /// still held, immediately before the pending-authority overlay.
+    static AUTHORITY_OVERLAY_READ_TEST_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_authority_overlay_read_test_hook(hook: Option<Box<dyn FnOnce()>>) {
+    AUTHORITY_OVERLAY_READ_TEST_HOOK.with(|slot| *slot.borrow_mut() = hook);
+}
+
 /// Run `publish` with `order` as the publishing editor frame (see
 /// [`PANE_LAYOUT_EDITOR_PUBLICATION`]). The previous value is restored even if
 /// `publish` panics.
@@ -3903,6 +3916,10 @@ struct ControllerMemoryState {
     /// the outgoing graph does not contain.
     state_document_versions: BTreeMap<String, u64>,
     state_projection: agent_doc_state_backbone::StateBackboneProjection,
+    /// Durable authority handoffs not yet folded into `state_projection`.
+    /// Sharing this lock makes the safety overlay and its clear atomic with the
+    /// corresponding main-ledger apply.
+    pending_document_authority_handoffs: HashMap<String, agent_doc_state_backbone::StateEvent>,
     /// `state_events.id` of the last durable row folded into
     /// `state_projection` (0 when none). A durable reload that ran off the
     /// ingress lock replays only the rows after it under the lock
@@ -3945,6 +3962,7 @@ impl ControllerMemoryState {
             Self {
                 state_document_versions,
                 state_projection,
+                pending_document_authority_handoffs: HashMap::new(),
                 durable_sequence,
                 map_backend: "std_btree_map",
             },
@@ -4098,11 +4116,6 @@ pub(crate) struct ControllerRuntime {
     /// Short-lived clients only persist the newest observation; this long-lived
     /// worker owns state-ledger retry and restart recovery.
     document_authority_handoff_wake: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
-    /// Durable handoffs not yet folded into the main ledger. Read projections
-    /// overlay this latest authority fact so state.db contention can never
-    /// expose a stale detached-disk decision while the background sink retries.
-    pending_document_authority_handoffs:
-        Mutex<HashMap<String, agent_doc_state_backbone::StateEvent>>,
     /// Per-document semantic fence shared by retained-transition projection and
     /// recovery/canonicalization retirement.
     ///
@@ -9762,7 +9775,6 @@ impl ControllerRuntime {
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
             document_authority_handoff_wake: Mutex::new(None),
-            pending_document_authority_handoffs: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),
@@ -9931,7 +9943,8 @@ impl ControllerRuntime {
             return;
         };
         let document_hash = event.document_hash().to_string();
-        let mut pending = self.pending_document_authority_handoffs.lock();
+        let mut memory = self.memory.lock();
+        let pending = &mut memory.pending_document_authority_handoffs;
         let replace = pending
             .get(&document_hash)
             .and_then(document_authority_epoch)
@@ -9944,7 +9957,8 @@ impl ControllerRuntime {
     fn clear_pending_document_authority_handoff(&self, event: &agent_doc_state_backbone::StateEvent) {
         let document_hash = event.document_hash();
         let authority_epoch = document_authority_epoch(event);
-        let mut pending = self.pending_document_authority_handoffs.lock();
+        let mut memory = self.memory.lock();
+        let pending = &mut memory.pending_document_authority_handoffs;
         if pending
             .get(document_hash)
             .and_then(document_authority_epoch)
@@ -10285,6 +10299,8 @@ impl ControllerRuntime {
         let next_documents = next.state_projection.documents.clone();
         let mut memory = self.memory.lock();
         let previous_documents = memory.state_projection.documents.clone();
+        next.pending_document_authority_handoffs =
+            std::mem::take(&mut memory.pending_document_authority_handoffs);
         *memory = next;
         drop(memory);
         self.actor_graph.set(next_actor_store);
@@ -10888,18 +10904,15 @@ impl ControllerRuntime {
         &self,
         document_hash: &str,
     ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
-        let mut projection = self
-            .memory
-            .lock()
-            .state_projection
-            .document(document_hash)
-            .cloned();
-        if let Some(event) = self
-            .pending_document_authority_handoffs
-            .lock()
-            .get(document_hash)
-            .cloned()
-        {
+        let memory = self.memory.lock();
+        let mut projection = memory.state_projection.document(document_hash).cloned();
+        #[cfg(test)]
+        AUTHORITY_OVERLAY_READ_TEST_HOOK.with(|slot| {
+            if let Some(hook) = slot.borrow_mut().take() {
+                hook();
+            }
+        });
+        if let Some(event) = memory.pending_document_authority_handoffs.get(document_hash) {
             projection
                 .get_or_insert_with(|| {
                     agent_doc_state_backbone::DocumentStateProjection::new(document_hash)
@@ -21471,12 +21484,12 @@ agent:queue\n\
             memory: Mutex::new(ControllerMemoryState {
                 state_document_versions: BTreeMap::new(),
                 state_projection,
+                pending_document_authority_handoffs: HashMap::new(),
                 durable_sequence: 0,
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),
             document_authority_handoff_wake: Mutex::new(None),
-            pending_document_authority_handoffs: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),

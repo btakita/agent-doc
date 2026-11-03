@@ -520,6 +520,31 @@ pub fn load_document_authority_handoffs(
     Ok(rows)
 }
 
+pub fn load_document_authority_handoff(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<Option<DocumentAuthorityHandoff>> {
+    if !document_authority_handoff_db_path(project_root).exists() {
+        return Ok(None);
+    }
+    let conn = open_document_authority_handoff_db(project_root)?;
+    conn.query_row(
+        "SELECT document_hash, authority_epoch, controller_generation, payload_json \
+         FROM document_authority_handoffs WHERE document_hash = ?1",
+        [document_hash],
+        |row| {
+            Ok(DocumentAuthorityHandoff {
+                document_hash: row.get(0)?,
+                authority_epoch: row.get::<_, i64>(1)?.max(0) as u64,
+                controller_generation: row.get::<_, i64>(2)?.max(0) as u64,
+                payload_json: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
 pub fn claim_document_authority_handoff(
     project_root: &Path,
     document_hash: &str,

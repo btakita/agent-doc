@@ -11458,6 +11458,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn pending_editor_handoff_refuses_detached_disk_over_stale_disk_projection() {
+        let (dir, file, _canonical) = temp_git_doc(&["operator queue edit\n"]);
+        let document_hash =
+            agent_doc_hash::document_id_for_path(&file.canonicalize().unwrap());
+        let authority_event = |event_id: &str, authority, authority_epoch| {
+            agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                    document_hash: document_hash.clone(),
+                    authority,
+                    authority_epoch,
+                    source: event_id.to_string(),
+                    reason: "test".to_string(),
+                    content_hash: Some(format!("cut-{authority_epoch}")),
+                    editor_id: None,
+                },
+            )
+        };
+        let stale_disk = authority_event(
+            "stale-disk",
+            agent_doc_state_backbone::DocumentAuthority::DiskReplica,
+            10,
+        );
+        agent_doc_controller_io::project_controller::append_state_event_for_test(
+            dir.path(),
+            &stale_disk,
+        )
+        .unwrap();
+        let pending_editor = authority_event(
+            "pending-editor",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            11,
+        );
+        agent_doc_sqlite::state_store::enqueue_document_authority_handoff(
+            dir.path(),
+            &agent_doc_sqlite::state_store::DocumentAuthorityHandoff {
+                document_hash,
+                authority_epoch: 11,
+                controller_generation: 2,
+                payload_json: serde_json::to_string(&pending_editor).unwrap(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            with_controller_document_mutation(|| {
+                observe_editor_authority_for_disk_write(&file, "pending_handoff_writeback")
+            })
+            .unwrap(),
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            "a newer durable editor handoff must refuse detached-disk fallback while state.db lags"
+        );
+    }
+
     /// `#clobberfollowups` (4): the durable operator-text refusal describes the
     /// document only while the canonical is the cut it was derived over; an
     /// unreadable authority keeps it (fail closed), a detached one drops it.

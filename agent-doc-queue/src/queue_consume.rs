@@ -5111,8 +5111,10 @@ fn parse_waiting_operator_packets(source: &str) -> Vec<(String, WaitingOperatorP
             index += 1;
             continue;
         };
-        let mut packet = WaitingOperatorPacket::default();
-        packet.response_timestamp = current_response_timestamp.clone();
+        let mut packet = WaitingOperatorPacket {
+            response_timestamp: current_response_timestamp.clone(),
+            ..Default::default()
+        };
         let mut blocking = false;
         let mut field = Field::Other;
         index += 1;

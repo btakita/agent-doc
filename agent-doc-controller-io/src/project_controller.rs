@@ -4141,6 +4141,37 @@ impl EditorOpCaptureAppliedNonces {
     }
 }
 
+#[derive(Clone)]
+struct StateProjectionEffectCommand {
+    document_hash: String,
+    projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
+}
+
+#[cfg(test)]
+type StateProjectionEffectTestHook = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(test)]
+fn state_projection_effect_test_hook(
+) -> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
+    static HOOK: OnceLock<Mutex<Option<(String, StateProjectionEffectTestHook)>>> = OnceLock::new();
+    HOOK.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn run_state_projection_effect_test_hook(document_hash: &str) {
+    let hook = state_projection_effect_test_hook()
+        .lock()
+        .as_ref()
+        .filter(|(expected, _)| expected == document_hash)
+        .map(|(_, hook)| Arc::clone(hook));
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_state_projection_effect_test_hook(_document_hash: &str) {}
+
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
@@ -4236,6 +4267,11 @@ pub(crate) struct ControllerRuntime {
     /// instead of making every waiter re-poll the projection on its own timer, so
     /// one fact producer publishes once and all waiters react.
     state_projection_waiters: Condvar,
+    /// Ordered, non-blocking handoff from durable state ingress to derived
+    /// document projections. Those projections may parse/reconcile a large live
+    /// document, so they must never hold admission's append/apply lock.
+    state_projection_effect_sender:
+        OnceLock<std::sync::mpsc::Sender<StateProjectionEffectCommand>>,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
     /// The serve-loop honors it by starting a two-phase handoff (debounced).
     /// Durable harness dispatches may remain open because their child is
@@ -9884,9 +9920,6 @@ impl ControllerRuntime {
         );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
-        for (document_hash, projection) in &memory.state_projection.documents {
-            document_graphs.set_projection(document_hash, Some(projection.clone()));
-        }
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
@@ -9914,6 +9947,7 @@ impl ControllerRuntime {
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
+            state_projection_effect_sender: OnceLock::new(),
             document_graphs,
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
@@ -9938,6 +9972,8 @@ impl ControllerRuntime {
         runtime
             .document_graphs
             .install_settle_sink(project_root.clone(), &runtime);
+        runtime.install_state_projection_effect_worker()?;
+        runtime.seed_state_projection_effects();
         runtime
             .editor_view_policy_graph
             .install_lifecycle_sink(&runtime);
@@ -9979,6 +10015,44 @@ impl ControllerRuntime {
             }),
         );
         Ok(runtime)
+    }
+
+    fn install_state_projection_effect_worker(self: &Arc<Self>) -> Result<()> {
+        let (sender, receiver) = std::sync::mpsc::channel::<StateProjectionEffectCommand>();
+        let runtime = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("agent-doc-state-projection-effects".to_string())
+            .spawn(move || {
+                while let Ok(command) = receiver.recv() {
+                    let Some(runtime) = runtime.upgrade() else {
+                        break;
+                    };
+                    run_state_projection_effect_test_hook(&command.document_hash);
+                    runtime.publish_state_projection_effect(command);
+                }
+            })
+            .context("failed to start state-projection effect worker")?;
+        self.state_projection_effect_sender
+            .set(sender)
+            .map_err(|_| anyhow::anyhow!("state-projection effect worker already installed"))?;
+        Ok(())
+    }
+
+    fn seed_state_projection_effects(&self) {
+        let projections = self
+            .memory
+            .lock()
+            .state_projection
+            .documents
+            .iter()
+            .map(|(document_hash, projection)| (document_hash.clone(), projection.clone()))
+            .collect::<Vec<_>>();
+        for (document_hash, projection) in projections {
+            self.enqueue_state_projection_effect(StateProjectionEffectCommand {
+                document_hash,
+                projection: Some(projection),
+            });
+        }
     }
 
     fn install_document_authority_handoff_worker(self: &Arc<Self>) -> Result<()> {
@@ -10480,8 +10554,6 @@ impl ControllerRuntime {
             &event.fact,
             agent_doc_state_backbone::StateFact::CommitObserved { .. }
         );
-        let captured_finalize_wake_projection =
-            captured_finalize_wake_reason.and_then(|_| document_projection.as_ref().cloned());
         if let agent_doc_state_backbone::StateFact::EditorViewBindingObserved {
             document_hash,
             canonical_path,
@@ -10512,21 +10584,41 @@ impl ControllerRuntime {
         // derivation at this call site, where it is correct only while every
         // writer remembers to run it. Done outside the memory lock: setting a
         // cell recomputes dependents, which must not re-enter the projection.
-        self.document_graphs
-            .set_projection(&document_hash, document_projection);
-        if let (Some(reason), Some(projection)) = (
-            captured_finalize_wake_reason,
-            captured_finalize_wake_projection.as_ref(),
-        ) {
+        if let (Some(reason), Some(projection)) =
+            (captured_finalize_wake_reason, document_projection.as_ref())
+        {
             rpc::publish_captured_finalize_wake(self, projection, reason);
         }
         if captured_finalize_committed {
             rpc::clear_captured_finalize_wake(self, &document_hash);
         }
+        self.enqueue_state_projection_effect(StateProjectionEffectCommand {
+            document_hash,
+            projection: document_projection,
+        });
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         crate::dashboard_refresh::mark_dirty_global();
         Ok(())
+    }
+
+    fn enqueue_state_projection_effect(&self, command: StateProjectionEffectCommand) {
+        let Some(sender) = self.state_projection_effect_sender.get() else {
+            // Directly-constructed test runtimes have no worker. Production
+            // runtimes always install it in `new_arc` before accepting RPCs.
+            self.publish_state_projection_effect(command);
+            return;
+        };
+        if let Err(error) = sender.send(command) {
+            // The worker can disappear only while this runtime is tearing down.
+            // Preserve eventual projection for any direct caller still holding it.
+            self.publish_state_projection_effect(error.0);
+        }
+    }
+
+    fn publish_state_projection_effect(&self, command: StateProjectionEffectCommand) {
+        self.document_graphs
+            .set_projection(&command.document_hash, command.projection);
     }
 
     /// Take the state-event ingress lock, recording how long it was awaited and
@@ -21808,6 +21900,7 @@ agent:queue\n\
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
+            state_projection_effect_sender: OnceLock::new(),
             document_graphs,
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wake_publication: Mutex::new(()),
@@ -21892,6 +21985,130 @@ agent:queue\n\
             ))
             .unwrap();
         assert!(runtime.main_layout_eligibility().permits(&canonical_path));
+    }
+
+    #[test]
+    fn state_event_ack_does_not_wait_for_blocked_projection_effect() {
+        use agent_doc_state_backbone::{
+            EditorViewBindingIdentity, EditorViewBindingState, EditorViewReleaseDestination,
+            EditorViewReleaseReason, StateEvent, StateFact,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let event_for = |event_id: &str, document_hash: &str| {
+            StateEvent::new(
+                event_id,
+                StateFact::EditorViewBindingObserved {
+                    document_hash: document_hash.to_string(),
+                    canonical_path: dir.path().join("tasks/sdk.md").to_string_lossy().to_string(),
+                    binding_epoch: 1,
+                    state: EditorViewBindingState::Released {
+                        binding: EditorViewBindingIdentity {
+                            view_id: "view".to_string(),
+                            client_family: "test".to_string(),
+                            connection_generation: 1,
+                            surface_id: "surface".to_string(),
+                            surface_generation: 1,
+                            view_session: "session".to_string(),
+                        },
+                        pane: None,
+                        reason: EditorViewReleaseReason::OwnerClosed,
+                        destination: EditorViewReleaseDestination::MainStash,
+                    },
+                },
+            )
+        };
+
+        // Startup must bind/serve from the authoritative in-memory replay even
+        // when derived work for an existing document is slow.
+        let startup_hash = "blocked-startup-state-projection".to_string();
+        append_state_event(dir.path(), &event_for("startup-event", &startup_hash)).unwrap();
+        let (startup_entered_tx, startup_entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (startup_release_tx, startup_release_rx) = std::sync::mpsc::sync_channel(1);
+        let startup_release_rx = Arc::new(Mutex::new(startup_release_rx));
+        let startup_hook: StateProjectionEffectTestHook = Arc::new(move || {
+            let _ = startup_entered_tx.send(());
+            let _ = startup_release_rx.lock().recv();
+        });
+        *state_projection_effect_test_hook().lock() = Some((startup_hash.clone(), startup_hook));
+        let startup_started = Instant::now();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        assert!(
+            startup_started.elapsed() < Duration::from_millis(500),
+            "controller startup waited on derived projection: {:?}",
+            startup_started.elapsed()
+        );
+        startup_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert!(
+            runtime
+                .document_state_projection(&startup_hash)
+                .unwrap()
+                .is_some()
+        );
+        startup_release_tx.send(()).unwrap();
+        let startup_deadline = Instant::now() + Duration::from_secs(2);
+        while runtime
+            .document_graphs
+            .projection
+            .observe(&runtime.document_graphs.ctx, &startup_hash)
+            .flatten()
+            .is_none()
+        {
+            assert!(Instant::now() < startup_deadline, "startup projection never completed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        *state_projection_effect_test_hook().lock() = None;
+
+        let document_hash = "blocked-state-projection-effect".to_string();
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let hook: StateProjectionEffectTestHook = Arc::new(move || {
+            let _ = entered_tx.send(());
+            let _ = release_rx.lock().recv();
+        });
+        *state_projection_effect_test_hook().lock() = Some((document_hash.clone(), hook));
+
+        let event = event_for("bounded-state-event-ack", &document_hash);
+        let started = Instant::now();
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &event)
+                .unwrap()
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "durable state-event acknowledgement waited on derived projection: {:?}",
+            started.elapsed()
+        );
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(
+            runtime
+                .document_state_projection(&document_hash)
+                .unwrap()
+                .is_some(),
+            "the ordered in-memory projection must advance before acknowledgement"
+        );
+
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &document_hash)
+                .flatten()
+                .is_some()
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "derived projection never completed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        *state_projection_effect_test_hook().lock() = None;
     }
 
     #[test]

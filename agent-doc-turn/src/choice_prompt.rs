@@ -112,6 +112,14 @@ pub fn render_choice_checkpoint(input: ChoiceCheckpointInput) -> Result<String, 
             &choice.description,
             MAX_DESCRIPTION_CHARS,
         )?;
+        if let Some(error) =
+            agent_doc_queue::operator_request_packet::recommended_choice_rationale_error(
+                &label,
+                &description,
+            )
+        {
+            return Err(reject(format!("choice checkpoint {error}")));
+        }
         if !labels.insert(label.to_lowercase()) {
             return Err(reject("choice checkpoint labels must be unique"));
         }
@@ -145,7 +153,7 @@ mod tests {
             choices: vec![
                 ChoiceCheckpointOption {
                     label: "Keep compatibility (Recommended)".to_string(),
-                    description: "Accept both formats for one release.".to_string(),
+                    description: "Recommended because existing clients still send the old format; accept both formats for one release.".to_string(),
                 },
                 ChoiceCheckpointOption {
                     label: "Switch now".to_string(),
@@ -163,7 +171,7 @@ mod tests {
 **Context:** The release can keep compatibility or adopt the new format.\n\n\
 **Question:** Which migration policy should this release use?\n\n\
 **Choices:**\n\n\
-1. **Keep compatibility (Recommended)** — Accept both formats for one release.\n\
+1. **Keep compatibility (Recommended)** — Recommended because existing clients still send the old format; accept both formats for one release.\n\
 2. **Switch now** — Require the new format immediately."
         );
     }
@@ -195,5 +203,19 @@ mod tests {
         let mut input = valid_input();
         input.question = "<!-- agent:queue -->".to_string();
         assert!(render_choice_checkpoint(input).is_err());
+    }
+
+    #[test]
+    fn rejects_recommended_choice_without_a_contextual_reason() {
+        let mut input = valid_input();
+        input.choices[0].description = "Accept both formats for one release.".to_string();
+        let error = render_choice_checkpoint(input).unwrap_err().to_string();
+        assert!(error.contains("Recommended because"), "{error}");
+
+        let mut input = valid_input();
+        input.choices[0].description =
+            "Recommended because it is the recommended choice.".to_string();
+        let error = render_choice_checkpoint(input).unwrap_err().to_string();
+        assert!(error.contains("tautological"), "{error}");
     }
 }

@@ -4847,6 +4847,19 @@ fn blocking_operator_request_todo_texts(
     texts
 }
 
+fn validate_blocking_operator_request_recommendations(
+    packets: &[agent_doc_turn::response_text::BlockingOperatorRequestPacket],
+) -> Result<()> {
+    if let Some(error) = packets.iter().find_map(|packet| {
+        agent_doc_queue::operator_request_packet::blocking_operator_request_recommendation_error(
+            packet,
+        )
+    }) {
+        anyhow::bail!("blocking subagent operator-request packet is invalid: {error}");
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 struct DerivedBlockingOperatorRequests {
     todo_inputs: Vec<String>,
@@ -4872,6 +4885,7 @@ fn derive_blocking_operator_requests(
             "blocking subagent operator-request packets reuse [#{duplicate}]; give every packet a unique [#subagent-operator-request-<unique-id>] marker"
         );
     }
+    validate_blocking_operator_request_recommendations(&packets)?;
     // An unreadable document only loses the response-citation fallback; the
     // gate ids and the packet itself still derive the todo.
     let document_ids = if options.force_disk {
@@ -6599,6 +6613,31 @@ mod tests {
         let mut pending_only = base();
         pending_only.pending_only = true;
         assert!(blocking_operator_request_todo_texts(&pending_only, &response, &ids).is_empty());
+    }
+
+    #[test]
+    fn new_blocking_packet_rejects_recommended_choice_without_reason() {
+        let response = concat!(
+            "[#subagent-operator-request-disposition] subagent operator request\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - How should the worktree be handled?\n",
+            "- *choices:*\n",
+            "  - **Leave uncommitted (Recommended)**: Keep the worktree available.\n",
+            "  - **Commit now**: Commit the verified patch.\n",
+        );
+        let packets = agent_doc_turn::response_text::blocking_operator_request_packets(response);
+        let error = validate_blocking_operator_request_recommendations(&packets)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Recommended because"), "{error}");
+
+        let valid = response.replace(
+            "Keep the worktree available.",
+            "Recommended because the integration regression is unresolved; preserving the worktree keeps the pending fix available.",
+        );
+        let packets = agent_doc_turn::response_text::blocking_operator_request_packets(&valid);
+        validate_blocking_operator_request_recommendations(&packets).unwrap();
     }
 
     #[test]

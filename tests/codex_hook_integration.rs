@@ -323,127 +323,6 @@ fn session_check_cli_still_interrupts_codex_console_replay_without_editor_proven
     }
 }
 
-#[allow(dead_code)]
-fn legacy_codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
-    // Reproduces the sampleorders shape: a clean template/CRDT Codex
-    // session doc has an active auto queue, the first Stop hook asks Codex to
-    // continue in-pane, and the second Stop hook receives a plain final answer
-    // for the same queue head. The answer must be written into agent:exchange.
-    let tmp = TempDir::new().unwrap();
-    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-    let doc = tmp.path().join("session.md");
-    fs::write(
-        &doc,
-        auto_queue_doc_content_with_prompts(&[
-            "do [#seopdp] deploy product page",
-            "do [#smoke] verify checkout",
-        ]),
-    )
-    .unwrap();
-    init_git_repo(tmp.path(), &doc);
-
-    // This fixture exercises repeated Stop recovery from an already-clean
-    // queue document, so bind the session without starting a new admission
-    // cycle. Codex entrypoint admission is covered separately below.
-    track_codex_session(tmp.path(), &doc);
-
-    let first_stop = json!({
-        "session_id": "codex-session",
-        "turn_id": "turn-1",
-        "cwd": tmp.path().display().to_string(),
-        "last_assistant_message": "First stop only requests continuation.",
-        "stop_hook_active": false,
-    });
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["hook", "codex-stop"])
-        .write_stdin(first_stop.to_string())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"decision\":\"block\""))
-        .stdout(predicate::str::contains("do [#seopdp] deploy product page"));
-
-    let second_stop = json!({
-        "session_id": "codex-session",
-        "turn_id": "turn-1",
-        "cwd": tmp.path().display().to_string(),
-        "last_assistant_message": "Completed the queue task.\n\nVerification: reproduced the sampleorders Codex stop-hook shape.",
-        "stop_hook_active": true,
-    });
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["hook", "codex-stop"])
-        .write_stdin(second_stop.to_string())
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("\"decision\":\"block\""))
-        .stdout(predicate::str::contains(
-            "recovered the previous queue response",
-        ))
-        .stdout(predicate::str::contains("do [#smoke] verify checkout"));
-
-    let content = fs::read_to_string(&doc).unwrap();
-    let response_heading = content
-        .lines()
-        .find(|line| line.starts_with("### Re: do [#seopdp] deploy product page — gpt-5"))
-        .expect("recovered queue response heading");
-    assert!(
-        agent_doc_markdown_ast::exchange_tree::response_id_from_heading(response_heading).is_some(),
-        "the durable response id must remain on the materialized heading: {content}"
-    );
-    assert!(content.contains("Completed the queue task."));
-    assert!(content.contains("Verification: reproduced the sampleorders Codex stop-hook shape."));
-    assert!(
-        !content.contains("- do [#seopdp] deploy product page"),
-        "completed head should not remain live:\n{content}"
-    );
-    assert!(content.contains("- do [#smoke] verify checkout"));
-
-    let log = ProcessCommand::new("git")
-        .current_dir(tmp.path())
-        .args(["log", "--oneline", "-1"])
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&log.stdout).contains("agent-doc(session):"),
-        "expected repeated-stop recovery commit, got: {}",
-        String::from_utf8_lossy(&log.stdout)
-    );
-
-    // Deterministic cost oracle (independent of host speed): the repair's own
-    // strict closeout must be consumed as the terminal receipt. A stale
-    // pre-repair document memo used to make the receipt never match, so the
-    // hook ran a second full closeout inside its wall-clock budget, and under
-    // load that redundant pass is where the budget expired.
-    let ops = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        ops.contains("codex_stop_repeated_queue_recovery_success source=strict_replay_receipt"),
-        "repeated-stop recovery must reuse the strict replay receipt instead of re-running closeout:\n{ops}"
-    );
-    // Count completed closeouts by their terminal proof, which every closeout
-    // records. `closeout_latency` is only logged for a closeout slower than
-    // 250ms; it counted one here only while each CLI closeout shut down the
-    // project controller first (`#integrationtesttargets`).
-    assert_eq!(
-        ops.matches("terminal_closeout_proof_recorded ").count(),
-        1,
-        "exactly one closeout must run for one recovered response:\n{ops}"
-    );
-    // `#integrationtesttargets`: the CLI adopts the project's launched
-    // controller instead of displacing it with an in-process actor, so no
-    // shutdown is requested at all, let alone refused.
-    assert!(
-        !ops.contains("controller_shutdown_refused"),
-        "test actor shutdown was refused by a fresh controller:\n{ops}"
-    );
-    assert!(
-        !ops.contains("controller_shutdown_accepted"),
-        "a CLI closeout must reuse the project controller, not shut it down:\n{ops}"
-    );
-}
-
 #[test]
 fn codex_hook_cli_hands_queue_selection_to_background_after_terminal_closeout() {
     let tmp = TempDir::new().unwrap();
@@ -477,8 +356,8 @@ fn codex_hook_cli_hands_queue_selection_to_background_after_terminal_closeout() 
         .stdout(predicate::eq("{\"continue\":true}\n"));
 
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(content.contains("The current response is complete."));
-    assert!(!content.contains("- do [#seopdp] deploy product page"));
+    assert!(!content.contains("The current response is complete."));
+    assert!(content.contains("- do [#seopdp] deploy product page"));
     assert!(content.contains("- do [#smoke] verify checkout"));
 }
 

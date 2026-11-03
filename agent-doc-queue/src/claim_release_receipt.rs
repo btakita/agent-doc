@@ -446,17 +446,30 @@ impl ClaimReleaseReceiptLedger {
 
 /// How a persisted answer closes queue line `item_text` (`#reportedrelease`):
 /// a free-text line strikes only on the verbatim `> **Queue prompt:**` echo.
-/// An id head closes with `--done <id>` when its tracked work is complete, or
-/// with `queue consume --ack-id <id>` when the worker handoff is integrated but
-/// the tracked item intentionally stays open. A heading-only answer leaves the
-/// line queued, so it is served (and dispatched) again.
+/// A row that leads with a directive `[#id]` closes with `queue consume
+/// --ack-id <id>` when the worker handoff is integrated but the tracked item
+/// stays open, or with `--done <id>` when its tracked work is complete. A
+/// heading-only answer leaves the line queued, so it is served (and
+/// dispatched) again.
+///
+/// `#reportedwritebackprescription`: a waiting-tree parent (`[#id] ... <!--
+/// agent-doc:waiting-item -->`) has a free-text claim identity, but its
+/// reported `☑️` attempt is a nested child: echoing the parent line never
+/// strikes that child, while `--ack-id <id>` does (`#nestedreceiptack`). The
+/// prescription therefore keys on the row's directive id, not its identity
+/// class, and no longer offers `--pending-gate` (a backlog-only legacy alias
+/// that cannot strike a Todo-backed reported row).
 pub fn queue_line_closeout(document: &str, item_text: &str) -> String {
     let item = item_text.trim();
-    match claim_identity(item) {
-        QueueItemIdentity::Id(id) => format!(
-            "when the tracked work is complete, pass `--done {id}` to `agent-doc finalize {document}` (or `--pending-gate {id}` when it is gated); when this worker handoff is integrated but the backlog/Todo item must stay open, strike the reported row immediately with `agent-doc queue consume {document} --ack-id {id}`"
+    let id = match claim_identity(item) {
+        QueueItemIdentity::Id(id) => Some(id),
+        QueueItemIdentity::FreeText(_) => crate::queue_response::queue_prompt_done_id(item),
+    };
+    match id {
+        Some(id) => format!(
+            "strike the reported row with `agent-doc queue consume {document} --ack-id {id}` (the tracked backlog/Todo item stays open; this also closes a `☑️` row nested under a waiting parent); only when the tracked work itself is complete, pass `--done {id}` to `agent-doc finalize {document}` instead"
         ),
-        QueueItemIdentity::FreeText(_) => format!(
+        None => format!(
             "open the response with the verbatim echo `> **Queue prompt:** {item}` and persist it with `agent-doc finalize {document}`; a `### Re:` heading alone leaves the line queued"
         ),
     }
@@ -467,7 +480,7 @@ pub fn queue_line_closeout(document: &str, item_text: &str) -> String {
 /// completion.
 pub fn persist_reported_instruction(document: &str, item_text: &str, owner: &str) -> String {
     format!(
-        "{owner} already reported and its claim was released, so this queue line is answered only in your context, not in the document. Persist that worker's result in THIS turn: {}. That closeout strikes the line. Do NOT dispatch a new subagent for it, do NOT re-claim it, and do NOT end the turn with the answer only in chat.",
+        "{owner} already reported and its claim was released. Its result is durable in agent-doc's completion evidence (preflight surfaces it as `queue_sync.reported_checkmark` `recovered_response`), so a harness switch or `/clear` does not lose it, but the document has not recorded it and the queue line is still open. Persist that worker's result in THIS turn: {}. That closeout strikes the line. Do NOT dispatch a new subagent for it, do NOT re-claim it, and do NOT end the turn with the answer only in chat.",
         queue_line_closeout(document, item_text)
     )
 }
@@ -669,8 +682,31 @@ mod tests {
             id.contains("agent-doc queue consume tasks/docs.md --ack-id gh275"),
             "{id}"
         );
-        assert!(id.contains("must stay open"), "{id}");
+        assert!(id.contains("stays open"), "{id}");
         assert!(!id.contains("Queue prompt"), "{id}");
+        assert!(!id.contains("--pending-gate"), "{id}");
+        assert!(!free.contains("only in your context"), "{free}");
+        assert!(free.contains("recovered_response"), "{free}");
+    }
+
+    /// `#reportedwritebackprescription`: a waiting-tree parent has a free-text
+    /// claim identity, yet the only closeout that strikes its nested `☑️`
+    /// attempt is `--ack-id <parent id>`; the echo never does.
+    #[test]
+    fn waiting_parent_closeout_prescribes_ack_id_not_the_echo() {
+        // The exact 2026-11-03 row; its claim identity is free text.
+        let parent = "[#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace (procedure in runbooks/coder-workspace.md): install, register, remote extension host, tmux attach, remoteName, layout sync; then update the VS Code on Coder status cell in editors/SPEC.md section 13. <!-- agent-doc:waiting-item -->";
+        assert!(matches!(
+            claim_identity(parent),
+            QueueItemIdentity::FreeText(_)
+        ));
+        let closeout = queue_line_closeout("tasks/bugs.md", parent);
+        assert!(
+            closeout.contains("agent-doc queue consume tasks/bugs.md --ack-id vscodecodersmoke"),
+            "{closeout}"
+        );
+        assert!(!closeout.contains("Queue prompt"), "{closeout}");
+        assert!(!closeout.contains("--pending-gate"), "{closeout}");
     }
 
     /// Formal receipt-admission truth table. Only a Reported claim with one

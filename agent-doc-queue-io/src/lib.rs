@@ -4,6 +4,7 @@ pub mod claim_release_receipt;
 pub mod continuation_detect;
 pub mod continuation_marker;
 pub mod continuation_request;
+pub mod reported_writeback_reminder;
 pub mod controller_pause;
 pub mod drain_owner;
 pub mod goal_loop_handoff;

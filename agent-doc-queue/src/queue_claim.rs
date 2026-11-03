@@ -1049,29 +1049,64 @@ impl QueueClaimLedger {
                 _ => {}
             }
         }
-        // Within one document queue the worker binding is injective. Refuse a
-        // corrupted/stale projection rather than choosing which attempt owns a
-        // worker and advancing both.
-        let mut workers: HashMap<&str, (&str, u64)> = HashMap::new();
-        for claim in &ledger.claims {
-            let Some(binding) = claim.worker.as_ref() else {
+        // Within one document queue the worker binding is injective. A binary
+        // before GH #390 could reuse a worker after its prior claim expired
+        // without retiring that prior attempt. Repair only that provable shape:
+        // the older claim's expiry must be no later than the newer binding's
+        // start. Overlapping or otherwise ambiguous bindings still fail closed.
+        let mut workers: HashMap<String, usize> = HashMap::new();
+        for index in 0..ledger.claims.len() {
+            let Some(binding) = ledger.claims[index].worker.as_ref() else {
                 continue;
             };
-            if claim.state == QueueClaimState::Lost {
+            if ledger.claims[index].state == QueueClaimState::Lost {
                 continue;
             }
-            if let Some((item_text, generation)) =
-                workers.insert(&binding.worker_id, (&claim.item_text, claim.generation))
+            let worker_id = binding.worker_id.clone();
+            let Some(previous_index) = workers.get(&worker_id).copied() else {
+                workers.insert(worker_id, index);
+                continue;
+            };
+            let previous_started = ledger.claims[previous_index]
+                .worker
+                .as_ref()
+                .expect("worker map only stores bound claims")
+                .started_at_secs;
+            let current_started = binding.started_at_secs;
+            let (older_index, newer_index, newer_started) =
+                if previous_started < current_started {
+                    (previous_index, index, current_started)
+                } else if current_started < previous_started {
+                    (index, previous_index, previous_started)
+                } else {
+                    let previous = &ledger.claims[previous_index];
+                    let current = &ledger.claims[index];
+                    anyhow::bail!(
+                        "queue worker {:?} is bound to both {:?} generation {} and {:?} generation {}",
+                        worker_id,
+                        previous.item_text,
+                        previous.generation,
+                        current.item_text,
+                        current.generation,
+                    );
+                };
+            let older = &ledger.claims[older_index];
+            if older.state == QueueClaimState::Reported
+                || older.expires_at_secs > newer_started
             {
+                let previous = &ledger.claims[previous_index];
+                let current = &ledger.claims[index];
                 anyhow::bail!(
                     "queue worker {:?} is bound to both {:?} generation {} and {:?} generation {}",
-                    binding.worker_id,
-                    item_text,
-                    generation,
-                    claim.item_text,
-                    claim.generation,
+                    worker_id,
+                    previous.item_text,
+                    previous.generation,
+                    current.item_text,
+                    current.generation,
                 );
             }
+            ledger.claims[older_index].state = QueueClaimState::Lost;
+            workers.insert(worker_id, newer_index);
         }
         Ok(ledger)
     }
@@ -1371,14 +1406,17 @@ impl QueueClaimLedger {
                 state: claim.state,
             });
         }
-        if let Some(binding) = &claim.worker {
+        let already_bound = if let Some(binding) = &claim.worker {
             if binding.worker_id == worker_id {
-                return Ok(claim.clone());
+                true
+            } else {
+                return Err(QueueClaimStartRefused::AttemptAlreadyBound {
+                    worker_id: binding.worker_id.clone(),
+                });
             }
-            return Err(QueueClaimStartRefused::AttemptAlreadyBound {
-                worker_id: binding.worker_id.clone(),
-            });
-        }
+        } else {
+            false
+        };
         if let Some(other) = self
             .claims
             .iter()
@@ -1398,6 +1436,24 @@ impl QueueClaimLedger {
                 item_text: other.item_text.clone(),
                 generation: other.generation,
             });
+        }
+        // Reusing a worker after its prior attempt expires is legitimate, but
+        // the prior binding must become terminal before the new one is stored.
+        // Otherwise the next ledger reader sees one worker on two attempts and
+        // refuses every queue operation (GH #390).
+        for (other_index, other) in self.claims.iter_mut().enumerate() {
+            if other_index != index
+                && !other.blocks_dispatch(now_secs)
+                && other
+                    .worker
+                    .as_ref()
+                    .is_some_and(|binding| binding.worker_id == worker_id)
+            {
+                other.state = QueueClaimState::Lost;
+            }
+        }
+        if already_bound {
+            return Ok(self.claims[index].clone());
         }
         let claim = &mut self.claims[index];
         claim.worker = Some(QueueWorkerBinding {
@@ -4143,6 +4199,46 @@ mod tests {
     }
 
     #[test]
+    fn expired_worker_binding_is_retired_before_worker_reuse() {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim("parent work", "subagent:parent", 100, 10);
+        ledger
+            .start(
+                "parent work",
+                "subagent:parent",
+                "worker:same",
+                100,
+                10,
+                Some(1),
+            )
+            .unwrap();
+        ledger.claim("nested answer", "subagent:child", 111, 10);
+
+        let child = ledger
+            .start(
+                "nested answer",
+                "subagent:child",
+                "worker:same",
+                111,
+                10,
+                Some(1),
+            )
+            .unwrap();
+
+        assert_eq!(ledger.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(child.state, QueueClaimState::Running);
+        assert_eq!(
+            child
+                .worker
+                .as_ref()
+                .map(|binding| binding.worker_id.as_str()),
+            Some("worker:same")
+        );
+        let stored = serde_json::to_string(&ledger).unwrap();
+        QueueClaimLedger::from_state_payload(&stored).unwrap();
+    }
+
+    #[test]
     fn stored_running_without_worker_downgrades_and_duplicate_worker_fails_closed() {
         let legacy_running = r#"{"claims":[{"identity":{"kind":"free_text","key":"work"},"item_text":"work","owner":"subagent:a","generation":1,"state":"running","claimed_at_secs":1,"expires_at_secs":50}]}"#;
         let ledger = QueueClaimLedger::from_state_payload(legacy_running).unwrap();
@@ -4150,6 +4246,13 @@ mod tests {
 
         let duplicate = r#"{"claims":[{"identity":{"kind":"free_text","key":"a"},"item_text":"a","owner":"subagent:a","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":2},"claimed_at_secs":1,"expires_at_secs":50},{"identity":{"kind":"free_text","key":"b"},"item_text":"b","owner":"subagent:b","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":2},"claimed_at_secs":1,"expires_at_secs":50}]}"#;
         assert!(QueueClaimLedger::from_state_payload(duplicate).is_err());
+
+        let gh390 = r#"{"claims":[{"identity":{"kind":"free_text","key":"parent"},"item_text":"parent","owner":"subagent:parent","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":1},"claimed_at_secs":1,"expires_at_secs":10},{"identity":{"kind":"free_text","key":"child"},"item_text":"child","owner":"subagent:child","generation":1,"state":"running","worker":{"worker_id":"worker:same","started_at_secs":20},"claimed_at_secs":20,"expires_at_secs":30}]}"#;
+        let repaired = QueueClaimLedger::from_state_payload(gh390).unwrap();
+        assert_eq!(repaired.claims[0].state, QueueClaimState::Lost);
+        assert_eq!(repaired.claims[1].state, QueueClaimState::Running);
+        let stored = serde_json::to_string(&repaired).unwrap();
+        QueueClaimLedger::from_state_payload(&stored).unwrap();
     }
 
     #[test]

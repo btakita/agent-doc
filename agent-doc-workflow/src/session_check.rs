@@ -579,11 +579,24 @@ fn queue_entry_indent(entry: &agent_doc_queue::document_queue::QueueEntry) -> Op
     }
 }
 
-fn waiting_parent_text(entry: &agent_doc_queue::document_queue::QueueEntry) -> Option<&str> {
+#[derive(Clone, Copy)]
+enum WaitingParentBoundary<'a> {
+    Live(&'a str),
+    Completed,
+}
+
+fn waiting_parent_boundary(
+    entry: &agent_doc_queue::document_queue::QueueEntry,
+) -> Option<WaitingParentBoundary<'_>> {
     use agent_doc_queue::document_queue::QueueEntry;
     match entry {
         QueueEntry::Prompt(prompt) if prompt.text.contains("<!-- agent-doc:waiting-item -->") => {
-            Some(&prompt.text)
+            Some(WaitingParentBoundary::Live(&prompt.text))
+        }
+        QueueEntry::Completed(prompt)
+            if prompt.text.contains("<!-- agent-doc:waiting-item -->") =>
+        {
+            Some(WaitingParentBoundary::Completed)
         }
         _ => None,
     }
@@ -707,7 +720,7 @@ fn queue_response_contamination_candidates_since_baseline_impl(
             let nearest_waiting_parent = ancestors
                 .iter()
                 .rev()
-                .find_map(|(_, ancestor_index)| waiting_parent_text(&entries[*ancestor_index]));
+                .find_map(|(_, ancestor_index)| waiting_parent_boundary(&entries[*ancestor_index]));
 
             if let agent_doc_queue::document_queue::QueueEntry::Freeform(raw) = entry {
                 for line in raw.lines() {
@@ -723,13 +736,15 @@ fn queue_response_contamination_candidates_since_baseline_impl(
                         continue;
                     }
                     let mirrors_proven_parent = allow_legacy_waiting_metadata
-                        && nearest_waiting_parent.is_some_and(|parent| {
-                            captured_queue_parent_proves_waiting_metadata(
-                                text,
-                                parent,
-                                &baseline_stable_ids,
-                            )
-                        });
+                        && matches!(
+                            nearest_waiting_parent,
+                            Some(WaitingParentBoundary::Live(parent))
+                                if captured_queue_parent_proves_waiting_metadata(
+                                    text,
+                                    parent,
+                                    &baseline_stable_ids,
+                                )
+                        );
                     if mirrors_proven_parent {
                         baseline_prefixes.insert(needle);
                         continue;
@@ -1438,6 +1453,28 @@ mod tests {
             ),
             vec![child.chars().take(80).collect::<String>()],
             "an identical leaf under a different nearest waiting parent must fail closed"
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_completed_inner_waiting_parent_is_boundary() {
+        let outer_work = "Run the real Coder workspace smoke and update the editor status cell.";
+        let inner_work = "Provide a real Coder workspace path before running that smoke test.";
+        let child = format!("**Response:** {outer_work} <!-- agent-doc:waiting-metadata -->");
+        let queue = format!(
+            "- [#vscodecodersmoke] {outer_work} <!-- agent-doc:waiting-item -->\n  - ~~[#workspace-request] {inner_work} <!-- agent-doc:waiting-item -->~~\n    - {child}\n"
+        );
+        let baseline = "- [#vscodecodersmoke]\n  - [#workspace-request]\n";
+        let exchange = format!("### Re: smoke result\n\n**Response:** {outer_work}\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates_since_baseline(
+                &queue,
+                &exchange,
+                Some(baseline),
+            ),
+            vec![child.chars().take(80).collect::<String>()],
+            "a struck inner waiting item remains an ancestry boundary and blocks outer proof"
         );
     }
 

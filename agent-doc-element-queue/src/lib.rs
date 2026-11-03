@@ -918,6 +918,14 @@ pub fn strip_queue_prompt_stable_id_annotation(text: &str) -> String {
     if queue_head_identity(text).is_id_backed() {
         return text.to_string();
     }
+    strip_generated_queue_prompt_id_annotation(text)
+}
+
+/// Remove only the binary-generated trailing `[#q-*]` occurrence annotation,
+/// even when an authored leading intent tag makes the row otherwise id-backed.
+/// Claim-repair lineage uses this narrower operation to compare the projected
+/// row with its pre-projection parent vector.
+pub fn strip_generated_queue_prompt_id_annotation(text: &str) -> String {
     let first_end = text.find('\n').unwrap_or(text.len());
     let first = &text[..first_end];
     let Some((_, annotation)) = generated_prompt_id_annotation(first) else {

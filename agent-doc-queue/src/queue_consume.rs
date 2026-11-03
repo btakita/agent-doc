@@ -1293,7 +1293,8 @@ pub fn answered_free_text_strike_decision(
                     .any(|prefix| node.node_key.starts_with(prefix))
             }) {
                 let text = node.item.text.trim();
-                let normalized = normalize_queue_prompt_text(text);
+                let normalized =
+                    crate::queue_response::normalized_authored_queue_prompt_text(text);
                 let occurrence = occurrences.entry(normalized.clone()).or_default();
                 let head = row_heads
                     .get(&normalized)
@@ -1331,7 +1332,7 @@ pub fn answered_free_text_strike_decision(
             continue;
         }
         let text = node.item.text.trim();
-        let normalized = normalize_queue_prompt_text(text);
+        let normalized = crate::queue_response::normalized_authored_queue_prompt_text(text);
         let occurrence = occurrences.entry(normalized.clone()).or_default();
         let head = row_heads
             .get(&normalized)
@@ -9501,6 +9502,61 @@ Old.
             "the FIRST copy is the struck one:\n{target}"
         );
         assert!(target.contains("- do [#between]"));
+    }
+
+    #[test]
+    fn answered_nested_vector_strikes_only_the_matching_parent_child() {
+        let document = concat!(
+            "---\nqueue_active: true\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/822\n",
+            "  - 📥 #adversarial-pr ⟦effect:1⟧ [#q-111111111111]\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/823\n",
+            "  - ☑️ [#subagent:adversarial-pr-823#1] #adversarial-pr ⟦effect:2⟧ [#q-222222222222]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response = concat!(
+            "> **Queue prompt:** https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr\n\n",
+            "Completed the adversarial review for pull request 823.\n",
+        );
+
+        let vector = "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr";
+        let response_heads =
+            crate::queue_response::queue_heads_by_normalized_prompt_text(document);
+        assert_eq!(
+            response_heads.get("#adversarial-pr"),
+            Some(&vec![
+                "https://github.com/haiven-dev/haiven-api/pull/822: #adversarial-pr".to_string(),
+                vector.to_string(),
+            ]),
+            "{response_heads:?}"
+        );
+        let projection = project_answered_free_text_strike_with_claims(
+            document,
+            response,
+            Some(document),
+            &[vector.to_string()],
+        )
+        .unwrap()
+        .expect("the parent-scoped child is answered");
+
+        assert_eq!(projection.node_keys.len(), 1, "{:?}", projection.node_keys);
+        assert!(
+            projection.target_content.contains(
+                "- ### https://github.com/haiven-dev/haiven-api/pull/822\n  - 📥 #adversarial-pr ⟦effect:1⟧ [#q-111111111111]\n"
+            ),
+            "the sibling vector stays live:\n{}",
+            projection.target_content
+        );
+        assert!(
+            projection.target_content.contains(
+                "- ### https://github.com/haiven-dev/haiven-api/pull/823\n  - ~~#adversarial-pr ⟦effect:2⟧ [#q-222222222222]~~ — auto-struck: answered this cycle (#ftstrike)"
+            ),
+            "the addressed vector is struck:\n{}",
+            projection.target_content
+        );
     }
 
     #[test]

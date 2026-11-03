@@ -791,7 +791,12 @@ fn lineage_matches_head(lineage: &str, head_text: &str) -> bool {
 /// `agent:gitlab`, `agent:jira`), queue bodies first.
 pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<String> {
     let (entries, index) = located_prompt(content, prompt_text)?;
-    crate::document_queue::nest_vector_at(&entries, index, prompt_text)
+    // `prompt_text` may be the runtime spelling of a reported row.  The
+    // parent:child address is authored work identity, so lifecycle, attempt,
+    // effect and generated q-id projections must not leak into the vector
+    // matched against the response echo.
+    let own_work = normalized_authored_queue_prompt_text(prompt_text);
+    crate::document_queue::nest_vector_at(&entries, index, &own_work)
 }
 
 /// Exact submitted heads for concrete document rows, grouped by normalized own
@@ -802,6 +807,14 @@ pub fn nest_vector_in_document(content: &str, prompt_text: &str) -> Option<Strin
 /// [`nest_vector_in_document`] for the first matching leaf every time
 /// (`#queueprojectiondrift`). Each grouped value is the parent vector for a
 /// nested row and the row's own work text for a top-level row.
+pub fn normalized_authored_queue_prompt_text(text: &str) -> String {
+    let marker_stripped = agent_doc_document::queue_projection::strip_in_progress_marker(text);
+    let without_effect = crate::document_queue::strip_queue_effect_annotation(&marker_stripped);
+    let authored =
+        agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&without_effect);
+    normalize_queue_prompt_text(&authored)
+}
+
 pub fn queue_heads_by_normalized_prompt_text(
     content: &str,
 ) -> std::collections::HashMap<String, Vec<String>> {
@@ -821,8 +834,12 @@ pub fn queue_heads_by_normalized_prompt_text(
                 | crate::document_queue::QueueEntry::Completed(prompt) => prompt,
                 _ => continue,
             };
-            let key = normalize_queue_prompt_text(prompt.text.trim());
-            let own_work = strip_priority_markers(prompt.text.trim());
+            let key = normalized_authored_queue_prompt_text(prompt.text.trim());
+            // Response matching addresses authored work. Runtime lifecycle,
+            // attempt, effect and generated q-id projections are occurrence
+            // metadata; carrying them into the nest vector makes an exact
+            // `parent: child` echo miss the reported child it owns.
+            let own_work = key.clone();
             let head = crate::document_queue::nest_vector_at(&entries, index, &own_work)
                 .unwrap_or(own_work);
             heads.entry(key).or_default().push(head);

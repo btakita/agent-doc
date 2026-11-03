@@ -53,7 +53,7 @@ use state_store::{
 };
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -4141,21 +4141,97 @@ impl EditorOpCaptureAppliedNonces {
     }
 }
 
-#[derive(Clone)]
-struct StateProjectionEffectCommand {
-    document_hash: String,
-    projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
-    sources_preseeded: bool,
+#[derive(Default)]
+struct StateProjectionActivationState {
+    next_version: u64,
+    shutdown: bool,
+    /// Newest requested activation per document. The projection payload lives
+    /// only in the graph SourceMap, so a burst never retains an unbounded run of
+    /// full document clones.
+    desired: HashMap<String, u64>,
+    pending: VecDeque<String>,
+    scheduled: HashSet<String>,
+}
+
+#[derive(Default)]
+struct StateProjectionActivationQueue {
+    state: Mutex<StateProjectionActivationState>,
+    wake: Condvar,
+}
+
+impl StateProjectionActivationQueue {
+    fn enqueue(&self, document_hash: &str) -> u64 {
+        let mut state = self.state.lock();
+        state.next_version = state.next_version.saturating_add(1);
+        let version = state.next_version;
+        state.desired.insert(document_hash.to_string(), version);
+        if state.scheduled.insert(document_hash.to_string()) {
+            state.pending.push_back(document_hash.to_string());
+        }
+        drop(state);
+        self.wake.notify_one();
+        version
+    }
+
+    fn next(&self) -> Option<(String, u64)> {
+        let mut state = self.state.lock();
+        loop {
+            if let Some(document_hash) = state.pending.pop_front()
+                && let Some(version) = state.desired.get(&document_hash).copied()
+            {
+                return Some((document_hash, version));
+            }
+            if state.shutdown {
+                return None;
+            }
+            self.wake.wait(&mut state);
+        }
+    }
+
+    fn is_current(&self, document_hash: &str, version: u64) -> bool {
+        self.state.lock().desired.get(document_hash).copied() == Some(version)
+    }
+
+    fn complete(&self, document_hash: &str, version: u64, activated: bool) {
+        let mut state = self.state.lock();
+        if activated && state.desired.get(document_hash).copied() == Some(version) {
+            state.desired.remove(document_hash);
+            state.scheduled.remove(document_hash);
+            return;
+        }
+        // A newer request replaced this version. Keep exactly one pending slot
+        // and activate only the newest retained desire.
+        state.pending.push_back(document_hash.to_string());
+        drop(state);
+        self.wake.notify_one();
+    }
+
+    fn shutdown(&self) {
+        self.state.lock().shutdown = true;
+        self.wake.notify_all();
+    }
+
+    #[cfg(test)]
+    fn counts(&self) -> (usize, usize) {
+        let state = self.state.lock();
+        (state.desired.len(), state.pending.len())
+    }
 }
 
 #[cfg(test)]
 type StateProjectionEffectTestHook = Arc<dyn Fn() + Send + Sync>;
 
 #[cfg(test)]
-fn state_projection_effect_test_hook(
-) -> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
+fn state_projection_effect_test_hook()
+-> &'static Mutex<Option<(String, StateProjectionEffectTestHook)>> {
     static HOOK: OnceLock<Mutex<Option<(String, StateProjectionEffectTestHook)>>> = OnceLock::new();
     HOOK.get_or_init(|| Mutex::new(None))
+}
+
+#[cfg(test)]
+fn state_projection_effect_test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[cfg(test)]
@@ -4271,8 +4347,8 @@ pub(crate) struct ControllerRuntime {
     /// Ordered, non-blocking handoff from durable state ingress to derived
     /// document projections. Those projections may parse/reconcile a large live
     /// document, so they must never hold admission's append/apply lock.
-    state_projection_effect_sender:
-        OnceLock<std::sync::mpsc::Sender<StateProjectionEffectCommand>>,
+    state_projection_activation_queue: Arc<StateProjectionActivationQueue>,
+    state_projection_effect_worker_started: OnceLock<()>,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
     /// The serve-loop honors it by starting a two-phase handoff (debounced).
     /// Durable harness dispatches may remain open because their child is
@@ -7473,6 +7549,7 @@ impl ControllerDocumentGraphs {
     /// they postdate, so rebuilding the graph after a binary handoff can settle
     /// an exact target without letting a coincidental pre-intent hash clear a
     /// newer write.
+    #[cfg(test)]
     fn set_projection(
         &self,
         document_hash: &str,
@@ -7582,6 +7659,14 @@ impl ControllerDocumentGraphs {
         if has_compact_continuation {
             self.current_compact_resume(document_hash);
         }
+    }
+
+    fn activate_current_projection(&self, document_hash: &str) {
+        let projection = self
+            .projection
+            .observe(&self.ctx, &document_hash.to_string())
+            .flatten();
+        self.activate_projection(document_hash, projection.as_ref());
     }
 
     /// Observe one clock edge beside the current durable closeout facts and
@@ -9867,6 +9952,12 @@ fn retained_intent_facts_from_projection(
     )
 }
 
+impl Drop for ControllerRuntime {
+    fn drop(&mut self) {
+        self.state_projection_activation_queue.shutdown();
+    }
+}
+
 impl ControllerRuntime {
     pub(crate) fn poison_controller_generation(&self) {
         self.controller_generation_poisoned
@@ -9946,7 +10037,7 @@ impl ControllerRuntime {
         );
         let document_path_transition_graph =
             rpc::ControllerDocumentPathTransitionGraph::new_in(&scope);
-        Ok(Self {
+        let runtime = Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
@@ -9973,14 +10064,31 @@ impl ControllerRuntime {
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
-            state_projection_effect_sender: OnceLock::new(),
+            state_projection_activation_queue: Arc::new(StateProjectionActivationQueue::default()),
+            state_projection_effect_worker_started: OnceLock::new(),
             document_graphs,
             recycle_requested: AtomicBool::new(false),
             recycle_urgent: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             recycle_declined_target: Mutex::new(None),
             _scope: scope,
-        })
+        };
+        // Source publication is cheap and defines the immediate read contract;
+        // only derived activation is deferred until `new_arc` starts its worker.
+        let startup_projections = runtime
+            .memory
+            .lock()
+            .state_projection
+            .documents
+            .iter()
+            .map(|(document_hash, projection)| (document_hash.clone(), projection.clone()))
+            .collect::<Vec<_>>();
+        for (document_hash, projection) in startup_projections {
+            runtime
+                .document_graphs
+                .set_projection_sources(&document_hash, Some(projection));
+        }
+        Ok(runtime)
     }
 
     /// Build the runtime already inside its `Arc` and bind the retained-write
@@ -10044,45 +10152,67 @@ impl ControllerRuntime {
     }
 
     fn install_state_projection_effect_worker(self: &Arc<Self>) -> Result<()> {
-        let (sender, receiver) = std::sync::mpsc::channel::<StateProjectionEffectCommand>();
         let runtime = Arc::downgrade(self);
+        let queue = Arc::clone(&self.state_projection_activation_queue);
         std::thread::Builder::new()
             .name("agent-doc-state-projection-effects".to_string())
             .spawn(move || {
-                while let Ok(command) = receiver.recv() {
+                loop {
+                    let Some((document_hash, version)) = queue.next() else {
+                        break;
+                    };
                     let Some(runtime) = runtime.upgrade() else {
                         break;
                     };
-                    run_state_projection_effect_test_hook(&command.document_hash);
-                    runtime.publish_state_projection_effect(command);
+                    let activated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        run_state_projection_effect_test_hook(&document_hash);
+                        if !queue.is_current(&document_hash, version) {
+                            return false;
+                        }
+                        runtime
+                            .document_graphs
+                            .activate_current_projection(&document_hash);
+                        true
+                    }));
+                    match activated {
+                        Ok(activated) => queue.complete(&document_hash, version, activated),
+                        Err(_) => {
+                            // A derived effect may be externally visible, so
+                            // blindly retrying it is not idempotent. Retain the
+                            // desired version, poison this generation, and let
+                            // controller restart replay durable state.
+                            runtime.poison_controller_generation();
+                            if let Ok(bootstrap) = runtime.bootstrap_snapshot() {
+                                agent_doc_ops_log_io::log_op(
+                                    &bootstrap.project_root,
+                                    &format!(
+                                        "state_projection_activation_panicked document_hash={document_hash} version={version} action=poison_generation_replay_durable"
+                                    ),
+                                );
+                            }
+                            break;
+                        }
+                    }
                 }
             })
             .context("failed to start state-projection effect worker")?;
-        self.state_projection_effect_sender
-            .set(sender)
+        self.state_projection_effect_worker_started
+            .set(())
             .map_err(|_| anyhow::anyhow!("state-projection effect worker already installed"))?;
         Ok(())
     }
 
     fn seed_state_projection_effects(&self) {
-        let projections = self
+        let document_hashes = self
             .memory
             .lock()
             .state_projection
             .documents
-            .iter()
-            .map(|(document_hash, projection)| (document_hash.clone(), projection.clone()))
+            .keys()
+            .cloned()
             .collect::<Vec<_>>();
-        for (document_hash, projection) in projections {
-            // Immediate graph reads after `new_arc` must see the durable
-            // projection. Only derived activation belongs on the worker.
-            self.document_graphs
-                .set_projection_sources(&document_hash, Some(projection.clone()));
-            self.enqueue_state_projection_effect(StateProjectionEffectCommand {
-                document_hash,
-                projection: Some(projection),
-                sources_preseeded: true,
-            });
+        for document_hash in document_hashes {
+            self.enqueue_state_projection_activation(&document_hash);
         }
     }
 
@@ -10536,8 +10666,11 @@ impl ControllerRuntime {
             .collect::<std::collections::BTreeSet<_>>()
         {
             if previous_documents.get(document_hash) != next_documents.get(document_hash) {
-                self.document_graphs
-                    .set_projection(document_hash, next_documents.get(document_hash).cloned());
+                self.document_graphs.set_projection_sources(
+                    document_hash,
+                    next_documents.get(document_hash).cloned(),
+                );
+                self.enqueue_state_projection_activation(document_hash);
             }
         }
         self.supervisor_recycle_waiters.notify_all();
@@ -10623,39 +10756,21 @@ impl ControllerRuntime {
         if captured_finalize_committed {
             rpc::clear_captured_finalize_wake(self, &document_hash);
         }
-        self.enqueue_state_projection_effect(StateProjectionEffectCommand {
-            document_hash,
-            projection: document_projection,
-            sources_preseeded: false,
-        });
+        // Publish the cheap graph Sources before acknowledging the fact. The
+        // worker activates expensive derived effects from the newest Source;
+        // bursts coalesce to one desired version per document.
+        self.document_graphs
+            .set_projection_sources(&document_hash, document_projection);
+        self.enqueue_state_projection_activation(&document_hash);
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         crate::dashboard_refresh::mark_dirty_global();
         Ok(())
     }
 
-    fn enqueue_state_projection_effect(&self, command: StateProjectionEffectCommand) {
-        let Some(sender) = self.state_projection_effect_sender.get() else {
-            // Directly-constructed test runtimes have no worker. Production
-            // runtimes always install it in `new_arc` before accepting RPCs.
-            self.publish_state_projection_effect(command);
-            return;
-        };
-        if let Err(error) = sender.send(command) {
-            // The worker can disappear only while this runtime is tearing down.
-            // Preserve eventual projection for any direct caller still holding it.
-            self.publish_state_projection_effect(error.0);
-        }
-    }
-
-    fn publish_state_projection_effect(&self, command: StateProjectionEffectCommand) {
-        if command.sources_preseeded {
-            self.document_graphs
-                .activate_projection(&command.document_hash, command.projection.as_ref());
-        } else {
-            self.document_graphs
-                .set_projection(&command.document_hash, command.projection);
-        }
+    fn enqueue_state_projection_activation(&self, document_hash: &str) -> u64 {
+        self.state_projection_activation_queue
+            .enqueue(document_hash)
     }
 
     /// Take the state-event ingress lock, recording how long it was awaited and
@@ -21937,7 +22052,8 @@ agent:queue\n\
             supervisor_recycle_waiters: Condvar::new(),
             editor_op_capture_writes: Mutex::new(EditorOpCaptureAppliedNonces::default()),
             state_projection_waiters: Condvar::new(),
-            state_projection_effect_sender: OnceLock::new(),
+            state_projection_activation_queue: Arc::new(StateProjectionActivationQueue::default()),
+            state_projection_effect_worker_started: OnceLock::new(),
             document_graphs,
             state_plane_graph: ControllerStatePlaneGraph::new_in(&scope),
             captured_finalize_wake_publication: Mutex::new(()),
@@ -22031,6 +22147,7 @@ agent:queue\n\
             EditorViewReleaseReason, StateEvent, StateFact,
         };
 
+        let _test_lock = state_projection_effect_test_lock().lock();
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let event_for = |event_id: &str, document_hash: &str| {
@@ -22129,6 +22246,15 @@ agent:queue\n\
                 .is_some(),
             "the ordered in-memory projection must advance before acknowledgement"
         );
+        assert!(
+            runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &document_hash)
+                .flatten()
+                .is_some(),
+            "the cheap graph Source must advance before acknowledgement"
+        );
 
         release_tx.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -22146,6 +22272,211 @@ agent:queue\n\
             std::thread::sleep(Duration::from_millis(10));
         }
         *state_projection_effect_test_hook().lock() = None;
+    }
+
+    #[test]
+    fn refresh_projection_activation_is_coalesced_and_cannot_overtake_sources() {
+        let _test_lock = state_projection_effect_test_lock().lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = "refresh-projection-order";
+        let old = deferred_document_write_event(document_hash, "old-intent", "old-target");
+        append_state_event(dir.path(), &old).unwrap();
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let first = Arc::new(AtomicBool::new(true));
+        let hook: StateProjectionEffectTestHook = Arc::new(move || {
+            if first.swap(false, Ordering::SeqCst) {
+                let _ = entered_tx.send(());
+                let _ = release_rx.lock().recv();
+            }
+        });
+        *state_projection_effect_test_hook().lock() =
+            Some((document_hash.to_string(), hook));
+
+        // The refresh publishes Sources and returns while derived activation
+        // remains blocked on another thread.
+        runtime.refresh_memory().unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let newer = deferred_document_write_event(document_hash, "new-intent", "new-target");
+        append_state_event(dir.path(), &newer).unwrap();
+        let refresh_started = Instant::now();
+        runtime.refresh_memory().unwrap();
+        assert!(refresh_started.elapsed() < Duration::from_millis(500));
+        assert_eq!(
+            runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &document_hash.to_string())
+                .flatten()
+                .and_then(|projection| projection.document.pending_write)
+                .map(|intent| intent.intent_id),
+            Some("new-intent".to_string()),
+            "refresh must publish the newest Source before activation"
+        );
+
+        // An unrelated ingress ACK is not coupled to the blocked activation.
+        let unrelated_hash = "refresh-unrelated-ack";
+        let unrelated =
+            deferred_document_write_event(unrelated_hash, "unrelated-intent", "unrelated-target");
+        let ack_started = Instant::now();
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &unrelated)
+                .unwrap()
+        );
+        assert!(ack_started.elapsed() < Duration::from_millis(500));
+        assert!(
+            runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &unrelated_hash.to_string())
+                .flatten()
+                .is_some()
+        );
+
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(Instant::now() < deadline, "activation queue did not drain");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            pending_intent_id(&runtime, document_hash).as_deref(),
+            Some("new-intent"),
+            "an older queued activation must never regress the newer Source"
+        );
+        *state_projection_effect_test_hook().lock() = None;
+    }
+
+    #[test]
+    fn projection_activation_bursts_coalesce_to_the_newest_version() {
+        let _test_lock = state_projection_effect_test_lock().lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = "coalesced-projection-burst";
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hook_calls = Arc::clone(&calls);
+        let hook: StateProjectionEffectTestHook = Arc::new(move || {
+            if hook_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                let _ = entered_tx.send(());
+                let _ = release_rx.lock().recv();
+            }
+        });
+        *state_projection_effect_test_hook().lock() =
+            Some((document_hash.to_string(), hook));
+
+        let first = deferred_document_write_event(document_hash, "intent-0", "target-0");
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &first)
+                .unwrap()
+        );
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        for index in 1..=64 {
+            let event = deferred_document_write_event(
+                document_hash,
+                &format!("intent-{index}"),
+                &format!("target-{index}"),
+            );
+            assert!(
+                runtime
+                    .append_apply_state_event_serialized(dir.path(), &event)
+                    .unwrap()
+            );
+        }
+        assert_eq!(
+            runtime.state_projection_activation_queue.counts(),
+            (1, 0),
+            "a blocked worker must retain one desired version, not 64 projections"
+        );
+        assert_eq!(
+            runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &document_hash.to_string())
+                .flatten()
+                .and_then(|projection| projection.document.pending_write)
+                .map(|intent| intent.intent_id),
+            Some("intent-64".to_string())
+        );
+
+        release_tx.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while runtime.state_projection_activation_queue.counts() != (0, 0) {
+            assert!(Instant::now() < deadline, "coalesced activation did not drain");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        *state_projection_effect_test_hook().lock() = None;
+    }
+
+    #[test]
+    fn projection_activation_panic_poison_is_fail_safe_without_ingress_fallback() {
+        let _test_lock = state_projection_effect_test_lock().lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = "panicked-projection-activation";
+        let hook: StateProjectionEffectTestHook = Arc::new(|| {
+            panic!("synthetic projection activation failure");
+        });
+        *state_projection_effect_test_hook().lock() =
+            Some((document_hash.to_string(), hook));
+
+        let event = deferred_document_write_event(document_hash, "panic-intent", "panic-target");
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &event)
+                .unwrap()
+        );
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !runtime.controller_generation_poisoned() {
+            assert!(Instant::now() < deadline, "worker panic did not poison generation");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(runtime.state_projection_activation_queue.counts(), (1, 0));
+        *state_projection_effect_test_hook().lock() = None;
+
+        let unrelated_hash = "post-panic-source";
+        let unrelated =
+            deferred_document_write_event(unrelated_hash, "post-panic-intent", "post-panic-target");
+        let started = Instant::now();
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(dir.path(), &unrelated)
+                .unwrap()
+        );
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(
+            runtime
+                .document_graphs
+                .projection
+                .observe(&runtime.document_graphs.ctx, &unrelated_hash.to_string())
+                .flatten()
+                .is_some(),
+            "worker failure must not remove immediate Source publication"
+        );
+    }
+
+    #[test]
+    fn projection_activation_queue_shutdown_wakes_idle_worker() {
+        let queue = Arc::new(StateProjectionActivationQueue::default());
+        let worker_queue = Arc::clone(&queue);
+        let (done_tx, done_rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            done_tx.send(worker_queue.next()).unwrap();
+        });
+        queue.shutdown();
+        assert_eq!(
+            done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            None
+        );
     }
 
     #[test]

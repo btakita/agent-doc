@@ -34,8 +34,10 @@ pub use observation_cache::{
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::io::Read as _;
+use std::process::{Command, Output, Stdio};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use agent_doc_tmux_commands::{
     TmuxCommand, TmuxSubmitProfile, capture_pane as capture_pane_command,
@@ -151,6 +153,10 @@ pub enum TmuxIoError {
         command: String,
         output: String,
     },
+    Timeout {
+        binary: String,
+        timeout_ms: u128,
+    },
     EmptyCurrentPane,
 }
 
@@ -170,6 +176,9 @@ impl fmt::Display for TmuxIoError {
             Self::Utf8 { message } => write!(f, "tmux output was not utf-8: {message}"),
             Self::InvalidOutput { command, output } => {
                 write!(f, "tmux {command} returned invalid output: {output:?}")
+            }
+            Self::Timeout { binary, timeout_ms } => {
+                write!(f, "{binary} command timed out after {timeout_ms}ms")
             }
             Self::EmptyCurrentPane => write!(f, "tmux returned an empty current pane id"),
         }
@@ -764,6 +773,75 @@ pub fn capture_pane_with_ansi(
     runner.run(&capture_pane_with_ansi_command(target))
 }
 
+/// Capture one pane with a hard process deadline.
+///
+/// Controller admission uses this instead of the generic runner so a wedged
+/// tmux server cannot wedge the project controller. A timed-out child is killed
+/// and reaped before this function returns.
+pub fn capture_pane_with_ansi_bounded(
+    tmux: &tmux_router::Tmux,
+    target: &str,
+    timeout: Duration,
+) -> Result<String, TmuxIoError> {
+    let command = capture_pane_with_ansi_command(target);
+    let binary = tmux.binary_path().display().to_string();
+    let mut process = tmux.cmd();
+    process.args(command.args());
+    let output = command_output_bounded(process, &binary, timeout)?;
+    tmux_output_to_string(output, &binary)
+}
+
+fn command_output_bounded(
+    mut command: Command,
+    binary: &str,
+    timeout: Duration,
+) -> Result<Output, TmuxIoError> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|err| TmuxIoError::Spawn {
+        binary: binary.to_string(),
+        message: err.to_string(),
+    })?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait().map_err(|err| TmuxIoError::Spawn {
+            binary: binary.to_string(),
+            message: err.to_string(),
+        })? {
+            Some(status) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut pipe) = child.stdout.take() {
+                    pipe.read_to_end(&mut stdout)
+                        .map_err(|err| TmuxIoError::Spawn {
+                            binary: binary.to_string(),
+                            message: err.to_string(),
+                        })?;
+                }
+                if let Some(mut pipe) = child.stderr.take() {
+                    pipe.read_to_end(&mut stderr)
+                        .map_err(|err| TmuxIoError::Spawn {
+                            binary: binary.to_string(),
+                            message: err.to_string(),
+                        })?;
+                }
+                return Ok(Output { status, stdout, stderr });
+            }
+            None if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(TmuxIoError::Timeout {
+                    binary: binary.to_string(),
+                    timeout_ms: timeout.as_millis(),
+                });
+            }
+            None => {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                std::thread::sleep(remaining.min(Duration::from_millis(5)));
+            }
+        }
+    }
+}
+
 /// Capture the pane INCLUDING its scrollback history.
 ///
 /// `#clearsubmitunobserved`: retained scrollback is the positive evidence that a
@@ -1050,6 +1128,27 @@ pub fn project_root_for_pane_current_path(output: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn bounded_command_kills_and_reaps_a_stalled_child() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 5"]);
+        let started = Instant::now();
+        let err = command_output_bounded(command, "test-tmux", Duration::from_millis(30))
+            .expect_err("stalled child should time out");
+        assert!(
+            matches!(
+                err,
+                TmuxIoError::Timeout {
+                    ref binary,
+                    timeout_ms: 30
+                } if binary == "test-tmux"
+            ),
+            "{err:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
     /// `#tmuxnotinmode` (GH #70): N copies of the benign `not in a mode` line
     /// (one per pane a batched mode command did not need) are success; a real
     /// error mixed in still fails.

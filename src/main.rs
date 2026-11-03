@@ -1150,6 +1150,7 @@ fn actor_inspection_view(
         freshness: inspection.freshness,
         queue_head: inspection.queue_head,
         queue_control: inspection.queue_control,
+        queue_controls: inspection.queue_controls,
         queue_backpressure: inspection.queue_backpressure,
         editor_replica: inspection.editor_replica,
         projection_lag: inspection.projection_lag,

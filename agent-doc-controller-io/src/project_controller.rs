@@ -11673,6 +11673,8 @@ pub struct ControllerActorInspection {
     #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
+    pub queue_controls: Vec<QueueControlStatus>,
+    #[serde(default)]
     pub queue_backpressure: Vec<QueueBackpressureStatus>,
     #[serde(default)]
     pub editor_replica: Option<agent_doc_controller::fleet::EditorReplicaHealth>,
@@ -20023,6 +20025,61 @@ mod tests {
                 .iter()
                 .any(|operation| operation.operation_kind == "queue_paused"
                     && operation.status == "accepted")
+        );
+
+        state_store::upsert_queue_control_in_db(
+            &conn,
+            &state_store::QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &document_id,
+                state: "draining",
+                reason: Some("stale document drain"),
+                operation_receipt_id: None,
+                actor_generation: Some(0),
+                target_item_id: None,
+                lease_expires_at: Some(1),
+            },
+        )
+        .unwrap();
+        state_store::upsert_queue_control_in_db(
+            &conn,
+            &state_store::QueueControlInsert {
+                scope_kind: "project",
+                scope_id: &dir.path().to_string_lossy(),
+                state: "paused",
+                reason: Some("project maintenance"),
+                operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
+            },
+        )
+        .unwrap();
+        let response = handle_request(
+            &(serde_json::to_string(&inspect).unwrap() + "\n"),
+            &bootstrap,
+            &mut should_stop,
+        )
+        .unwrap();
+        let envelope: ControllerEnvelope<ControllerActorInspection> =
+            serde_json::from_str(&response).unwrap();
+        let inspection = envelope.data.unwrap();
+        let effective = inspection.queue_control.as_ref().unwrap();
+        assert_eq!(effective.scope_kind, "project");
+        assert_eq!(effective.state, "paused");
+        assert_eq!(inspection.queue_controls.len(), 2);
+        let stale_document = inspection
+            .queue_controls
+            .iter()
+            .find(|control| control.scope_kind == "document")
+            .unwrap();
+        assert!(!stale_document.effective);
+        assert!(
+            stale_document
+                .effectiveness_reason
+                .as_deref()
+                .unwrap()
+                .starts_with("drain_generation_superseded")
         );
     }
 

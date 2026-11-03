@@ -50,6 +50,8 @@ pub struct ControllerActorInspectionView {
     #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
+    pub queue_controls: Vec<QueueControlStatus>,
+    #[serde(default)]
     pub queue_backpressure: Vec<QueueBackpressureStatus>,
     #[serde(default)]
     pub editor_replica: Option<agent_doc_controller::fleet::EditorReplicaHealth>,
@@ -330,6 +332,19 @@ pub fn inspect(
             .and_then(|health| health.remedy.as_deref())
         {
             println!("  editor_replica_remedy={remedy}");
+        }
+        for control in &inspection.queue_controls {
+            println!(
+                "  retained_queue_control scope={}:{} state={} effective={} reason={} actor_generation={:?} target_item_id={:?} lease_expires_at={:?}",
+                control.scope_kind,
+                control.scope_id,
+                control.state,
+                control.effective,
+                control.effectiveness_reason.as_deref().unwrap_or("none"),
+                control.actor_generation,
+                control.target_item_id,
+                control.lease_expires_at,
+            );
         }
     } else {
         println!("No actor found for {}", inspection.target);

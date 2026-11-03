@@ -19,8 +19,8 @@ use anyhow::{Context, Result};
 use crate::{
     document_queue::{self, QueueEntry},
     queue_response::{
-        normalize_done_id, normalize_queue_prompt_text, queue_prompt_done_id,
-        queue_prompt_text_is_free_text, queue_prompt_text_matches,
+        ConsumedPromptResponseEcho, normalize_done_id, normalize_queue_prompt_text,
+        queue_prompt_done_id, queue_prompt_text_is_free_text, queue_prompt_text_matches,
     },
 };
 
@@ -786,6 +786,70 @@ pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<S
         .into_iter()
         .map(|prompt| strip_in_progress_marker(&prompt.text))
         .take(count)
+        .collect()
+}
+
+fn prompt_response_echo_at(
+    entries: &[QueueEntry],
+    index: usize,
+    identity: String,
+) -> ConsumedPromptResponseEcho {
+    let display = document_queue::nest_vector_at(entries, index, &identity)
+        .unwrap_or_else(|| identity.clone());
+    ConsumedPromptResponseEcho { identity, display }
+}
+
+/// Response echoes for the first `count` executable prompts, captured from the
+/// concrete pre-consume rows rather than looked up by leaf text afterwards.
+pub fn first_n_queue_prompt_response_echoes(
+    entries: &[QueueEntry],
+    count: usize,
+) -> Vec<ConsumedPromptResponseEcho> {
+    document_queue::executable_prompt_indexes(entries)
+        .into_iter()
+        .filter_map(|index| match entries.get(index) {
+            Some(QueueEntry::Prompt(prompt)) => Some(prompt_response_echo_at(
+                entries,
+                index,
+                strip_in_progress_marker(&prompt.text),
+            )),
+            _ => None,
+        })
+        .take(count)
+        .collect()
+}
+
+/// Response echoes for every live prompt selected by stable done id.
+///
+/// The predicate intentionally mirrors [`mark_entries_completed_by_done_ids`]
+/// so explicit ids remain authoritative while each selected occurrence keeps
+/// its own parent-qualified display vector.
+pub fn queue_prompt_response_echoes_for_done_ids(
+    entries: &[QueueEntry],
+    done_ids: &[String],
+) -> Vec<ConsumedPromptResponseEcho> {
+    if done_ids.is_empty() {
+        return Vec::new();
+    }
+    let done_ids = done_ids
+        .iter()
+        .map(|id| normalize_done_id(id))
+        .collect::<HashSet<_>>();
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| match entry {
+            QueueEntry::Prompt(prompt)
+                if queue_prompt_done_id(&prompt.text).is_some_and(|id| done_ids.contains(&id)) =>
+            {
+                Some(prompt_response_echo_at(
+                    entries,
+                    index,
+                    struck_work_text(&prompt.text).to_string(),
+                ))
+            }
+            _ => None,
+        })
         .collect()
 }
 
@@ -9095,6 +9159,58 @@ mod tests {
         assert_eq!(
             first_n_queue_prompt_texts(&entries, 1),
             vec!["do [#head]".to_string()]
+        );
+    }
+
+    #[test]
+    fn response_echoes_capture_full_concrete_ancestry_and_keep_leaf_compatibility() {
+        let entries = entries(concat!(
+            "- Root context\n",
+            "  - do [#parent]\n",
+            "    - same leaf\n",
+            "- Sibling root\n",
+            "  - same leaf\n",
+            "- top-level leaf\n",
+        ));
+
+        let echoes = first_n_queue_prompt_response_echoes(&entries, 3);
+
+        assert_eq!(
+            echoes,
+            vec![
+                ConsumedPromptResponseEcho {
+                    identity: "same leaf".to_string(),
+                    display: "Root context: #parent: same leaf".to_string(),
+                },
+                ConsumedPromptResponseEcho {
+                    identity: "same leaf".to_string(),
+                    display: "Sibling root: same leaf".to_string(),
+                },
+                ConsumedPromptResponseEcho {
+                    identity: "top-level leaf".to_string(),
+                    display: "top-level leaf".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn done_id_response_echoes_keep_explicit_id_selection_parent_qualified() {
+        let entries = entries(concat!(
+            "- Parent A\n",
+            "  - do [#same] first\n",
+            "- Parent B\n",
+            "  - do [#same] second\n",
+        ));
+
+        let echoes = queue_prompt_response_echoes_for_done_ids(&entries, &["same".to_string()]);
+
+        assert_eq!(
+            echoes
+                .iter()
+                .map(|echo| echo.display.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Parent A: do [#same] first", "Parent B: do [#same] second"]
         );
     }
 

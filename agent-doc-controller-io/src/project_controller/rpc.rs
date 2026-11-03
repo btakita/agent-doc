@@ -40020,7 +40020,9 @@ fn handle_queue_projection_generation_write(
     // generation so a queue repair cannot splice itself into closeout.
     if let Some(projected) = runtime.document_state_projection(&document_hash)? {
         if queue_projection_active_write_fence(&projected)? {
-            return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+            anyhow::bail!(
+                "queue projection repair deferred: captured finalize or retained document write is active"
+            );
         }
     }
 

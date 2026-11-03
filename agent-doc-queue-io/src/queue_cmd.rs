@@ -996,6 +996,31 @@ pub fn ensure_queue_projection_repair_request(
     generation: u64,
     reason: &str,
 ) -> Result<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest> {
+    ensure_queue_projection_repair_request_with_wake(file, generation, reason, true, |file| {
+        agent_doc_controller_io::project_controller::wake_queue_projection_repair_for_file(file)
+    })
+}
+
+/// Persist or reuse the exact repair request without publishing a wake.
+///
+/// The idle supervisor uses this after consuming the document-delivery edge
+/// that made repair due. Publishing another delivery wake from inside that
+/// consumer would re-arm its own successful `changed=false` repair forever.
+pub fn ensure_queue_projection_repair_request_without_wake(
+    file: &Path,
+    generation: u64,
+    reason: &str,
+) -> Result<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest> {
+    ensure_queue_projection_repair_request_with_wake(file, generation, reason, false, |_| Ok(()))
+}
+
+fn ensure_queue_projection_repair_request_with_wake(
+    file: &Path,
+    generation: u64,
+    reason: &str,
+    publish_wake: bool,
+    wake: impl FnOnce(&Path) -> Result<()>,
+) -> Result<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     conn.execute_batch("BEGIN IMMEDIATE")
@@ -1035,18 +1060,17 @@ pub fn ensure_queue_projection_repair_request(
             .context("parse existing queue projection repair request")
         })
         .transpose()?;
-        if let Some(existing) = existing.filter(|request| {
-            request.generation == generation && request.request_generation > 0
-        }) {
+        if let Some(existing) = existing
+            .filter(|request| request.generation == generation && request.request_generation > 0)
+        {
             return Ok::<_, anyhow::Error>((existing, false));
         }
 
-        let sequence_record =
-            agent_doc_sqlite::state_store::load_queue_document_state_from_db(
-                &conn,
-                &document_hash,
-                agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_SEQUENCE_STATE_KIND,
-            )?;
+        let sequence_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_SEQUENCE_STATE_KIND,
+        )?;
         let sequence = sequence_record
             .as_ref()
             .map(|record| {
@@ -1110,12 +1134,10 @@ pub fn ensure_queue_projection_repair_request(
         }
     };
     let (request, created) = recorded;
-    if !created {
+    if !created || !publish_wake {
         return Ok(request);
     }
-    if let Err(error) =
-        agent_doc_controller_io::project_controller::wake_queue_projection_repair_for_file(file)
-    {
+    if let Err(error) = wake(file) {
         // The request is already durable. An inactive document consumes it on
         // supervisor startup; an attached supervisor also has its periodic
         // repair cadence, so a transient wake failure must not erase the typed
@@ -4536,14 +4558,12 @@ mod tests {
             agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
                 .unwrap();
         assert_eq!(first.generation, 1);
-        let first_request =
-            ensure_queue_projection_repair_request(&doc, 1, "first").unwrap();
+        let first_request = ensure_queue_projection_repair_request(&doc, 1, "first").unwrap();
         let second =
             agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
                 .unwrap();
         assert_eq!(second.generation, 2);
-        let second_request =
-            ensure_queue_projection_repair_request(&doc, 2, "second").unwrap();
+        let second_request = ensure_queue_projection_repair_request(&doc, 2, "second").unwrap();
         assert!(second_request.request_generation > first_request.request_generation);
 
         let source = std::fs::read_to_string(&doc).unwrap();
@@ -4595,21 +4615,28 @@ mod tests {
         .unwrap();
         // A retry or restarted supervisor reuses the durable token rather than
         // manufacturing a retry storm.
-        let restarted = ensure_queue_projection_repair_request(
-            &doc,
-            generation,
-            "ordinary_projection_retry",
-        )
-        .unwrap();
+        let restarted =
+            ensure_queue_projection_repair_request(&doc, generation, "ordinary_projection_retry")
+                .unwrap();
         assert_eq!(restarted, first);
-        assert_eq!(load_queue_projection_repair_request(&doc).unwrap(), Some(first.clone()));
+        assert_eq!(
+            load_queue_projection_repair_request(&doc).unwrap(),
+            Some(first.clone())
+        );
 
         let mut stale = first.clone();
         stale.request_generation = stale.request_generation.saturating_sub(1);
         assert!(!clear_queue_projection_repair_request(&doc, &stale).unwrap());
-        assert_eq!(load_queue_projection_repair_request(&doc).unwrap(), Some(first.clone()));
+        assert_eq!(
+            load_queue_projection_repair_request(&doc).unwrap(),
+            Some(first.clone())
+        );
         assert!(clear_queue_projection_repair_request(&doc, &first).unwrap());
-        assert!(load_queue_projection_repair_request(&doc).unwrap().is_none());
+        assert!(
+            load_queue_projection_repair_request(&doc)
+                .unwrap()
+                .is_none()
+        );
 
         let next = ensure_queue_projection_repair_request(
             &doc,
@@ -4667,6 +4694,88 @@ mod tests {
             Some(request),
             "a replacement supervisor must be able to resume the exact request"
         );
+    }
+
+    #[test]
+    fn production_repair_wake_runs_one_unchanged_worker_then_quiesces() {
+        use std::cell::Cell;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let initial = "<!-- agent:queue -->\n- already settled\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, initial).unwrap();
+        // Normalize the fixture before the measured request/wake/worker cycle.
+        let setup_effects = FakeEffects::with_current(initial);
+        project_all_queue_runtime_state_once_with_effects(&setup_effects, &doc).unwrap();
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let wake_count = Cell::new(0usize);
+        let generation = queue_repair_generation(&doc).unwrap();
+
+        // External recovery records one durable request and publishes exactly
+        // one maintenance wake through the same production helper.
+        let requested = ensure_queue_projection_repair_request_with_wake(
+            &doc,
+            generation,
+            "external_recovery",
+            true,
+            |_| {
+                wake_count.set(wake_count.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(wake_count.get(), 1);
+
+        // The idle watcher consumes that edge, reuses the token without
+        // publishing a self-wake, and runs one unchanged generation-fenced
+        // worker.
+        let worker_request = ensure_queue_projection_repair_request_with_wake(
+            &doc,
+            generation,
+            "ordinary_projection_reconcile",
+            false,
+            |_| panic!("idle consumption must not publish its own delivery wake"),
+        )
+        .unwrap();
+        assert_eq!(worker_request, requested);
+        assert_eq!(wake_count.get(), 1);
+        let effects = FakeEffects::with_current(content);
+        assert_eq!(
+            project_all_queue_runtime_state_once_for_generation_with_effects(
+                &effects,
+                &doc,
+                worker_request.generation,
+            )
+            .unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Settled { changed: false }
+        );
+        assert!(clear_queue_projection_repair_request(&doc, &worker_request).unwrap());
+        assert!(
+            load_queue_projection_repair_request(&doc)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            wake_count.get(),
+            1,
+            "settlement must publish no successor wake"
+        );
+
+        let root = agent_doc_fs::find_project_root(&doc).unwrap();
+        let document_hash = agent_doc_hash::path_hash(&doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        let sequence = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_SEQUENCE_STATE_KIND,
+        )
+        .unwrap()
+        .expect("repair sequence")
+        .payload_json;
+        let sequence: agent_doc_queue::queue_repair_generation::QueueProjectionRepairSequence =
+            serde_json::from_str(&sequence).unwrap();
+        assert_eq!(sequence.generation, requested.request_generation);
     }
 
     #[test]

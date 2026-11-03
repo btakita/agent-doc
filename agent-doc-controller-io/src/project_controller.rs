@@ -6062,7 +6062,6 @@ impl AnsweredFreeTextQueueStrikeProjection {
             && self.file.is_some()
             && !self.projection_id.is_empty()
             && self.target_content != self.expected_content
-            && !self.node_keys.is_empty()
     }
 }
 
@@ -7972,29 +7971,26 @@ impl ControllerDocumentGraphs {
                     &observation.dispatch_owned_heads,
                     &addressed_at,
                 ) {
-                    Ok((target, inline_vetoed_heads))
-                        if !inline_vetoed_heads.is_empty() || target.is_some() =>
-                    {
-                        let Some(target) = target else {
-                            return AnsweredFreeTextQueueStrikeProjection {
-                                inline_vetoed_heads,
-                                ..AnsweredFreeTextQueueStrikeProjection::default()
+                    Ok((target, inline_vetoed_heads)) => {
+                        let (target_content, node_keys) = if let Some(target) = target {
+                            let content = match agent_doc_queue::queue_recency::annotate_newly_struck_rows(
+                                &observation.content,
+                                &target.target_content,
+                                &addressed_at,
+                            ) {
+                                Ok(content) => content,
+                                Err(error) => {
+                                    return AnsweredFreeTextQueueStrikeProjection {
+                                        error: Some(format!(
+                                            "answered free-text recency annotation failed for {key}: {error}"
+                                        )),
+                                        ..AnsweredFreeTextQueueStrikeProjection::default()
+                                    };
+                                }
                             };
-                        };
-                        let target_content = match agent_doc_queue::queue_recency::annotate_newly_struck_rows(
-                            &observation.content,
-                            &target.target_content,
-                            &addressed_at,
-                        ) {
-                            Ok(content) => content,
-                            Err(error) => {
-                                return AnsweredFreeTextQueueStrikeProjection {
-                                    error: Some(format!(
-                                        "answered free-text recency annotation failed for {key}: {error}"
-                                    )),
-                                    ..AnsweredFreeTextQueueStrikeProjection::default()
-                                };
-                            }
+                            (content, target.node_keys)
+                        } else {
+                            (observation.content.clone(), Vec::new())
                         };
                         // `#activeterminalprojection`: the answered-head Effect is
                         // the terminal document successor for this work. Keep the
@@ -8017,11 +8013,17 @@ impl ControllerDocumentGraphs {
                                 };
                             }
                         };
+                        if target_content == observation.content {
+                            return AnsweredFreeTextQueueStrikeProjection {
+                                inline_vetoed_heads,
+                                ..AnsweredFreeTextQueueStrikeProjection::default()
+                            };
+                        }
                         let projection_id = agent_doc_hash::content_hash(&format!(
                             "{}:{}:{}",
                             captured.response_sha256,
                             observation.content_hash,
-                            target.node_keys.join(",")
+                            node_keys.join(",")
                         ));
                         AnsweredFreeTextQueueStrikeProjection {
                             file: Some(observation.file),
@@ -8033,7 +8035,7 @@ impl ControllerDocumentGraphs {
                             response_body: captured.response_body,
                             baseline_content: captured.baseline_content,
                             addressed_at,
-                            node_keys: target.node_keys,
+                            node_keys,
                             claimed_heads: observation.claimed_heads,
                             selected_heads: observation.selected_heads,
                             dispatch_owned_heads: observation.dispatch_owned_heads,
@@ -8041,7 +8043,6 @@ impl ControllerDocumentGraphs {
                             error: None,
                         }
                     }
-                    Ok(_) => AnsweredFreeTextQueueStrikeProjection::default(),
                     Err(error) => AnsweredFreeTextQueueStrikeProjection {
                         error: Some(format!(
                             "answered free-text queue projection failed for {key}: {error}"
@@ -27386,6 +27387,51 @@ revised operator request
             !projected.contains("queue-free:stale")
                 && !projected.contains("- **Status:** reported"),
             "the background strike successor must retire its terminal active row: {projected}"
+        );
+
+        // Model a partial retained landing/restart: the queue strike is already
+        // terminal, but an older Active block reappears. The same reactive edge
+        // repairs Active without requiring another strikeable head.
+        let stale_active = projected.replace(
+            "<!-- /agent:active -->",
+            concat!(
+                "- **Queue** (1)\n",
+                "  - `queue-free:partial` — staging deploy\n",
+                "    - **Status:** reported\n",
+                "<!-- /agent:active -->",
+            ),
+        );
+        std::fs::write(&canonical, &stale_active).unwrap();
+        runtime
+            .document_queue_authority_observe(&document_hash, &canonical, stale_active)
+            .unwrap();
+        let repair = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            repair.has_target(),
+            "stale Active must form a repair edge: {repair:?}"
+        );
+        assert!(
+            repair.node_keys.is_empty(),
+            "the queue is already terminal, so the repair owns only Active: {repair:?}"
+        );
+        let repaired = loop {
+            let repaired = std::fs::read_to_string(&canonical).unwrap();
+            if !repaired.contains("queue-free:partial") {
+                break repaired;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the asynchronous Active-only repair did not settle"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            agent_doc_work_projection::reconcile_managed_active_items(&repaired)
+                .unwrap()
+                .is_none(),
+            "the background repair must land an Active fixpoint: {repaired}"
         );
 
         let terminal_events = [

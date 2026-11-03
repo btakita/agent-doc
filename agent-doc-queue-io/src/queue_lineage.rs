@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent_doc_element_queue::{QueueItemIdentity, strip_queue_prompt_stable_id_annotation};
+use agent_doc_element_queue::QueueItemIdentity;
 use agent_doc_queue::queue_claim::{QueueClaim, claim_identity};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -1059,7 +1059,8 @@ fn require_integrated_repo_work_inner(
     // same attempt, not fresh work. Resolve only that one-way generated-id
     // alias; authored ids are never stripped. More than one candidate remains
     // corrupt/ambiguous state and must not pick an attempt silently.
-    let authored_item = strip_queue_prompt_stable_id_annotation(item);
+    let authored_item =
+        agent_doc_queue::queue_response::normalized_authored_queue_prompt_text(item);
     let authored_identity = claim_identity(&authored_item);
     let mut attempts = ledger
         .attempts

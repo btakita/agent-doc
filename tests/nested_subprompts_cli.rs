@@ -685,6 +685,53 @@ fn a_verbatim_nested_echo_closes_the_reported_leaf_not_the_parent() {
     assert!(!body.contains("☑️"), "{body}");
     assert!(claim_owners(dir.path(), path).is_empty());
 }
+
+/// Equal child text under separate parents is separate queue work. A closeout
+/// for one nest vector must not remove or strike the sibling occurrence.
+#[test]
+fn equal_nested_children_close_by_parent_vector() {
+    let dir = tempfile::tempdir().unwrap();
+    let first_parent = "https://github.com/haiven-dev/haiven-api/pull/822";
+    let second_parent = "https://github.com/haiven-dev/haiven-api/pull/823";
+    let child = "#adversarial-pr";
+    let second_vector = format!("{second_parent}: {child}");
+    let rows = format!(
+        "- {first_parent}\n  - {child}\n- {second_parent}\n  - {child}\n"
+    );
+    let doc = closeout_session(dir.path(), &rows, "");
+    let path = doc.to_str().unwrap();
+
+    dispatch_and_report(
+        dir.path(),
+        path,
+        &second_vector,
+        "subagent:adversarial-pr-823",
+    );
+    preflight_json(dir.path(), &doc);
+    let response = format!(
+        "<!-- patch:exchange -->\n### Re: adversarial review — gpt-5\n\n> **Queue prompt:** {first_parent}\n\n**Deferred:** Its child remains queued.\n\n> **Queue prompt:** {second_vector}\n\nReviewed pull request 823.\n<!-- /patch:exchange -->\n"
+    );
+    let output = run_agent_doc_stdin(dir.path(), &["respond", path, "--force-disk"], &response);
+    assert_ok(&output, "respond");
+
+    let body = without_admitted_queue_ids(&run_body(&doc, "run"));
+    let (first_section, second_section) = body
+        .split_once(second_parent)
+        .unwrap_or_else(|| panic!("missing second parent:\n{body}"));
+    assert!(
+        first_section.contains(first_parent)
+            && first_section.contains(child)
+            && !first_section.contains(&format!("~~{child}~~")),
+        "the equal-text child under the other parent stays live:\n{body}"
+    );
+    assert!(
+        second_section.contains(&format!("~~{child}")),
+        "only the addressed parent vector closes:\n{body}"
+    );
+    assert_eq!(body.matches(&format!("~~{child}")).count(), 1, "{body}");
+    assert!(!second_section.contains("☑️"), "{body}");
+    assert!(claim_owners(dir.path(), path).is_empty());
+}
 /// `#nestedechostrike` (the ahfe row): a reported `do [#id]` dispatch row whose
 /// id is an open Todo awaiting an operator check closes with
 /// `queue consume --ack-id`, which leaves the Todo open; `--done` would

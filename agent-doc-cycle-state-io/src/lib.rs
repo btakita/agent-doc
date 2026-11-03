@@ -719,6 +719,97 @@ pub struct CapturedResponseCheckpoint {
     pub baseline_content: Option<String>,
 }
 
+/// Exact capture projection expected to precede a terminal closeout proof.
+///
+/// Capture identity and response hash alone are not a version: recovery may
+/// refresh the same capture with a newer baseline after a terminal proof was
+/// recorded.  Callers that use committed HEAD as provenance must bind the
+/// proof to the latest content-bearing capture fact in durable ledger order.
+pub struct CaptureProjectionTerminalProofInput<'a> {
+    pub cycle_id: &'a str,
+    pub capture_id: &'a str,
+    pub response_sha256: &'a str,
+    pub baseline_content: Option<&'a str>,
+    pub head_hash: &'a str,
+}
+
+pub fn terminal_proof_follows_capture_projection(
+    file: &Path,
+    expected: CaptureProjectionTerminalProofInput<'_>,
+) -> Result<bool> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(false);
+    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let Some(capture_row) =
+        agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+            &conn,
+            &document_hash,
+            "response_captured",
+            1,
+        )?
+        .into_iter()
+        .next()
+    else {
+        return Ok(false);
+    };
+    let Some(proof_row) =
+        agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+            &conn,
+            &document_hash,
+            "terminal_closeout_proof_recorded",
+            1,
+        )?
+        .into_iter()
+        .next()
+    else {
+        return Ok(false);
+    };
+    if capture_row.sequence >= proof_row.sequence {
+        return Ok(false);
+    }
+
+    let capture_event: agent_doc_state_backbone::StateEvent =
+        serde_json::from_str(&capture_row.payload_json)
+            .with_context(|| format!("decode state event {}", capture_row.event_id))?;
+    let proof_event: agent_doc_state_backbone::StateEvent =
+        serde_json::from_str(&proof_row.payload_json)
+            .with_context(|| format!("decode state event {}", proof_row.event_id))?;
+    let capture_matches = matches!(
+        capture_event.fact,
+        agent_doc_state_backbone::StateFact::ResponseCaptured {
+            cycle_id,
+            capture_id,
+            response_sha256,
+            baseline_content,
+            ..
+        } if cycle_id == expected.cycle_id
+            && capture_id == expected.capture_id
+            && response_sha256 == expected.response_sha256
+            && baseline_content.as_deref() == expected.baseline_content
+    );
+    let proof_matches = matches!(
+        proof_event.fact,
+        agent_doc_state_backbone::StateFact::TerminalCloseoutProofRecorded {
+            cycle_id,
+            did_commit: true,
+            head_hash,
+            capture_id: Some(capture_id),
+            response_sha256: Some(response_sha256),
+            ..
+        } if cycle_id == expected.cycle_id
+            && capture_id == expected.capture_id
+            && response_sha256 == expected.response_sha256
+            && head_hash == expected.head_hash
+    );
+    Ok(capture_matches && proof_matches)
+}
+
 impl ProjectedCloseoutState {
     pub fn phase_is_open(&self) -> Option<bool> {
         self.phase.map(CyclePhase::is_open)

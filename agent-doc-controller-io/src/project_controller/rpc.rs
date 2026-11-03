@@ -21925,21 +21925,60 @@ pub(crate) fn controller_self_promote_to_public(
     handoff_temp_socket: &Path,
     public_sock: &Path,
 ) -> Result<()> {
+    let snapshot = runtime.bootstrap_snapshot()?;
+    // Serialize with every controller launcher, then re-read the durable owner.
+    // A replacement may have decided to self-promote just before a newer
+    // recovery controller superseded it; the process-local snapshot alone is
+    // therefore never authority to unlink `controller.sock`.
+    let _launch_claim = LaunchClaim::acquire(&snapshot.project_root)
+        .context("self-promote: controller launch is concurrently in progress")?;
+    let persisted = read_bootstrap(&snapshot.project_root)?
+        .context("self-promote: durable controller bootstrap is missing")?;
+    anyhow::ensure!(
+        persisted.pid == snapshot.pid
+            && persisted.controller_generation == snapshot.controller_generation
+            && persisted.project_root == snapshot.project_root
+            && persisted.socket_path == handoff_temp_socket
+            && persisted.handoff_state == snapshot.handoff_state
+            && persisted.previous_controller_pid == snapshot.previous_controller_pid
+            && matches!(
+                persisted.handoff_state,
+                ControllerHandoffState::Preparing | ControllerHandoffState::Stable
+            ),
+        "self-promote: durable controller ownership changed before promotion"
+    );
+    if persisted.handoff_state == ControllerHandoffState::Preparing {
+        anyhow::ensure!(
+            persisted
+                .previous_controller_pid
+                .map(crate::process::process_is_alive)
+                == Some(false),
+            "self-promote: preparing predecessor is still alive or unknown"
+        );
+    }
+
+    let mut promoted = persisted.clone();
+    promoted.socket_path = public_sock.to_path_buf();
+    promoted.handoff_state = ControllerHandoffState::Stable;
+    promoted.handoff_started_at = None;
+    write_bootstrap_state(&promoted)?;
     if public_sock.exists() {
         let _ = std::fs::remove_file(public_sock);
     }
-    std::fs::rename(handoff_temp_socket, public_sock).with_context(|| {
-        format!(
-            "self-promote: failed to rename handoff socket {} onto public {}",
-            handoff_temp_socket.display(),
-            public_sock.display()
-        )
-    })?;
+    if let Err(error) = std::fs::rename(handoff_temp_socket, public_sock) {
+        // The launch claim still excludes a concurrent successor, so restoring
+        // the exact pre-promotion record is safe and keeps the retry reachable.
+        let _ = write_bootstrap_state(&persisted);
+        return Err(error).with_context(|| {
+            format!(
+                "self-promote: failed to rename handoff socket {} onto public {}",
+                handoff_temp_socket.display(),
+                public_sock.display()
+            )
+        });
+    }
     let mut state = runtime.bootstrap.lock();
-    state.socket_path = public_sock.to_path_buf();
-    state.handoff_state = ControllerHandoffState::Stable;
-    state.handoff_started_at = None;
-    write_bootstrap_state(&state)?;
+    *state = promoted;
     agent_doc_ops_log_io::log_op(
         &state.project_root,
         &format!(
@@ -58094,6 +58133,41 @@ mod tests {
                 Some(state)
             );
         }
+    }
+
+    #[test]
+    fn self_promote_refuses_to_clobber_newer_durable_controller() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let temp = dir.path().join(".agent-doc/controller-handoff-old.sock");
+        let public = socket_path(dir.path());
+        std::fs::write(&temp, b"stale replacement").unwrap();
+        std::fs::write(&public, b"newer controller").unwrap();
+
+        let mut stale = test_bootstrap(&dir);
+        stale.socket_path = temp.clone();
+        stale.controller_generation = 10;
+        stale.handoff_state = ControllerHandoffState::Preparing;
+        stale.previous_controller_pid = Some(u32::MAX - 1);
+        let runtime = test_controller_runtime(&stale);
+
+        let mut newer = stale.clone();
+        newer.controller_generation = 11;
+        newer.socket_path = public.clone();
+        newer.handoff_state = ControllerHandoffState::Stable;
+        newer.previous_controller_pid = None;
+        write_bootstrap_state(&newer).unwrap();
+
+        let error = controller_self_promote_to_public(runtime.as_ref(), &temp, &public)
+            .expect_err("a superseded replacement must fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("durable controller ownership changed")
+        );
+        assert_eq!(std::fs::read(&public).unwrap(), b"newer controller");
+        assert!(temp.exists());
+        assert_eq!(read_bootstrap(dir.path()).unwrap(), Some(newer));
     }
 
     #[test]

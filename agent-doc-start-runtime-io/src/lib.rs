@@ -2460,7 +2460,18 @@ fn supervisor_binary_freshness_observation(
     let running_started_from_installed_path = launch_binary_identity
         .zip(installed_binary_at_launch)
         .is_some_and(|(launch, installed)| launch.path == installed.identity.path);
-    let (recorded_identity, recorded_inode) = if running_started_from_installed_path {
+    // Compare the process image directly before substituting the cross-path
+    // fallback below.  A supervisor launched from a versioned cache path can
+    // later `execve` the installed command in place; its launch path remains
+    // the cache path, but `/proc/<pid>/exe` now proves that the fresh installed
+    // image is running.
+    let running_inode_proves_fresh = matches!(
+        (running_exe_inode, installed_binary_now.inode),
+        (Some(running), Some(installed)) if running == installed
+    );
+    let (recorded_identity, recorded_inode) = if running_inode_proves_fresh {
+        (Some(&installed_binary_now.identity), running_exe_inode)
+    } else if running_started_from_installed_path {
         (launch_binary_identity, running_exe_inode)
     } else if let Some(installed) = installed_binary_at_launch {
         (Some(&installed.identity), installed.inode)
@@ -2475,10 +2486,6 @@ fn supervisor_binary_freshness_observation(
     // state makes the fresh image recycle itself again on every idle-watch
     // tick, starving IPC and accumulating transient process resources.  Keep
     // the identity fallback only when inode identity cannot prove freshness.
-    let running_inode_proves_fresh = matches!(
-        (recorded_inode, installed_binary_now.inode),
-        (Some(running), Some(installed)) if running == installed
-    );
     let identity_stale = !running_inode_proves_fresh
         && agent_doc_controller::status::process_binary_is_stale(
             recorded_identity,
@@ -3530,6 +3537,44 @@ mod tests {
         assert!(!after_reexec.identity_stale);
         assert_eq!(after_reexec.running_exe_inode, Some(21));
         assert_eq!(after_reexec.installed_binary_inode, Some(21));
+    }
+
+    #[test]
+    fn matching_running_inode_settles_distinct_cache_launch_after_hot_reexec() {
+        let launch = binary_identity("/cache/agent-doc/1.0.0/agent-doc", "1.0.0", 100, 1);
+        let installed_at_launch = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.0", 100, 1),
+            inode: Some(20),
+        };
+        let upgraded = InstalledBinarySnapshot {
+            identity: binary_identity("/usr/bin/agent-doc", "1.0.1", 101, 2),
+            inode: Some(21),
+        };
+
+        let before_reexec = supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            Some(10),
+        );
+        assert!(before_reexec.identity_stale);
+        assert_eq!(before_reexec.running_exe_inode, Some(20));
+
+        let after_reexec = supervisor_binary_freshness_observation(
+            Some(&launch),
+            Some(&installed_at_launch),
+            &upgraded,
+            Some(21),
+        );
+        assert!(!after_reexec.identity_stale);
+        assert_eq!(after_reexec.running_exe_inode, Some(21));
+        assert_eq!(after_reexec.installed_binary_inode, Some(21));
+
+        let state_scope = agent_doc_state_scope::ProcessScope::new();
+        let freshness =
+            agent_doc_supervisor::binary_freshness::BinaryFreshnessState::new_in(&state_scope);
+        freshness.observe(after_reexec);
+        assert!(!freshness.stale());
     }
 
     #[test]

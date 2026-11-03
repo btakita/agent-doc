@@ -27,6 +27,12 @@ Follow-up. You can also annotate inline:
 > What about edge cases?
 ```
 
+The canonical hierarchy is one optional document-title H1, H2 for managed
+top-level components, and H3 `### Re:` headings for assistant response cells
+inside Exchange. Newly scaffolded empty documents receive `# Session: <file
+stem>`. Older documents without an H1 remain valid and are not rewritten just
+to add one.
+
 ## Frontmatter fields
 
 | Field | Required | Default | Description |

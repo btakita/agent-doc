@@ -20,6 +20,7 @@ struct StatusReport<'a> {
     #[serde(flatten)]
     status: &'a ControllerReliableSyncStatusResponse,
     pane_placements: &'a [PanePlacement],
+    pane_placement_error: Option<&'a str>,
     surface_pane_findings: &'a [PlacementFinding],
     unobserved_surface_gap: Option<&'a UnobservedSurfaceGap>,
 }
@@ -75,35 +76,56 @@ pub fn run(project_root: &Path, json: bool, check: bool) -> Result<()> {
             tracked.push(document.clone());
         }
     }
-    let placements = collect_pane_placements(project_root, &tracked);
-    let findings = visible
-        .as_ref()
-        .map(|visible| surface_pane_divergence(visible, &placements))
-        .unwrap_or_default();
-    let gap = unobserved_surface_gap(project_root, &status, &registered, &placements);
+    let (placements, placement_error) = match collect_pane_placements(project_root, &tracked) {
+        Ok(placements) => (placements, None),
+        Err(error) => (Vec::new(), Some(error.to_string())),
+    };
+    let findings = if placement_error.is_none() {
+        visible
+            .as_ref()
+            .map(|visible| surface_pane_divergence(visible, &placements))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let gap = if placement_error.is_none() {
+        unobserved_surface_gap(project_root, &status, &registered, &placements)
+    } else {
+        None
+    };
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&StatusReport {
                 status: &status,
                 pane_placements: &placements,
+                pane_placement_error: placement_error.as_deref(),
                 surface_pane_findings: &findings,
                 unobserved_surface_gap: gap.as_ref(),
             })?
         );
-        return check_outcome(check, &findings);
+        return check_outcome(check, &findings, placement_error.as_deref());
     }
     print_plane(&status);
     print_surface_sync(&status, gap.as_ref(), now_ms());
-    print_pane_placement(&registered, &placements);
-    print_findings(&findings, gap.as_ref());
-    check_outcome(check, &findings)
+    print_pane_placement(&registered, &placements, placement_error.as_deref());
+    if placement_error.is_none() {
+        print_findings(&findings, gap.as_ref());
+    }
+    check_outcome(check, &findings, placement_error.as_deref())
 }
 
 /// GH #62: `--check` turns the divergence verdict into an exit status, so a doctor
 /// script or CI step can fail on "the document the editor shows has its pane parked
 /// in stash" instead of an operator reading three views by hand.
-fn check_outcome(check: bool, findings: &[PlacementFinding]) -> Result<()> {
+fn check_outcome(
+    check: bool,
+    findings: &[PlacementFinding],
+    placement_error: Option<&str>,
+) -> Result<()> {
+    if check && let Some(error) = placement_error {
+        anyhow::bail!("surface/pane divergence not evaluated: tmux pane listing failed: {error}");
+    }
     if check && !findings.is_empty() {
         anyhow::bail!(
             "surface/pane divergence: {} finding(s); the tmux layout does not match the editor's visible documents",
@@ -249,17 +271,23 @@ fn normalize_document(project_root: &Path, document: &str) -> String {
 }
 
 /// Every tmux pane whose agent-doc owner process binds one of `documents`.
-/// A tmux failure (no server) yields no placements rather than an error: the
-/// status command must still report the plane.
-fn collect_pane_placements(project_root: &Path, documents: &[String]) -> Vec<PanePlacement> {
-    let runner = agent_doc_tmux_io::ProcessTmuxRunner::default_binary();
-    let Ok(listing) = agent_doc_tmux_io::list_panes_all(
+/// A tmux failure is retained as unavailable evidence rather than converted to
+/// an empty placement set. Empty meant "every visible document has no pane" and
+/// produced false divergence findings when a stale client could not speak to
+/// the live server (GH #388).
+fn collect_pane_placements(
+    project_root: &Path,
+    documents: &[String],
+) -> Result<Vec<PanePlacement>, agent_doc_tmux_io::TmuxIoError> {
+    // Use the same configured, socket-aware, highest-version tmux handle as
+    // sync. A bare ProcessTmuxRunner("tmux") can select /usr/bin/tmux even when
+    // tmux-router resolved a newer compatible client elsewhere on PATH.
+    let runner = agent_doc_tmux_io::configured_tmux();
+    let listing = agent_doc_tmux_io::list_panes_all(
         &runner,
         "#{session_name}:#{window_index}\t#{window_name}\t#{pane_id}\t#{pane_pid}",
-    ) else {
-        return Vec::new();
-    };
-    listing
+    )?;
+    Ok(listing
         .lines()
         .filter_map(|line| {
             let mut fields = line.split('\t');
@@ -277,7 +305,7 @@ fn collect_pane_placements(project_root: &Path, documents: &[String]) -> Vec<Pan
                 window: PaneWindow::from_window_name(window_name),
             })
         })
-        .collect()
+        .collect())
 }
 
 fn print_plane(status: &ControllerReliableSyncStatusResponse) {
@@ -399,8 +427,16 @@ fn print_surface_sync(
     }
 }
 
-fn print_pane_placement(registered: &[String], placements: &[PanePlacement]) {
+fn print_pane_placement(
+    registered: &[String],
+    placements: &[PanePlacement],
+    placement_error: Option<&str>,
+) {
     println!("tmux pane placement for registered documents:");
+    if let Some(error) = placement_error {
+        println!("  unavailable: tmux pane listing failed: {error}");
+        return;
+    }
     for document in registered {
         let panes: Vec<&PanePlacement> = placements
             .iter()
@@ -500,9 +536,11 @@ mod tests {
             document: "/p/tasks/agent-doc.md".to_string(),
             pane_id: "%28".to_string(),
         };
-        assert!(check_outcome(true, std::slice::from_ref(&finding)).is_err());
-        assert!(check_outcome(false, &[finding]).is_ok());
-        assert!(check_outcome(true, &[]).is_ok());
+        assert!(check_outcome(true, std::slice::from_ref(&finding), None).is_err());
+        assert!(check_outcome(false, &[finding], None).is_ok());
+        assert!(check_outcome(true, &[], None).is_ok());
+        assert!(check_outcome(true, &[], Some("server exited unexpectedly")).is_err());
+        assert!(check_outcome(false, &[], Some("server exited unexpectedly")).is_ok());
     }
 
     use super::*;

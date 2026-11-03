@@ -1307,9 +1307,11 @@ pub fn release_attempt(
     Ok(released)
 }
 
-/// End dispatch ownership without erasing the fact that this attempt started.
-/// The retained `Lost` attempt is non-blocking and can be reclaimed as the next
-/// generation, while its live queue row can never regress to bare.
+/// End dispatch ownership. A claim that never bound a worker is removed
+/// cleanly: its lineage `Created` receipt still fences the generation, but
+/// there is no uncertain execution to retain as `Lost`. Once a worker was
+/// bound, the retained `Lost` attempt preserves that execution evidence and is
+/// non-blocking for reconciliation/recovery.
 pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
     let resolved = resolve_live_claim_target(file, item, "queue_claim_abandon").ok();
     let target = resolved
@@ -1324,8 +1326,12 @@ pub fn abandon(file: &Path, item: &str) -> Result<Option<QueueClaim>> {
         }
         let released = ledger.release(&target).or_else(|| ledger.release(item));
         Ok(released.map(|mut claim| {
-            claim.mark_lost();
-            ledger.claims.push(claim.clone());
+            if claim.worker.is_some()
+                || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
+            {
+                claim.mark_lost();
+                ledger.claims.push(claim.clone());
+            }
             claim
         }))
     })
@@ -1353,11 +1359,66 @@ pub fn abandon_attempt(
             None => ledger.release_fenced(item, generation)?,
         };
         Ok(released.map(|mut claim| {
-            claim.mark_lost();
-            ledger.claims.push(claim.clone());
+            if claim.worker.is_some()
+                || claim.state != agent_doc_queue::queue_claim::QueueClaimState::Claimed
+            {
+                claim.mark_lost();
+                ledger.claims.push(claim.clone());
+            }
             claim
         }))
     })
+}
+
+/// Compensate a claim admission whose visible runtime projection failed before
+/// the harness received permission to spawn (`#claimbeforespawn`). The exact
+/// generation may be restored only while it is still unstarted; a concurrent
+/// `queue start` makes the compensation fail closed instead of erasing a real
+/// worker. `previous` restores a refreshed/reassigned attempt exactly, while a
+/// newly created claim is simply removed. Durable lineage keeps the consumed
+/// generation fenced in either case.
+pub fn rollback_unstarted_admission(
+    file: &Path,
+    admitted: &QueueClaim,
+    previous: Option<&QueueClaim>,
+) -> Result<()> {
+    mutate_ledger(file, |ledger| {
+        let index = ledger
+            .claims
+            .iter()
+            .position(|claim| claim.identity == admitted.identity)
+            .context("admitted queue claim disappeared before projection rollback")?;
+        let current = &ledger.claims[index];
+        anyhow::ensure!(
+            current.generation == admitted.generation,
+            "refusing projection rollback for stale queue claim generation {}; current generation is {}",
+            admitted.generation,
+            current.generation,
+        );
+        anyhow::ensure!(
+            current.state == agent_doc_queue::queue_claim::QueueClaimState::Claimed
+                && current.worker.is_none(),
+            "refusing projection rollback for generation {} after worker dispatch acknowledgement",
+            admitted.generation,
+        );
+        match previous {
+            Some(previous) => ledger.claims[index] = previous.clone(),
+            None => {
+                ledger.claims.remove(index);
+            }
+        }
+        Ok(())
+    })?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_claim_admission_rolled_back owner={} generation={} restored_previous={} reason=projection_unacknowledged (#claimbeforespawn)",
+            admitted.owner,
+            admitted.generation,
+            previous.is_some(),
+        ),
+    );
+    Ok(())
 }
 
 /// Move one exact attempt into the durable operator-cancellation audit ledger.
@@ -2473,6 +2534,64 @@ mod tests {
             reports[0].lost_recovery.as_ref().unwrap().reason,
             "attempt_abandoned_for_requeue"
         );
+    }
+
+    #[test]
+    fn explicit_requeue_of_never_started_claim_removes_it_without_lost_debt() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#unstarted]"]);
+        let (_, first) = claim(&doc, "#unstarted", "subagent:unstarted", 600).unwrap();
+
+        let released = abandon_attempt(&doc, "#unstarted", Some(first.generation))
+            .unwrap()
+            .expect("the exact generation is released");
+        assert_eq!(
+            released.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Claimed
+        );
+        assert!(released.worker.is_none());
+        assert!(
+            load_ledger(&doc).unwrap().claims.is_empty(),
+            "a claim with no spawn acknowledgement is not lost execution debt"
+        );
+
+        let (outcome, replacement) =
+            claim(&doc, "#unstarted", "subagent:unstarted", 600).unwrap();
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Created
+        );
+        assert_eq!(replacement.generation, first.generation + 1);
+    }
+
+    #[test]
+    fn projection_rollback_refuses_to_erase_a_started_worker() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_doc(dir.path(), &["do [#started]"]);
+        let (_, admitted) = claim(&doc, "#started", "subagent:started", 600).unwrap();
+        start_attempt(
+            &doc,
+            "#started",
+            "subagent:started",
+            "worker:started",
+            600,
+            admitted.generation,
+        )
+        .unwrap();
+
+        let error = rollback_unstarted_admission(&doc, &admitted, None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("after worker dispatch acknowledgement"),
+            "{error:#}"
+        );
+        let stored = load_ledger(&doc).unwrap().claims.remove(0);
+        assert_eq!(
+            stored.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Running
+        );
+        assert_eq!(stored.worker.unwrap().worker_id, "worker:started");
     }
 
     /// `#claimfreshnessdiagnostics`: `Running` proves that dispatch bound a

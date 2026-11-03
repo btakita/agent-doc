@@ -7,8 +7,9 @@
 //! receipt and the other way round.
 //!
 //! `queue release` records a receipt for the claim it ends; `queue release
-//! --requeue` retains the attempt as `Lost` and forgets any receipt. Readers (mid-turn
-//! steering, the subagent dispatch plan, the Codex Stop hook) are actorless
+//! --requeue` retains a started attempt as `Lost`, removes a never-started
+//! claim cleanly, and forgets any receipt. Readers (mid-turn steering, the
+//! subagent dispatch plan, the Codex Stop hook) are actorless
 //! one-shot boundaries, like the claim readers: an unreadable receipt row is
 //! reported on stderr and treated as "no receipts", the pre-receipt behaviour.
 
@@ -155,8 +156,8 @@ pub enum ReleaseKind {
     /// The worker reported back: record a receipt so the line is persisted by
     /// the coordinator and never offered to a new worker.
     Reported,
-    /// Abandoned, failed, or requeued work: no receipt; the retained `Lost`
-    /// attempt makes the line visibly reclaimable.
+    /// Abandoned, failed, or requeued work: no receipt. A started attempt is
+    /// retained as `Lost`; a claim with no worker is removed cleanly.
     Requeue,
 }
 
@@ -782,11 +783,9 @@ mod tests {
         assert!(governing_receipt(&doc, &content, question).is_none());
         assert!(load(&doc).unwrap().receipts.is_empty(), "requeue forgot it");
         let attempts = crate::queue_claim::claim_states_for_content(&doc, &content).unwrap();
-        assert_eq!(attempts.len(), 1);
-        assert_eq!(
-            attempts[0].state,
-            agent_doc_queue::queue_claim::QueueClaimState::Lost,
-            "requeue retains non-blocking work evidence"
+        assert!(
+            attempts.is_empty(),
+            "requeue removes a claim that never bound a replacement worker"
         );
 
         let (_, third) = crate::queue_claim::claim(&doc, question, "subagent:third", 3600).unwrap();

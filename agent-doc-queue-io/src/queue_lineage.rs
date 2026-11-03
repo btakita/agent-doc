@@ -378,6 +378,40 @@ pub fn attempt_never_started(ledger: &QueueLineageLedger, claim: &QueueClaim) ->
         })
 }
 
+/// Work identities whose newest durable generation was created but never
+/// bound to a worker or recorded any later effect. This remains the retry
+/// authority after an explicit no-worker requeue removes the live claim rather
+/// than retaining a synthetic `Lost` attempt.
+pub fn latest_unstarted_identities(
+    ledger: &QueueLineageLedger,
+) -> Vec<agent_doc_element_queue::QueueItemIdentity> {
+    let newest = ledger.attempts.iter().fold(
+        std::collections::HashMap::new(),
+        |mut newest, attempt| {
+            newest
+                .entry(attempt.identity.clone())
+                .and_modify(|generation: &mut u64| {
+                    *generation = (*generation).max(attempt.generation)
+                })
+                .or_insert(attempt.generation);
+            newest
+        },
+    );
+    ledger
+        .attempts
+        .iter()
+        .filter(|attempt| {
+            newest.get(&attempt.identity) == Some(&attempt.generation)
+                && !attempt.events.is_empty()
+                && attempt
+                    .events
+                    .iter()
+                    .all(|event| event.kind == QueueLineageEventKind::Created)
+        })
+        .map(|attempt| attempt.identity.clone())
+        .collect()
+}
+
 /// Idempotently establish the durable attempt after `queue claim`.
 pub fn record_claim(file: &Path, claim: &QueueClaim) -> Result<QueueLineageAttempt> {
     mutate(file, |ledger| {

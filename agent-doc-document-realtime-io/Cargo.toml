@@ -61,5 +61,6 @@ tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.567", features = ["test-support"] }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.567" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.567" }

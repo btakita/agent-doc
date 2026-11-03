@@ -2638,13 +2638,15 @@ post-preflight, and committed may schedule work, but they must not change the
 realtime authority rules.
 
 `DocumentAuthorityObserved` is a latest-value telemetry sink, not part of the
-synchronous response closeout barrier. Authority queries publish their newest
-observation through a per-process coalescing worker; repeated observations for
-one document occupy one pending slot. Its controller append uses a bounded
-SQLite contention budget and retries from the retained latest observation, so
-telemetry cannot hold the lifecycle state-event lane through the five-second RPC
-deadline. Admission, response capture, document-write proof, git commit, and the
-terminal closeout facts retain the normal durable ingress budget and ordering.
+synchronous response closeout barrier. Authority queries durably hand their
+newest observation to the long-lived project controller; repeated observations
+for one document occupy one generation-fenced handoff row. The controller owns
+retry and recovers that row after restart. Its state-ledger append uses a bounded
+SQLite contention budget, so telemetry cannot hold the lifecycle state-event
+lane through the five-second RPC deadline. Admission, response capture,
+document-write proof, git commit, and terminal closeout facts retain the normal
+durable ingress budget and ordering. A short-lived client never owns an
+authority-observation mailbox and never needs a shutdown flush.
 
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor

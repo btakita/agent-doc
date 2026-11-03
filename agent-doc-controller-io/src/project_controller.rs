@@ -3982,6 +3982,15 @@ pub(crate) const STATE_EVENT_INGRESS_SLOW: Duration = Duration::from_secs(1);
 /// closeout facts have no such freedom and keep the normal durable timeout.
 const TELEMETRY_EVENT_INGRESS_BUSY_TIMEOUT: Duration = Duration::from_millis(100);
 
+fn document_authority_epoch(event: &agent_doc_state_backbone::StateEvent) -> Option<u64> {
+    match &event.fact {
+        agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+            authority_epoch, ..
+        } => Some(*authority_epoch),
+        _ => None,
+    }
+}
+
 fn telemetry_event_ingress_busy_timeout(
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Option<Duration> {
@@ -4085,6 +4094,15 @@ pub(crate) struct ControllerRuntime {
     /// This mutex preserves exact CAS ordering while allowing the projection
     /// lock to be dropped before durable I/O.
     state_event_ingress: Mutex<()>,
+    /// Wake channel for the controller-owned durable authority handoff sink.
+    /// Short-lived clients only persist the newest observation; this long-lived
+    /// worker owns state-ledger retry and restart recovery.
+    document_authority_handoff_wake: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+    /// Durable handoffs not yet folded into the main ledger. Read projections
+    /// overlay this latest authority fact so state.db contention can never
+    /// expose a stale detached-disk decision while the background sink retries.
+    pending_document_authority_handoffs:
+        Mutex<HashMap<String, agent_doc_state_backbone::StateEvent>>,
     /// Per-document semantic fence shared by retained-transition projection and
     /// recovery/canonicalization retirement.
     ///
@@ -9743,6 +9761,8 @@ impl ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
+            document_authority_handoff_wake: Mutex::new(None),
+            pending_document_authority_handoffs: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),
@@ -9784,6 +9804,7 @@ impl ControllerRuntime {
         let project_root = bootstrap.project_root.clone();
         let runtime = Arc::new(Self::new(bootstrap)?);
         runtime.document_authority_graph.install_runtime(&runtime);
+        runtime.install_document_authority_handoff_worker()?;
         runtime
             .document_graphs
             .install_settle_sink(project_root.clone(), &runtime);
@@ -9828,6 +9849,109 @@ impl ControllerRuntime {
             }),
         );
         Ok(runtime)
+    }
+
+    fn install_document_authority_handoff_worker(self: &Arc<Self>) -> Result<()> {
+        let project_root = self.bootstrap.lock().project_root.clone();
+        for handoff in state_store::load_document_authority_handoffs(&project_root)? {
+            let event: agent_doc_state_backbone::StateEvent =
+                serde_json::from_str(&handoff.payload_json)
+                    .context("parse recovered document-authority handoff")?;
+            anyhow::ensure!(
+                event.document_hash() == handoff.document_hash
+                    && document_authority_epoch(&event) == Some(handoff.authority_epoch),
+                "recovered document-authority handoff identity mismatch for {}",
+                handoff.document_hash,
+            );
+            self.note_pending_document_authority_handoff(event);
+        }
+        let (wake, receiver) = std::sync::mpsc::sync_channel(1);
+        let runtime = Arc::downgrade(self);
+        std::thread::Builder::new()
+            .name("agent-doc-authority-handoff".to_string())
+            .spawn(move || {
+                let mut retry_delay = Duration::from_millis(100);
+                loop {
+                    match receiver.recv_timeout(Duration::from_secs(1)) {
+                        Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                    let Some(runtime) = runtime.upgrade() else {
+                        break;
+                    };
+                    if runtime.successor_promoted() {
+                        break;
+                    }
+                    match runtime.drain_document_authority_handoffs(&project_root) {
+                        Ok(true) => {
+                            std::thread::sleep(retry_delay);
+                            retry_delay = (retry_delay * 2).min(Duration::from_secs(5));
+                        }
+                        Ok(false) => retry_delay = Duration::from_millis(100),
+                        Err(error) => {
+                            agent_doc_ops_log_io::log_op(
+                                &project_root,
+                                &format!(
+                                    "document_authority_handoff_drain_deferred retry_after_ms={} error={error:#}",
+                                    retry_delay.as_millis(),
+                                ),
+                            );
+                            std::thread::sleep(retry_delay);
+                            retry_delay = (retry_delay * 2).min(Duration::from_secs(5));
+                        }
+                    }
+                }
+            })
+            .context("spawn controller document-authority handoff worker")?;
+        *self.document_authority_handoff_wake.lock() = Some(wake.clone());
+        let _ = wake.try_send(());
+        Ok(())
+    }
+
+    fn wake_document_authority_handoff_worker(&self) {
+        let Some(wake) = self.document_authority_handoff_wake.lock().as_ref().cloned() else {
+            return;
+        };
+        match wake.try_send(()) {
+            Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => {}
+            Err(std::sync::mpsc::TrySendError::Disconnected(())) => {
+                agent_doc_ops_log_io::log_op(
+                    &self.bootstrap.lock().project_root,
+                    "document_authority_handoff_worker_disconnected",
+                );
+            }
+        }
+    }
+
+    fn note_pending_document_authority_handoff(
+        &self,
+        event: agent_doc_state_backbone::StateEvent,
+    ) {
+        let Some(incoming_epoch) = document_authority_epoch(&event) else {
+            return;
+        };
+        let document_hash = event.document_hash().to_string();
+        let mut pending = self.pending_document_authority_handoffs.lock();
+        let replace = pending
+            .get(&document_hash)
+            .and_then(document_authority_epoch)
+            .is_none_or(|current_epoch| incoming_epoch >= current_epoch);
+        if replace {
+            pending.insert(document_hash, event);
+        }
+    }
+
+    fn clear_pending_document_authority_handoff(&self, event: &agent_doc_state_backbone::StateEvent) {
+        let document_hash = event.document_hash();
+        let authority_epoch = document_authority_epoch(event);
+        let mut pending = self.pending_document_authority_handoffs.lock();
+        if pending
+            .get(document_hash)
+            .and_then(document_authority_epoch)
+            == authority_epoch
+        {
+            pending.remove(document_hash);
+        }
     }
 
     pub(crate) fn main_layout_eligibility(&self) -> MainLayoutEligibility {
@@ -10384,6 +10508,69 @@ impl ControllerRuntime {
         Ok(inserted)
     }
 
+    /// Fold every durable latest-value authority handoff this controller can
+    /// generation-fence. `true` means at least one row remains retryable.
+    fn drain_document_authority_handoffs(&self, project_root: &Path) -> Result<bool> {
+        let generation = self.bootstrap.lock().controller_generation;
+        let mut retry = false;
+        for handoff in state_store::load_document_authority_handoffs(project_root)? {
+            if !state_store::claim_document_authority_handoff(
+                project_root,
+                &handoff.document_hash,
+                handoff.authority_epoch,
+                generation,
+            )? {
+                continue;
+            }
+            let event: agent_doc_state_backbone::StateEvent =
+                serde_json::from_str(&handoff.payload_json)
+                    .context("parse durable document-authority handoff")?;
+            anyhow::ensure!(
+                event.document_hash() == handoff.document_hash,
+                "document-authority handoff identity mismatch: row={} event={}",
+                handoff.document_hash,
+                event.document_hash(),
+            );
+            anyhow::ensure!(
+                document_authority_epoch(&event) == Some(handoff.authority_epoch),
+                "document-authority handoff epoch mismatch for {}",
+                handoff.document_hash,
+            );
+            match self.append_apply_state_event_serialized(project_root, &event) {
+                Ok(_) => {
+                    if let Err(error) = state_store::acknowledge_document_authority_handoff(
+                        project_root,
+                        &handoff.document_hash,
+                        handoff.authority_epoch,
+                        generation,
+                    ) {
+                        agent_doc_ops_log_io::log_op(
+                            project_root,
+                            &format!(
+                                "document_authority_handoff_ack_deferred document_hash={} authority_epoch={} controller_generation={} error={error:#}",
+                                handoff.document_hash, handoff.authority_epoch, generation,
+                            ),
+                        );
+                        retry = true;
+                    } else {
+                        self.clear_pending_document_authority_handoff(&event);
+                    }
+                }
+                Err(error) => {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "document_authority_handoff_apply_deferred document_hash={} authority_epoch={} controller_generation={} error={error:#}",
+                            handoff.document_hash, handoff.authority_epoch, generation,
+                        ),
+                    );
+                    retry = true;
+                }
+            }
+        }
+        Ok(retry)
+    }
+
     /// The document's derived settlement verdict, given content observations the
     /// caller has resolved.
     ///
@@ -10701,12 +10888,25 @@ impl ControllerRuntime {
         &self,
         document_hash: &str,
     ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
-        Ok(self
+        let mut projection = self
             .memory
             .lock()
             .state_projection
             .document(document_hash)
-            .cloned())
+            .cloned();
+        if let Some(event) = self
+            .pending_document_authority_handoffs
+            .lock()
+            .get(document_hash)
+            .cloned()
+        {
+            projection
+                .get_or_insert_with(|| {
+                    agent_doc_state_backbone::DocumentStateProjection::new(document_hash)
+                })
+                .apply_fact(&event.fact);
+        }
+        Ok(projection)
     }
 
     /// The closeout part of [`Self::document_state_projection`], cloned under
@@ -21275,6 +21475,8 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             state_event_ingress: Mutex::new(()),
+            document_authority_handoff_wake: Mutex::new(None),
+            pending_document_authority_handoffs: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),

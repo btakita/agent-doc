@@ -1260,7 +1260,10 @@ impl agent_doc_admin_io::AdminControllerEffects for CliAdminControllerEffects {
         let mut view = actor_inspection_view(inspection);
         if let Some(record) = view.record.as_ref() {
             view.pane_observation = self.observe_pane(&record.pane_id, &record.harness);
-            if view.pane_observation.status != "ready" {
+            if agent_doc_admin_io::pane_observation_is_projection_lag(
+                record.state.as_str(),
+                &view.pane_observation,
+            ) {
                 view.projection_lag = true;
             }
         }

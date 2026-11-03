@@ -103,6 +103,17 @@ pub fn effective_actor_state(stored_state: &str, observation: &PaneObservationVi
     }
 }
 
+pub fn pane_observation_is_projection_lag(
+    stored_state: &str,
+    observation: &PaneObservationView,
+) -> bool {
+    stored_state == "ready"
+        && matches!(
+            observation.status.as_str(),
+            "busy_or_blocked" | "unavailable"
+        )
+}
+
 pub trait AdminControllerEffects {
     fn load_actor_list(&self, root: &Path) -> Result<Vec<ActorListRecord>>;
     fn load_registry_bindings(&self, root: &Path) -> Result<Vec<ActorListRegistryBinding>>;
@@ -661,6 +672,12 @@ mod tests {
             effective_actor_state("busy", &unavailable),
             "busy",
             "a diagnostic observation never downgrades an authoritative non-ready state"
+        );
+        assert!(pane_observation_is_projection_lag("ready", &busy));
+        assert!(pane_observation_is_projection_lag("ready", &unavailable));
+        assert!(
+            !pane_observation_is_projection_lag("busy", &busy),
+            "stored Busy and pane-observed busy agree; that is not projection lag"
         );
     }
     use std::cell::RefCell;

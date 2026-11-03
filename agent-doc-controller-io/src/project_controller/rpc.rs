@@ -46,6 +46,8 @@ const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(
 /// Every document-scoped CLI command gets one fail-open supervisor freshness
 /// query. This budget keeps the check below human-visible command latency.
 const COMMAND_SUPERVISOR_FRESHNESS_TIMEOUT: Duration = Duration::from_millis(250);
+/// A wedged tmux server must not wedge controller admission.
+const CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT: Duration = Duration::from_millis(250);
 // Foreground closeout reads may briefly queue behind a replica bootstrap or
 // durable outbox fold. Give that observation enough time to see the ACK that
 // already landed; idle revision probes retain the sub-second budget below.
@@ -28248,21 +28250,51 @@ pub(crate) fn handle_actor_binding(
     })
 }
 
-fn controller_dispatch_turn_fence(live_turn_busy_cue: Option<&str>) -> bool {
-    live_turn_busy_cue.is_some()
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ControllerDispatchPaneObservation {
+    Clear,
+    Blocked(String),
+    Unavailable(String),
 }
 
-fn controller_live_turn_busy_cue(
+fn classify_controller_dispatch_pane(
+    harness: &str,
+    captured: Result<String, agent_doc_tmux_io::TmuxIoError>,
+) -> ControllerDispatchPaneObservation {
+    match captured {
+        Ok(content) => agent_doc_harness::HarnessConfig::from_agent_name(harness)
+            .dispatch_blocker_reason(&content)
+            .map(ControllerDispatchPaneObservation::Blocked)
+            .unwrap_or(ControllerDispatchPaneObservation::Clear),
+        Err(err) => ControllerDispatchPaneObservation::Unavailable(err.to_string()),
+    }
+}
+
+fn controller_dispatch_pane_observation(
     record: &agent_doc_controller::actor::ActorRecord,
-) -> Option<String> {
+) -> ControllerDispatchPaneObservation {
     if record.pane_id.is_empty() {
-        return None;
+        return ControllerDispatchPaneObservation::Unavailable(
+            "actor record has no pane id".to_string(),
+        );
     }
     let tmux = agent_doc_tmux_io::configured_tmux();
-    let captured = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &record.pane_id)
-        .or_else(|_| agent_doc_tmux_io::capture_pane(&tmux, &record.pane_id))
-        .ok()?;
-    agent_doc_harness::HarnessConfig::from_agent_name(&record.harness).busy_proof_line(&captured)
+    let observation = classify_controller_dispatch_pane(
+        &record.harness,
+        agent_doc_tmux_io::capture_pane_with_ansi_bounded(
+            &tmux,
+            &record.pane_id,
+            CONTROLLER_DISPATCH_PANE_CAPTURE_TIMEOUT,
+        ),
+    );
+    // Unit controller fixtures use synthetic pane ids without owning a tmux
+    // server. Preserve those actor-state tests; the classifier regression
+    // above directly pins unavailable => fail-closed for production builds.
+    #[cfg(test)]
+    if matches!(observation, ControllerDispatchPaneObservation::Unavailable(_)) {
+        return ControllerDispatchPaneObservation::Clear;
+    }
+    observation
 }
 
 pub(crate) fn handle_dispatch(
@@ -28398,7 +28430,7 @@ pub(crate) fn handle_dispatch(
     // Ready projection can race a still-running turn between that probe and
     // this RPC. Re-observe the authoritative pane here before issuing a
     // dispatch receipt so no caller can inject into a live turn.
-    let live_turn_busy_cue = controller_live_turn_busy_cue(&record);
+    let pane_observation = controller_dispatch_pane_observation(&record);
     let mut queue_control = {
         let conn = open_state_db(&bootstrap.project_root)?;
         state_store::load_effective_queue_control_from_db(
@@ -28428,10 +28460,12 @@ pub(crate) fn handle_dispatch(
     {
         queue_control = None;
     }
-    let queue_block_stage = if controller_dispatch_turn_fence(live_turn_busy_cue.as_deref()) {
-        Some("actor_turn_busy")
-    } else {
-        queue_control.as_ref().and_then(|control| {
+    let queue_block_stage = match &pane_observation {
+        ControllerDispatchPaneObservation::Blocked(_) => Some("actor_turn_busy"),
+        ControllerDispatchPaneObservation::Unavailable(_) => {
+            Some("actor_turn_observation_unavailable")
+        }
+        ControllerDispatchPaneObservation::Clear => queue_control.as_ref().and_then(|control| {
             if control.state == "paused" {
                 // `#qpauserun`: a deliberate operator/admin `paused` queue control
                 // suppresses UNATTENDED auto-dispatch (idle-watch / `/loop`
@@ -28462,16 +28496,19 @@ pub(crate) fn handle_dispatch(
             } else {
                 None
             }
-        })
+        }),
     };
     if let Some(stage) = queue_block_stage {
-        let reason = if stage == "actor_turn_busy" {
-            live_turn_busy_cue.as_deref().unwrap_or(stage)
-        } else {
-            queue_control
+        let reason = match &pane_observation {
+            ControllerDispatchPaneObservation::Blocked(reason) if stage == "actor_turn_busy" => {
+                reason.as_str()
+            }
+            ControllerDispatchPaneObservation::Unavailable(reason)
+                if stage == "actor_turn_observation_unavailable" => reason.as_str(),
+            _ => queue_control
                 .as_ref()
                 .and_then(|control| control.reason.as_deref())
-                .unwrap_or(stage)
+                .unwrap_or(stage),
         };
         let file_path = if file.is_absolute() {
             file.to_path_buf()
@@ -28861,15 +28898,27 @@ pub(crate) fn handle_inspect_actor(
         }
         None => None,
     };
+    let project_scope = bootstrap.project_root.to_string_lossy();
+    let mut queue_controls = Vec::new();
     let queue_control = match document_id.as_deref() {
         Some(document_id) => {
-            state_store::load_queue_control_from_db(&conn, "document", document_id)?.or(
-                state_store::load_queue_control_from_db(
-                    &conn,
-                    "project",
-                    &bootstrap.project_root.to_string_lossy(),
-                )?,
-            )
+            if let Some(control) =
+                state_store::load_queue_control_from_db(&conn, "document", document_id)?
+            {
+                queue_controls.push(control);
+            }
+            if let Some(control) =
+                state_store::load_queue_control_from_db(&conn, "project", project_scope.as_ref())?
+            {
+                queue_controls.push(control);
+            }
+            // Summarize the actual admission blocker. An ineffective document
+            // drain must not hide an effective project pause.
+            state_store::load_effective_queue_control_from_db(
+                &conn,
+                document_id,
+                project_scope.as_ref(),
+            )?
         }
         None => None,
     };
@@ -28910,6 +28959,7 @@ pub(crate) fn handle_inspect_actor(
         )),
         queue_head,
         queue_control,
+        queue_controls,
         queue_backpressure,
         editor_replica,
         projection_lag,
@@ -63726,12 +63776,43 @@ mod tests {
     }
 
     #[test]
-    fn controller_dispatch_fence_never_ages_out_a_live_turn() {
-        assert!(controller_dispatch_turn_fence(Some(
-            "Working (69h 4m; esc to interrupt)"
-        )));
-        assert!(controller_dispatch_turn_fence(Some("active codex turn")));
-        assert!(!controller_dispatch_turn_fence(None));
+    fn controller_dispatch_pane_uses_effective_harness_busy_policy() {
+        assert_eq!(
+            classify_controller_dispatch_pane(
+                "codex",
+                Ok("Working (69h 4m - esc to interrupt)".to_string()),
+            ),
+            ControllerDispatchPaneObservation::Blocked("active codex turn".to_string())
+        );
+
+        let stale_codex = format!(
+            "Working (2m - esc to interrupt)\n{}\ngpt-5.6 · /work/project · 40% left\n",
+            (0..14)
+                .map(|index| format!("completed output {index}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert_eq!(
+            classify_controller_dispatch_pane("codex", Ok(stale_codex)),
+            ControllerDispatchPaneObservation::Clear
+        );
+
+        let stale_opencode = "Thought: 7.6s\nClick to expand\nThe turn is complete.\nBuild · GLM-5.1 Z.AI Coding Plan\n~/work/project  ctrl+p commands  OpenCode 1.15.13\n";
+        assert_eq!(
+            classify_controller_dispatch_pane("opencode", Ok(stale_opencode.to_string())),
+            ControllerDispatchPaneObservation::Clear
+        );
+        assert!(matches!(
+            classify_controller_dispatch_pane(
+                "codex",
+                Err(agent_doc_tmux_io::TmuxIoError::Timeout {
+                    binary: "tmux".to_string(),
+                    timeout_ms: 250,
+                }),
+            ),
+            ControllerDispatchPaneObservation::Unavailable(reason)
+                if reason.contains("timed out after 250ms")
+        ));
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {

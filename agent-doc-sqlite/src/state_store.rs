@@ -3802,10 +3802,9 @@ fn queue_control_effectiveness(
             },
         )
         .optional()?;
-    let Some((actor_generation, actor_state)) = actor else {
-        return Ok((false, "drain_actor_absent".to_string()));
-    };
-    if control_generation.is_some_and(|generation| generation != actor_generation) {
+    if let Some((actor_generation, _)) = actor.as_ref()
+        && control_generation.is_some_and(|generation| generation != *actor_generation)
+    {
         return Ok((
             false,
             format!(
@@ -3815,20 +3814,38 @@ fn queue_control_effectiveness(
         ));
     }
 
-    let target_present = if let Some(target) = target_item_id {
-        conn.query_row(
-            "SELECT head_id FROM queue_heads WHERE document_id = ?1 AND head_id = ?2 AND state NOT IN ('completed', 'closed', 'lost') LIMIT 1",
+    if let Some(target) = target_item_id {
+        // `--until-id` is through-target authority, not merely "while this id
+        // is the current head". Keep the drain until the target's own terminal
+        // cycle lands, including across restart and actor-absent gaps.
+        let target_completed = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM document_cycles \
+             WHERE document_id = ?1 AND queue_head_id = ?2 AND updated_at >= ?3 \
+             AND (response_commit IS NOT NULL OR state IN ('committed', 'completed', 'closed', 'abandoned'))) ",
+            params![scope_id, target, sqlite_i64(updated_at, "queue control updated_at")?],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if target_completed {
+            return Ok((false, "drain_target_completed".to_string()));
+        }
+        let target_is_head = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM queue_heads WHERE document_id = ?1 AND head_id = ?2 AND state NOT IN ('completed', 'closed', 'lost'))",
             params![scope_id, target],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some()
-    } else {
-        false
-    };
-    if target_present {
-        return Ok((true, "drain_target_present".to_string()));
+            |row| row.get::<_, bool>(0),
+        )?;
+        let reason = if actor.is_none() {
+            "drain_target_pending_actor_absent"
+        } else if target_is_head {
+            "drain_target_present_head"
+        } else {
+            "drain_target_pending_through_target"
+        };
+        return Ok((true, reason.to_string()));
     }
+
+    let Some((_actor_generation, actor_state)) = actor else {
+        return Ok((false, "drain_actor_absent".to_string()));
+    };
 
     // A long-running live turn cannot be retired by time. Starting is also
     // protected because startup may legitimately exceed the nominal lease.
@@ -11209,10 +11226,10 @@ mod state_db_corruption_evidence_tests {
         let live = load_queue_control_from_db(&conn, "document", &document_id)
             .unwrap()
             .unwrap();
-        assert!(live.effective, "a long live turn must retain the drain");
+        assert!(live.effective, "a pending target must retain the drain");
         assert_eq!(
             live.effectiveness_reason.as_deref(),
-            Some("drain_actor_live:busy")
+            Some("drain_target_pending_through_target")
         );
 
         conn.execute(
@@ -11221,7 +11238,33 @@ mod state_db_corruption_evidence_tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO queue_heads (document_id, queue_name, generation, head_id, prompt, state, priority, selected_at, updated_at) VALUES (?1, 'agent:queue', 20, '#target', 'target', 'running', 0, 1, 1)",
+            "INSERT INTO queue_heads (document_id, queue_name, generation, head_id, prompt, state, priority, selected_at, updated_at) VALUES (?1, 'agent:queue', 20, '#before-target', 'before target', 'running', 0, 1, 1)",
+            [&document_id],
+        )
+        .unwrap();
+        let non_head_target = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(non_head_target.effective);
+        assert_eq!(
+            non_head_target.effectiveness_reason.as_deref(),
+            Some("drain_target_pending_through_target")
+        );
+
+        conn.execute("DELETE FROM documents WHERE document_id = ?1", [&document_id])
+            .unwrap();
+        let actor_absent = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(actor_absent.effective);
+        assert_eq!(
+            actor_absent.effectiveness_reason.as_deref(),
+            Some("drain_target_pending_actor_absent")
+        );
+
+        insert_queue_control_test_actor(&conn, &document_id, 20, "ready");
+        conn.execute(
+            "UPDATE queue_heads SET head_id = '#target', prompt = 'target' WHERE document_id = ?1",
             [&document_id],
         )
         .unwrap();
@@ -11231,7 +11274,7 @@ mod state_db_corruption_evidence_tests {
         assert!(targeted.effective);
         assert_eq!(
             targeted.effectiveness_reason.as_deref(),
-            Some("drain_target_present")
+            Some("drain_target_present_head")
         );
 
         conn.execute(
@@ -11252,6 +11295,25 @@ mod state_db_corruption_evidence_tests {
                 .as_deref()
                 .unwrap()
                 .starts_with("drain_generation_superseded")
+        );
+
+        conn.execute(
+            "UPDATE documents SET generation = 20 WHERE document_id = ?1",
+            [&document_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO document_cycles (document_id, cycle_id, state, queue_head_id, response_commit, updated_at) VALUES (?1, 'cycle-target', 'committed', '#target', 'abc123', ?2)",
+            params![document_id, i64::try_from(timestamp_secs()).unwrap()],
+        )
+        .unwrap();
+        let completed = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(!completed.effective);
+        assert_eq!(
+            completed.effectiveness_reason.as_deref(),
+            Some("drain_target_completed")
         );
     }
 }

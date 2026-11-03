@@ -15,8 +15,13 @@
 //!   unresolved. Supplying the flag is never acknowledgement provenance.
 //! - `agent-doc queue consume <FILE> --ack-text <text>` — exact acknowledgement
 //!   for a completed free-text head, including a unique active nested lineage.
+//! - `queue claim` is an admission transaction: the harness receives spawn
+//!   permission only after the durable claim and visible `Claimed` projection
+//!   agree. Projection refusal compensates the exact unstarted generation.
+//!   Admission/start/release project only that work identity across its queue
+//!   displays; global lifecycle/Active reconciliation belongs to explicit sync.
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -295,6 +300,7 @@ pub fn derive_claim_runtime_projection_scoped(
         cleared_item,
         scope,
         RuntimeProjectionRows::All,
+        None,
     )
 }
 
@@ -305,6 +311,7 @@ fn derive_blocker_runtime_projection(file: &Path, current: &str) -> Result<Claim
         None,
         ClaimProjectionScope::Document,
         RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
+        None,
     )
 }
 
@@ -314,6 +321,7 @@ fn derive_runtime_projection_scoped(
     cleared_item: Option<&str>,
     scope: ClaimProjectionScope<'_>,
     rows: RuntimeProjectionRows,
+    only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
 ) -> Result<ClaimRuntimeProjection> {
     let input_current = current;
     let mut claim_ledger = crate::queue_claim::load_ledger(file);
@@ -468,6 +476,32 @@ fn derive_runtime_projection_scoped(
                         });
                     let observed =
                         agent_doc_document::queue_projection::lifecycle_marker(&prompt.text);
+                    if only_identity.is_some_and(|target| target != &identity) {
+                        // The document projector owns every visible lifecycle prefix it
+                        // encounters. Preserve unrelated projections explicitly so a
+                        // target-scoped admission neither normalizes them away nor asks
+                        // their historical durable state to converge first.
+                        let marker = observed?;
+                        return Some(agent_doc_queue::document_queue::QueueRowProjection {
+                            text: agent_doc_document::queue_projection::strip_in_progress_marker(
+                                &prompt.text,
+                            ),
+                            blockers: if marker
+                                == agent_doc_document::queue_projection::QueueLifecycleMarker::Blocked
+                            {
+                                blockers
+                                    .blockers_for_row(&prompt.text)
+                                    .map(<[String]>::to_vec)
+                                    .unwrap_or_default()
+                            } else {
+                                Vec::new()
+                            },
+                            marker,
+                            owner: agent_doc_document::queue_projection::owner_projection(
+                                &prompt.text,
+                            ),
+                        });
+                    }
                     if let Some(claim) = claim_states.get(&identity)
                         && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
                             claim,
@@ -622,6 +656,15 @@ pub fn record_claim_runtime_projection(
     projection: &ClaimRuntimeProjection,
     cleared_item: Option<&str>,
 ) -> Result<()> {
+    record_claim_runtime_projection_scoped(file, projection, cleared_item, None)
+}
+
+fn record_claim_runtime_projection_scoped(
+    file: &Path,
+    projection: &ClaimRuntimeProjection,
+    cleared_item: Option<&str>,
+    only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
+) -> Result<()> {
     if projection.changed {
         // Keep the recovery baseline aligned with this binary-owned cosmetic
         // mutation. Otherwise a later exchange update can make the unrelated
@@ -632,8 +675,12 @@ pub fn record_claim_runtime_projection(
                     &snapshot,
                     &projection.target_content,
                 );
-            let synced = agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
-                .unwrap_or(queue_synced);
+            let synced = if only_identity.is_some() {
+                queue_synced
+            } else {
+                agent_doc_work_projection::reconcile_managed_active_items(&queue_synced)?
+                    .unwrap_or(queue_synced)
+            };
             if synced != snapshot
                 && let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                     file,
@@ -645,10 +692,17 @@ pub fn record_claim_runtime_projection(
             }
         }
     }
-    agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(
-        file,
-        &projection.persisted_heads,
-    )?;
+    let projected_heads = if let Some(identity) = only_identity {
+        let mut heads = agent_doc_cycle_state_io::load(file)?
+            .map(|state| state.projected_in_progress_queue_heads)
+            .unwrap_or_default();
+        heads.retain(|head| agent_doc_queue::queue_claim::claim_identity(head) != *identity);
+        heads.extend(projection.persisted_heads.iter().cloned());
+        heads
+    } else {
+        projection.persisted_heads.clone()
+    };
+    agent_doc_cycle_state_io::set_projected_in_progress_queue_heads(file, &projected_heads)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -682,7 +736,71 @@ pub fn project_claim_runtime_state_with_effects(
         file,
         cleared_item,
         RuntimeProjectionRows::LifecycleEvidence,
+        None,
     )
+}
+
+/// Reconcile only the exact attempt identity (across every duplicate display)
+/// after a claim/start/release transition. Unrelated lifecycle or Active-index
+/// drift remains for declarative sync and cannot veto this transition.
+pub fn project_claim_item_runtime_state_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    item: &str,
+    cleared: bool,
+) -> Result<bool> {
+    let identity = agent_doc_queue::queue_claim::claim_identity(item);
+    project_runtime_state_with_effects(
+        effects,
+        file,
+        cleared.then_some(item),
+        RuntimeProjectionRows::LifecycleEvidence,
+        Some(&identity),
+    )
+}
+
+/// Admit one dispatch claim only when its operator-visible `Claimed` projection
+/// converges. The returned claim is the harness's permission to spawn. If the
+/// projection fails, compensate the exact still-unstarted ledger transition
+/// and make a best-effort projection repair so callers never receive a spawn
+/// acknowledgement for an invisible reservation (`#claimbeforespawn`).
+pub fn claim_with_runtime_projection(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    item: &str,
+    owner: &str,
+    ttl_secs: u64,
+) -> Result<(
+    agent_doc_queue::queue_claim::ClaimOutcome,
+    agent_doc_queue::queue_claim::QueueClaim,
+)> {
+    let before = crate::queue_claim::load_ledger(file)?;
+    let (outcome, claim) = crate::queue_claim::claim(file, item, owner, ttl_secs)?;
+    let previous = before
+        .claims
+        .iter()
+        .find(|previous| previous.identity == claim.identity);
+    if let Err(projection_error) =
+        project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, false)
+    {
+        let rollback = crate::queue_claim::rollback_unstarted_admission(file, &claim, previous);
+        let repair = rollback.as_ref().ok().and_then(|_| {
+            project_claim_item_runtime_state_with_effects(effects, file, &claim.item_text, true)
+                .err()
+        });
+        return match (rollback, repair) {
+            (Ok(()), None) => Err(projection_error).context(
+                "queue claim admission was rolled back because its Claimed projection was not acknowledged; no worker may be spawned",
+            ),
+            (Ok(()), Some(repair_error)) => Err(projection_error).context(format!(
+                "queue claim admission was rolled back because its Claimed projection was not acknowledged; marker repair also failed: {repair_error:#}; no worker may be spawned"
+            )),
+            (Err(rollback_error), _) => Err(projection_error).context(format!(
+                "queue claim projection failed and admission rollback was refused: {rollback_error:#}; inspect the exact generation before dispatching any worker"
+            )),
+        };
+    }
+    Ok((outcome, claim))
 }
 
 /// Reconcile the complete queue lifecycle projection for an explicit
@@ -696,7 +814,7 @@ pub fn project_all_queue_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
-    project_runtime_state_with_effects(effects, file, None, RuntimeProjectionRows::All)
+    project_runtime_state_with_effects(effects, file, None, RuntimeProjectionRows::All, None)
 }
 
 /// Repaint only rows that are blocked now or still carry a stale blocked
@@ -711,6 +829,7 @@ pub fn project_blocker_runtime_state_with_effects(
         file,
         None,
         RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
+        None,
     )
 }
 
@@ -719,6 +838,7 @@ fn project_runtime_state_with_effects(
     file: &Path,
     cleared_item: Option<&str>,
     rows: RuntimeProjectionRows,
+    only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
 ) -> Result<bool> {
     let mut wrote_successor = false;
     for attempt in 1..=CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS {
@@ -741,15 +861,19 @@ fn project_runtime_state_with_effects(
                     cleared_item,
                     ClaimProjectionScope::Document,
                     rows,
+                    only_identity,
                 )?
             }
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &current)?
             }
         };
-        let target_content =
+        let target_content = if only_identity.is_some() {
+            projection.target_content
+        } else {
             agent_doc_work_projection::reconcile_managed_active_items(&projection.target_content)?
-                .unwrap_or(projection.target_content);
+                .unwrap_or(projection.target_content)
+        };
         if target_content != current {
             effects.converge_document_or_disk(
                 file,
@@ -773,21 +897,27 @@ fn project_runtime_state_with_effects(
                     cleared_item,
                     ClaimProjectionScope::Document,
                     rows,
+                    only_identity,
                 )?
             }
             RuntimeProjectionRows::BlockedOrPreviouslyBlocked => {
                 derive_blocker_runtime_projection(file, &authoritative)?
             }
         };
-        let active_settled =
-            agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
+        let active_settled = only_identity.is_some()
+            || agent_doc_work_projection::reconcile_managed_active_items(&authoritative)?.is_none();
         if !settled.changed && active_settled {
             let accepted = ClaimRuntimeProjection {
                 target_content: authoritative,
                 persisted_heads: settled.persisted_heads,
                 changed: wrote_successor,
             };
-            record_claim_runtime_projection(file, &accepted, cleared_item)?;
+            record_claim_runtime_projection_scoped(
+                file,
+                &accepted,
+                cleared_item,
+                only_identity,
+            )?;
             return Ok(wrote_successor);
         }
 
@@ -1460,6 +1590,8 @@ mod tests {
         current: RefCell<Option<String>>,
         captured_answered: Cell<usize>,
         reject_scaffold_during_capture: Cell<bool>,
+        reject_convergence: Cell<bool>,
+        required_preserved_line: RefCell<Option<String>>,
     }
 
     impl FakeEffects {
@@ -1468,6 +1600,8 @@ mod tests {
                 current: RefCell::new(Some(content.into())),
                 captured_answered: Cell::new(0),
                 reject_scaffold_during_capture: Cell::new(false),
+                reject_convergence: Cell::new(false),
+                required_preserved_line: RefCell::new(None),
             }
         }
 
@@ -1521,6 +1655,15 @@ mod tests {
             source_content: &str,
             _reason: &str,
         ) -> Result<()> {
+            if self.reject_convergence.get() {
+                bail!("synthetic projection delivery refusal");
+            }
+            if let Some(line) = self.required_preserved_line.borrow().as_deref() {
+                anyhow::ensure!(
+                    target_content.lines().any(|candidate| candidate == line),
+                    "target projection rewrote unrelated lifecycle drift: {target_content:?}"
+                );
+            }
             if let Some(current) = self.current.borrow().as_ref() {
                 anyhow::ensure!(
                     current == source_content,
@@ -2499,6 +2642,93 @@ mod tests {
             "{released_snapshot}"
         );
         assert_eq!(released.item_text, "dispatched worker work");
+    }
+
+    #[test]
+    fn failed_claim_projection_rolls_back_admission_before_spawn_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), "- dispatch me\n");
+        let effects = FakeEffects::default();
+        effects.reject_convergence.set(true);
+
+        let error = claim_with_runtime_projection(
+            &effects,
+            &doc,
+            "dispatch me",
+            "subagent:projection-refused",
+            600,
+        )
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("no worker may be spawned"),
+            "{error:#}"
+        );
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "a failed visible projection must not strand a durable claim"
+        );
+        assert!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .contains("- dispatch me\n"),
+            "the row remains visibly unclaimed"
+        );
+    }
+
+    #[test]
+    fn claim_and_clean_requeue_ignore_unrelated_lifecycle_projection_drift() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(
+            dir.path(),
+            "- dispatch me\n- 🚧 unrelated historical drift\n",
+        );
+        let effects = FakeEffects::default();
+        *effects.required_preserved_line.borrow_mut() =
+            Some("- 🚧 unrelated historical drift".to_string());
+
+        let (_, claim) = claim_with_runtime_projection(
+            &effects,
+            &doc,
+            "dispatch me",
+            "subagent:target-scoped",
+            600,
+        )
+        .expect("unrelated drift cannot veto target admission");
+        let claimed = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            claimed.contains("- 🟡 [#subagent:target-scoped#1] dispatch me\n"),
+            "{claimed}"
+        );
+        assert!(
+            claimed.contains("- 🚧 unrelated historical drift\n"),
+            "{claimed}"
+        );
+
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            &claim.item_text,
+            crate::claim_release_receipt::ReleaseKind::Requeue,
+            Some(claim.generation),
+        )
+        .unwrap();
+        project_claim_item_runtime_state_with_effects(
+            &effects,
+            &doc,
+            &claim.item_text,
+            true,
+        )
+        .expect("unrelated drift cannot veto clean requeue projection");
+        let released = std::fs::read_to_string(&doc).unwrap();
+        assert!(released.contains("- 📥 dispatch me\n"), "{released}");
+        assert!(
+            released.contains("- 🚧 unrelated historical drift\n"),
+            "{released}"
+        );
+        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
     }
 
     #[test]

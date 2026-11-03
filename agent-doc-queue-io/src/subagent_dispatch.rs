@@ -147,19 +147,14 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
         .into_iter()
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
-    let lineage = if lost.is_empty() {
-        None
-    } else {
-        Some(crate::queue_lineage::load(file)?)
-    };
+    let lineage = crate::queue_lineage::load(file)?;
     let lost_identities = lost
         .into_iter()
         .filter(|claim| {
-            lineage
-                .as_ref()
-                .is_some_and(|lineage| crate::queue_lineage::attempt_never_started(lineage, claim))
+            crate::queue_lineage::attempt_never_started(&lineage, claim)
         })
         .map(|claim| claim.identity)
+        .chain(crate::queue_lineage::latest_unstarted_identities(&lineage))
         .collect::<Vec<_>>();
     if fresh_identities.is_empty() && lost_identities.is_empty() {
         return Ok(Vec::new());

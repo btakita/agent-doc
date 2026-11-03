@@ -46,6 +46,11 @@
 //!   the cycle state says `committed` but the snapshot does not match HEAD
 //!   in the owning git root (response patchback visible but never committed).
 //! - Exit 2 on unexpected I/O errors.
+//! - A committed current-document closeout is not converted into exit 1 by
+//!   response debt that belongs only to a related document and already existed
+//!   in that document's previous-turn baseline. The full project debt remains
+//!   visible/actionable, while current or newly introduced response debt still
+//!   fails closed.
 //!
 //! ## Agentic Contracts
 //! - May also clear a persisted startup-miss marker when the marker is proven
@@ -2802,6 +2807,10 @@ fn report_coordinator_action_required(
         .iter()
         .filter(|item| item.missing_response_debt)
         .count();
+    let blocking_response_debt = action_items
+        .iter()
+        .filter(|item| response_debt_blocks_current_closeout(item))
+        .count();
     let placement_reconcile = snapshot.placement_reconcile.len();
     let mut component_counts = std::collections::BTreeMap::<String, usize>::new();
     for item in &action_items {
@@ -2834,9 +2843,9 @@ fn report_coordinator_action_required(
         component_counts,
         snapshot.scan_errors.len(),
     );
-    if recovered_response_delivery_debt > 0 || missing_response_debt > 0 {
+    if blocking_response_debt > 0 {
         anyhow::bail!(
-            "subagent response exchange debt blocks clean closeout: recovered_response_delivery_debt={recovered_response_delivery_debt} missing_response_debt={missing_response_debt}; consolidate every available recovered response exactly once, or preserve the named missing_response_debt blocker"
+            "subagent response exchange debt blocks clean closeout: blocking_response_debt={blocking_response_debt} recovered_response_delivery_debt={recovered_response_delivery_debt} missing_response_debt={missing_response_debt}; consolidate every available recovered response exactly once, or preserve the named missing_response_debt blocker"
         );
     }
     if codex_final_gate {
@@ -2844,6 +2853,35 @@ fn report_coordinator_action_required(
         std::process::exit(2);
     }
     Ok(())
+}
+
+/// Related-document response debt that predates this turn remains a project
+/// coordinator obligation, but it is not evidence that the current document's
+/// already-committed closeout failed. Current-document debt and any newly
+/// introduced related debt still fail closed.
+fn response_debt_blocks_current_closeout(
+    item: &agent_doc_queue::queue_sync_payload::QueueSyncItem,
+) -> bool {
+    let has_response_debt = item.missing_response_debt
+        || (item.response_evidence
+            == agent_doc_queue::queue_sync_payload::QueueSyncResponseEvidence::AgentHistory
+            && item.recovered_response.is_some());
+    response_debt_blocks_current_closeout_facts(
+        item.document_scope,
+        item.incomplete_since_previous_turn,
+        has_response_debt,
+    )
+}
+
+fn response_debt_blocks_current_closeout_facts(
+    document_scope: agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope,
+    incomplete_since_previous_turn: bool,
+    has_response_debt: bool,
+) -> bool {
+    has_response_debt
+        && (document_scope
+            == agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::Current
+            || !incomplete_since_previous_turn)
 }
 
 /// `#steerinterruptexit`: print a pending-steering status as a successful
@@ -6477,5 +6515,31 @@ mod supervisor_scope_claim_tests {
         );
         assert!(item.completion_response_receipt);
         assert!(item.missing_response_debt);
+    }
+}
+
+#[cfg(test)]
+mod response_debt_scope_tests {
+    use super::response_debt_blocks_current_closeout_facts;
+    use agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::{Current, Related};
+
+    #[test]
+    fn preexisting_related_response_debt_does_not_fail_committed_child_closeout() {
+        assert!(!response_debt_blocks_current_closeout_facts(
+            Related, true, true
+        ));
+    }
+
+    #[test]
+    fn current_or_new_related_response_debt_still_fails_closed() {
+        assert!(response_debt_blocks_current_closeout_facts(
+            Current, true, true
+        ));
+        assert!(response_debt_blocks_current_closeout_facts(
+            Related, false, true
+        ));
+        assert!(!response_debt_blocks_current_closeout_facts(
+            Current, false, false
+        ));
     }
 }

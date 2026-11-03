@@ -8555,10 +8555,11 @@ fn try_main() -> anyhow::Result<()> {
                         generation,
                     )?;
                     let queue_effects = CliQueueCommandEffects;
-                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                    agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
                         &queue_effects,
                         &file,
-                        None,
+                        &claim.item_text,
+                        false,
                     )?;
                     eprintln!(
                         "[queue] refreshed {:?} for {} generation {} until {} (running)",
@@ -8566,13 +8567,14 @@ fn try_main() -> anyhow::Result<()> {
                     );
                     return Ok(());
                 }
-                let (outcome, claim) =
-                    agent_doc_queue_io::queue_claim::claim(&file, &item, &owner, ttl_secs)?;
                 let queue_effects = CliQueueCommandEffects;
-                agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                let (outcome, claim) =
+                    agent_doc_queue_io::queue_cmd::claim_with_runtime_projection(
                     &queue_effects,
                     &file,
-                    None,
+                    &item,
+                    &owner,
+                    ttl_secs,
                 )?;
                 eprintln!(
                     "[queue] claimed {:?} for {} generation {} until {} ({:?}, dispatching)",
@@ -8604,10 +8606,11 @@ fn try_main() -> anyhow::Result<()> {
                     &file, &item, &owner, &worker_id, ttl_secs, generation,
                 )?;
                 let queue_effects = CliQueueCommandEffects;
-                agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
                     &queue_effects,
                     &file,
-                    None,
+                    &claim.item_text,
+                    false,
                 )?;
                 eprintln!(
                     "[queue] started {:?} for {} generation {} on worker {:?} until {} (running)",
@@ -8634,10 +8637,11 @@ fn try_main() -> anyhow::Result<()> {
                 let released = release_attempt(&file, &item, kind, generation)?;
                 if let Some(claim) = released.as_ref() {
                     let queue_effects = CliQueueCommandEffects;
-                    agent_doc_queue_io::queue_cmd::project_claim_runtime_state_with_effects(
+                    agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
                         &queue_effects,
                         &file,
-                        requeue.then_some(claim.item_text.as_str()),
+                        &claim.item_text,
+                        requeue,
                     )?;
                 }
                 match released {

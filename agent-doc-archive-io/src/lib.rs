@@ -281,28 +281,46 @@ pub fn write_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<Exc
         }
     };
     let mut entries = parse_response_index_file(&index_path)?;
+    // `#archivedupid`: the checksums each response id already proves in this
+    // archive. Several terminal cells can claim one id (repeated `**Response
+    // [#id]**` projections, a revised re-materialization). Every claimant's
+    // bytes must land in the archive, because compaction removes them from the
+    // live document, and the index must only name bytes the archive holds.
+    // The 2026-11-03 `agent-doc-bugs.md` wedge skipped every claimant after the
+    // first (its anchor already existed) yet re-pointed the index at the LAST
+    // claimant's checksum: the bytes vanished and session-check failed
+    // `archive checksum proof failed` forever.
+    let mut archived = archive_response_checksums(&archive);
     let mut changed = false;
     for (response_id, response, cell) in nodes {
         let anchor = anchor_for(&response_id)?;
         let anchor_marker = format!("<a id=\"{anchor}\"></a>");
         let checksum = agent_doc_hash::content_hash(&response);
-        if !archive.contains(&anchor_marker) {
-            if !archive.ends_with('\n') {
-                archive.push('\n');
-            }
-            // A prompt-shaped delimiter makes the preceding H3 response
-            // terminate according to the exchange parser before archive
-            // framing begins. Consequently reparsing the archive yields the
-            // byte-identical response node whose checksum was indexed, even
-            // after many cells have been appended.
-            archive.push_str(&format!("❯ Archived response locator {response_id}\n\n"));
-            archive.push_str(&anchor_marker);
-            archive.push('\n');
-            archive.push_str(&cell);
-            if !archive.ends_with('\n') {
-                archive.push('\n');
-            }
+        let already_archived = archived
+            .get(&response_id)
+            .is_some_and(|checksums| checksums.contains(&checksum));
+        if !already_archived {
+            append_archived_cell(&mut archive, &response_id, &anchor_marker, &cell);
+            archived
+                .entry(response_id.clone())
+                .or_default()
+                .insert(checksum.clone());
             changed = true;
+        }
+        // An existing locator whose bytes the archive still proves keeps its
+        // checksum when a different claimant of the same id arrives: the first
+        // proven body stays canonical and the later claimant is preserved
+        // (unanchored) beside it. Re-archiving identical bytes refreshes the
+        // locator exactly as before.
+        let keep_existing = entries.get(&response_id).is_some_and(|existing| {
+            existing.content_sha256 != checksum
+                && existing.archive_path == archive_rel
+                && archived
+                    .get(&response_id)
+                    .is_some_and(|checksums| checksums.contains(&existing.content_sha256))
+        });
+        if keep_existing {
+            continue;
         }
         entries.insert(
             response_id.clone(),
@@ -327,6 +345,41 @@ pub fn write_exchange_archive(doc: &Path, archived_exchange: &str) -> Result<Exc
         index_path,
         entries: entries.into_values().collect(),
     })
+}
+
+/// Append one terminal cell to the archive. A prompt-shaped delimiter makes
+/// the preceding H3 response terminate according to the exchange parser before
+/// archive framing begins, so reparsing the archive yields the byte-identical
+/// response node whose checksum was indexed, even after many cells have been
+/// appended. The HTML anchor is written once per id; a later claimant of the
+/// same id is framed by its locator line only.
+fn append_archived_cell(archive: &mut String, response_id: &str, anchor_marker: &str, cell: &str) {
+    if !archive.ends_with('\n') {
+        archive.push('\n');
+    }
+    archive.push_str(&format!("❯ Archived response locator {response_id}\n\n"));
+    if !archive.contains(anchor_marker) {
+        archive.push_str(anchor_marker);
+        archive.push('\n');
+    }
+    archive.push_str(cell);
+    if !archive.ends_with('\n') {
+        archive.push('\n');
+    }
+}
+
+/// Every checksum each response id proves in `archive`. An id may own several
+/// archived bodies (see `#archivedupid`); an index entry is proven when its
+/// checksum is any one of them, matching [`verify_entry_in_archive`].
+fn archive_response_checksums(archive: &str) -> BTreeMap<String, BTreeSet<String>> {
+    let mut checksums = BTreeMap::<String, BTreeSet<String>>::new();
+    for (response_id, body) in response_nodes(archive) {
+        checksums
+            .entry(response_id)
+            .or_default()
+            .insert(agent_doc_hash::content_hash(&body));
+    }
+    checksums
 }
 
 fn render_response_index<'a>(
@@ -473,7 +526,7 @@ fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
     let index = parse_response_index_file(&response_index_path(doc))?;
     let root = project_root(doc)?;
     let mut indexed = BTreeSet::new();
-    let mut archive_proofs = BTreeMap::<String, BTreeMap<String, String>>::new();
+    let mut archive_proofs = BTreeMap::<String, BTreeMap<String, BTreeSet<String>>>::new();
     for entry in index.values() {
         if !archive_proofs.contains_key(&entry.archive_path) {
             let archive =
@@ -485,21 +538,156 @@ fn verified_indexed_response_ids(doc: &Path) -> Result<BTreeSet<String>> {
                 })?;
             archive_proofs.insert(
                 entry.archive_path.clone(),
-                response_nodes(&archive)
-                    .into_iter()
-                    .map(|(id, body)| (id, agent_doc_hash::content_hash(&body)))
-                    .collect(),
+                archive_response_checksums(&archive),
             );
         }
         ensure!(
-            archive_proofs[&entry.archive_path].get(&entry.response_id)
-                == Some(&entry.content_sha256),
-            "archive checksum proof failed for {}",
-            entry.response_id,
+            archive_proofs[&entry.archive_path]
+                .get(&entry.response_id)
+                .is_some_and(|checksums| checksums.contains(&entry.content_sha256)),
+            "{}",
+            unproven_archive_entry_message(doc, entry),
         );
         indexed.insert(entry.response_id.clone());
     }
     Ok(indexed)
+}
+
+/// The refusal for an index entry whose checksum names bytes its archive does
+/// not hold. It names the self-heal that restores those bytes from Git history
+/// (`#archivedupid`) instead of leaving the document wedged with no exit.
+fn unproven_archive_entry_message(doc: &Path, entry: &ResponseIndexEntry) -> String {
+    format!(
+        "archive checksum proof failed for {id}: {index} names sha256 {sha} but {archive} holds no {id} response with those bytes. \
+`agent-doc session-check {doc}` restores the exact bytes from a commit of the document whose response cell hashes to that checksum; \
+when no commit carries them the index entry cannot be proven and needs an explicit restore, detach, or replace decision",
+        id = entry.response_id,
+        index = response_index_path(doc).display(),
+        sha = entry.content_sha256,
+        archive = entry.archive_path,
+        doc = doc.display(),
+    )
+}
+
+/// Bound for [`restore_unproven_response_index_entries_from_git`]: commits of
+/// the document scanned for the bytes an unproven index entry names.
+pub const MAX_UNPROVEN_ENTRY_HISTORY_COMMITS: usize = 256;
+const MAX_UNPROVEN_INDEX_ENTRIES: usize = 64;
+
+/// `#archivedupid` self-heal: append to the archive the exact response bytes
+/// an index entry names but its archive does not hold, recovered from the
+/// document's own Git history.
+///
+/// A candidate is accepted only when a terminal response cell for that id in a
+/// committed version of the document hashes to the indexed checksum, so the
+/// repair can only restore bytes the index already committed to; it never
+/// re-points a checksum. The session document is not touched. Returns the ids
+/// whose proof was restored; entries without a checksum-matching candidate are
+/// left for [`verified_indexed_response_ids`] to refuse with the recovery path.
+pub fn restore_unproven_response_index_entries_from_git(doc: &Path) -> Result<Vec<String>> {
+    let index_path = response_index_path(doc);
+    if !index_path.exists() {
+        return Ok(Vec::new());
+    }
+    let root = project_root(doc)?;
+    let index = parse_response_index_file(&index_path)?;
+    let mut archives = BTreeMap::<String, String>::new();
+    for entry in index.values() {
+        if !archives.contains_key(&entry.archive_path) {
+            let Ok(archive) = std::fs::read_to_string(root.join(&entry.archive_path)) else {
+                continue;
+            };
+            archives.insert(entry.archive_path.clone(), archive);
+        }
+    }
+    let mut proofs = archives
+        .iter()
+        .map(|(path, archive)| (path.clone(), archive_response_checksums(archive)))
+        .collect::<BTreeMap<_, _>>();
+    let unproven = index
+        .values()
+        .filter(|entry| {
+            proofs.get(&entry.archive_path).is_some_and(|proof| {
+                !proof
+                    .get(&entry.response_id)
+                    .is_some_and(|checksums| checksums.contains(&entry.content_sha256))
+            })
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if unproven.is_empty() {
+        return Ok(Vec::new());
+    }
+    ensure!(
+        unproven.len() <= MAX_UNPROVEN_INDEX_ENTRIES,
+        "response index has {} unproven entries; bounded history recovery limit is {}",
+        unproven.len(),
+        MAX_UNPROVEN_INDEX_ENTRIES,
+    );
+    let document_rel = relative_slash(&root, &doc.canonicalize().unwrap_or(doc.to_path_buf()))?;
+    let commits = git_stdout(
+        &root,
+        &[
+            "log",
+            "--format=%H",
+            &format!("-n{MAX_UNPROVEN_ENTRY_HISTORY_COMMITS}"),
+            "--",
+            &document_rel,
+        ],
+    )
+    .unwrap_or_default();
+    let mut wanted = unproven
+        .iter()
+        .map(|entry| {
+            (
+                (entry.response_id.clone(), entry.content_sha256.clone()),
+                entry,
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut restored = Vec::new();
+    for commit in commits.lines().filter(|line| !line.trim().is_empty()) {
+        if wanted.is_empty() {
+            break;
+        }
+        let Ok(content) = head_blob(&root, commit, &document_rel) else {
+            continue;
+        };
+        for (response_id, response, cell) in terminal_response_cells(&content) {
+            let key = (response_id.clone(), agent_doc_hash::content_hash(&response));
+            let Some(entry) = wanted.remove(&key) else {
+                continue;
+            };
+            let archive = archives
+                .get_mut(&entry.archive_path)
+                .expect("unproven entries only come from readable archives");
+            let anchor_marker = format!("<a id=\"{}\"></a>", entry.anchor);
+            append_archived_cell(archive, &response_id, &anchor_marker, &cell);
+            proofs
+                .get_mut(&entry.archive_path)
+                .expect("proofs mirror archives")
+                .entry(response_id.clone())
+                .or_default()
+                .insert(key.1);
+            restored.push((entry.archive_path.clone(), response_id));
+        }
+    }
+    if restored.is_empty() {
+        return Ok(Vec::new());
+    }
+    let touched = restored
+        .iter()
+        .map(|(path, _)| path.clone())
+        .collect::<BTreeSet<_>>();
+    for path in touched {
+        atomic_write(&root.join(&path), archives[&path].as_bytes())?;
+        if let Err(error) = agent_doc_sqlite::archive_index::index_archive(doc, &root.join(&path)) {
+            eprintln!(
+                "[archive] warning: rebuildable SQLite archive index update failed for {path}: {error}"
+            );
+        }
+    }
+    Ok(restored.into_iter().map(|(_, id)| id).collect())
 }
 
 /// Render only response bodies not pinned by authoritative decision evidence.
@@ -2324,5 +2512,165 @@ mod tests {
             affected_response_ids_for_commit(&doc, Some(&before), &after).unwrap(),
             BTreeSet::from([response_id.to_string()]),
         );
+    }
+
+    const DUP_ID: &str = "[#r-0a0b0c0d0e0f]";
+
+    fn dup_claimants() -> (String, String, String) {
+        let first = format!("### Re: first claimant {DUP_ID}\n\nFirst claimant body.\n");
+        let second = format!(
+            "❯ restate the locator\n\n### Re: second claimant {DUP_ID}\n\nSecond claimant body.\n"
+        );
+        let both = format!("{first}\n{second}");
+        (first, second, both)
+    }
+
+    fn claimant_checksums(content: &str) -> Vec<String> {
+        terminal_response_cells(content)
+            .into_iter()
+            .filter(|(id, _, _)| id == DUP_ID)
+            .map(|(_, response, _)| agent_doc_hash::content_hash(&response))
+            .collect()
+    }
+
+    #[test]
+    fn duplicate_id_claimants_are_all_archived_and_the_index_stays_proven() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let (_, _, both) = dup_claimants();
+        let checksums = claimant_checksums(&both);
+        assert_eq!(
+            checksums.len(),
+            2,
+            "fixture must hold two claimants of one id"
+        );
+        assert_ne!(checksums[0], checksums[1]);
+
+        let write = write_exchange_archive(&doc, &both).unwrap();
+        let archive = std::fs::read_to_string(&write.archive_path).unwrap();
+        assert!(archive.contains("First claimant body."), "{archive}");
+        assert!(
+            archive.contains("Second claimant body."),
+            "a later claimant's bytes were dropped:\n{archive}"
+        );
+        assert_eq!(archive.matches("<a id=\"r-0a0b0c0d0e0f\"></a>").count(), 1);
+        let index = parse_response_index_file(&write.index_path).unwrap();
+        assert_eq!(index[DUP_ID].content_sha256, checksums[0]);
+        assert!(
+            verified_indexed_response_ids(&doc)
+                .unwrap()
+                .contains(DUP_ID)
+        );
+
+        let again = write_exchange_archive(&doc, &both).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&again.archive_path).unwrap(),
+            archive
+        );
+        assert_eq!(again.entries, write.entries);
+    }
+
+    #[test]
+    fn revised_claimant_of_an_archived_id_keeps_the_proven_locator() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "live\n").unwrap();
+        let (first, second, _) = dup_claimants();
+        let first_checksum = claimant_checksums(&first).remove(0);
+
+        write_exchange_archive(&doc, &first).unwrap();
+        let write = write_exchange_archive(&doc, &second).unwrap();
+
+        let archive = std::fs::read_to_string(&write.archive_path).unwrap();
+        assert!(archive.contains("First claimant body."));
+        assert!(archive.contains("Second claimant body."));
+        let index = parse_response_index_file(&write.index_path).unwrap();
+        assert_eq!(index[DUP_ID].content_sha256, first_checksum);
+        assert!(
+            verified_indexed_response_ids(&doc)
+                .unwrap()
+                .contains(DUP_ID)
+        );
+    }
+
+    /// Reproduce the archive the pre-fix writer left behind: the first
+    /// claimant's bytes, an index naming the LAST claimant's checksum.
+    fn wedged_archive(doc: &Path) -> String {
+        let (first, _, both) = dup_claimants();
+        let write = write_exchange_archive(doc, &first).unwrap();
+        let mut entries = parse_response_index_file(&write.index_path).unwrap();
+        let last = claimant_checksums(&both).pop().unwrap();
+        entries.get_mut(DUP_ID).unwrap().content_sha256 = last.clone();
+        atomic_write(
+            &write.index_path,
+            render_response_index(doc, entries.values()).as_bytes(),
+        )
+        .unwrap();
+        last
+    }
+
+    #[test]
+    fn unproven_index_entry_is_restored_from_document_history() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        let (_, _, both) = dup_claimants();
+        std::fs::write(&doc, format!("# Session\n\n{both}")).unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "claimants"]);
+        let last = wedged_archive(&doc);
+        std::fs::write(&doc, "# Session\n\ncompacted\n").unwrap();
+
+        let error = verified_indexed_response_ids(&doc).unwrap_err().to_string();
+        assert!(error.contains("archive checksum proof failed for [#r-0a0b0c0d0e0f]"));
+        assert!(
+            error.contains("agent-doc session-check"),
+            "the refusal must name its recovery path: {error}"
+        );
+
+        assert_eq!(
+            restore_unproven_response_index_entries_from_git(&doc).unwrap(),
+            vec![DUP_ID.to_string()]
+        );
+        let archive = std::fs::read_to_string(exchange_archive_path(&doc)).unwrap();
+        assert!(archive.contains("Second claimant body."), "{archive}");
+        assert_eq!(archive.matches("<a id=\"r-0a0b0c0d0e0f\"></a>").count(), 1);
+        let index = parse_response_index_file(&response_index_path(&doc)).unwrap();
+        assert_eq!(
+            index[DUP_ID].content_sha256, last,
+            "repair never re-points a checksum"
+        );
+        assert!(
+            verified_indexed_response_ids(&doc)
+                .unwrap()
+                .contains(DUP_ID)
+        );
+        assert!(
+            restore_unproven_response_index_entries_from_git(&doc)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn unproven_index_entry_without_matching_history_stays_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        init_repo(dir.path());
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n\ncompacted\n").unwrap();
+        git(dir.path(), &["add", "session.md"]);
+        git(dir.path(), &["commit", "-q", "-m", "no claimant bytes"]);
+        wedged_archive(&doc);
+
+        assert!(
+            restore_unproven_response_index_entries_from_git(&doc)
+                .unwrap()
+                .is_empty()
+        );
+        let error = verified_indexed_response_ids(&doc).unwrap_err().to_string();
+        assert!(error.contains("archive checksum proof failed for [#r-0a0b0c0d0e0f]"));
     }
 }

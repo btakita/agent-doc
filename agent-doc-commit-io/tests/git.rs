@@ -917,6 +917,98 @@ Duplicate replay should stay live.
         );
     }
 
+    /// `#archivedupid`: the pre-fix compaction writer archived only the first
+    /// of several cells claiming one response id but indexed the LAST one's
+    /// checksum, so every response-index reader refused the document forever.
+    /// The session-check self-heal restores the exact indexed bytes from the
+    /// document's history and commits only the archive.
+    #[test]
+    fn unproven_index_entry_bytes_are_restored_from_history_and_committed() {
+        const RESPONSE_ID: &str = "[#r-0a0b0c0d0e0f]";
+        let first = format!("### Re: first claimant {RESPONSE_ID}\n\nFirst claimant body.\n");
+        let second = format!(
+            "❯ restate the locator\n\n### Re: second claimant {RESPONSE_ID}\n\nSecond claimant body.\n"
+        );
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        th::init_repo(root);
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        th::commit_file(
+            root,
+            "session.md",
+            &format!("# Session\n\n{first}\n{second}"),
+            "two claimants",
+        );
+        let doc = root.join("session.md");
+
+        // Checksum the second claimant through the real writer, in a scratch repo.
+        let scratch = tempfile::TempDir::new().unwrap();
+        th::init_repo(scratch.path());
+        let scratch_doc = scratch.path().join("session.md");
+        fs::write(&scratch_doc, "scratch\n").unwrap();
+        let second_sha = agent_doc_archive_io::write_exchange_archive(&scratch_doc, &second)
+            .unwrap()
+            .entries
+            .remove(0)
+            .content_sha256;
+        let first_write = agent_doc_archive_io::write_exchange_archive(&doc, &first).unwrap();
+        let first_sha = first_write.entries[0].content_sha256.clone();
+        assert_ne!(first_sha, second_sha);
+        let index_path = agent_doc_archive_io::response_index_path(&doc);
+        let wedged_index = fs::read_to_string(&index_path)
+            .unwrap()
+            .replace(&first_sha, &second_sha);
+        fs::write(&index_path, wedged_index).unwrap();
+        fs::write(&doc, "# Session\n\ncompacted\n").unwrap();
+        for rel in [
+            "session.md",
+            "session.exchange-archive.md",
+            "session.response-index.md",
+        ] {
+            Command::new("git")
+                .current_dir(root)
+                .args(["add", "--", rel])
+                .output()
+                .unwrap();
+        }
+        Command::new("git")
+            .current_dir(root)
+            .args(["commit", "-m", "wedged compaction", "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, "compacted\n")
+                .unwrap_err()
+                .to_string()
+                .contains("archive checksum proof failed for [#r-0a0b0c0d0e0f]")
+        );
+
+        assert!(
+            restore_and_commit_historical_response_evidence(&doc)
+                .expect("indexed bytes should be restored from history")
+        );
+        let show = |rel: &str| {
+            let output = Command::new("git")
+                .current_dir(root)
+                .args(["show", &format!("HEAD:{rel}")])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        assert_eq!(show("session.md"), "# Session\n\ncompacted\n");
+        assert!(show("session.exchange-archive.md").contains("Second claimant body."));
+        assert!(show("session.response-index.md").contains(&second_sha));
+        assert!(
+            agent_doc_archive_io::dangling_response_references(&doc, "compacted\n")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !restore_and_commit_historical_response_evidence(&doc)
+                .expect("a proven index should be idempotent")
+        );
+    }
+
     #[test]
     fn historical_structured_response_evidence_repairs_with_unrelated_live_drift() {
         const RESPONSE_ID: &str = "[#r-00d5833b78bd]";

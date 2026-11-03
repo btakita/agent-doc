@@ -1843,12 +1843,20 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
     agent_doc_document_realtime_io::with_current_document_projection_pass(|| {
         let authority =
             commit_current_document_content(file, "commit_historical_response_evidence_authority")?;
-        if agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty() {
-            return Ok(false);
-        }
         let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
             return Ok(false);
         };
+        // `#archivedupid`: first restore archive bytes an index entry already
+        // committed to but its archive lost. Every other response-index reader
+        // refuses such an entry, so this must run before them; only the
+        // archive file changes and the commit below stages HEAD's document.
+        let reproven =
+            agent_doc_archive_io::restore_unproven_response_index_entries_from_git(file)?;
+        if reproven.is_empty()
+            && agent_doc_archive_io::extract_response_reference_ids(&authority).is_empty()
+        {
+            return Ok(false);
+        }
 
         let restored = agent_doc_archive_io::restore_committed_inline_response_references_from_git(
             file, &authority, &head,
@@ -1858,6 +1866,7 @@ pub fn restore_and_commit_historical_response_evidence(file: &Path) -> Result<bo
             agent_doc_archive_io::affected_response_ids_for_commit(file, Some(&head), &head)?;
         affected.retain(|response_id| referenced.contains(response_id));
         affected.extend(restored);
+        affected.extend(reproven.iter().cloned());
         if affected.is_empty() {
             return Ok(false);
         }

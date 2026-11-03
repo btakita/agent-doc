@@ -2637,6 +2637,15 @@ states such as idle, `preflight_started`, `response_captured`, `write_applied`,
 post-preflight, and committed may schedule work, but they must not change the
 realtime authority rules.
 
+`DocumentAuthorityObserved` is a latest-value telemetry sink, not part of the
+synchronous response closeout barrier. Authority queries publish their newest
+observation through a per-process coalescing worker; repeated observations for
+one document occupy one pending slot. Its controller append uses a bounded
+SQLite contention budget and retries from the retained latest observation, so
+telemetry cannot hold the lifecycle state-event lane through the five-second RPC
+deadline. Admission, response capture, document-write proof, git commit, and the
+terminal closeout facts retain the normal durable ingress budget and ordering.
+
 A retained document-write owner therefore keeps the same delivery/native-save
 transition across the captured-response/write-applied boundary. Once the editor
 acknowledges the exact canonical cut, `session-check` may request the

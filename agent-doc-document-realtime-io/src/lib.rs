@@ -871,6 +871,140 @@ struct DocumentAuthorityObservation {
     editor_id: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+#[cfg_attr(test, allow(dead_code))]
+struct DocumentAuthorityPublishCommand {
+    canonical: PathBuf,
+    file: PathBuf,
+    project_root: PathBuf,
+    observation: DocumentAuthorityObservation,
+    event: agent_doc_state_backbone::StateEvent,
+}
+
+#[derive(Debug, Default)]
+struct DocumentAuthorityPublishMailbox {
+    pending: HashMap<PathBuf, DocumentAuthorityPublishCommand>,
+}
+
+impl DocumentAuthorityPublishMailbox {
+    fn enqueue(&mut self, command: DocumentAuthorityPublishCommand) -> bool {
+        let changed = self
+            .pending
+            .get(&command.canonical)
+            .is_none_or(|pending| pending.observation != command.observation);
+        if changed {
+            self.pending.insert(command.canonical.clone(), command);
+        }
+        changed
+    }
+
+    fn drain(&mut self) -> Vec<DocumentAuthorityPublishCommand> {
+        std::mem::take(&mut self.pending).into_values().collect()
+    }
+}
+
+#[cfg_attr(test, allow(dead_code))]
+struct DocumentAuthorityPublisher {
+    mailbox: std::sync::Arc<Mutex<DocumentAuthorityPublishMailbox>>,
+    wake: std::sync::mpsc::SyncSender<()>,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn spawn_document_authority_publisher() -> std::io::Result<DocumentAuthorityPublisher> {
+    let mailbox = std::sync::Arc::new(Mutex::new(DocumentAuthorityPublishMailbox::default()));
+    let worker_mailbox = std::sync::Arc::clone(&mailbox);
+    let (wake, receiver) = std::sync::mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("agent-doc-authority-sink".to_string())
+        .spawn(move || {
+            while receiver.recv().is_ok() {
+                let mut retry_delay = std::time::Duration::from_millis(100);
+                loop {
+                    let commands = worker_mailbox.lock().drain();
+                    if commands.is_empty() {
+                        break;
+                    }
+                    let mut retry = false;
+                    for command in commands {
+                        match publish_reactive_state_event(&command.project_root, &command.event) {
+                            Ok(_) => {
+                                DOCUMENT_AUTHORITY_OBSERVATIONS
+                                    .lock()
+                                    .insert(command.canonical, command.observation);
+                            }
+                            Err(error) => {
+                                agent_doc_ops_log_io::log_op(
+                                    &command.file,
+                                    &format!(
+                                        "document_authority_state_event_deferred file={} source={} retry_after_ms={} error={error:#}",
+                                        command.file.display(),
+                                        command.observation.source,
+                                        retry_delay.as_millis(),
+                                    ),
+                                );
+                                let mut mailbox = worker_mailbox.lock();
+                                mailbox
+                                    .pending
+                                    .entry(command.canonical.clone())
+                                    .or_insert(command);
+                                retry = true;
+                            }
+                        }
+                    }
+                    if retry {
+                        std::thread::sleep(retry_delay);
+                        retry_delay = (retry_delay * 2).min(std::time::Duration::from_secs(5));
+                    } else {
+                        retry_delay = std::time::Duration::from_millis(100);
+                    }
+                }
+            }
+        })?;
+    Ok(DocumentAuthorityPublisher { mailbox, wake })
+}
+
+#[cfg_attr(test, allow(dead_code))]
+static DOCUMENT_AUTHORITY_PUBLISHER: LazyLock<Option<DocumentAuthorityPublisher>> =
+    LazyLock::new(|| match spawn_document_authority_publisher() {
+        Ok(publisher) => Some(publisher),
+        Err(error) => {
+            eprintln!("[agent-doc] failed to start document-authority sink: {error}");
+            None
+        }
+    });
+
+#[cfg_attr(test, allow(dead_code))]
+fn schedule_document_authority_publish(command: DocumentAuthorityPublishCommand) {
+    let Some(publisher) = DOCUMENT_AUTHORITY_PUBLISHER.as_ref() else {
+        agent_doc_ops_log_io::log_op(
+            &command.file,
+            &format!(
+                "document_authority_state_event_deferred file={} source={} reason=background_sink_unavailable",
+                command.file.display(), command.observation.source,
+            ),
+        );
+        return;
+    };
+    let diagnostic_file = command.file.clone();
+    let diagnostic_source = command.observation.source.clone();
+    if !publisher.mailbox.lock().enqueue(command) {
+        return;
+    }
+    match publisher.wake.try_send(()) {
+        Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => {}
+        Err(std::sync::mpsc::TrySendError::Disconnected(())) => {
+            agent_doc_ops_log_io::log_op(
+                &diagnostic_file,
+                &format!(
+                    "document_authority_state_event_deferred file={} source={} reason=background_sink_disconnected",
+                    diagnostic_file.display(), diagnostic_source,
+                ),
+            );
+            eprintln!("[agent-doc] document-authority sink disconnected with pending work");
+        }
+    }
+}
+
 pub struct SessionActorWriteQueueSubmitter;
 
 pub static SESSION_ACTOR_WRITE_QUEUE: SessionActorWriteQueueSubmitter =
@@ -5506,8 +5640,7 @@ fn record_document_authority(
         content_hash: content_hash.clone(),
         editor_id: editor_id.clone(),
     };
-    let mut observations = DOCUMENT_AUTHORITY_OBSERVATIONS.lock();
-    if observations.get(&canonical) == Some(&observation) {
+    if DOCUMENT_AUTHORITY_OBSERVATIONS.lock().get(&canonical) == Some(&observation) {
         return;
     }
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -5524,22 +5657,29 @@ fn record_document_authority(
             editor_id,
         },
     );
+    #[cfg(test)]
     match publish_reactive_state_event(&project_root, &event) {
         Ok(_) => {
-            observations.insert(canonical, observation);
+            DOCUMENT_AUTHORITY_OBSERVATIONS
+                .lock()
+                .insert(canonical, observation);
         }
-        Err(e) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "document_authority_state_event_error file={} source={} error={}",
-                    file.display(),
-                    source,
-                    e,
-                ),
-            );
-        }
+        Err(error) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_authority_state_event_error file={} source={} error={error:#}",
+                file.display(), source,
+            ),
+        ),
     }
+    #[cfg(not(test))]
+    schedule_document_authority_publish(DocumentAuthorityPublishCommand {
+        canonical,
+        file: file.to_path_buf(),
+        project_root,
+        observation,
+        event,
+    });
 }
 
 /// Return the durable deferred write for `file`, if one still awaits editor
@@ -11403,6 +11543,44 @@ mod tests {
                 .is_none(),
             "an explicit newer last-editor-close projection permits detached disk authority"
         );
+    }
+
+    #[test]
+    fn authority_sink_coalesces_a_hot_document_to_its_latest_observation() {
+        let canonical = PathBuf::from("/tmp/authority-hot-document.md");
+        let mut mailbox = DocumentAuthorityPublishMailbox::default();
+        for epoch in 1..=10_000u64 {
+            let observation = DocumentAuthorityObservation {
+                source: format!("probe-{epoch}"),
+                authority: agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                reason: "crdt_relay_current".to_string(),
+                content_hash: Some(format!("hash-{epoch}")),
+                editor_id: None,
+            };
+            assert!(mailbox.enqueue(DocumentAuthorityPublishCommand {
+                canonical: canonical.clone(),
+                file: canonical.clone(),
+                project_root: PathBuf::from("/tmp"),
+                observation,
+                event: agent_doc_state_backbone::StateEvent::new(
+                    format!("authority-{epoch}"),
+                    agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                        document_hash: "doc".to_string(),
+                        authority: agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                        authority_epoch: epoch,
+                        source: format!("probe-{epoch}"),
+                        reason: "crdt_relay_current".to_string(),
+                        content_hash: Some(format!("hash-{epoch}")),
+                        editor_id: None,
+                    },
+                ),
+            }));
+        }
+
+        let drained = mailbox.drain();
+        assert_eq!(drained.len(), 1, "one document owns one pending sink slot");
+        assert_eq!(drained[0].observation.source, "probe-10000");
+        assert!(mailbox.drain().is_empty());
     }
 
     #[test]

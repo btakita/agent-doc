@@ -378,6 +378,19 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
 /// reads continue to call [`open_state_db`], so periodic maintenance remains
 /// automatic and happens outside the state-event critical section.
 pub fn open_state_db_for_event_ingress(project_root: &Path) -> Result<Connection> {
+    open_state_db_for_event_ingress_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
+}
+
+/// Open the initialized state database for a latency-bounded event sink.
+///
+/// Best-effort telemetry uses a short timeout so it can yield to lifecycle facts
+/// instead of occupying the controller's serialized ingress lane for the normal
+/// 30-second recovery budget. Lifecycle events continue to use
+/// [`open_state_db_for_event_ingress`].
+pub fn open_state_db_for_event_ingress_with_timeout(
+    project_root: &Path,
+    busy_timeout: Duration,
+) -> Result<Connection> {
     anyhow::ensure!(
         !state_db_connections_forbidden_for_process(),
         "SQLite state connections are forbidden in this process; use the Project Controller projection/command plane"
@@ -388,7 +401,7 @@ pub fn open_state_db_for_event_ingress(project_root: &Path) -> Result<Connection
         std::fs::create_dir_all(parent)?;
     }
     if !schema_already_converged(&path) {
-        return open_and_init_state_db(&path, STATE_DB_BUSY_TIMEOUT).with_context(|| {
+        return open_and_init_state_db(&path, busy_timeout).with_context(|| {
             format!(
                 "authoritative state db {} is unavailable; refusing automatic replacement",
                 path.display()
@@ -397,7 +410,7 @@ pub fn open_state_db_for_event_ingress(project_root: &Path) -> Result<Connection
     }
     let conn = Connection::open(&path)
         .with_context(|| format!("failed to open {} for state-event ingress", path.display()))?;
-    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    conn.busy_timeout(busy_timeout)?;
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     Ok(conn)
 }
@@ -4393,16 +4406,7 @@ pub fn upsert_supervisor_lease_in_db(
     Ok(())
 }
 
-pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>) -> Result<bool> {
-    // `document_version` (`#retentionversion`) is assigned inside the same
-    // statement as the insert. SQLite serializes writers, so the `MAX(..) + 1`
-    // subquery and the insert cannot interleave with another connection's
-    // append — there is no read-modify-write window to lose. It is deliberately
-    // NOT a UNIQUE constraint: `INSERT OR IGNORE` targets the `event_id`
-    // uniqueness, and a second unique index here could silently drop a
-    // legitimate event instead of the intended duplicate.
-    let changed = conn.execute(
-        r#"
+const INSERT_STATE_EVENT_SQL: &str = r#"
         INSERT OR IGNORE INTO state_events (
             event_id,
             document_hash,
@@ -4417,7 +4421,18 @@ pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>)
             FROM state_events existing
             WHERE existing.document_hash = ?2
         ))
-        "#,
+        "#;
+
+pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>) -> Result<bool> {
+    // `document_version` (`#retentionversion`) is assigned inside the same
+    // statement as the insert. SQLite serializes writers, so the `MAX(..) + 1`
+    // subquery and the insert cannot interleave with another connection's
+    // append — there is no read-modify-write window to lose. It is deliberately
+    // NOT a UNIQUE constraint: `INSERT OR IGNORE` targets the `event_id`
+    // uniqueness, and a second unique index here could silently drop a
+    // legitimate event instead of the intended duplicate.
+    let changed = conn.execute(
+        INSERT_STATE_EVENT_SQL,
         params![
             event.event_id,
             event.document_hash,
@@ -10108,6 +10123,31 @@ mod tests {
         assert!(
             index_sql.contains("WHERE document_version = 0"),
             "guard index must stay sparse after convergence: {index_sql}"
+        );
+        Ok(())
+    }
+
+    /// `#retentionversion`: a hot append assigns the next per-document version
+    /// by seeking the document's high-water index. It must not replay or scan
+    /// the ledger while the controller holds serialized state-event ingress.
+    #[test]
+    fn state_event_append_high_water_uses_document_version_index() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let explain = format!("EXPLAIN QUERY PLAN {INSERT_STATE_EVENT_SQL}");
+        let plan: Vec<String> = conn
+            .prepare(&explain)?
+            .query_map(
+                params!["event", "document", "domain", "fact", "{}", 1i64],
+                |row| row.get(3),
+            )?
+            .collect::<std::result::Result<_, _>>()?;
+        assert!(
+            plan.iter().any(|detail| {
+                detail.contains("state_events_document_hash_document_version")
+                    && detail.contains("SEARCH")
+            }),
+            "state-event version assignment must seek the per-document high-water index, plan: {plan:?}"
         );
         Ok(())
     }

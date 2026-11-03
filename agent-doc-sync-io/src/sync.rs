@@ -1856,7 +1856,7 @@ pub fn repair_layout(
             }
         }
         if agent_doc_owned && window.height == STASH_JOIN_TEMP_HEIGHT {
-            match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
+            match agent_doc_tmux_io::restore_window_size_after_staging(tmux, &window.id) {
                 Ok(()) => {
                     mutated = true;
                     sync_log(&format!(
@@ -1890,7 +1890,7 @@ pub fn repair_layout(
                 height,
                 clients,
             ) {
-                match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
+                match agent_doc_tmux_io::release_window_size_pin(tmux, &window.id) {
                     Ok(()) => {
                         mutated = true;
                         sync_log(&format!(
@@ -2096,7 +2096,9 @@ pub fn repair_layout(
             // 1000-row height above is a join-time workaround, not a layout
             // choice. Re-fit the current geometry and remove tmux's per-window
             // manual-size override so subsequent client resizes remain live.
-            if let Err(err) = agent_doc_tmux_io::resize_window_to_clients(tmux, &primary_id) {
+            if let Err(err) =
+                agent_doc_tmux_io::restore_window_size_after_staging(tmux, &primary_id)
+            {
                 eprintln!(
                     "[repair] warning: could not restore stash window {primary_id} to the client size: {err}"
                 );
@@ -2474,8 +2476,14 @@ fn session_name_for_target_window(tmux: &Tmux, window: &str) -> Option<String> {
 }
 
 fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Option<PathBuf> {
-    agent_doc_sync::sync_candidate_files(col_args, focus)
+    // GH #388: a full editor-surface sync may carry a stale/unrelated focus
+    // alongside authoritative visible columns. Repair one of those columns;
+    // consult focus only when no visible column names a repairable document.
+    // Otherwise the post-sync repair can start and briefly join a pane for a
+    // document that is not part of the accepted surface.
+    agent_doc_sync::sync_candidate_files(col_args, None)
         .into_iter()
+        .chain(agent_doc_sync::sync_candidate_files(&[], focus))
         .find_map(|path| {
             if !path.exists() || agent_doc_frontmatter_io::session::read_session_id(&path).is_none()
             {
@@ -4242,10 +4250,16 @@ fn run_with_options_internal_at_root(
             // ledger, and the durable registry merely to reconstruct the same
             // file→pane relationship. Missing/ambiguous actors still fall
             // through to the full fail-closed proof path below.
-            if exact_visible_target
-                && let Some(binding) = reactive_actor_bindings.get(file_path)
-                && pane_projection_is_reusable_for_document(tmux, &binding.pane_id, file_path)
-            {
+            if exact_visible_target && let Some(binding) = reactive_actor_bindings.get(file_path) {
+                // `#tmuxautosyncreactive`, GH #388: this generation-fenced
+                // actor binding is already the hot ownership projection for
+                // this exact document. Re-walking tmux liveness and the pane's
+                // process tree here made a reactive fact depend on synchronous
+                // external observations while the layout lock was held. The
+                // reconciler remains the idempotent effect boundary and reports
+                // a missing pane; registry/cross-root fallbacks below still need
+                // their physical ownership witness because they are not the
+                // current controller projection.
                 sync_log(&format!(
                     "exact_visible_actor_projection_reused file={} pane={} generation={}",
                     file_path.display(),
@@ -7846,6 +7860,37 @@ mod tests {
     use std::process::Command as ProcessCommand;
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn doctor_repair_prefers_visible_column_over_unrelated_focus_gh388() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let visible = tmp.path().join("visible.md");
+        let unrelated_focus = tmp.path().join("unrelated-focus.md");
+        std::fs::write(&visible, "---\nagent_doc_session: visible\n---\n").unwrap();
+        std::fs::write(&unrelated_focus, "---\nagent_doc_session: unrelated\n---\n").unwrap();
+        let columns = vec![visible.to_string_lossy().into_owned()];
+
+        assert_eq!(
+            sync_doctor_repair_candidate(
+                &columns,
+                Some(unrelated_focus.to_string_lossy().as_ref()),
+            ),
+            Some(visible.canonicalize().unwrap()),
+            "an accepted visible column must own repair selection before stale focus",
+        );
+        assert_eq!(
+            sync_doctor_repair_candidate(
+                &[tmp
+                    .path()
+                    .join("not-managed.txt")
+                    .to_string_lossy()
+                    .into_owned()],
+                Some(unrelated_focus.to_string_lossy().as_ref()),
+            ),
+            Some(unrelated_focus.canonicalize().unwrap()),
+            "focus remains the fallback when no visible column is repairable",
+        );
+    }
 
     #[test]
     fn exact_visible_cross_root_after_content_does_not_repeat_actor_lookup() {

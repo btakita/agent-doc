@@ -147,6 +147,10 @@ pub enum TmuxIoError {
     Utf8 {
         message: String,
     },
+    InvalidOutput {
+        command: String,
+        output: String,
+    },
     EmptyCurrentPane,
 }
 
@@ -164,6 +168,9 @@ impl fmt::Display for TmuxIoError {
                 write!(f, "{binary} command failed with status {code:?}: {stderr}")
             }
             Self::Utf8 { message } => write!(f, "tmux output was not utf-8: {message}"),
+            Self::InvalidOutput { command, output } => {
+                write!(f, "tmux {command} returned invalid output: {output:?}")
+            }
             Self::EmptyCurrentPane => write!(f, "tmux returned an empty current pane id"),
         }
     }
@@ -631,16 +638,56 @@ pub fn resize_window_height(
         .map(|_| ())
 }
 
-/// `#stashresizerestore`: re-fit a window to its clients and remove the
-/// per-window manual-size override left by the stash-consolidation workaround.
-pub fn resize_window_to_clients(
+/// `#stashresizerestore`: remove the per-window manual-size override left by
+/// the stash-consolidation workaround.
+///
+/// Unsetting the local option immediately returns geometry ownership to tmux's
+/// configured window-size policy, which re-fits the window to its clients. Do
+/// not precede this with `resize-window -A`: that command creates the very
+/// `window-size manual` pin we are releasing and can block indefinitely while
+/// the server is reconciling client geometry (GH #388).
+pub fn release_window_size_pin(
     runner: &(impl TmuxCommandRunner + ?Sized),
     target: &str,
 ) -> Result<(), TmuxIoError> {
-    runner
-        .run(&agent_doc_tmux_commands::resize_window_to_clients(target))
-        .and_then(|_| runner.run(&inherit_window_size_command(target)))
-        .map(|_| ())
+    runner.run(&inherit_window_size_command(target)).map(|_| ())
+}
+
+/// Restore a window after agent-doc's 1000-row staging resize without asking
+/// tmux to discover client geometry via the potentially blocking `-A` path.
+///
+/// A detached session has no client to trigger an immediate re-fit when its
+/// local `window-size` option is unset. Resize it to tmux's configured
+/// `default-size` height first, then release the manual pin so attached clients
+/// regain ownership as soon as one exists (GH #388).
+pub fn restore_window_size_after_staging(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    target: &str,
+) -> Result<(), TmuxIoError> {
+    let default_size = runner.run(&TmuxCommand::new(["show-options", "-gv", "default-size"]))?;
+    let height = default_size
+        .trim()
+        .split_once('x')
+        .and_then(|(width, height)| {
+            (width
+                .parse::<u32>()
+                .ok()
+                .filter(|value| *value > 0)
+                .is_some()
+                && height
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|value| *value > 0)
+                    .is_some())
+            .then_some(height)
+        })
+        .ok_or_else(|| TmuxIoError::InvalidOutput {
+            command: "show-options -gv default-size".to_string(),
+            output: default_size.clone(),
+        })?;
+
+    runner.run(&resize_window_height_command(target, height))?;
+    runner.run(&inherit_window_size_command(target)).map(|_| ())
 }
 
 /// GH #244: the window's own (not inherited) `window-size` option, or `None`
@@ -1585,15 +1632,31 @@ mod tests {
     }
 
     #[test]
-    fn resize_window_to_clients_refits_then_unsets_manual_size() {
+    fn release_window_size_pin_unsets_without_resize_window_adjust() {
         let runner = RecordingRunner::new();
 
-        resize_window_to_clients(&runner, "@2").unwrap();
+        release_window_size_pin(&runner, "@2").unwrap();
+
+        assert_eq!(
+            runner.commands(),
+            vec![vec!["set-option", "-w", "-u", "-t", "@2", "window-size"]]
+        );
+    }
+
+    #[test]
+    fn restore_window_size_after_staging_uses_default_height_without_adjust() {
+        let runner = RecordingRunner {
+            commands: RefCell::new(Vec::new()),
+            response: "80x24\n".to_string(),
+        };
+
+        restore_window_size_after_staging(&runner, "@2").unwrap();
 
         assert_eq!(
             runner.commands(),
             vec![
-                vec!["resize-window", "-t", "@2", "-A"],
+                vec!["show-options", "-gv", "default-size"],
+                vec!["resize-window", "-t", "@2", "-y", "24"],
                 vec!["set-option", "-w", "-u", "-t", "@2", "window-size"],
             ]
         );

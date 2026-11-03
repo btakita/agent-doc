@@ -975,6 +975,11 @@ thread or in a detached periodic timer.
 `agent-doc reliable-sync-status [--json] [--check]`
 
 - Reports the reliable-sync plane, the controller's editor-surface auto-sync state (last surface observation, last pane-layout outcome), the tmux pane placement of every registered document, and the surface/pane divergence verdict (GH #62). `--check` exits non-zero only on a divergence finding computed against an accepted surface observation.
+- Pane placement uses the same configured, socket-aware, highest-version tmux
+  handle as sync (GH #388). A listing failure is reported as
+  `pane_placement_error` / unavailable evidence and never converted into an
+  empty placement set; `--check` fails as not evaluated instead of claiming the
+  visible documents have no panes.
 - **No observation is reported, not silenced (GH #72).** Without an accepted surface observation the layout effect synthesises its expectation from focus alone, so a `converged_focus_only` outcome is scoped to focus and cannot vouch for the layout. The status must then (a) label the layout outcome `expectation synthesised from focus` with the count of registered documents absent from that expectation, (b) replace the bare `not evaluated` divergence line with the placement that is decidable without the editor — registered documents counted in `agent-doc`, in `stash`, elsewhere, and without a pane — plus an `UNVERIFIED` line when any are parked in stash, and (c) name whether each live JetBrains plugin build predates the surface publisher (first shipped in 0.2.334) or ships it, which separates "restart the editor" from "the editor→controller path is silent". `--json` carries the same facts as `unobserved_surface_gap` (`null` when an accepted observation exists). The gap is advisory: with no observation, whether a stashed document *should* be visible is undecidable, so it does not fail `--check`.
 
 ## resync
@@ -1432,13 +1437,16 @@ markdown file, sync must expand that one-column projection from the project
   re-list the session's windows once per `normalize_window_to_index` call, so an
   editor tab switch paid roughly a dozen redundant tmux round-trips per gesture
   to rediscover a layout that was already correct.
-- Owned-window size pins (`#stashresizerestore`, GH #244). Only the
+- Owned-window size pins (`#stashresizerestore`, GH #244, GH #388). Only the
   agent-doc-owned windows of the repaired session (`agent-doc` and `stash*`)
   are ever re-fit; an operator's own windows keep whatever size and
   `window-size` option they have (`#bare-foreign-session-guard`). Two pins are
-  released, each with `resize-window -A` followed by `set-option -w -u
-  window-size`, so the window follows its client again under the global or
-  session policy:
+  released without `resize-window -A`: that command recreates a manual pin and
+  can block the sync lock while tmux reconciles client geometry. Repair instead
+  restores the exact 1000-row stash-join staging height to tmux's configured
+  `default-size` height and then unsets the per-window `window-size`; ordinary
+  manual pins are unset directly, so the window follows its client again under
+  the global or session policy:
   - the exact 1000-row stash-join staging height left by older binaries
     (`layout_repair_unpinned_window`);
   - a per-window `window-size manual` that holds the window at a size **no**
@@ -1478,6 +1486,14 @@ markdown file, sync must expand that one-column projection from the project
   `doctor_repair_post` in the sync phase log. They previously sat between
   measured phases and were invisible to the phase meter, which is how that cost
   hid on the editor hot path.
+- Full editor-surface sync chooses a doctor-repair document from the accepted
+  visible columns before consulting focus. Focus is only a fallback when no
+  visible column names a repairable session, so repair cannot start an unrelated
+  document pane and join it into an already-converged surface (GH #388).
+- Exact-visible sync consumes the controller's generation-fenced document/pane
+  actor binding directly. It does not synchronously re-walk tmux liveness and
+  process ownership under the sync lock; registry and cross-root fallbacks still
+  require their physical ownership witness (GH #388).
 
 ## session
 

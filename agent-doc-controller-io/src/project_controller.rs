@@ -21888,7 +21888,7 @@ agent:queue\n\
     }
 
     #[test]
-    fn self_watchdog_does_not_reap_predecessor_owned_by_outgoing_handoff() {
+    fn self_watchdog_reaps_predecessor_after_outgoing_handoff_lease_expires() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let stale = timestamp_secs().saturating_sub(600);
@@ -21899,7 +21899,7 @@ agent:queue\n\
         ));
 
         assert!(
-            !controller_self_watchdog_should_suicide(
+            controller_self_watchdog_should_suicide(
                 &runtime,
                 true,
                 None,
@@ -21907,7 +21907,7 @@ agent:queue\n\
                 Duration::from_secs(600),
                 Duration::from_secs(45),
             ),
-            "the outgoing handoff worker owns completion and drain; the predecessor watchdog must stay disarmed"
+            "a stale outgoing handoff no longer proves ownership; the predecessor must self-reap so a clean controller can recover"
         );
     }
 

@@ -1149,7 +1149,9 @@ also record its concrete operator action in `agent:todo` with `--todo-add`; when
 worker result complete that action, check it off with `--todo-done`. Never treat a chat answer as \
 a tool permission grant; the harness must grant the exact protected action. Keep the generation \
 printed by the claim. When the subagent reports back, run `agent-doc queue report-complete <FILE> \
---item <item> --generation <generation> --response '<complete worker response>'`; integrate and close \
+--item <item> --generation <generation> --prose-only --response '<complete worker response>'` for \
+non-repository work. For repository work replace `--prose-only` with explicit `--source-repo`, \
+`--source-sha`, `--sink-repo`, and designated `--sink-ref`; integrate and close \
 the item normally. Empty responses and placeholder-only reports are refused. Use `queue release \
 --requeue --generation <generation>` only for explicitly abandoned work.";
 

@@ -98,6 +98,7 @@ fn four_cli_reporters_serialize_without_losing_completion_feedback() {
                 .args([
                     "queue",
                     "report-complete",
+                    "--prose-only",
                     doc.to_str().unwrap(),
                     "--item",
                     item,
@@ -230,6 +231,7 @@ fn report_complete_keeps_component_markers_in_worker_response_inert_and_scoped()
     let report = run(&[
         "queue",
         "report-complete",
+        "--prose-only",
         doc.to_str().unwrap(),
         "--item",
         item,
@@ -632,6 +634,7 @@ fn several_reports_then_preflight_admits_the_next_turn() {
             &[
                 "queue",
                 "report-complete",
+                "--prose-only",
                 doc.to_str().unwrap(),
                 "--item",
                 item,
@@ -759,6 +762,37 @@ fn committed_run_session(dir: &std::path::Path, run_rows: &[&str]) -> std::path:
     doc
 }
 
+#[test]
+fn report_complete_joins_repository_provenance_to_the_exact_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = committed_session(dir.path(), &["repository work"]);
+    let path = doc.to_str().unwrap();
+    assert_ok(&run_agent_doc(dir.path(), &["queue", "claim", path, "--item", "repository work", "--owner", "subagent:repo"]), "claim");
+    assert_ok(&run_agent_doc(dir.path(), &["queue", "start", path, "--item", "repository work", "--owner", "subagent:repo", "--generation", "1", "--worker-id", "worker:repo"]), "start");
+
+    let unclassified = run_agent_doc(dir.path(), &["queue", "report-complete", path, "--item", "repository work", "--generation", "1", "--response", "implemented"]);
+    assert!(!unclassified.status.success());
+    assert!(String::from_utf8_lossy(&unclassified.stderr).contains("exactly one result class"));
+
+    let source = String::from_utf8(git(dir.path(), &["rev-parse", "HEAD"]).stdout).unwrap().trim().to_string();
+    let sink_ref = String::from_utf8(git(dir.path(), &["branch", "--show-current"]).stdout).unwrap().trim().to_string();
+    let report = run_agent_doc(dir.path(), &[
+        "queue", "report-complete", path, "--item", "repository work", "--generation", "1",
+        "--source-repo", dir.path().to_str().unwrap(), "--source-sha", &source,
+        "--sink-repo", dir.path().to_str().unwrap(), "--sink-ref", &sink_ref,
+        "--response", "implemented and tested",
+    ]);
+    assert_ok(&report, "report repository completion");
+    assert!(String::from_utf8_lossy(&report.stderr).contains("is not integrated"));
+    let lineage = run_agent_doc(dir.path(), &["queue", "lineage", path, "--item", "repository work", "--generation", "1", "--json"]);
+    assert_ok(&lineage, "query lineage");
+    let json: serde_json::Value = serde_json::from_slice(&lineage.stdout).unwrap();
+    assert_eq!(json["attempts"][0]["source_sha"], source);
+    assert_eq!(json["attempts"][0]["source_repo_path"], dir.path().to_string_lossy().as_ref());
+    assert_eq!(json["attempts"][0]["sink_repo_path"], dir.path().to_string_lossy().as_ref());
+    assert_eq!(json["attempts"][0]["state"], "committed");
+}
+
 /// The `agent:run` rows of `doc`.
 fn run_rows(doc: &std::path::Path) -> Vec<String> {
     let content = fs::read_to_string(doc).unwrap();
@@ -870,6 +904,7 @@ fn a_claimed_mirrored_id_head_stays_one_row_through_its_whole_attempt() {
             &[
                 "queue",
                 "report-complete",
+                "--prose-only",
                 path,
                 "--item",
                 &format!("do [#{id}]"),

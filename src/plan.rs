@@ -1849,6 +1849,65 @@ Done.
         }));
     }
 
+    /// `#queueparallelpr`: nested PR headings are presentation parents, not
+    /// ordering edges. A `subagents` run therefore offers independent PR leaves
+    /// in one batch; each leaf may still run its own reviewer/fixer phases in
+    /// order after the coordinator has claimed and bound its worker.
+    #[test]
+    fn connected_plan_parallelizes_independent_nested_pr_heads() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+## Engine SDK PRs <!-- agent:run id="engine-sdk-prs" subagents priority -->
+- ### https://github.com/example/sdk-unity/pull/1
+  - #adversarial-pr: https://github.com/example/sdk-unity/pull/1 [#q-unity]
+- ### https://github.com/example/sdk-unreal/pull/1
+  - #adversarial-pr: https://github.com/example/sdk-unreal/pull/1 [#q-unreal]
+- ### https://github.com/example/sdk-godot/pull/1
+  - #adversarial-pr: https://github.com/example/sdk-godot/pull/1 [#q-godot]
+<!-- /agent:run -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert!(plan.parallelizable, "{plan:#?}");
+        assert_eq!(
+            plan.queue_subagent_dispatch
+                .iter()
+                .map(|entry| entry.item.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "#adversarial-pr: https://github.com/example/sdk-unity/pull/1 [#q-unity]",
+                "#adversarial-pr: https://github.com/example/sdk-unreal/pull/1 [#q-unreal]",
+                "#adversarial-pr: https://github.com/example/sdk-godot/pull/1 [#q-godot]",
+            ]
+        );
+        assert!(plan.prompt_targets.is_empty(), "{:#?}", plan.prompt_targets);
+    }
+
     #[test]
     fn connected_plan_fails_closed_on_subagent_marker_near_miss() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");

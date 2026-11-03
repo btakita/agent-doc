@@ -567,6 +567,32 @@ fn captured_queue_parent_proves_waiting_metadata(
     !child_work.is_empty() && child_work == parent_work
 }
 
+fn queue_entry_indent(entry: &agent_doc_queue::document_queue::QueueEntry) -> Option<usize> {
+    use agent_doc_queue::document_queue::QueueEntry;
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(prompt.indent),
+        QueueEntry::Freeform(raw) => raw.lines().next().and_then(|line| {
+            let indent = line.len() - line.trim_start_matches(' ').len();
+            line[indent..].starts_with("- ").then_some(indent)
+        }),
+        _ => None,
+    }
+}
+
+fn waiting_parent_text(entry: &agent_doc_queue::document_queue::QueueEntry) -> Option<&str> {
+    use agent_doc_queue::document_queue::QueueEntry;
+    match entry {
+        QueueEntry::Prompt(prompt) if prompt.text.contains("<!-- agent-doc:waiting-item -->") => {
+            Some(&prompt.text)
+        }
+        _ => None,
+    }
+}
+
+fn freeform_list_item_text(line: &str) -> Option<&str> {
+    line.trim_start().strip_prefix("- ").map(str::trim)
+}
+
 /// The same contamination check with committed queue provenance. Queue rows
 /// already present in the baseline are operator-authored ancestry, even when a
 /// later response quotes them at the start of a prose line.
@@ -574,6 +600,20 @@ pub fn queue_response_contamination_candidates_since_baseline(
     queue_body: &str,
     exchange_body: &str,
     baseline_queue_body: Option<&str>,
+) -> Vec<String> {
+    queue_response_contamination_candidates_since_baseline_impl(
+        queue_body,
+        exchange_body,
+        baseline_queue_body,
+        true,
+    )
+}
+
+fn queue_response_contamination_candidates_since_baseline_impl(
+    queue_body: &str,
+    exchange_body: &str,
+    baseline_queue_body: Option<&str>,
+    allow_legacy_waiting_metadata: bool,
 ) -> Vec<String> {
     let response_text = agent_doc_turn::closeout_signal::assistant_response_text(exchange_body);
     if response_text.trim().is_empty() {
@@ -624,19 +664,8 @@ pub fn queue_response_contamination_candidates_since_baseline(
 
     let mut contaminated = Vec::new();
     if let Ok(entries) = agent_doc_queue::document_queue::parse(queue_body) {
-        let mut ancestors: Vec<(usize, String)> = Vec::new();
         for prompt in agent_doc_queue::document_queue::prompts(&entries) {
             let text = prompt.text.trim();
-            while ancestors
-                .last()
-                .is_some_and(|(indent, _)| *indent >= prompt.indent)
-            {
-                ancestors.pop();
-            }
-            let mirrors_proven_parent = ancestors.iter().rev().any(|(_, parent)| {
-                captured_queue_parent_proves_waiting_metadata(text, parent, &baseline_stable_ids)
-            });
-            ancestors.push((prompt.indent, text.to_string()));
             if text.is_empty() || agent_doc_queue::queue_command::is_queue_directive_prompt(text) {
                 continue;
             }
@@ -651,20 +680,70 @@ pub fn queue_response_contamination_candidates_since_baseline(
             if baseline_prefixes.contains(&needle) {
                 continue;
             }
-            if mirrors_proven_parent {
-                // Also exempt the raw-line fallback below.  Its purpose is to
-                // catch malformed, unparseable projections, not to override a
-                // successfully parsed binary-owned metadata mirror whose
-                // stable parent exists in the captured queue.
-                baseline_prefixes.insert(needle);
-                continue;
-            }
             if response_text
                 .lines()
                 .any(|line| line.trim_start().starts_with(&needle))
             {
                 contaminated.push(text.chars().take(80).collect::<String>());
             }
+        }
+
+        // Waiting metadata is intentionally Freeform, so executable `prompts`
+        // cannot establish its lineage. Walk every parsed entry by index and
+        // keep the structural ancestor stack. Only the nearest waiting-item
+        // parent may prove a metadata mirror; an outer parent must never lend
+        // provenance through a different inner waiting item.
+        let mut ancestors: Vec<(usize, usize)> = Vec::new();
+        for (entry_index, entry) in entries.iter().enumerate() {
+            let Some(indent) = queue_entry_indent(entry) else {
+                continue;
+            };
+            while ancestors
+                .last()
+                .is_some_and(|(ancestor_indent, _)| *ancestor_indent >= indent)
+            {
+                ancestors.pop();
+            }
+            let nearest_waiting_parent = ancestors
+                .iter()
+                .rev()
+                .find_map(|(_, ancestor_index)| waiting_parent_text(&entries[*ancestor_index]));
+
+            if let agent_doc_queue::document_queue::QueueEntry::Freeform(raw) = entry {
+                for line in raw.lines() {
+                    let Some(text) = freeform_list_item_text(line) else {
+                        continue;
+                    };
+                    let normalized = normalized_queue_prompt(text);
+                    if normalized.chars().count() < 20 {
+                        continue;
+                    }
+                    let needle: String = normalized.chars().take(40).collect();
+                    if baseline_prefixes.contains(&needle) {
+                        continue;
+                    }
+                    let mirrors_proven_parent = allow_legacy_waiting_metadata
+                        && nearest_waiting_parent.is_some_and(|parent| {
+                            captured_queue_parent_proves_waiting_metadata(
+                                text,
+                                parent,
+                                &baseline_stable_ids,
+                            )
+                        });
+                    if mirrors_proven_parent {
+                        baseline_prefixes.insert(needle);
+                        continue;
+                    }
+                    if response_text
+                        .lines()
+                        .map(agent_doc_turn::closeout_signal::normalized_prompt_for_match)
+                        .any(|line| line.starts_with(&needle))
+                    {
+                        contaminated.push(text.chars().take(80).collect::<String>());
+                    }
+                }
+            }
+            ancestors.push((indent, entry_index));
         }
     }
 
@@ -1293,6 +1372,17 @@ mod tests {
         let queue = format!("- {parent}\n  - {child}\n");
         let exchange = format!("### Re: smoke result\n\n**Response:** {work}\n");
 
+        let without_fallback = queue_response_contamination_candidates_since_baseline_impl(
+            &queue,
+            &exchange,
+            Some(&baseline),
+            false,
+        );
+        assert_eq!(
+            without_fallback,
+            vec![child.chars().take(80).collect::<String>()],
+            "the exact live Freeform candidate must be contaminated before legacy recovery"
+        );
         assert!(
             queue_response_contamination_candidates_since_baseline(
                 &queue,
@@ -1310,11 +1400,44 @@ mod tests {
         let child = format!("**Response:** {work} <!-- agent-doc:waiting-metadata -->");
         let parent = format!("[#vscodecodersmoke] {work} <!-- agent-doc:waiting-item -->");
         // A tracked-work/Todo mention outside the captured queue component is
-        // is not provenance. This models deletion while Todo lineage remains.
+        // not provenance. This models deletion while Todo lineage remains.
         let baseline_ids = std::collections::HashSet::from(["other-work".to_string()]);
         assert!(
             !captured_queue_parent_proves_waiting_metadata(&child, &parent, &baseline_ids,),
             "a stable id absent from the captured queue must fail closed"
+        );
+        let queue = format!("- {parent}\n  - {child}\n");
+        let exchange = format!("### Re: smoke result\n\n**Response:** {work}\n");
+        let baseline_after_deletion = "- [#other-work] Preserve unrelated queue work.\n";
+        assert_eq!(
+            queue_response_contamination_candidates_since_baseline(
+                &queue,
+                &exchange,
+                Some(baseline_after_deletion),
+            ),
+            vec![child.chars().take(80).collect::<String>()],
+        );
+    }
+
+    #[test]
+    fn queue_response_contamination_does_not_borrow_outer_waiting_parent() {
+        let outer_work = "Run the real Coder workspace smoke and update the editor status cell.";
+        let inner_work = "Provide a real Coder workspace path before running that smoke test.";
+        let child = format!("**Response:** {outer_work} <!-- agent-doc:waiting-metadata -->");
+        let queue = format!(
+            "- [#vscodecodersmoke] {outer_work} <!-- agent-doc:waiting-item -->\n  - [#workspace-request] {inner_work} <!-- agent-doc:waiting-item -->\n    - {child}\n"
+        );
+        let baseline = "- [#vscodecodersmoke]\n  - [#workspace-request]\n";
+        let exchange = format!("### Re: smoke result\n\n**Response:** {outer_work}\n");
+
+        assert_eq!(
+            queue_response_contamination_candidates_since_baseline(
+                &queue,
+                &exchange,
+                Some(baseline),
+            ),
+            vec![child.chars().take(80).collect::<String>()],
+            "an identical leaf under a different nearest waiting parent must fail closed"
         );
     }
 

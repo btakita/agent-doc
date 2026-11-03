@@ -1,0 +1,41 @@
+# `#testgitenvisolation`: every test binary (and `cargo run` target) starts with
+# Git's repository-locating environment removed, whatever launched Cargo.
+#
+# `git bisect run`, `git rebase --exec`, and `!` aliases export an absolute
+# `GIT_DIR` when started inside a submodule or linked worktree. Test fixtures
+# then run `git init` / `git config user.name` in their tempdir, and Git
+# reinitializes the INHERITED repository instead: on 2026-11-02 a
+# `git bisect run cargo test --test codex_hook_integration` from a linked
+# agent-doc worktree set `core.bare = true` and `user.name = Test User` in the
+# shared `.git/modules/agent-doc/config`, breaking every git command in the
+# main checkout and authoring later commits as "Test User".
+#
+# The list is Git's own `local_repo_env`, exactly `git rev-parse
+# --local-env-vars` (what `git submodule` clears before entering a
+# submodule). The Makefile's CARGO_CLEAN_ENV mirrors it for steps that execute
+# test binaries directly; `make git-env-isolation-self-test` proves both
+# against a sentinel repository and that the list still covers Git's.
+# Windows has no `env -u`; this guard is unix-only like the shells that export
+# these variables.
+#
+# This file must carry no `[patch]`/`[source]` overrides: release packaging
+# uses the same registry-default dependency graph as a fresh checkout.
+[target.'cfg(unix)']
+runner = [
+    "env",
+    "-u", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "-u", "GIT_COMMON_DIR",
+    "-u", "GIT_CONFIG",
+    "-u", "GIT_CONFIG_COUNT",
+    "-u", "GIT_CONFIG_PARAMETERS",
+    "-u", "GIT_DIR",
+    "-u", "GIT_GRAFT_FILE",
+    "-u", "GIT_IMPLICIT_WORK_TREE",
+    "-u", "GIT_INDEX_FILE",
+    "-u", "GIT_NO_REPLACE_OBJECTS",
+    "-u", "GIT_OBJECT_DIRECTORY",
+    "-u", "GIT_PREFIX",
+    "-u", "GIT_REPLACE_REF_BASE",
+    "-u", "GIT_SHALLOW_FILE",
+    "-u", "GIT_WORK_TREE",
+]

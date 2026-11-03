@@ -1953,10 +1953,10 @@ fn strike_free_text_queue_heads_with_proof(
     };
     let (new_document, active_projection_changed) =
         reconcile_terminal_active_projection(new_document)?;
-    if new_document == content {
-        return Ok(0);
+    let live_changed = new_document != content;
+    if live_changed {
+        require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
     }
-    require_integrated_reported_repo_work_for_successor(file, &content, &new_document)?;
 
     // Snapshot sync: match the same answered free-text heads in the snapshot and
     // strike them by the snapshot's own node keys (keys are position/hash derived
@@ -1981,6 +1981,18 @@ fn strike_free_text_queue_heads_with_proof(
         },
         None => None,
     };
+
+    // A previous retained delivery may have landed the live terminal successor
+    // while leaving only the recovery snapshot's Active index stale. Snapshot
+    // repair is an independently owned projection edge: do not return merely
+    // because the live document is already a fixpoint, and do not manufacture
+    // a live write just to make the snapshot repair observable.
+    if !live_changed {
+        if let Some(snap) = new_snapshot {
+            save_snapshot_recovery_only(file, &snap, "free-text strike snapshot sync");
+        }
+        return Ok(0);
+    }
 
     // `#crdtstructops` node-only path: derive per-node Replace ops from the
     // struck+annotated diff (each newly-struck free-text head carries its
@@ -5680,6 +5692,67 @@ mod core_tests {
                 "{label} must be an Active projection fixpoint: {content}"
             );
         }
+    }
+
+    #[test]
+    fn answered_free_text_live_fixpoint_repairs_only_the_stale_snapshot_active() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("plan.md");
+        let response = concat!(
+            "### Re: already done — test\n\n",
+            "> **Queue prompt:** already done\n\n",
+            "Completed and integrated.\n",
+        );
+        let live = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n{}<!-- /agent:exchange -->\n\n",
+                "## Active <!-- agent:active priority -->\n",
+                "\n",
+                "<!-- /agent:active -->\n\n",
+                "<!-- agent:queue -->\n",
+                "- ~~already done~~ — auto-struck: answered this cycle (#ftstrike)\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            response,
+        );
+        let stale_snapshot = live.replace(
+            "<!-- /agent:active -->",
+            concat!(
+                "- **Queue** (1)\n",
+                "  - `queue-free:stale-snapshot` — already done\n",
+                "    - **Status:** reported\n",
+                "<!-- /agent:active -->",
+            ),
+        );
+        fs::write(&doc, &live).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        assert_eq!(
+            strike_answered_free_text_queue_heads(&doc, response, true).unwrap(),
+            0,
+            "the live queue has no newly strikeable head"
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            live,
+            "snapshot-only repair must not force a live document write"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !snapshot.contains("queue-free:stale-snapshot")
+                && agent_doc_work_projection::reconcile_managed_active_items(&snapshot)
+                    .unwrap()
+                    .is_none(),
+            "the independently stale snapshot Active index must self-heal: {snapshot}"
+        );
     }
 
     #[test]

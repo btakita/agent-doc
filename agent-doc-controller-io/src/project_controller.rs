@@ -3340,6 +3340,9 @@ pub struct ControllerAnsweredFreeTextStrikeInvocation {
     pub file: PathBuf,
     pub expected_content: String,
     pub target_content: String,
+    /// False when the live document is already terminal and this typed effect
+    /// exists solely to inspect/repair the independently persisted snapshot.
+    pub live_write_required: bool,
     pub projection_id: String,
     pub capture_id: String,
     pub response_sha256: String,
@@ -3681,8 +3684,11 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             current == invocation.expected_content,
             "project controller test free-text strike: authority changed"
         );
-        std::fs::write(&invocation.file, &invocation.target_content)
-            .context("project controller test free-text strike: failed to write document")
+        if invocation.live_write_required {
+            std::fs::write(&invocation.file, &invocation.target_content)
+                .context("project controller test free-text strike: failed to write document")?;
+        }
+        Ok(())
     }
 }
 
@@ -6031,6 +6037,7 @@ struct AnsweredFreeTextQueueStrikeProjection {
     file: Option<PathBuf>,
     expected_content: String,
     target_content: String,
+    live_write_required: bool,
     projection_id: String,
     capture_id: String,
     response_sha256: String,
@@ -6061,7 +6068,7 @@ impl AnsweredFreeTextQueueStrikeProjection {
         self.error.is_none()
             && self.file.is_some()
             && !self.projection_id.is_empty()
-            && self.target_content != self.expected_content
+            && self.live_write_required == (self.target_content != self.expected_content)
     }
 }
 
@@ -8013,22 +8020,68 @@ impl ControllerDocumentGraphs {
                                 };
                             }
                         };
-                        if target_content == observation.content {
+                        let live_write_required = target_content != observation.content;
+                        // A live fixpoint owns a snapshot-only effect only when
+                        // this capture can prove it previously owned the
+                        // terminal transition. Otherwise every unrelated,
+                        // weakly quoted, or dispatch-vetoed response would
+                        // become a synthetic closeout target. The captured
+                        // baseline proves ordinary strikes; a struck selected
+                        // or claimed row covers a head admitted after that
+                        // baseline.
+                        let baseline_owned_strike = captured
+                            .baseline_content
+                            .as_deref()
+                            .is_some_and(|baseline| {
+                                agent_doc_queue::queue_consume::project_answered_free_text_strike_with_dispatch_at(
+                                    baseline,
+                                    &captured.response_body,
+                                    captured.baseline_content.as_deref(),
+                                    &observation.claimed_heads,
+                                    &observation.selected_heads,
+                                    &observation.dispatch_owned_heads,
+                                    &addressed_at,
+                                )
+                                .ok()
+                                .is_some_and(|(target, _)| target.is_some())
+                            });
+                        let terminal_owned_row = if live_write_required {
+                            false
+                        } else {
+                            let mut owned_heads = observation.claimed_heads.clone();
+                            owned_heads.extend(observation.selected_heads.iter().cloned());
+                            agent_doc_queue::queue_consume::struck_queue_contains_owned_head(
+                                &observation.content,
+                                &owned_heads,
+                            )
+                        };
+                        let answered_terminal_row = !live_write_required
+                            && agent_doc_queue::queue_consume::struck_queue_contains_head_answered_by(
+                                &observation.content,
+                                &captured.response_body,
+                            );
+                        if !live_write_required
+                            && !baseline_owned_strike
+                            && !terminal_owned_row
+                            && !answered_terminal_row
+                        {
                             return AnsweredFreeTextQueueStrikeProjection {
                                 inline_vetoed_heads,
                                 ..AnsweredFreeTextQueueStrikeProjection::default()
                             };
                         }
                         let projection_id = agent_doc_hash::content_hash(&format!(
-                            "{}:{}:{}",
+                            "{}:{}:{}:{}",
                             captured.response_sha256,
                             observation.content_hash,
-                            node_keys.join(",")
+                            node_keys.join(","),
+                            if live_write_required { "live" } else { "snapshot" },
                         ));
                         AnsweredFreeTextQueueStrikeProjection {
                             file: Some(observation.file),
                             expected_content: observation.content,
                             target_content,
+                            live_write_required,
                             projection_id,
                             capture_id: captured.capture_id,
                             response_sha256: captured.response_sha256,
@@ -8436,6 +8489,7 @@ impl ControllerDocumentGraphs {
                 file: file.clone(),
                 expected_content: projection.expected_content.clone(),
                 target_content: projection.target_content.clone(),
+                live_write_required: projection.live_write_required,
                 projection_id: projection.projection_id.clone(),
                 capture_id: projection.capture_id.clone(),
                 response_sha256: projection.response_sha256.clone(),
@@ -27432,6 +27486,48 @@ revised operator request
                 .unwrap()
                 .is_none(),
             "the background repair must land an Active fixpoint: {repaired}"
+        );
+
+        // Publish the now-correct live cut while the captured response still
+        // owns closeout. The reactive graph must retain a typed effect for the
+        // independently persisted snapshot, but that effect must explicitly
+        // decline a live write.
+        runtime
+            .document_queue_authority_observe(
+                &document_hash,
+                &canonical,
+                repaired.clone(),
+            )
+            .unwrap();
+        let snapshot_only = runtime
+            .document_graphs
+            .current_answered_free_text_strike(&document_hash);
+        assert!(
+            snapshot_only.has_target() && !snapshot_only.live_write_required,
+            "a live fixpoint must still own a snapshot-only repair effect: {snapshot_only:?}"
+        );
+        assert_eq!(
+            snapshot_only.expected_content, snapshot_only.target_content,
+            "snapshot-only repair must not manufacture a live successor"
+        );
+        let snapshot_receipt = await_source_map_entry(
+            &runtime.document_graphs.ctx,
+            &runtime.document_graphs.answered_free_text_strike_applied,
+            &document_hash,
+            {
+                let projection_id = snapshot_only.projection_id.clone();
+                move |applied| applied.as_deref() == Some(projection_id.as_str())
+            },
+            "the snapshot-only repair effect did not publish its receipt",
+        );
+        assert_eq!(
+            snapshot_receipt.as_deref(),
+            Some(snapshot_only.projection_id.as_str())
+        );
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            repaired,
+            "the typed snapshot-only effect must not rewrite the live document"
         );
 
         let terminal_events = [

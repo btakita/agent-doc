@@ -34,9 +34,16 @@ pub struct StructuredChoiceDecision {
 /// the recommendation survives projection without relying on hidden reasoning.
 pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Option<String> {
     let label = label.trim();
-    if !label.to_ascii_lowercase().ends_with("(recommended)") {
+    let lowercase_label = label.to_ascii_lowercase();
+    if !lowercase_label.ends_with("(recommended)") {
         return None;
     }
+
+    let choice_words = lowercase_label
+        .trim_end_matches("(recommended)")
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<std::collections::HashSet<_>>();
 
     let description = description.trim();
     const PREFIX: &str = "recommended because ";
@@ -49,6 +56,9 @@ pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Opt
     let substantive_words = rationale
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|word| !word.is_empty())
+        // Restating the action label is not evidence for preferring it.  A
+        // rationale must name an independent tradeoff or current fact.
+        .filter(|word| !choice_words.contains(word))
         .filter(|word| {
             !matches!(
                 *word,
@@ -523,6 +533,14 @@ mod tests {
             recommended_choice_rationale_error(
                 "Leave uncommitted (Recommended)",
                 "Recommended because it is the recommended choice."
+            )
+            .unwrap()
+            .contains("tautological")
+        );
+        assert!(
+            recommended_choice_rationale_error(
+                "Leave uncommitted (Recommended)",
+                "Recommended because leave uncommitted."
             )
             .unwrap()
             .contains("tautological")

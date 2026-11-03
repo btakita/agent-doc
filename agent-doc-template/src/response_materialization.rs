@@ -4,6 +4,81 @@ use anyhow::Result;
 
 use crate::PatchBlock;
 
+pub(crate) fn markdown_fence_marker(line: &str) -> Option<(u8, usize, bool)> {
+    let indent = line.bytes().take_while(|byte| *byte == b' ').count();
+    if indent > 3 {
+        return None;
+    }
+    let trimmed = &line[indent..];
+    let marker = *trimmed.as_bytes().first()?;
+    if !matches!(marker, b'`' | b'~') {
+        return None;
+    }
+    let len = trimmed.bytes().take_while(|byte| *byte == marker).count();
+    (len >= 3).then_some((marker, len, trimmed[len..].trim().is_empty()))
+}
+
+/// Canonicalize response-cell heading depth in assistant-owned response text.
+///
+/// `agent:exchange` is a level-two document component, so a response cell is
+/// always a level-three `### Re:` section. Harness models occasionally emit
+/// `## Re:` (or a deeper `#### Re:` variant); accepting that text verbatim
+/// either promotes one response to a document peer or makes response-node
+/// parsing disagree with closeout validation.
+///
+/// This function is intentionally scoped to a captured/generated response. It
+/// is not a document-wide repair and therefore never rewrites an operator's
+/// existing headings. Markdown fenced examples are kept byte-for-byte.
+pub fn canonicalize_owned_response_heading_depth(response: &str) -> String {
+    fn canonical_response_heading(line: &str) -> Option<String> {
+        let indent = line.bytes().take_while(|byte| *byte == b' ').count();
+        if indent > 3 {
+            return None;
+        }
+        let trimmed = &line[indent..];
+        let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+        if !(2..=6).contains(&hashes) || !trimmed[hashes..].starts_with(" Re:") {
+            return None;
+        }
+        (hashes != 3).then(|| format!("{}###{}", &line[..indent], &trimmed[hashes..]))
+    }
+
+    let mut out = String::with_capacity(response.len());
+    let mut fence: Option<(u8, usize)> = None;
+    let mut changed = false;
+    for segment in response.split_inclusive('\n') {
+        let (line, newline) = segment
+            .strip_suffix('\n')
+            .map_or((segment, ""), |line| (line, "\n"));
+        if let Some((marker, minimum_len)) = fence {
+            out.push_str(line);
+            out.push_str(newline);
+            if let Some((candidate, len, only_marker)) = markdown_fence_marker(line)
+                && candidate == marker
+                && len >= minimum_len
+                && only_marker
+            {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some((marker, len, _)) = markdown_fence_marker(line) {
+            fence = Some((marker, len));
+            out.push_str(line);
+            out.push_str(newline);
+            continue;
+        }
+        if let Some(canonical) = canonical_response_heading(line) {
+            out.push_str(&canonical);
+            changed = true;
+        } else {
+            out.push_str(line);
+        }
+        out.push_str(newline);
+    }
+    if changed { out } else { response.to_string() }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateResponseWriteProof {
     pub explicit_components: Vec<String>,
@@ -253,6 +328,8 @@ pub fn response_text_has_heading(text: &str) -> bool {
 pub fn canonicalize_strict_closeout_response_heading(response: &str) -> String {
     let normalized = normalize_fully_escaped_exchange_patch(response);
     let response = normalized.as_deref().unwrap_or(response);
+    let heading_depth_normalized = canonicalize_owned_response_heading_depth(response);
+    let response = heading_depth_normalized.as_str();
     if response.trim().is_empty() || response_text_has_heading(response) {
         return response.to_string();
     }
@@ -867,6 +944,29 @@ mod tests {
         assert!(canonical.contains("### Re: Plan: durable effects"));
         assert!(!canonical.contains("### Plan:"));
         assert!(canonical.contains("Use an effect sink."));
+    }
+
+    #[test]
+    fn strict_closeout_canonicalizes_response_heading_depth_outside_fences() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "## Re: promoted response — gpt-5\n\n",
+            "Implemented.\n\n",
+            "```markdown\n",
+            "## Re: example that must stay h2\n",
+            "```\n\n",
+            "#### Re: second response — gpt-5\n\n",
+            "Also implemented.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let canonical = canonicalize_strict_closeout_response_heading(response);
+
+        assert!(canonical.contains("### Re: promoted response — gpt-5"));
+        assert!(canonical.contains("### Re: second response — gpt-5"));
+        assert!(canonical.contains("```markdown\n## Re: example that must stay h2\n```"));
+        assert!(!canonical.contains("\n## Re: promoted response"));
+        assert!(!canonical.contains("\n#### Re: second response"));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::path::Path;
 
 use agent_doc_frontmatter::{frontmatter, project_config};
 
@@ -51,10 +52,35 @@ pub fn should_scaffold_empty_markdown(content: &str, extension: Option<&str>) ->
 }
 
 pub fn render_empty_template_scaffold(session_id: &str) -> String {
+    render_empty_template_scaffold_with_title(session_id, "")
+}
+
+/// Render a new empty session with the canonical one-title hierarchy.
+///
+/// This is creation-time behavior only. Existing documents are never given an
+/// H1 by maintenance because their title and authored heading layout belong to
+/// the operator.
+pub fn render_empty_template_scaffold_with_title(session_id: &str, title: &str) -> String {
+    let title = title.replace(['\r', '\n'], " ");
+    let title = title.trim();
+    let heading = if title.is_empty() {
+        "# Session".to_string()
+    } else {
+        format!("# Session: {title}")
+    };
     format!(
-        "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---{}",
+        "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n{heading}{}",
         render_default_template_components("")
     )
+}
+
+/// Derive the title of a newly-created session from its Markdown filename.
+pub fn render_empty_template_scaffold_for_path(session_id: &str, path: &Path) -> String {
+    let title = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("");
+    render_empty_template_scaffold_with_title(session_id, title)
 }
 
 pub fn default_format_and_write_content(content: &str) -> Result<Option<String>> {
@@ -148,6 +174,15 @@ mod tests {
         let scaffold = render_empty_template_scaffold("session-1");
         assert!(scaffold.contains("agent_doc_session: session-1"));
         assert!(scaffold.contains("agent_doc_format: template"));
+        assert!(scaffold.contains("\n# Session\n"));
+        assert_eq!(
+            scaffold
+                .lines()
+                .filter(|line| line.starts_with("# "))
+                .count(),
+            1,
+            "a newly generated document gets one canonical H1 title"
+        );
         let section_headers = scaffold
             .lines()
             .filter(|line| line.starts_with("## "))
@@ -253,6 +288,21 @@ mod tests {
                 agent_doc_frontmatter::frontmatter::queue_marker_legend_line()
             )
         );
+    }
+
+    #[test]
+    fn path_scaffold_uses_filename_for_the_single_document_title() {
+        let scaffold =
+            render_empty_template_scaffold_for_path("session-1", Path::new("tasks/sdk/sdk-dev.md"));
+        assert!(scaffold.contains("\n# Session: sdk-dev\n"));
+        assert_eq!(
+            scaffold
+                .lines()
+                .filter(|line| line.starts_with("# "))
+                .count(),
+            1
+        );
+        assert!(scaffold.contains("\n## Exchange <!-- agent:exchange"));
     }
 
     #[test]

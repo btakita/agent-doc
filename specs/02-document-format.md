@@ -4,6 +4,24 @@
 
 ## Session Document
 
+### Heading hierarchy
+
+A session document may have one document-title H1 (`# Session: …`). New empty
+Markdown documents scaffold that title from the filename. Existing documents
+without an H1 remain valid: maintenance does not invent a title or rewrite
+operator-authored headings merely to backfill hierarchy.
+
+Managed top-level components are H2 sections (`## Status`, `## Run`,
+`## Exchange`, and so on). An assistant response cell inside `agent:exchange`
+is an H3 section whose canonical heading starts with `### Re:`. Component
+sections are not promoted to H1, and response cells are not promoted to H2.
+
+At the assistant-owned response-capture boundary, agent-doc normalizes
+`## Re:` and deeper `#### Re:` through `###### Re:` variants to `### Re:`
+outside Markdown code fences. This is a generated-response repair, not a
+document-wide migration: agent-doc does not scan and rewrite an existing H2
+that the operator may have authored.
+
 Frontmatter fields:
 - `agent_doc_session`: Document/routing UUID — permanent identifier for tmux pane routing. Legacy alias: `session` (read but not written).
 - `agent_doc_format`: Document format — `inline` (canonical), `template` (default: `template`). `append` accepted as backward-compat alias for `inline`.

@@ -493,13 +493,21 @@ fn stream_loop(
                 let mut buf = buffer.lock();
                 // For assistant messages, the text is cumulative (full text so far)
                 // For result messages, it's the final full text
-                if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
+                let generated = if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none()
+                {
                     // Interleave: prepend thinking as collapsible details
                     let thinking_text = thinking_buffer.lock().clone();
-                    *buf = render_interleaved_thinking_response(&thinking_text, &chunk.text);
+                    render_interleaved_thinking_response(&thinking_text, &chunk.text)
                 } else {
-                    *buf = chunk.text.clone();
-                }
+                    chunk.text.clone()
+                };
+                *buf = if target == "exchange" {
+                    agent_doc_template::response_materialization::canonicalize_owned_response_heading_depth(
+                        &generated,
+                    )
+                } else {
+                    generated
+                };
                 buf.clone()
             };
             if !chunk.is_final {
@@ -606,6 +614,13 @@ pub fn flush_to_document(
     effects: &dyn StreamRuntimeEffects,
 ) -> Result<()> {
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
+    let text = if target == "exchange" {
+        agent_doc_template::response_materialization::canonicalize_owned_response_heading_depth(
+            text,
+        )
+    } else {
+        text.to_string()
+    };
     // Build a patch block targeting the component
     let patch_response = format!(
         "<!-- patch:{} -->\n{}\n<!-- /patch:{} -->\n",
@@ -1046,6 +1061,59 @@ mod tests {
         let final_doc = std::fs::read_to_string(&doc).unwrap();
         assert!(final_doc.contains("FINAL_ONLY"));
         assert!(!final_doc.contains("PARTIAL_ONLY"));
+    }
+
+    #[test]
+    fn stream_loop_canonicalizes_generated_exchange_response_heading_depth() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for subdir in ["snapshots", "locks", "pending", "crdt", "captures"] {
+            std::fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
+        }
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: sid\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "---\n\n",
+            "## Exchange <!-- agent:exchange patch=append -->\n",
+            "operator prompt\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        stream_loop(
+            &doc,
+            mock_chunks(vec![StreamChunk {
+                text: "## Re: generated h2 — gpt-5\n\nDone.\n".to_string(),
+                thinking: None,
+                is_final: true,
+                session_id: Some("sess-heading".to_string()),
+            }]),
+            100,
+            "exchange",
+            content,
+            None,
+            test_loop_effects(),
+        )
+        .unwrap();
+
+        let written = std::fs::read_to_string(&doc).unwrap();
+        assert!(written.contains("### Re: generated h2 — gpt-5"));
+        assert!(!written.contains("\n## Re: generated h2"));
+        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert!(
+            capture
+                .response_body
+                .contains("### Re: generated h2 — gpt-5")
+        );
     }
 
     #[test]

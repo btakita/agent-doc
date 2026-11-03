@@ -4123,7 +4123,10 @@ fn run_with_options_internal_at_root(
             eprintln!("[sync] auto-scaffolding empty file: {}", path.display());
             let session_id = uuid::Uuid::new_v4().to_string();
             let scaffold =
-                agent_doc_document::claim_scaffold::render_empty_template_scaffold(&session_id);
+                agent_doc_document::claim_scaffold::render_empty_template_scaffold_for_path(
+                    &session_id,
+                    path,
+                );
             if let Err(e) = effects.write_current_document(path, &scaffold) {
                 eprintln!(
                     "[sync] warning: failed to scaffold {}: {}",

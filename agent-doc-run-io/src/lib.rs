@@ -861,11 +861,15 @@ pub fn apply_template_response_with_authority(
     use_crdt: bool,
     force_disk: bool,
 ) -> Result<()> {
+    let response =
+        agent_doc_template::response_materialization::canonicalize_owned_response_heading_depth(
+            response,
+        );
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let current_content =
         direct_run_current_document_content(file, force_disk, "direct_run_template_current")?;
     let (mut patches, unmatched) =
-        template::parse_patches(response).context("failed to parse patch blocks from response")?;
+        template::parse_patches(&response).context("failed to parse patch blocks from response")?;
     agent_doc_template::sanitize::sanitize_patches(&mut patches);
     let normalized =
         normalize_backlog_patch_response(file, &current_content, patches, unmatched, false)?;

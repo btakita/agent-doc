@@ -151,6 +151,26 @@ pub fn classify_replay_payload_against_document<'a>(
     message: &'a str,
     document: Option<&str>,
 ) -> ReplayPayloadClassification<'a> {
+    let canonical =
+        crate::response_materialization::canonicalize_owned_response_heading_depth(message);
+    if canonical != message {
+        return match classify_replay_payload_against_document_inner(&canonical, document) {
+            ReplayPayloadClassification::Replayable(response) => {
+                ReplayPayloadClassification::Replayable(Cow::Owned(response.into_owned()))
+            }
+            ReplayPayloadClassification::Blocked(reason) => {
+                ReplayPayloadClassification::Blocked(reason)
+            }
+            ReplayPayloadClassification::Empty => ReplayPayloadClassification::Empty,
+        };
+    }
+    classify_replay_payload_against_document_inner(message, document)
+}
+
+fn classify_replay_payload_against_document_inner<'a>(
+    message: &'a str,
+    document: Option<&str>,
+) -> ReplayPayloadClassification<'a> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
         return ReplayPayloadClassification::Empty;
@@ -304,12 +324,34 @@ pub fn classify_replay_payload_against_document<'a>(
 fn re_heading_topics(text: &str) -> Vec<String> {
     let completion_headings =
         agent_doc_document::subagent_completion::completion_cell_heading_lines(text);
+    let mut fence: Option<(u8, usize)> = None;
     text.lines()
         .enumerate()
         .filter(|(index, _)| !completion_headings.contains(index))
         .filter_map(|(_, line)| {
+            if let Some((marker, minimum_len)) = fence {
+                if let Some((candidate, len, only_marker)) =
+                    crate::response_materialization::markdown_fence_marker(line)
+                    && candidate == marker
+                    && len >= minimum_len
+                    && only_marker
+                {
+                    fence = None;
+                }
+                return None;
+            }
+            if let Some((marker, len, _)) =
+                crate::response_materialization::markdown_fence_marker(line)
+            {
+                fence = Some((marker, len));
+                return None;
+            }
             let line = line.trim();
-            let rest = line.strip_prefix("### Re:")?;
+            let hashes = line.bytes().take_while(|byte| *byte == b'#').count();
+            if !(2..=6).contains(&hashes) {
+                return None;
+            }
+            let rest = line[hashes..].strip_prefix(" Re:")?;
             let topic = match rest.rfind(" — ") {
                 Some(at) => &rest[..at],
                 None => rest,
@@ -391,6 +433,50 @@ mod tests {
                 panic!("expected blocked payload, got replayable: {actual}")
             }
         }
+    }
+
+    #[test]
+    fn replay_payload_canonicalizes_assistant_owned_h2_response_heading() {
+        let payload = concat!(
+            "<!-- patch:exchange -->\n",
+            "## Re: fixed hierarchy — gpt-5\n\n",
+            "Done.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        match classify_replay_payload(payload) {
+            ReplayPayloadClassification::Replayable(actual) => {
+                assert!(actual.contains("### Re: fixed hierarchy — gpt-5"));
+                assert!(!actual.contains("\n## Re: fixed hierarchy"));
+            }
+            other => panic!("expected replayable canonical response, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replay_payload_keeps_h2_response_example_inside_code_fence_inert() {
+        let payload = concat!(
+            "### Re: fixed hierarchy — gpt-5\n\n",
+            "```markdown\n",
+            "## Re: example only\n",
+            "```\n",
+        );
+        let document =
+            "<!-- agent:exchange -->\n### Re: example only\n\nOld.\n<!-- /agent:exchange -->\n";
+        match classify_replay_payload_against_document(payload, Some(document)) {
+            ReplayPayloadClassification::Replayable(actual) => assert_eq!(actual, payload.trim()),
+            other => panic!("fenced example must stay inert, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn replay_guard_matches_legacy_h2_document_heading_after_payload_normalization() {
+        let payload = "## Re: same topic — gpt-5\n\nNew replay.\n";
+        let document = "<!-- agent:exchange -->\n## Re: same topic — gpt-4\n\nOld.\n<!-- /agent:exchange -->\n";
+        let reason = match classify_replay_payload_against_document(payload, Some(document)) {
+            ReplayPayloadClassification::Blocked(reason) => reason,
+            other => panic!("expected duplicate-topic refusal, got {other:?}"),
+        };
+        assert!(reason.contains("same topic"), "{reason}");
     }
 
     #[test]

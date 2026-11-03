@@ -129,7 +129,7 @@ use agent_doc_controller::claim::{
 };
 use agent_doc_document::claim_scaffold::{
     default_format_and_write_content, merge_default_template_component_config,
-    render_empty_template_scaffold, scaffold_default_template_components,
+    render_empty_template_scaffold_for_path, scaffold_default_template_components,
     should_scaffold_empty_markdown, uses_template_format,
 };
 use agent_doc_frontmatter::frontmatter;
@@ -517,7 +517,7 @@ pub fn run(
         if should_scaffold_empty_markdown(&raw, extension) {
             eprintln!("[claim] auto-scaffolding empty file: {}", file.display());
             let session_id = uuid::Uuid::new_v4();
-            let scaffold = render_empty_template_scaffold(&session_id.to_string());
+            let scaffold = render_empty_template_scaffold_for_path(&session_id.to_string(), file);
             effects.atomic_write(file, &scaffold)?;
             agent_doc_snapshot_io::checkpoint_document_baseline(
                 file,

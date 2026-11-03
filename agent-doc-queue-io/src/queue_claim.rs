@@ -1990,8 +1990,21 @@ fn claimed_items_with_queue_holds(
     // `after=` predecessor still queued). A held head is out of the in-session
     // loop exactly like a claimed one: never drained inline, never counted.
     let claimed = match crate::subagent_dispatch::queue_attr_subagent_plan(file, content) {
-        Some(plan) if !plan.held.is_empty() => claimed.with_heads(&plan.held),
-        _ => claimed,
+        Ok(Some(plan)) if !plan.held.is_empty() => claimed.with_heads(&plan.held),
+        Ok(_) => claimed,
+        Err(error) => {
+            eprintln!(
+                "[queue-claim] ERROR: subagent ownership planning failed for {}; holding every queue head: {error:#}",
+                file.display()
+            );
+            claimed.with_heads(
+                &agent_doc_queue::queue_continuation::all_executable_row_keys(content)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(_, lineage)| lineage)
+                    .collect::<Vec<_>>(),
+            )
+        }
     };
     // `#queueschedule`: a scheduled queue's closed window holds every head the
     // same way — out of the in-session loop, the supervisor drain, preflight

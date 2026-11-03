@@ -610,7 +610,7 @@ struct DocumentDeliverySignal {
 #[derive(Debug)]
 struct QueueProjectionSelfHealWorkerOutcome {
     projection: agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome,
-    generation: u64,
+    request: agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
     /// Controller delivery frontier observed after the projection attempt
     /// returned. A superseded attempt owns every delivery edge through this
     /// cursor; only a strictly newer edge may re-arm repair.
@@ -847,6 +847,7 @@ fn spawn_captured_finalize_resume_worker(
 
 fn spawn_queue_projection_self_heal_worker(
     file: PathBuf,
+    request: agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
 ) -> std::io::Result<QueueProjectionSelfHealWorker> {
     let (send, result) = std::sync::mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -856,17 +857,14 @@ fn spawn_queue_projection_self_heal_worker(
         .spawn(move || {
             let projection_cancel = Arc::clone(&worker_cancel);
             let run =
-                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_run_with_effects(
+                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_for_generation_with_effects(
                     &IdleQueueProjectionSelfHealEffects {
                         cancel: worker_cancel,
                     },
                     &file,
+                    request.generation,
                 );
-            let outcome = run.map(|run| {
-                let agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionRun {
-                    outcome: projection,
-                    generation,
-                } = run;
+            let outcome = run.map(|projection| {
                 let terminal_delivery_cursor = matches!(
                     projection,
                     agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded
@@ -890,7 +888,7 @@ fn spawn_queue_projection_self_heal_worker(
                 .flatten();
                 QueueProjectionSelfHealWorkerOutcome {
                     projection,
-                    generation,
+                    request,
                     terminal_delivery_cursor,
                 }
             });
@@ -911,14 +909,12 @@ enum CapturedFinalizePresence {
 }
 
 fn queue_projection_self_heal_can_start(
-    turn_boundary: bool,
     due: bool,
     retry_ready: bool,
     quiet_ready: bool,
     captured_finalize_presence: CapturedFinalizePresence,
 ) -> bool {
-    turn_boundary
-        && due
+    due
         && retry_ready
         && quiet_ready
         && captured_finalize_presence == CapturedFinalizePresence::Absent
@@ -2791,7 +2787,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
         // latch. Only a failed effect receives a timed retry edge.
     let mut resume_worker: Option<CapturedFinalizeResumeWorker> = None;
     // `#sdkdocumentselfheal`: queue markers are derived state. Reconcile them
-    // once on supervisor start and after document-delivery edges, but keep the
+    // once on supervisor start and after quiet document-delivery edges, but keep the
     // potentially slow editor/controller round trips off this watch thread.
     // The Option is the single-flight lease: no retry can start while one
     // document-local repair still owns the effect.
@@ -2861,25 +2857,38 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Settled {
                             changed,
                         },
-                    generation,
+                    request,
                     ..
                 })) => {
                     queue_projection_self_heal_worker = None;
                     queue_projection_self_heal_retry_at = None;
                     queue_projection_self_heal_superseded_through = None;
-                    if let Err(error) =
-                        agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(
-                            &path,
-                            generation,
-                        )
-                    {
-                        agent_doc_ops_log_io::log_op(
-                            &path,
-                            &format!(
-                                "queue_projection_repair_request_clear_deferred file={} error={error:#}",
-                                path.display(),
-                            ),
-                        );
+                    match agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(
+                        &path,
+                        &request,
+                    ) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            queue_projection_self_heal_due =
+                                agent_doc_queue_io::queue_cmd::load_queue_projection_repair_request(
+                                    &path,
+                                )
+                                .ok()
+                                .flatten()
+                                .is_some();
+                        }
+                        Err(error) => {
+                            queue_projection_self_heal_due = true;
+                            queue_projection_self_heal_retry_at =
+                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "queue_projection_repair_request_clear_deferred file={} error={error:#}",
+                                    path.display(),
+                                ),
+                            );
+                        }
                     }
                     agent_doc_ops_log_io::log_op(
                         &path,
@@ -4634,8 +4643,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // never trips it.
                 turn_boundary = prompt_visible && !turn_active;
                 head_pending = active_head.is_some();
-                // Derived queue/Todo state repairs at a quiet actor boundary,
-                // before this supervisor auto-dispatches another row. The
+                // Derived queue/Todo state repairs after the delivery quiet
+                // window, even while a long foreground turn remains active.
+                // Captured-finalize and retained-write state still fence the
+                // controller CAS. Before this supervisor auto-dispatches
+                // another row, the
                 // repair itself is background single-flight; while it owns the
                 // projection edge, leave auto-dispatch parked but continue the
                 // outer watch loop so recycle, operator input, and health
@@ -4646,13 +4658,49 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let self_heal_retry_ready = queue_projection_self_heal_retry_at
                     .is_none_or(|retry_at| now >= retry_at);
                 if queue_projection_self_heal_can_start(
-                    turn_boundary,
                     queue_projection_self_heal_due,
                     self_heal_retry_ready,
                     now >= queue_projection_self_heal_not_before,
                     captured_finalize_presence,
                 ) {
-                    match spawn_queue_projection_self_heal_worker(path.clone()) {
+                    let generation =
+                        match agent_doc_queue_io::queue_cmd::queue_repair_generation(&path) {
+                            Ok(generation) => generation,
+                            Err(error) => {
+                                queue_projection_self_heal_retry_at =
+                                    Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                                agent_doc_ops_log_io::log_op(
+                                    &path,
+                                    &format!(
+                                        "queue_projection_self_heal_request_deferred file={} retry_after_ms={} error={error:#}",
+                                        path.display(),
+                                        IDLE_WATCH_CONTROLLER_BACKOFF.as_millis(),
+                                    ),
+                                );
+                                break 'drain;
+                            }
+                        };
+                    let request = match agent_doc_queue_io::queue_cmd::ensure_queue_projection_repair_request(
+                            &path,
+                            generation,
+                            "ordinary_projection_reconcile",
+                        ) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            queue_projection_self_heal_retry_at =
+                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "queue_projection_self_heal_request_deferred file={} retry_after_ms={} error={error:#}",
+                                    path.display(),
+                                    IDLE_WATCH_CONTROLLER_BACKOFF.as_millis(),
+                                ),
+                            );
+                            break 'drain;
+                        }
+                    };
+                    match spawn_queue_projection_self_heal_worker(path.clone(), request) {
                         Ok(worker) => {
                             queue_projection_self_heal_worker = Some(worker);
                             queue_projection_self_heal_due = false;
@@ -4660,7 +4708,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(
                                 &path,
                                 &format!(
-                                    "queue_projection_self_heal_started file={} boundary=actor_ready_quiet authority=editor_crdt single_flight=true cas_attempts=1 quiet_ms={}",
+                                    "queue_projection_self_heal_started file={} boundary=document_delivery_quiet authority=editor_crdt single_flight=true cas_attempts=1 quiet_ms={}",
                                     path.display(),
                                     QUEUE_PROJECTION_SELF_HEAL_QUIET.as_millis(),
                                 ),
@@ -7547,15 +7595,31 @@ mod tests {
             CapturedFinalizePresence::Unknown,
             CapturedFinalizePresence::Present,
         ] {
-            assert!(!queue_projection_self_heal_can_start(
-                true, true, true, true, presence,
-            ));
+            assert!(!queue_projection_self_heal_can_start(true, true, true, presence));
         }
         assert!(queue_projection_self_heal_can_start(
             true,
             true,
             true,
+            CapturedFinalizePresence::Absent,
+        ));
+    }
+
+    #[test]
+    fn queue_projection_self_heal_runs_after_quiet_delivery_during_a_long_turn() {
+        // There is deliberately no turn-boundary input: a foreground turn may
+        // stay active for minutes. The quiet delivery debounce plus CAS is the
+        // boundary for derived projection repair.
+        assert!(queue_projection_self_heal_can_start(
             true,
+            true,
+            true,
+            CapturedFinalizePresence::Absent,
+        ));
+        assert!(!queue_projection_self_heal_can_start(
+            true,
+            true,
+            false,
             CapturedFinalizePresence::Absent,
         ));
     }

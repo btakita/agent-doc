@@ -915,7 +915,7 @@ pub fn project_all_queue_runtime_state_once_run_with_effects(
     })
 }
 
-fn project_all_queue_runtime_state_once_for_generation_with_effects(
+pub fn project_all_queue_runtime_state_once_for_generation_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
     generation: u64,
@@ -991,17 +991,12 @@ pub fn queue_repair_generation(file: &Path) -> Result<u64> {
         .generation)
 }
 
-fn record_queue_projection_repair_request(
+pub fn ensure_queue_projection_repair_request(
     file: &Path,
     generation: u64,
     reason: &str,
-) -> Result<bool> {
+) -> Result<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
-    let request = agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest {
-        generation,
-        reason: reason.to_string(),
-        requested_at_secs: crate::queue_claim::claim_clock_now_secs(),
-    };
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     conn.execute_batch("BEGIN IMMEDIATE")
         .context("begin queue projection repair request transaction")?;
@@ -1023,8 +1018,71 @@ fn record_queue_projection_repair_request(
             .unwrap_or_default()
             .generation;
         if current_generation != generation {
-            return Ok::<_, anyhow::Error>(false);
+            anyhow::bail!(
+                "queue projection repair request superseded: expected generation {generation}, current generation {current_generation}"
+            );
         }
+
+        let existing = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
+        )?
+        .map(|record| {
+            serde_json::from_str::<
+                agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
+            >(&record.payload_json)
+            .context("parse existing queue projection repair request")
+        })
+        .transpose()?;
+        if let Some(existing) = existing.filter(|request| {
+            request.generation == generation && request.request_generation > 0
+        }) {
+            return Ok::<_, anyhow::Error>((existing, false));
+        }
+
+        let sequence_record =
+            agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+                &conn,
+                &document_hash,
+                agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_SEQUENCE_STATE_KIND,
+            )?;
+        let sequence = sequence_record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::queue_repair_generation::QueueProjectionRepairSequence,
+                >(&record.payload_json)
+                .context("parse queue projection repair sequence")
+            })
+            .transpose()?
+            .unwrap_or_default()
+            .generation
+            .saturating_add(1);
+        let request = agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest {
+            generation,
+            request_generation: sequence,
+            reason: reason.to_string(),
+            requested_at_secs: crate::queue_claim::claim_clock_now_secs(),
+        };
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: document_hash.clone(),
+                state_kind: agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_SEQUENCE_STATE_KIND.to_string(),
+                canonical_path: file
+                    .canonicalize()
+                    .unwrap_or_else(|_| file.to_path_buf())
+                    .display()
+                    .to_string(),
+                payload_json: serde_json::to_string(
+                    &agent_doc_queue::queue_repair_generation::QueueProjectionRepairSequence {
+                        generation: sequence,
+                    },
+                )?,
+                updated_at_secs: request.requested_at_secs,
+            },
+        )?;
         agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
             &conn,
             &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
@@ -1039,7 +1097,7 @@ fn record_queue_projection_repair_request(
                 updated_at_secs: request.requested_at_secs,
             },
         )?;
-        Ok(true)
+        Ok((request, true))
     })();
     let recorded = match recorded {
         Ok(recorded) => {
@@ -1051,8 +1109,9 @@ fn record_queue_projection_repair_request(
             return Err(error);
         }
     };
-    if !recorded {
-        return Ok(false);
+    let (request, created) = recorded;
+    if !created {
+        return Ok(request);
     }
     if let Err(error) =
         agent_doc_controller_io::project_controller::wake_queue_projection_repair_for_file(file)
@@ -1070,10 +1129,13 @@ fn record_queue_projection_repair_request(
             ),
         );
     }
-    Ok(true)
+    Ok(request)
 }
 
-pub fn clear_queue_projection_repair_request(file: &Path, generation: u64) -> Result<bool> {
+pub fn clear_queue_projection_repair_request(
+    file: &Path,
+    expected: &agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
+) -> Result<bool> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     conn.execute_batch("BEGIN IMMEDIATE")?;
@@ -1095,7 +1157,9 @@ pub fn clear_queue_projection_repair_request(file: &Path, generation: u64) -> Re
         else {
             return Ok::<_, anyhow::Error>(false);
         };
-        if request.generation != generation {
+        if request.generation != expected.generation
+            || request.request_generation != expected.request_generation
+        {
             return Ok(false);
         }
         agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
@@ -1117,8 +1181,7 @@ pub fn clear_queue_projection_repair_request(file: &Path, generation: u64) -> Re
     }
 }
 
-#[cfg(test)]
-fn load_queue_projection_repair_request(
+pub fn load_queue_projection_repair_request(
     file: &Path,
 ) -> Result<Option<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest>> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
@@ -1167,11 +1230,15 @@ pub fn clean_slate_with_effects(
         reset.generation,
     ) {
         Ok(outcome @ QueueRuntimeProjectionOnceOutcome::Settled { .. }) => {
-            clear_queue_projection_repair_request(file, reset.generation)?;
+            if let Some(request) = load_queue_projection_repair_request(file)?
+                && request.generation == reset.generation
+            {
+                clear_queue_projection_repair_request(file, &request)?;
+            }
             outcome
         }
         Ok(QueueRuntimeProjectionOnceOutcome::Superseded) => {
-            record_queue_projection_repair_request(
+            ensure_queue_projection_repair_request(
                 file,
                 reset.generation,
                 "clean_slate_projection_superseded",
@@ -1179,7 +1246,7 @@ pub fn clean_slate_with_effects(
             QueueRuntimeProjectionOnceOutcome::Superseded
         }
         Err(error) => {
-            record_queue_projection_repair_request(
+            ensure_queue_projection_repair_request(
                 file,
                 reset.generation,
                 "clean_slate_projection_error",
@@ -4165,13 +4232,29 @@ mod tests {
             current: RefCell::new(current),
             convergence_attempts: Cell::new(0),
         };
+        let request = ensure_queue_projection_repair_request(
+            &doc,
+            queue_repair_generation(&doc).unwrap(),
+            "ordinary_projection_reconcile",
+        )
+        .unwrap();
 
         assert_eq!(
-            project_all_queue_runtime_state_once_with_effects(&effects, &doc).unwrap(),
+            project_all_queue_runtime_state_once_for_generation_with_effects(
+                &effects,
+                &doc,
+                request.generation,
+            )
+            .unwrap(),
             QueueRuntimeProjectionOnceOutcome::Superseded,
             "a superseded background CAS must defer"
         );
         assert_eq!(effects.convergence_attempts.get(), 1);
+        assert_eq!(
+            load_queue_projection_repair_request(&doc).unwrap(),
+            Some(request),
+            "operator CAS supersession must retain the exact durable request"
+        );
     }
 
     fn upsert_test_state(doc: &Path, state_kind: &str, payload_json: String) {
@@ -4453,12 +4536,15 @@ mod tests {
             agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
                 .unwrap();
         assert_eq!(first.generation, 1);
-        assert!(record_queue_projection_repair_request(&doc, 1, "first").unwrap());
+        let first_request =
+            ensure_queue_projection_repair_request(&doc, 1, "first").unwrap();
         let second =
             agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
                 .unwrap();
         assert_eq!(second.generation, 2);
-        assert!(record_queue_projection_repair_request(&doc, 2, "second").unwrap());
+        let second_request =
+            ensure_queue_projection_repair_request(&doc, 2, "second").unwrap();
+        assert!(second_request.request_generation > first_request.request_generation);
 
         let source = std::fs::read_to_string(&doc).unwrap();
         let stale_target = source.replace("generation fence", "stale generation marker");
@@ -4475,17 +4561,111 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), source);
 
-        assert!(!clear_queue_projection_repair_request(&doc, 1).unwrap());
+        assert!(!clear_queue_projection_repair_request(&doc, &first_request).unwrap());
         let request = load_queue_projection_repair_request(&doc)
             .unwrap()
             .expect("new request must survive old worker settlement");
         assert_eq!(request.generation, 2);
         assert_eq!(request.reason, "second");
-        assert!(clear_queue_projection_repair_request(&doc, 2).unwrap());
+        assert!(clear_queue_projection_repair_request(&doc, &second_request).unwrap());
         assert!(
             load_queue_projection_repair_request(&doc)
                 .unwrap()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn ordinary_projection_request_is_durable_idempotent_and_exactly_consumed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:queue -->\n- ordinary drift\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+
+        let generation = queue_repair_generation(&doc).unwrap();
+        let first = ensure_queue_projection_repair_request(
+            &doc,
+            generation,
+            "ordinary_projection_reconcile",
+        )
+        .unwrap();
+        // A retry or restarted supervisor reuses the durable token rather than
+        // manufacturing a retry storm.
+        let restarted = ensure_queue_projection_repair_request(
+            &doc,
+            generation,
+            "ordinary_projection_retry",
+        )
+        .unwrap();
+        assert_eq!(restarted, first);
+        assert_eq!(load_queue_projection_repair_request(&doc).unwrap(), Some(first.clone()));
+
+        let mut stale = first.clone();
+        stale.request_generation = stale.request_generation.saturating_sub(1);
+        assert!(!clear_queue_projection_repair_request(&doc, &stale).unwrap());
+        assert_eq!(load_queue_projection_repair_request(&doc).unwrap(), Some(first.clone()));
+        assert!(clear_queue_projection_repair_request(&doc, &first).unwrap());
+        assert!(load_queue_projection_repair_request(&doc).unwrap().is_none());
+
+        let next = ensure_queue_projection_repair_request(
+            &doc,
+            generation,
+            "ordinary_projection_reconcile",
+        )
+        .unwrap();
+        assert!(next.request_generation > first.request_generation);
+    }
+
+    #[test]
+    fn ordinary_projection_error_leaves_its_durable_request_for_restart() {
+        struct ReadErrorEffects;
+
+        impl QueueRuntimeProjectionEffects for ReadErrorEffects {
+            fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+                bail!("injected ordinary projection read error")
+            }
+
+            fn converge_document_or_disk(
+                &self,
+                _file: &Path,
+                _target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                unreachable!()
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:queue -->\n- error recovery\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let request = ensure_queue_projection_repair_request(
+            &doc,
+            queue_repair_generation(&doc).unwrap(),
+            "ordinary_projection_reconcile",
+        )
+        .unwrap();
+
+        let error = project_all_queue_runtime_state_once_for_generation_with_effects(
+            &ReadErrorEffects,
+            &doc,
+            request.generation,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("injected ordinary"));
+        assert_eq!(
+            load_queue_projection_repair_request(&doc).unwrap(),
+            Some(request),
+            "a replacement supervisor must be able to resume the exact request"
         );
     }
 

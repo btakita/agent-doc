@@ -42,6 +42,7 @@ pub mod queue_preemption;
 pub mod queue_projection;
 pub mod queue_prompt_drift;
 pub mod queue_recency;
+pub mod queue_repair_generation;
 pub mod queue_replay;
 pub mod queue_response;
 pub mod queue_schedule;

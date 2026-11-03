@@ -4116,6 +4116,13 @@ pub(crate) struct ControllerRuntime {
     /// Short-lived clients only persist the newest observation; this long-lived
     /// worker owns state-ledger retry and restart recovery.
     document_authority_handoff_wake: Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+    /// Per-document admission/maintenance fence.
+    ///
+    /// State ingress takes this before the short project-global durable
+    /// append/apply lock. Document-local maintenance can therefore exclude a
+    /// same-document cycle admission without holding unrelated documents
+    /// behind CRDT resolution, markdown parsing, or SQLite maintenance.
+    document_maintenance_fences: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Per-document semantic fence shared by retained-transition projection and
     /// recovery/canonicalization retirement.
     ///
@@ -9775,6 +9782,7 @@ impl ControllerRuntime {
             memory: Mutex::new(memory),
             state_event_ingress: Mutex::new(()),
             document_authority_handoff_wake: Mutex::new(None),
+            document_maintenance_fences: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),
@@ -10442,6 +10450,14 @@ impl ControllerRuntime {
             .clone()
     }
 
+    pub(crate) fn document_maintenance_fence(&self, document_hash: &str) -> Arc<Mutex<()>> {
+        self.document_maintenance_fences
+            .lock()
+            .entry(document_hash.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
     /// Atomically verify and retire the exact retained-write lineage observed
     /// by recovery. A changed lineage is ambiguous and therefore fails closed.
     pub(crate) fn retire_document_write_lineage_serialized(
@@ -10508,6 +10524,8 @@ impl ControllerRuntime {
         project_root: &Path,
         event: &agent_doc_state_backbone::StateEvent,
     ) -> Result<bool> {
+        let document_fence = self.document_maintenance_fence(event.fact.document_hash());
+        let _document_guard = document_fence.lock();
         let _ingress = self.lock_state_event_ingress(
             project_root,
             "append_apply_state_event",
@@ -21490,6 +21508,7 @@ agent:queue\n\
             }),
             state_event_ingress: Mutex::new(()),
             document_authority_handoff_wake: Mutex::new(None),
+            document_maintenance_fences: Mutex::new(HashMap::new()),
             retained_intent_semantic_fences: Mutex::new(HashMap::new()),
             state_apply_generation: AtomicU64::new(0),
             controller_generation_poisoned: AtomicBool::new(false),

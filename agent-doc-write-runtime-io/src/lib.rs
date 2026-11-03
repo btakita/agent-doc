@@ -394,6 +394,26 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
             reason,
         )
     }
+
+    fn converge_document_or_disk_for_generation(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+        generation: u64,
+    ) -> Result<bool> {
+        Ok(matches!(
+            agent_doc_controller_io::project_controller::converge_queue_projection_for_generation(
+                file,
+                target_content,
+                source_content,
+                reason,
+                generation,
+            )?,
+            agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Applied
+        ))
+    }
 }
 
 fn queue_skip_diagnostic_for_current_document(

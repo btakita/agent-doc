@@ -5263,6 +5263,100 @@ pub fn repair_projection(
 pub struct QueueCleanSlateReset {
     pub cleared_claims: usize,
     pub cleared_release_receipts: usize,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueProjectionGenerationWriteOutcome {
+    Applied,
+    Superseded,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct QueueProjectionGenerationWriteRequest {
+    generation: u64,
+    source_content: String,
+    target_content: String,
+    reason: String,
+}
+
+/// Apply a derived queue projection under the same document-local fence as a
+/// clean-slate generation advance.
+pub fn converge_queue_projection_for_generation(
+    file: &Path,
+    target_content: &str,
+    source_content: &str,
+    reason: &str,
+    generation: u64,
+) -> Result<QueueProjectionGenerationWriteOutcome> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let payload = QueueProjectionGenerationWriteRequest {
+        generation,
+        source_content: source_content.to_string(),
+        target_content: target_content.to_string(),
+        reason: reason.to_string(),
+    };
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let bootstrap = ControllerBootstrap {
+            project_root: project_root.clone(),
+            socket_path: socket_path(&project_root),
+            launch_mode: LaunchMode::Lazy,
+            bootstrap_epoch: 0,
+            pid: std::process::id(),
+            controller_binary: Some(current_binary_identity()?),
+            controller_generation: 1,
+            handoff_state: ControllerHandoffState::Stable,
+            handoff_started_at: None,
+            previous_controller_pid: None,
+        };
+        let runtime = ControllerRuntime::new(bootstrap.clone())?;
+        handle_queue_projection_generation_write(
+            &bootstrap,
+            &runtime,
+            ControllerRequest {
+                command: "queue_projection_generation_write".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("queue_projection".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&payload)?),
+                sequence: None,
+            },
+        )
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        ensure_controller_running_for_file(file)?;
+        request_controller(
+            &project_root,
+            ControllerRequest {
+                command: "queue_projection_generation_write".to_string(),
+                file: Some(file.to_path_buf()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("queue_projection".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(serde_json::to_string(&payload)?),
+                sequence: None,
+            },
+        )
+    }
 }
 
 /// Reset only stale queue-attempt projections while the document actor owns
@@ -22838,6 +22932,13 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "queue_projection_generation_write" => {
+            controller_envelope(handle_queue_projection_generation_write(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
         "queue_projection_repair_wake" => controller_envelope(handle_queue_projection_repair_wake(
             runtime.as_ref(),
             request,
@@ -39458,30 +39559,176 @@ pub(crate) fn handle_projection_repair(
     Ok(receipt)
 }
 
-fn queue_clean_slate_current_content(canonical: &Path) -> Result<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum QueueCleanSlateAuthorityToken {
+    Detached { content_hash: String },
+    Attached(agent_doc_crdt_relay_io::CurrentRevision),
+}
+
+struct QueueCleanSlateAuthorityCut {
+    content: String,
+    token: QueueCleanSlateAuthorityToken,
+}
+
+fn queue_clean_slate_authority_cut(canonical: &Path) -> Result<QueueCleanSlateAuthorityCut> {
     let authority = crdt_authority_for_file(&canonical.to_string_lossy());
-    match agent_doc_crdt_relay_io::current_text_for_file_with_authority(canonical, authority)? {
-        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Ok(text),
-        agent_doc_crdt_relay_io::CurrentText::Detached => std::fs::read_to_string(canonical)
-            .with_context(|| format!("read queue clean-slate document {}", canonical.display())),
-        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => anyhow::bail!(
-            "queue clean-slate refused: editor authority for {} has no current replica; wait for editor synchronization",
-            canonical.display()
-        ),
-        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => anyhow::bail!(
-            "queue clean-slate refused: editor authority for {} is still synchronizing",
-            canonical.display()
-        ),
+    if !authority.editor_attached() {
+        let content = std::fs::read_to_string(canonical)
+            .with_context(|| format!("read queue clean-slate document {}", canonical.display()))?;
+        return Ok(QueueCleanSlateAuthorityCut {
+            token: QueueCleanSlateAuthorityToken::Detached {
+                content_hash: agent_doc_hash::content_hash(&content),
+            },
+            content,
+        });
     }
+
+    // Capture text between two compact revision reads. CRDT materialization
+    // and markdown parsing happen outside the maintenance fence; equal
+    // revisions prove that the parsed bytes belong to the token revalidated at
+    // mutation time.
+    for _ in 0..3 {
+        let before = agent_doc_crdt_relay_io::current_revision_for_file_with_authority(
+            canonical, authority,
+        )?;
+        let current =
+            agent_doc_crdt_relay_io::current_text_for_file_with_authority(canonical, authority)?;
+        let after = agent_doc_crdt_relay_io::current_revision_for_file_with_authority(
+            canonical, authority,
+        )?;
+        if before != after {
+            continue;
+        }
+        return match current {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+                Ok(QueueCleanSlateAuthorityCut {
+                    content: text,
+                    token: QueueCleanSlateAuthorityToken::Attached(after),
+                })
+            }
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => anyhow::bail!(
+                "queue clean-slate refused: editor authority for {} has no current replica; wait for editor synchronization",
+                canonical.display()
+            ),
+            agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => anyhow::bail!(
+                "queue clean-slate refused: editor authority for {} is still synchronizing",
+                canonical.display()
+            ),
+            agent_doc_crdt_relay_io::CurrentText::Detached => anyhow::bail!(
+                "queue clean-slate refused: authority for {} detached while capturing the editor cut",
+                canonical.display()
+            ),
+        };
+    }
+    anyhow::bail!(
+        "queue clean-slate refused: editor authority for {} changed while capturing the maintenance cut",
+        canonical.display()
+    )
+}
+
+fn revalidate_queue_clean_slate_authority(
+    canonical: &Path,
+    expected: &QueueCleanSlateAuthorityToken,
+) -> Result<()> {
+    let authority = crdt_authority_for_file(&canonical.to_string_lossy());
+    let current = if authority.editor_attached() {
+        QueueCleanSlateAuthorityToken::Attached(
+            agent_doc_crdt_relay_io::current_revision_for_file_with_authority(
+                canonical, authority,
+            )?,
+        )
+    } else {
+        let content = std::fs::read_to_string(canonical).with_context(|| {
+            format!(
+                "revalidate queue clean-slate document {}",
+                canonical.display()
+            )
+        })?;
+        QueueCleanSlateAuthorityToken::Detached {
+            content_hash: agent_doc_hash::content_hash(&content),
+        }
+    };
+    anyhow::ensure!(
+        current == *expected,
+        "queue clean-slate superseded before mutation: document authority changed"
+    );
+    Ok(())
+}
+
+fn queue_repair_generation_from_db(
+    conn: &agent_doc_sqlite::state_store::Connection,
+    document_hash: &str,
+) -> Result<u64> {
+    let record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        conn,
+        document_hash,
+        agent_doc_queue::queue_repair_generation::QUEUE_REPAIR_GENERATION_STATE_KIND,
+    )?;
+    Ok(record
+        .as_ref()
+        .map(|record| {
+            serde_json::from_str::<agent_doc_queue::queue_repair_generation::QueueRepairGeneration>(
+                &record.payload_json,
+            )
+            .context("parse queue repair generation")
+        })
+        .transpose()?
+        .unwrap_or_default()
+        .generation)
+}
+
+fn handle_queue_projection_generation_write(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<QueueProjectionGenerationWriteOutcome> {
+    let requested = request_file(&request)?;
+    let canonical = canonical_controller_request_file(bootstrap, &requested);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: QueueProjectionGenerationWriteRequest =
+        serde_json::from_str(&payload_json).context("parse queue projection generation write")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let maintenance_fence = runtime.document_maintenance_fence(&document_hash);
+    let _maintenance = maintenance_fence.lock();
+    let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
+    if queue_repair_generation_from_db(&conn, &document_hash)? != payload.generation {
+        return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+    }
+
+    let authority = crdt_authority_for_file(&canonical.to_string_lossy());
+    if authority.editor_attached() {
+        let Some(write) = agent_doc_crdt_relay_io::apply_cp_write_for_file_scoped(
+            &canonical,
+            &payload.source_content,
+            &payload.target_content,
+            &payload.reason,
+            None,
+        )?
+        else {
+            return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+        };
+        if !write.applied
+            && write.content_hash != agent_doc_hash::content_hash(&payload.target_content)
+        {
+            return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+        }
+    } else {
+        let current = std::fs::read_to_string(&canonical)
+            .with_context(|| format!("read queue projection base {}", canonical.display()))?;
+        if current != payload.source_content {
+            return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+        }
+        agent_doc_fs::write_atomic(&canonical, payload.target_content.as_bytes())?;
+    }
+    Ok(QueueProjectionGenerationWriteOutcome::Applied)
 }
 
 /// Controller-owned exclusive maintenance boundary for queue clean-slate.
 ///
-/// The state-event ingress guard excludes cycle admission and closeout facts.
-/// The immediate transaction excludes claim/report writers and re-reads their
-/// ledgers after the guard is held. Editor authority is likewise resolved here,
-/// immediately before the transaction; document bytes are never rewritten by
-/// this operation.
+/// The document-local maintenance fence excludes same-document cycle admission
+/// while leaving sibling document closeout unblocked. CRDT materialization and
+/// markdown parsing occur before the fence; only a compact authority-token
+/// revalidation and the immediate state transaction run inside it.
 fn handle_queue_clean_slate_reset(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -39490,11 +39737,19 @@ fn handle_queue_clean_slate_reset(
     let requested = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-    let _maintenance = runtime.lock_state_event_ingress(
-        &bootstrap.project_root,
-        "queue_clean_slate_reset",
-        "exclusive_document_maintenance",
-    );
+
+    let authority_cut = queue_clean_slate_authority_cut(&canonical)?;
+    let completion_count =
+        agent_doc_document::subagent_completion::completion_evidence(&authority_cut.content).len();
+    if completion_count > 0 {
+        anyhow::bail!(
+            "queue clean-slate refused: {completion_count} worker completion handoff(s) remain in the document; integrate/finalize them before resetting attempt projections"
+        );
+    }
+
+    let maintenance_fence = runtime.document_maintenance_fence(&document_hash);
+    let _maintenance = maintenance_fence.lock();
+    revalidate_queue_clean_slate_authority(&canonical, &authority_cut.token)?;
 
     let projected = runtime.document_state_projection(&document_hash)?;
     if let Some(cycle) = projected
@@ -39508,15 +39763,6 @@ fn handle_queue_clean_slate_reset(
             "queue clean-slate refused: cycle {} is still open in phase {:?}; finish or recover that cycle first",
             cycle.cycle_id,
             cycle.phase,
-        );
-    }
-
-    let content = queue_clean_slate_current_content(&canonical)?;
-    let completion_count =
-        agent_doc_document::subagent_completion::completion_evidence(&content).len();
-    if completion_count > 0 {
-        anyhow::bail!(
-            "queue clean-slate refused: {completion_count} worker completion handoff(s) remain in the document; integrate/finalize them before resetting attempt projections"
         );
     }
 
@@ -39585,6 +39831,8 @@ fn handle_queue_clean_slate_reset(
             );
         }
 
+        let generation = queue_repair_generation_from_db(&conn, &document_hash)?.saturating_add(1);
+
         agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
             &conn,
             &document_hash,
@@ -39595,9 +39843,24 @@ fn handle_queue_clean_slate_reset(
             &document_hash,
             agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
         )?;
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: document_hash.clone(),
+                state_kind:
+                    agent_doc_queue::queue_repair_generation::QUEUE_REPAIR_GENERATION_STATE_KIND
+                        .to_string(),
+                canonical_path: canonical.display().to_string(),
+                payload_json: serde_json::to_string(
+                    &agent_doc_queue::queue_repair_generation::QueueRepairGeneration { generation },
+                )?,
+                updated_at_secs: timestamp_secs(),
+            },
+        )?;
         Ok::<_, anyhow::Error>(QueueCleanSlateReset {
             cleared_claims: claims.claims.len(),
             cleared_release_receipts: 0,
+            generation,
         })
     })();
     let reset = match reset {
@@ -39628,8 +39891,9 @@ fn handle_queue_clean_slate_reset(
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "queue_clean_slate_reset_committed file={} cleared_claims={} cleared_release_receipts={} authority=controller_exclusive_maintenance",
+            "queue_clean_slate_reset_committed file={} generation={} cleared_claims={} cleared_release_receipts={} authority=controller_document_maintenance",
             canonical.display(),
+            reset.generation,
             reset.cleared_claims,
             reset.cleared_release_receipts,
         ),
@@ -42262,6 +42526,75 @@ mod tests {
 
     fn test_controller_runtime(bootstrap: &ControllerBootstrap) -> Arc<ControllerRuntime> {
         ControllerRuntime::new_arc(bootstrap.clone()).unwrap()
+    }
+
+    #[test]
+    fn document_maintenance_fence_blocks_only_its_own_admission_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = test_controller_runtime(&bootstrap);
+        let doc_a = "maintenance-doc-a";
+        let doc_b = "unrelated-doc-b";
+        let maintenance = runtime.document_maintenance_fence(doc_a);
+        let guard = maintenance.lock();
+
+        let unrelated = agent_doc_state_backbone::StateEvent::new(
+            "unrelated-doc-event",
+            agent_doc_state_backbone::StateFact::DocumentWriteLineageRetired {
+                document_hash: doc_b.to_string(),
+                intent_ids: Vec::new(),
+                source: "test".to_string(),
+            },
+        );
+        let (send, receive) = std::sync::mpsc::channel();
+        let unrelated_runtime = Arc::clone(&runtime);
+        let unrelated_bootstrap = bootstrap.clone();
+        std::thread::spawn(move || {
+            let _ = send.send(append_apply_state_event(
+                &unrelated_bootstrap,
+                &unrelated_runtime,
+                unrelated,
+            ));
+        });
+        assert!(
+            receive
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap(),
+            "a sibling document admission must not wait for maintenance"
+        );
+
+        let same_document = agent_doc_state_backbone::StateEvent::new(
+            "same-doc-event",
+            agent_doc_state_backbone::StateFact::DocumentWriteLineageRetired {
+                document_hash: doc_a.to_string(),
+                intent_ids: Vec::new(),
+                source: "test".to_string(),
+            },
+        );
+        let (send, receive) = std::sync::mpsc::channel();
+        let same_runtime = Arc::clone(&runtime);
+        let same_bootstrap = bootstrap.clone();
+        let worker = std::thread::spawn(move || {
+            let _ = send.send(append_apply_state_event(
+                &same_bootstrap,
+                &same_runtime,
+                same_document,
+            ));
+        });
+        assert!(
+            receive.recv_timeout(Duration::from_millis(50)).is_err(),
+            "same-document admission must wait for the maintenance mutation"
+        );
+        drop(guard);
+        assert!(
+            receive
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap()
+        );
+        worker.join().unwrap();
     }
 
     /// A project root long enough that `<root>/.agent-doc/controller.sock`

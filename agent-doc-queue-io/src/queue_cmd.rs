@@ -112,6 +112,26 @@ pub trait QueueCommandEffects {
         reason: &str,
     ) -> Result<()>;
 
+    fn converge_document_or_disk_for_generation(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+        generation: u64,
+    ) -> Result<bool> {
+        Ok(matches!(
+            agent_doc_controller_io::project_controller::converge_queue_projection_for_generation(
+                file,
+                target_content,
+                source_content,
+                reason,
+                generation,
+            )?,
+            agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Applied
+        ))
+    }
+
     fn consume_free_text_queue_prompts_force_disk(
         &self,
         file: &Path,
@@ -162,6 +182,18 @@ pub trait QueueRuntimeProjectionEffects {
         source_content: &str,
         reason: &str,
     ) -> Result<()>;
+
+    fn converge_document_or_disk_for_generation(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+        _generation: u64,
+    ) -> Result<bool> {
+        self.converge_document_or_disk(file, target_content, source_content, reason)?;
+        Ok(true)
+    }
 }
 
 impl<T: QueueCommandEffects + ?Sized> QueueRuntimeProjectionEffects for T {
@@ -182,6 +214,24 @@ impl<T: QueueCommandEffects + ?Sized> QueueRuntimeProjectionEffects for T {
             target_content,
             source_content,
             reason,
+        )
+    }
+
+    fn converge_document_or_disk_for_generation(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+        generation: u64,
+    ) -> Result<bool> {
+        QueueCommandEffects::converge_document_or_disk_for_generation(
+            self,
+            file,
+            target_content,
+            source_content,
+            reason,
+            generation,
         )
     }
 }
@@ -731,6 +781,7 @@ pub fn project_claim_runtime_state_with_effects(
     file: &Path,
     cleared_item: Option<&str>,
 ) -> Result<bool> {
+    let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
         file,
@@ -738,6 +789,7 @@ pub fn project_claim_runtime_state_with_effects(
         RuntimeProjectionRows::LifecycleEvidence,
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
+        repair_generation,
     )
 }
 
@@ -751,6 +803,7 @@ pub fn project_claim_item_runtime_state_with_effects(
     cleared: bool,
 ) -> Result<bool> {
     let identity = agent_doc_queue::queue_claim::claim_identity(item);
+    let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
         file,
@@ -758,6 +811,7 @@ pub fn project_claim_item_runtime_state_with_effects(
         RuntimeProjectionRows::LifecycleEvidence,
         Some(&identity),
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
+        repair_generation,
     )
 }
 
@@ -816,6 +870,7 @@ pub fn project_all_queue_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
+    let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
         file,
@@ -823,6 +878,7 @@ pub fn project_all_queue_runtime_state_with_effects(
         RuntimeProjectionRows::All,
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
+        repair_generation,
     )
 }
 
@@ -838,6 +894,34 @@ pub fn project_all_queue_runtime_state_once_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<QueueRuntimeProjectionOnceOutcome> {
+    Ok(project_all_queue_runtime_state_once_run_with_effects(effects, file)?.outcome)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueRuntimeProjectionRun {
+    pub outcome: QueueRuntimeProjectionOnceOutcome,
+    pub generation: u64,
+}
+
+pub fn project_all_queue_runtime_state_once_run_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<QueueRuntimeProjectionRun> {
+    let generation = queue_repair_generation(file)?;
+    let outcome = project_all_queue_runtime_state_once_for_generation_with_effects(
+        effects, file, generation,
+    )?;
+    Ok(QueueRuntimeProjectionRun {
+        outcome,
+        generation,
+    })
+}
+
+fn project_all_queue_runtime_state_once_for_generation_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+    generation: u64,
+) -> Result<QueueRuntimeProjectionOnceOutcome> {
     match project_runtime_state_with_effects(
         effects,
         file,
@@ -845,9 +929,14 @@ pub fn project_all_queue_runtime_state_once_with_effects(
         RuntimeProjectionRows::All,
         None,
         1,
+        generation,
     ) {
         Ok(changed) => Ok(QueueRuntimeProjectionOnceOutcome::Settled { changed }),
-        Err(error) if error.downcast_ref::<QueueRuntimeProjectionSuperseded>().is_some() => {
+        Err(error)
+            if error
+                .downcast_ref::<QueueRuntimeProjectionSuperseded>()
+                .is_some() =>
+        {
             Ok(QueueRuntimeProjectionOnceOutcome::Superseded)
         }
         Err(error) => Err(error),
@@ -871,14 +960,6 @@ pub struct QueueCleanSlateOutcome {
     pub projection: QueueRuntimeProjectionOnceOutcome,
 }
 
-const QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND: &str = "queue_projection_repair_request";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
-struct QueueProjectionRepairRequest {
-    reason: String,
-    requested_at_secs: u64,
-}
-
 fn queue_projection_repair_state_identity(file: &Path) -> Result<(std::path::PathBuf, String)> {
     let project_root = agent_doc_fs::find_project_root(file).with_context(|| {
         format!(
@@ -891,27 +972,90 @@ fn queue_projection_repair_state_identity(file: &Path) -> Result<(std::path::Pat
     Ok((project_root, document_hash))
 }
 
-fn record_queue_projection_repair_request(file: &Path, reason: &str) -> Result<()> {
+pub fn queue_repair_generation(file: &Path) -> Result<u64> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
-    let request = QueueProjectionRepairRequest {
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        &conn,
+        &document_hash,
+        agent_doc_queue::queue_repair_generation::QUEUE_REPAIR_GENERATION_STATE_KIND,
+    )?;
+    Ok(record
+        .as_ref()
+        .map(|record| {
+            serde_json::from_str::<agent_doc_queue::queue_repair_generation::QueueRepairGeneration>(
+                &record.payload_json,
+            )
+            .context("parse queue repair generation")
+        })
+        .transpose()?
+        .unwrap_or_default()
+        .generation)
+}
+
+fn record_queue_projection_repair_request(
+    file: &Path,
+    generation: u64,
+    reason: &str,
+) -> Result<bool> {
+    let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
+    let request = agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest {
+        generation,
         reason: reason.to_string(),
         requested_at_secs: crate::queue_claim::claim_clock_now_secs(),
     };
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
-        &conn,
-        &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
-            document_hash,
-            state_kind: QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND.to_string(),
-            canonical_path: file
-                .canonicalize()
-                .unwrap_or_else(|_| file.to_path_buf())
-                .display()
-                .to_string(),
-            payload_json: serde_json::to_string(&request)?,
-            updated_at_secs: request.requested_at_secs,
-        },
-    )?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin queue projection repair request transaction")?;
+    let recorded = (|| {
+        let generation_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_REPAIR_GENERATION_STATE_KIND,
+        )?;
+        let current_generation = generation_record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::queue_repair_generation::QueueRepairGeneration,
+                >(&record.payload_json)
+                .context("parse queue repair generation while recording request")
+            })
+            .transpose()?
+            .unwrap_or_default()
+            .generation;
+        if current_generation != generation {
+            return Ok::<_, anyhow::Error>(false);
+        }
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: document_hash.clone(),
+                state_kind: agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND.to_string(),
+                canonical_path: file
+                    .canonicalize()
+                    .unwrap_or_else(|_| file.to_path_buf())
+                    .display()
+                    .to_string(),
+                payload_json: serde_json::to_string(&request)?,
+                updated_at_secs: request.requested_at_secs,
+            },
+        )?;
+        Ok(true)
+    })();
+    let recorded = match recorded {
+        Ok(recorded) => {
+            conn.execute_batch("COMMIT")?;
+            recorded
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(error);
+        }
+    };
+    if !recorded {
+        return Ok(false);
+    }
     if let Err(error) =
         agent_doc_controller_io::project_controller::wake_queue_projection_repair_for_file(file)
     {
@@ -928,30 +1072,63 @@ fn record_queue_projection_repair_request(file: &Path, reason: &str) -> Result<(
             ),
         );
     }
-    Ok(())
+    Ok(true)
 }
 
-pub fn clear_queue_projection_repair_request(file: &Path) -> Result<()> {
+pub fn clear_queue_projection_repair_request(file: &Path, generation: u64) -> Result<bool> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
-    agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
-        &conn,
-        &document_hash,
-        QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
-    )?;
-    Ok(())
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    let cleared = (|| {
+        let record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
+        )?;
+        let Some(request) = record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest,
+                >(&record.payload_json)
+                .context("parse queue projection repair request while clearing")
+            })
+            .transpose()?
+        else {
+            return Ok::<_, anyhow::Error>(false);
+        };
+        if request.generation != generation {
+            return Ok(false);
+        }
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
+        )?;
+        Ok(true)
+    })();
+    match cleared {
+        Ok(cleared) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(cleared)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
 fn load_queue_projection_repair_request(
     file: &Path,
-) -> Result<Option<QueueProjectionRepairRequest>> {
+) -> Result<Option<agent_doc_queue::queue_repair_generation::QueueProjectionRepairRequest>> {
     let (project_root, document_hash) = queue_projection_repair_state_identity(file)?;
     let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     agent_doc_sqlite::state_store::load_queue_document_state_from_db(
         &conn,
         &document_hash,
-        QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
+        agent_doc_queue::queue_repair_generation::QUEUE_PROJECTION_REPAIR_REQUEST_STATE_KIND,
     )?
     .map(|record| serde_json::from_str(&record.payload_json).map_err(Into::into))
     .transpose()
@@ -986,17 +1163,29 @@ pub fn clean_slate_with_effects(
 ) -> Result<QueueCleanSlateOutcome> {
     let reset =
         agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(file)?;
-    let projection = match project_all_queue_runtime_state_once_with_effects(effects, file) {
+    let projection = match project_all_queue_runtime_state_once_for_generation_with_effects(
+        effects,
+        file,
+        reset.generation,
+    ) {
         Ok(outcome @ QueueRuntimeProjectionOnceOutcome::Settled { .. }) => {
-            clear_queue_projection_repair_request(file)?;
+            clear_queue_projection_repair_request(file, reset.generation)?;
             outcome
         }
         Ok(QueueRuntimeProjectionOnceOutcome::Superseded) => {
-            record_queue_projection_repair_request(file, "clean_slate_projection_superseded")?;
+            record_queue_projection_repair_request(
+                file,
+                reset.generation,
+                "clean_slate_projection_superseded",
+            )?;
             QueueRuntimeProjectionOnceOutcome::Superseded
         }
         Err(error) => {
-            record_queue_projection_repair_request(file, "clean_slate_projection_error")?;
+            record_queue_projection_repair_request(
+                file,
+                reset.generation,
+                "clean_slate_projection_error",
+            )?;
             return Err(error).context(
                 "queue clean-slate reset committed; projection repair was durably deferred",
             );
@@ -1027,6 +1216,7 @@ pub fn project_blocker_runtime_state_with_effects(
     effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
     file: &Path,
 ) -> Result<bool> {
+    let repair_generation = queue_repair_generation(file)?;
     project_runtime_state_with_effects(
         effects,
         file,
@@ -1034,6 +1224,7 @@ pub fn project_blocker_runtime_state_with_effects(
         RuntimeProjectionRows::BlockedOrPreviouslyBlocked,
         None,
         CLAIM_RUNTIME_PROJECTION_MAX_ATTEMPTS,
+        repair_generation,
     )
 }
 
@@ -1044,9 +1235,13 @@ fn project_runtime_state_with_effects(
     rows: RuntimeProjectionRows,
     only_identity: Option<&agent_doc_element_queue::QueueItemIdentity>,
     max_attempts: usize,
+    repair_generation: u64,
 ) -> Result<bool> {
     let mut wrote_successor = false;
     for attempt in 1..=max_attempts {
+        if queue_repair_generation(file)? != repair_generation {
+            return Err(QueueRuntimeProjectionSuperseded.into());
+        }
         // Start every attempt from the live authority. This first absorbs any
         // operator/editor normalization that raced the ledger transition; the
         // marker overlay below is then rederived by stable work identity.
@@ -1096,12 +1291,18 @@ fn project_runtime_state_with_effects(
             target_content
         };
         if target_content != current {
-            effects.converge_document_or_disk(
+            if queue_repair_generation(file)? != repair_generation {
+                return Err(QueueRuntimeProjectionSuperseded.into());
+            }
+            if !effects.converge_document_or_disk_for_generation(
                 file,
                 &target_content,
                 &current,
                 "queue_claim_runtime_projection",
-            )?;
+                repair_generation,
+            )? {
+                return Err(QueueRuntimeProjectionSuperseded.into());
+            }
             wrote_successor = true;
         }
 
@@ -1136,17 +1337,15 @@ fn project_runtime_state_with_effects(
             .completed_ids
             .is_empty();
         if !settled.changed && active_settled && terminal_todos_settled {
+            if queue_repair_generation(file)? != repair_generation {
+                return Err(QueueRuntimeProjectionSuperseded.into());
+            }
             let accepted = ClaimRuntimeProjection {
                 target_content: authoritative,
                 persisted_heads: settled.persisted_heads,
                 changed: wrote_successor,
             };
-            record_claim_runtime_projection_scoped(
-                file,
-                &accepted,
-                cleared_item,
-                only_identity,
-            )?;
+            record_claim_runtime_projection_scoped(file, &accepted, cleared_item, only_identity)?;
             return Ok(wrote_successor);
         }
         let authority_superseded = authoritative != current;
@@ -1910,6 +2109,24 @@ mod tests {
             Ok(())
         }
 
+        fn converge_document_or_disk_for_generation(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            reason: &str,
+            _generation: u64,
+        ) -> Result<bool> {
+            QueueCommandEffects::converge_document_or_disk(
+                self,
+                file,
+                target_content,
+                source_content,
+                reason,
+            )?;
+            Ok(true)
+        }
+
         fn consume_free_text_queue_prompts_force_disk(
             &self,
             file: &Path,
@@ -2018,6 +2235,24 @@ mod tests {
             Ok(())
         }
 
+        fn converge_document_or_disk_for_generation(
+            &self,
+            file: &Path,
+            target_content: &str,
+            source_content: &str,
+            reason: &str,
+            _generation: u64,
+        ) -> Result<bool> {
+            QueueCommandEffects::converge_document_or_disk(
+                self,
+                file,
+                target_content,
+                source_content,
+                reason,
+            )?;
+            Ok(true)
+        }
+
         fn consume_free_text_queue_prompts_force_disk(
             &self,
             _file: &Path,
@@ -2066,7 +2301,10 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        let effects = FakeEffects::with_current(content);
+        // Exercise the production generation-fenced detached write path. A
+        // synthetic retained editor cut would not observe the controller-owned
+        // disk successor on the next authoritative retry.
+        let effects = FakeEffects::default();
         effects.captured_answered.set(2);
 
         sync_with_effects(&effects, &doc)
@@ -2948,20 +3186,20 @@ mod tests {
             Some(claim.generation),
         )
         .unwrap();
-        project_claim_item_runtime_state_with_effects(
-            &effects,
-            &doc,
-            &claim.item_text,
-            true,
-        )
-        .expect("unrelated drift cannot veto clean requeue projection");
+        project_claim_item_runtime_state_with_effects(&effects, &doc, &claim.item_text, true)
+            .expect("unrelated drift cannot veto clean requeue projection");
         let released = std::fs::read_to_string(&doc).unwrap();
         assert!(released.contains("- 📥 dispatch me\n"), "{released}");
         assert!(
             released.contains("- 🚧 unrelated historical drift\n"),
             "{released}"
         );
-        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty()
+        );
     }
 
     #[test]
@@ -3907,9 +4145,7 @@ mod tests {
                     .set(self.convergence_attempts.get() + 1);
                 // Model an operator edit superseding the repair cut while its
                 // delivery is in flight.
-                self.current
-                    .borrow_mut()
-                    .push_str("\noperator edit wins\n");
+                self.current.borrow_mut().push_str("\noperator edit wins\n");
                 Ok(())
             }
         }
@@ -4088,6 +4324,7 @@ mod tests {
         let request = load_queue_projection_repair_request(&doc)
             .unwrap()
             .expect("superseded projection must enqueue durable repair");
+        assert_eq!(request.generation, 1);
         assert_eq!(request.reason, "clean_slate_projection_superseded");
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("queue_clean_slate_reset_committed"), "{ops}");
@@ -4143,9 +4380,111 @@ mod tests {
         let request = load_queue_projection_repair_request(&doc)
             .unwrap()
             .expect("projection error must enqueue durable repair");
+        assert_eq!(request.generation, 1);
         assert_eq!(request.reason, "clean_slate_projection_error");
         let ops = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops.contains("queue_clean_slate_reset_committed"), "{ops}");
+    }
+
+    #[test]
+    fn pre_reset_self_heal_generation_cannot_write_after_reset() {
+        use std::cell::Cell;
+
+        struct ResetDuringAuthorityRead {
+            current: String,
+            reset: Cell<bool>,
+            writes: Cell<usize>,
+        }
+
+        impl QueueRuntimeProjectionEffects for ResetDuringAuthorityRead {
+            fn current_document_content(&self, file: &Path, _source: &str) -> Result<String> {
+                if !self.reset.replace(true) {
+                    let reset = agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(file)?;
+                    assert_eq!(reset.generation, 1);
+                }
+                Ok(self.current.clone())
+            }
+
+            fn converge_document_or_disk(
+                &self,
+                _file: &Path,
+                _target_content: &str,
+                _source_content: &str,
+                _reason: &str,
+            ) -> Result<()> {
+                self.writes.set(self.writes.get() + 1);
+                Ok(())
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "<!-- agent:queue -->\n- stale marker candidate\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, content).unwrap();
+        let effects = ResetDuringAuthorityRead {
+            current: content.to_string(),
+            reset: Cell::new(false),
+            writes: Cell::new(0),
+        };
+
+        assert_eq!(
+            project_all_queue_runtime_state_once_with_effects(&effects, &doc).unwrap(),
+            QueueRuntimeProjectionOnceOutcome::Superseded
+        );
+        assert_eq!(effects.writes.get(), 0, "old generation must not write");
+        assert_eq!(queue_repair_generation(&doc).unwrap(), 1);
+    }
+
+    #[test]
+    fn old_self_heal_clear_cannot_retire_a_newer_repair_request() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:queue -->\n- generation fence\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+
+        let first =
+            agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
+                .unwrap();
+        assert_eq!(first.generation, 1);
+        assert!(record_queue_projection_repair_request(&doc, 1, "first").unwrap());
+        let second =
+            agent_doc_controller_io::project_controller::queue_clean_slate_reset_for_file(&doc)
+                .unwrap();
+        assert_eq!(second.generation, 2);
+        assert!(record_queue_projection_repair_request(&doc, 2, "second").unwrap());
+
+        let source = std::fs::read_to_string(&doc).unwrap();
+        let stale_target = source.replace("generation fence", "stale generation marker");
+        assert_eq!(
+            agent_doc_controller_io::project_controller::converge_queue_projection_for_generation(
+                &doc,
+                &stale_target,
+                &source,
+                "stale_generation_test",
+                1,
+            )
+            .unwrap(),
+            agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Superseded,
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), source);
+
+        assert!(!clear_queue_projection_repair_request(&doc, 1).unwrap());
+        let request = load_queue_projection_repair_request(&doc)
+            .unwrap()
+            .expect("new request must survive old worker settlement");
+        assert_eq!(request.generation, 2);
+        assert_eq!(request.reason, "second");
+        assert!(clear_queue_projection_repair_request(&doc, 2).unwrap());
+        assert!(
+            load_queue_projection_repair_request(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

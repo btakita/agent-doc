@@ -525,6 +525,31 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
         agent_doc_document_realtime_io::invalidate_current_document_projection(file);
         Ok(())
     }
+
+    fn converge_document_or_disk_for_generation(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+        generation: u64,
+    ) -> anyhow::Result<bool> {
+        self.ensure_active()?;
+        let applied = matches!(
+            agent_doc_controller_io::project_controller::converge_queue_projection_for_generation(
+                file,
+                target_content,
+                source_content,
+                reason,
+                generation,
+            )?,
+            agent_doc_controller_io::project_controller::QueueProjectionGenerationWriteOutcome::Applied
+        );
+        if applied {
+            agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        }
+        Ok(applied)
+    }
 }
 
 struct CapturedFinalizeResumeRetry {
@@ -585,6 +610,7 @@ struct DocumentDeliverySignal {
 #[derive(Debug)]
 struct QueueProjectionSelfHealWorkerOutcome {
     projection: agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome,
+    generation: u64,
     /// Controller delivery frontier observed after the projection attempt
     /// returned. A superseded attempt owns every delivery edge through this
     /// cursor; only a strictly newer edge may re-arm repair.
@@ -829,14 +855,18 @@ fn spawn_queue_projection_self_heal_worker(
         .name("queue-projection-self-heal".into())
         .spawn(move || {
             let projection_cancel = Arc::clone(&worker_cancel);
-            let projection =
-                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_with_effects(
+            let run =
+                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_run_with_effects(
                     &IdleQueueProjectionSelfHealEffects {
                         cancel: worker_cancel,
                     },
                     &file,
                 );
-            let outcome = projection.map(|projection| {
+            let outcome = run.map(|run| {
+                let agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionRun {
+                    outcome: projection,
+                    generation,
+                } = run;
                 let terminal_delivery_cursor = matches!(
                     projection,
                     agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded
@@ -860,6 +890,7 @@ fn spawn_queue_projection_self_heal_worker(
                 .flatten();
                 QueueProjectionSelfHealWorkerOutcome {
                     projection,
+                    generation,
                     terminal_delivery_cursor,
                 }
             });
@@ -2830,13 +2861,17 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Settled {
                             changed,
                         },
+                    generation,
                     ..
                 })) => {
                     queue_projection_self_heal_worker = None;
                     queue_projection_self_heal_retry_at = None;
                     queue_projection_self_heal_superseded_through = None;
                     if let Err(error) =
-                        agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(&path)
+                        agent_doc_queue_io::queue_cmd::clear_queue_projection_repair_request(
+                            &path,
+                            generation,
+                        )
                     {
                         agent_doc_ops_log_io::log_op(
                             &path,
@@ -2862,6 +2897,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     projection:
                         agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded,
                     terminal_delivery_cursor: Some(terminal_delivery_cursor),
+                    ..
                 })) => {
                     queue_projection_self_heal_worker = None;
                     // The operator's newer cut is authoritative. End this
@@ -2889,6 +2925,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     projection:
                         agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded,
                     terminal_delivery_cursor: None,
+                    ..
                 })) => {
                     queue_projection_self_heal_worker = None;
                     queue_projection_self_heal_due = false;

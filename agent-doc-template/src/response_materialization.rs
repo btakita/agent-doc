@@ -315,13 +315,15 @@ pub fn response_text_has_heading(text: &str) -> bool {
 /// Canonicalize a semantically complete strict-closeout response before it is
 /// captured. This is the production owner of response-heading materialization:
 /// agents author model attribution and timestamps from the preflight contract,
-/// while this function preserves that complete heading byte-for-byte on the
+/// while this function preserves a canonical H3 heading byte-for-byte on the
 /// write path. Agents often use a descriptive leading heading such as `### Plan:`;
 /// requiring a retry solely to rename that heading creates a new closeout attempt
 /// without adding response information.
 ///
-/// Existing `Re:` headings are preserved byte-for-byte. A leading Markdown
-/// heading in `patch:exchange` (or unmatched response text) is relabeled, while
+/// Existing canonical `### Re:` headings are preserved byte-for-byte. An
+/// assistant-owned `## Re:` or `#### Re:` through `###### Re:` heading is
+/// normalized to H3 outside code fences. A leading Markdown heading in
+/// `patch:exchange` (or unmatched response text) is relabeled, while
 /// body-only prose receives a small canonical heading. Empty response shells and
 /// non-exchange patchbacks are left untouched so the ordinary strict validators
 /// still reject them.

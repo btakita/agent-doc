@@ -1,4 +1,4 @@
-.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check jetbrains-keystroke-bench tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
+.PHONY: build build-release release release-check release-preflight release-macos-assets release-macos-cadence-check release-version release-macos-coverage-check audit-docs test sim-medium sim-net sim-fuzz cross-editor-simworld editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check jetbrains-keystroke-bench tmux-ci clippy check check-fast dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test git-env-isolation-self-test build-priority-probe python-compat-check artifact-purge-check preview-artifact-check verify-jetbrains-262-preview precommit pypi-quota-check pypi-quota-self-test homebrew-formula-self-test timings install install-full install-editor-plugins editor-generation-bump cleanup-build-artifacts install-hooks clean init-python python-bootstrap-test wheel publish publish-pypi bump-plugin bump-plugin-262 version-sync dev-harness-test lean tla tla-runner-self-test fuzz
 
 # `#tmuxscopesteward`: tmux built with systemd support (e.g. Arch/CachyOS tmux
 # 3.8) asks the systemd user manager for one transient `tmux-spawn-<uuid>.scope`
@@ -53,7 +53,12 @@ CARGO_TARGET_DIR_ABS := $(abspath $(if $(strip $(CARGO_TARGET_DIR)),$(CARGO_TARG
 CARGO_INSTALL_BIN_DIR_ABS := $(abspath $(if $(strip $(CARGO_INSTALL_ROOT)),$(CARGO_INSTALL_ROOT)/bin,$(if $(strip $(CARGO_HOME)),$(CARGO_HOME)/bin,$(if $(strip $(HOME)),$(HOME)/.cargo/bin,$(USERPROFILE)/.cargo/bin))))
 AGENT_DOC_TEST_TMPDIR ?= $(if $(strip $(TMPDIR)),$(TMPDIR),$(shell if test -d /var/tmp && test -w /var/tmp; then printf '%s' /var/tmp; else printf '%s' /tmp; fi))
 VSCODE_NODE_LOCK := editors/vscode/node_modules/.package-lock.json
-CARGO_CLEAN_ENV = env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE
+# `#testgitenvisolation`: Git's `local_repo_env` (`git rev-parse --local-env-vars`),
+# the same list `.cargo/config.toml`'s runner removes. An inherited GIT_DIR (from
+# `git bisect run`, `git rebase --exec`, or a hook) makes a fixture's `git init` /
+# `git config` rewrite the REAL repository; see git-env-isolation-self-test.
+GIT_LOCAL_REPO_ENV := GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_CONFIG GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_GRAFT_FILE GIT_IMPLICIT_WORK_TREE GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS GIT_OBJECT_DIRECTORY GIT_PREFIX GIT_REPLACE_REF_BASE GIT_SHALLOW_FILE GIT_WORK_TREE
+CARGO_CLEAN_ENV = env $(foreach var,$(GIT_LOCAL_REPO_ENV),-u $(var))
 CARGO_CMD ?= ./scripts/with-cargo-cache cargo
 NEXTEST_QUIET_FLAGS ?= --cargo-quiet --show-progress none --status-level fail --final-status-level fail --failure-output immediate-final --success-output never
 BATCHED_TEST_PACKAGES := agent-doc-controller agent-doc-controller-io agent-doc-route-io agent-doc-session-check-io agent-doc-start-runtime-io
@@ -473,6 +478,39 @@ jetbrains-repository-self-test:
 build-priority-self-test:
 	@python3 scripts/build-priority.py --self-test
 
+# `#testgitenvisolation`: run a fixture-shaped test (git init + git config in a
+# tempdir) through plain `cargo test` -- NOT CARGO_CLEAN_ENV -- with GIT_DIR and
+# GIT_WORK_TREE aimed at a sentinel repository, exactly as `git bisect run` from
+# a linked worktree exports them. The sentinel's config must be byte-identical
+# afterwards, and the runner must still cover every variable Git lists (older
+# or newer Git may list a different set, so this is a superset check).
+git-env-isolation-self-test:
+	@expected="$$(git rev-parse --local-env-vars | sort | tr '\n' ' ')"; \
+	runner="$$(sed -n 's/^ *"-u", "\(GIT_[A-Z_]*\)",$$/\1/p' .cargo/config.toml | sort | tr '\n' ' ')"; \
+	make_list="$$(printf '%s\n' $(GIT_LOCAL_REPO_ENV) | sort | tr '\n' ' ')"; \
+	if [ "$$runner" != "$$make_list" ]; then \
+		echo "error: .cargo/config.toml runner [$$runner] != Makefile GIT_LOCAL_REPO_ENV [$$make_list] (#testgitenvisolation)" >&2; \
+		exit 1; \
+	fi; \
+	for var in $$expected; do \
+		case " $$runner" in *" $$var "*) ;; *) \
+			echo "error: git rev-parse --local-env-vars lists $$var but the .cargo/config.toml runner does not remove it (#testgitenvisolation)" >&2; \
+			exit 1;; \
+		esac; \
+	done; \
+	sentinel="$$(mktemp -d "$${TMPDIR:-/tmp}/agent-doc-git-env-sentinel.XXXXXX")"; \
+	$(CARGO_CLEAN_ENV) git init -q "$$sentinel/repo"; \
+	before="$$(cksum < "$$sentinel/repo/.git/config")"; \
+	GIT_DIR="$$sentinel/repo/.git" GIT_WORK_TREE="$$sentinel/repo" $(CARGO_CMD) test --quiet -p agent-doc-git-io --test inherited_git_env_isolation; \
+	status=$$?; \
+	after="$$(cksum < "$$sentinel/repo/.git/config")"; \
+	rm -rf "$$sentinel"; \
+	if [ $$status -ne 0 ] || [ "$$before" != "$$after" ]; then \
+		if [ "$$before" != "$$after" ]; then changed=yes; else changed=no; fi; \
+		echo "error: a test process inherited GIT_DIR aimed at a sentinel repository (test status=$$status, sentinel config rewritten=$$changed) (#testgitenvisolation)" >&2; \
+		exit 1; \
+	fi
+
 # Report what a recipe actually runs under (read by build-priority-self-test).
 build-priority-probe:
 	@echo "priority=$(BUILD_PRIORITY_STATUS)"
@@ -487,10 +525,10 @@ build-priority-probe:
 
 # Fast edit-loop validation: helper checks plus Rust packages affected by the
 # diff and their reverse-dependency closure. This is not a release proof.
-check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test
+check-fast: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test git-env-isolation-self-test
 	@python3 scripts/dev-check.py run
 
-check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
+check: python-compat-check plugin-version-check artifact-purge-check preview-artifact-check pypi-quota-self-test homebrew-formula-self-test dev-check-self-test release-driver-self-test release-publication-self-test target-stable-channel-self-test installer-self-test jetbrains-repository-self-test build-priority-self-test git-env-isolation-self-test clippy test sim-medium sim-net version-sync audit-docs editor-parity jetbrains-classic-check jetbrains-262-check jetbrains-263-check python-bootstrap-test lean tla-runner-self-test tla
 	@AGENT_DOC_FULL_CHECK_SUCCEEDED=1 python3 scripts/dev-check.py record-full-check
 
 # Target-specific, so it reaches the `audit-docs` prerequisite of `check` only.

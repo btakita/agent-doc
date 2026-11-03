@@ -14,7 +14,10 @@ tmp/
 # Rust
 target/
 .bin/
-.cargo/
+# Local Cargo config stays untracked; the tracked `#testgitenvisolation`
+# runner is the one exception.
+.cargo/*
+!.cargo/config.toml
 
 # Python packaging
 .venv/

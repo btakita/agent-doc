@@ -2033,25 +2033,19 @@ fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
                 match agent_doc_element_queue::queue_head_identity(&prompt.text) {
                     agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
-                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => {
-                        // Canonical operator-request projection rewrites legacy
-                        // `🙋 [#request] text` as `🙋 text [#request]`. The
-                        // trailing id is still the same binary-owned row
-                        // identity, not incidental prose. Keep the primary
-                        // queue-head id above when one exists (`do [#work] ...
-                        // [#request]`); otherwise use the one active request id
-                        // recognized by the shared projection parser.
-                        let request_ids =
-                            agent_doc_document::queue_projection::operator_action_ids(
-                                &prompt.text,
-                            );
-                        (request_ids.len() == 1).then(|| request_ids[0].clone())
-                    }
+                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
                 }
             }
             _ => None,
         })
         .collect()
+}
+
+fn queue_entry_prompt_text(entry: &QueueEntry) -> Option<&str> {
+    match entry {
+        QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => Some(&prompt.text),
+        _ => None,
+    }
 }
 
 fn validate_in_progress_marker_projection(
@@ -2066,22 +2060,43 @@ fn validate_in_progress_marker_projection(
     );
     let before_ids = tracked_prompt_ids_by_entry(before);
     let after_ids = tracked_prompt_ids_by_entry(after);
-    if before_ids != after_ids {
-        let mismatch = before_ids
+    let request_identity_bridge =
+        |index: usize, before_id: &Option<String>, after_id: &Option<String>| {
+            let before_request_ids = before
+                .get(index)
+                .and_then(queue_entry_prompt_text)
+                .map(agent_doc_document::queue_projection::operator_action_ids)
+                .unwrap_or_default();
+            let after_request_ids = after
+                .get(index)
+                .and_then(queue_entry_prompt_text)
+                .map(agent_doc_document::queue_projection::operator_action_ids)
+                .unwrap_or_default();
+            let bridged_id = match (before_id, after_id) {
+                (Some(id), None) | (None, Some(id)) => id,
+                _ => return false,
+            };
+            // A canonical operator-request projection may move its binary-owned
+            // request id from queue-head position to a trailing annotation. Treat
+            // that as the same row only when the shared request parser sees the
+            // exact id on both sides. A newly appended request id on an otherwise
+            // free-text row never becomes its primary queue identity.
+            before_request_ids.iter().any(|id| id == bridged_id)
+                && after_request_ids.iter().any(|id| id == bridged_id)
+        };
+    let mismatch =
+        before_ids
             .iter()
             .zip(&after_ids)
             .enumerate()
-            .find(|(_, (before, after))| before != after)
-            .map(|(index, (before_id, after_id))| {
-                format!(
-                    "index={index} before_id={before_id:?} after_id={after_id:?} before={:?} after={:?}",
-                    before.get(index),
-                    after.get(index),
-                )
-            })
-            .unwrap_or_else(|| "identity vector length changed".to_string());
+            .find(|(index, (before_id, after_id))| {
+                before_id != after_id && !request_identity_bridge(*index, before_id, after_id)
+            });
+    if let Some((index, (before_id, after_id))) = mismatch {
         anyhow::bail!(
-            "queue in-progress marker projection moved or buried a tracked [#id] row: {mismatch}"
+            "queue in-progress marker projection moved or buried a tracked [#id] row: index={index} before_id={before_id:?} after_id={after_id:?} before={:?} after={:?}",
+            before.get(index),
+            after.get(index),
         );
     }
     anyhow::ensure!(
@@ -7408,8 +7423,11 @@ mod tests {
         validate_in_progress_marker_projection(&before, &after)
             .expect("canonical request-id placement must be marker-invariant");
         assert_eq!(
-            tracked_prompt_ids_by_entry(&before),
-            tracked_prompt_ids_by_entry(&after)
+            agent_doc_document::queue_projection::operator_action_ids(match &after[0] {
+                QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => &prompt.text,
+                _ => unreachable!("fixture is a prompt"),
+            }),
+            vec!["subagent-operator-request-slack-stg-rollout".to_string()]
         );
     }
 

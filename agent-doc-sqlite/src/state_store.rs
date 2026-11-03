@@ -415,6 +415,153 @@ pub fn open_state_db_for_event_ingress_with_timeout(
     Ok(conn)
 }
 
+const DOCUMENT_AUTHORITY_HANDOFF_DB_FILE: &str = "document-authority-handoff.db";
+const DOCUMENT_AUTHORITY_HANDOFF_BUSY_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentAuthorityHandoff {
+    pub document_hash: String,
+    pub authority_epoch: u64,
+    pub controller_generation: u64,
+    pub payload_json: String,
+}
+
+pub fn document_authority_handoff_db_path(project_root: &Path) -> PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join(DOCUMENT_AUTHORITY_HANDOFF_DB_FILE)
+}
+
+fn open_document_authority_handoff_db(project_root: &Path) -> Result<Connection> {
+    let path = document_authority_handoff_db_path(project_root);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let conn = Connection::open(&path)
+        .with_context(|| format!("open document-authority handoff {}", path.display()))?;
+    conn.busy_timeout(DOCUMENT_AUTHORITY_HANDOFF_BUSY_TIMEOUT)?;
+    conn.execute_batch(
+        r#"
+        PRAGMA journal_mode = WAL;
+        CREATE TABLE IF NOT EXISTS document_authority_handoffs (
+            document_hash TEXT PRIMARY KEY,
+            authority_epoch INTEGER NOT NULL,
+            controller_generation INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        "#,
+    )?;
+    Ok(conn)
+}
+
+/// Durably retain the newest authority observation for one document.
+///
+/// This database is intentionally separate from `state.db`: accepting a
+/// telemetry handoff must not wait behind state-ledger maintenance. Generation
+/// never moves backwards, so an in-flight predecessor cannot reclaim a row a
+/// promoted successor already owns.
+pub fn enqueue_document_authority_handoff(
+    project_root: &Path,
+    handoff: &DocumentAuthorityHandoff,
+) -> Result<bool> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    let changed = conn.execute(
+        r#"
+        INSERT INTO document_authority_handoffs (
+            document_hash,
+            authority_epoch,
+            controller_generation,
+            payload_json,
+            updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(document_hash) DO UPDATE SET
+            authority_epoch = excluded.authority_epoch,
+            controller_generation = MAX(
+                document_authority_handoffs.controller_generation,
+                excluded.controller_generation
+            ),
+            payload_json = excluded.payload_json,
+            updated_at = excluded.updated_at
+        WHERE excluded.authority_epoch >= document_authority_handoffs.authority_epoch
+        "#,
+        params![
+            handoff.document_hash,
+            sqlite_i64(handoff.authority_epoch, "authority handoff epoch")?,
+            sqlite_i64(
+                handoff.controller_generation,
+                "authority handoff controller generation"
+            )?,
+            handoff.payload_json,
+            sqlite_i64(timestamp_secs(), "authority handoff timestamp")?,
+        ],
+    )?;
+    Ok(changed > 0)
+}
+
+pub fn load_document_authority_handoffs(
+    project_root: &Path,
+) -> Result<Vec<DocumentAuthorityHandoff>> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    let mut statement = conn.prepare(
+        "SELECT document_hash, authority_epoch, controller_generation, payload_json \
+         FROM document_authority_handoffs ORDER BY document_hash",
+    )?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(DocumentAuthorityHandoff {
+                document_hash: row.get(0)?,
+                authority_epoch: row.get::<_, i64>(1)?.max(0) as u64,
+                controller_generation: row.get::<_, i64>(2)?.max(0) as u64,
+                payload_json: row.get(3)?,
+            })
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn claim_document_authority_handoff(
+    project_root: &Path,
+    document_hash: &str,
+    authority_epoch: u64,
+    controller_generation: u64,
+) -> Result<bool> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    Ok(conn.execute(
+        "UPDATE document_authority_handoffs SET controller_generation = ?3 \
+         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation <= ?3",
+        params![
+            document_hash,
+            sqlite_i64(authority_epoch, "authority handoff epoch")?,
+            sqlite_i64(
+                controller_generation,
+                "authority handoff controller generation"
+            )?,
+        ],
+    )? > 0)
+}
+
+pub fn acknowledge_document_authority_handoff(
+    project_root: &Path,
+    document_hash: &str,
+    authority_epoch: u64,
+    controller_generation: u64,
+) -> Result<bool> {
+    let conn = open_document_authority_handoff_db(project_root)?;
+    Ok(conn.execute(
+        "DELETE FROM document_authority_handoffs \
+         WHERE document_hash = ?1 AND authority_epoch = ?2 AND controller_generation = ?3",
+        params![
+            document_hash,
+            sqlite_i64(authority_epoch, "authority handoff epoch")?,
+            sqlite_i64(
+                controller_generation,
+                "authority handoff controller generation"
+            )?,
+        ],
+    )? > 0)
+}
+
 /// Open the authoritative state database with a caller-owned contention bound.
 ///
 /// Latency-sensitive optional projections use this instead of inheriting the
@@ -10149,6 +10296,61 @@ mod tests {
             }),
             "state-event version assignment must seek the per-document high-water index, plan: {plan:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn authority_handoff_keeps_latest_and_successor_generation_owns_ack() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let handoff = |authority_epoch, controller_generation, payload_json: &str| {
+            DocumentAuthorityHandoff {
+                document_hash: "doc".to_string(),
+                authority_epoch,
+                controller_generation,
+                payload_json: payload_json.to_string(),
+            }
+        };
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &handoff(10, 1, "old")
+        )?);
+        assert!(!enqueue_document_authority_handoff(
+            dir.path(),
+            &handoff(9, 1, "stale")
+        )?);
+        assert!(claim_document_authority_handoff(
+            dir.path(),
+            "doc",
+            10,
+            2
+        )?);
+        assert!(enqueue_document_authority_handoff(
+            dir.path(),
+            &handoff(11, 1, "new-from-predecessor")
+        )?);
+
+        let retained = load_document_authority_handoffs(dir.path())?;
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0], handoff(11, 2, "new-from-predecessor"));
+        assert!(!claim_document_authority_handoff(
+            dir.path(),
+            "doc",
+            11,
+            1
+        )?);
+        assert!(!acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            11,
+            1
+        )?);
+        assert!(acknowledge_document_authority_handoff(
+            dir.path(),
+            "doc",
+            11,
+            2
+        )?);
+        assert!(load_document_authority_handoffs(dir.path())?.is_empty());
         Ok(())
     }
 

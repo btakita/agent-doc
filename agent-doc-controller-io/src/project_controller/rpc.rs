@@ -4559,6 +4559,38 @@ pub fn publish_state_event(
     })
 }
 
+/// Durably hand one latest-value authority observation to the long-lived
+/// project controller. The short-lived caller waits only for the separate
+/// handoff ledger, never for the main state ledger or its projection effects.
+pub fn enqueue_document_authority_state_event(
+    project_root: &Path,
+    event: &agent_doc_state_backbone::StateEvent,
+) -> Result<bool> {
+    anyhow::ensure!(
+        document_authority_epoch(event).is_some(),
+        "authority handoff accepts only document_authority_observed facts"
+    );
+    let request = ControllerRequest {
+        command: "document_authority_handoff".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("document_authority_source".to_string()),
+        reason: Some("latest_authority_handoff".to_string()),
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(event)?),
+        sequence: None,
+    };
+    retry_state_event_deadline(project_root, || {
+        request_controller_with_timeout(project_root, request.clone(), CONTROLLER_RPC_TIMEOUT)
+    })
+}
+
 /// Publish a typed fact only when this project already has a live controller.
 ///
 /// Passive editor ingress and isolated tests use this form when they must not
@@ -22346,6 +22378,9 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "document_authority_handoff" => controller_envelope(
+            handle_document_authority_handoff(&bootstrap_snapshot, runtime.as_ref(), request),
+        ),
         "editor_op_capture_update" => controller_envelope(handle_editor_op_capture_update(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -24599,6 +24634,30 @@ pub(crate) fn handle_state_event_append(
     let event: agent_doc_state_backbone::StateEvent =
         serde_json::from_str(&payload_json).context("parse state actor append payload")?;
     ingest_state_event(bootstrap, runtime, event)
+}
+
+fn handle_document_authority_handoff(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let event: agent_doc_state_backbone::StateEvent =
+        serde_json::from_str(&payload_json).context("parse document-authority handoff payload")?;
+    let authority_epoch = document_authority_epoch(&event)
+        .context("document-authority handoff requires document_authority_observed")?;
+    let changed = state_store::enqueue_document_authority_handoff(
+        &bootstrap.project_root,
+        &state_store::DocumentAuthorityHandoff {
+            document_hash: event.document_hash().to_string(),
+            authority_epoch,
+            controller_generation: bootstrap.controller_generation,
+            payload_json,
+        },
+    )?;
+    runtime.note_pending_document_authority_handoff(event);
+    runtime.wake_document_authority_handoff_worker();
+    Ok(changed)
 }
 
 /// Shared authority for external RPC and controller-local event producers.
@@ -56959,6 +57018,155 @@ mod tests {
                 .as_ref()
                 .map(|intent| intent.intent_id.as_str()),
             Some("intent-reactive-ingress")
+        );
+    }
+
+    fn authority_handoff_test_event(
+        event_id: &str,
+        document_hash: &str,
+        authority_epoch: u64,
+    ) -> agent_doc_state_backbone::StateEvent {
+        agent_doc_state_backbone::StateEvent::new(
+            event_id,
+            agent_doc_state_backbone::StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.to_string(),
+                authority: agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+                authority_epoch,
+                source: "authority-handoff-test".to_string(),
+                reason: "relay_current".to_string(),
+                content_hash: Some(format!("cut-{authority_epoch}")),
+                editor_id: Some("editor-1".to_string()),
+            },
+        )
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn short_lived_client_handoff_is_durable_before_controller_apply() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let _actor = start_state_actor_for_tests(dir.path()).unwrap();
+        let event = authority_handoff_test_event("authority-short-client", "doc", 101);
+        let writer = open_state_db(dir.path()).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+
+        assert!(enqueue_document_authority_state_event(dir.path(), &event).unwrap());
+        assert_eq!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .len(),
+            1,
+            "the RPC returns only after a client-independent durable handoff exists"
+        );
+        assert!(
+            load_state_event_ledger(dir.path())
+                .unwrap()
+                .events()
+                .iter()
+                .all(|stored| stored.event_id != event.event_id),
+            "the fixture's state.db lock proves the client did not wait for main-ledger apply"
+        );
+        writer.execute_batch("ROLLBACK").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let ledger = load_state_event_ledger(dir.path()).unwrap();
+            if ledger
+                .events()
+                .iter()
+                .any(|stored| stored.event_id == event.event_id)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the controller must fold the durable handoff after the client returns"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty(),
+            "the controller acknowledges the handoff only after durable state apply"
+        );
+    }
+
+    #[test]
+    fn successor_recovers_authority_handoff_after_state_db_contention() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let writer = open_state_db(dir.path()).unwrap();
+        writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let event = authority_handoff_test_event("authority-restart-retry", "doc", 202);
+        let request = ControllerRequest {
+            command: "document_authority_handoff".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("short-lived-test-client".to_string()),
+            reason: Some("restart-retry".to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&event).unwrap()),
+            sequence: None,
+        };
+        assert!(handle_document_authority_handoff(&bootstrap, &runtime, request).unwrap());
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .len(),
+            1,
+            "state.db contention retains the separate durable handoff"
+        );
+        assert_eq!(
+            runtime
+                .document_state_projection("doc")
+                .unwrap()
+                .and_then(|projection| projection.document.latest_authority)
+                .map(|authority| authority.authority),
+            Some(agent_doc_state_backbone::DocumentAuthority::EditorRelay),
+            "the durable pending handoff must fail closed against detached-disk fallback"
+        );
+        runtime.retire_after_successor_promotion();
+        drop(runtime);
+        writer.execute_batch("ROLLBACK").unwrap();
+
+        let successor = ControllerRuntime::new_arc(ControllerBootstrap {
+            controller_generation: 2,
+            previous_controller_pid: None,
+            ..bootstrap
+        })
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let projection = successor.document_state_projection("doc").unwrap();
+            let projected = projection.as_ref().is_some_and(|projection| {
+                projection.document.latest_authority.as_ref().is_some_and(
+                    |authority| authority.authority_epoch == 202,
+                )
+            });
+            if projected
+                && state_store::load_document_authority_handoffs(dir.path())
+                    .unwrap()
+                    .is_empty()
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the successor must claim and apply its predecessor's durable handoff"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            state_store::load_document_authority_handoffs(dir.path())
+                .unwrap()
+                .is_empty()
         );
     }
 

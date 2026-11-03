@@ -6520,8 +6520,11 @@ mod supervisor_scope_claim_tests {
 
 #[cfg(test)]
 mod response_debt_scope_tests {
-    use super::response_debt_blocks_current_closeout_facts;
+    use super::{
+        report_coordinator_action_required, response_debt_blocks_current_closeout_facts,
+    };
     use agent_doc_queue::queue_sync_payload::QueueSyncDocumentScope::{Current, Related};
+    use std::path::Path;
 
     #[test]
     fn preexisting_related_response_debt_does_not_fail_committed_child_closeout() {
@@ -6541,5 +6544,41 @@ mod response_debt_scope_tests {
         assert!(!response_debt_blocks_current_closeout_facts(
             Current, false, false
         ));
+    }
+
+    /// Exercise the actual terminal reporter with the live project-payload and
+    /// coordinator-drain types. A committed child closeout may expose a large
+    /// amount of unchanged historical response/queue debt from sibling session
+    /// documents; that debt stays visible for coordination but cannot turn the
+    /// already-successful child commit into exit status 1.
+    #[test]
+    fn terminal_report_accepts_unchanged_related_missing_responses_and_queue_debt() {
+        let rows = (0..25)
+            .map(|index| format!("- ☑️ historical report {index}\n"))
+            .collect::<String>();
+        let content = format!("<!-- agent:run id=main -->\n{rows}<!-- /agent:run -->\n");
+        let mut snapshot = agent_doc_queue::queue_sync_payload::project_document_queue_sync(
+            "sibling-session.md",
+            Related,
+            &content,
+            Some(&content),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(snapshot.reported_checkmark.len(), 25);
+        for item in &mut snapshot.reported_checkmark {
+            assert!(item.incomplete_since_previous_turn);
+            item.missing_response_debt = true;
+            item.response_evidence =
+                agent_doc_queue::queue_sync_payload::QueueSyncResponseEvidence::Missing;
+        }
+        let decision = agent_doc_queue::coordinator_drain::observe_coordinator_drain(
+            &Default::default(),
+            &snapshot,
+        )
+        .expect("reported rows require coordinator action");
+
+        report_coordinator_action_required(Path::new("committed-child.md"), &decision, false)
+            .expect("historical sibling debt must not retroactively fail the child closeout");
     }
 }

@@ -1110,7 +1110,7 @@ operator-owned scratch state\n\
     #[test]
     fn prompt_component_subagent_flags_are_valid_bare_attributes() {
         let dir = TempDir::new().unwrap();
-        for attribute in ["subagents", "fan-out"] {
+        for attribute in ["subagents", "subagent", "fan-out"] {
             let doc = format!(
                 "---\nagent_doc_session: test\n---\n\n\
                  <!-- agent:exchange -->\n\
@@ -1135,6 +1135,30 @@ operator-owned scratch state\n\
             run(&exchange_file, None).unwrap_or_else(|error| {
                 panic!("bare exchange flag `{attribute}` must pass lint: {error:#}")
             });
+        }
+    }
+
+    #[test]
+    fn subagent_marker_near_misses_still_fail_closed() {
+        let dir = TempDir::new().unwrap();
+        for attribute in ["subagnt", "sub-agent", "subagentx", "fanout", "fan_out"] {
+            let doc = format!(
+                "---\nagent_doc_session: test\n---\n\n\
+                 <!-- agent:exchange -->\n\
+                 prompt\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue {attribute} -->\n\
+                 - do [#a]\n\
+                 <!-- /agent:queue -->\n"
+            );
+            let file = write_doc(&dir, &format!("near-miss-{attribute}.md"), &doc);
+            let error = run(&file, None).expect_err("near-miss must remain a lint blocker");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("agent-doc/unknown-attr")
+                    || message.contains("agent-doc/malformed-attr"),
+                "{attribute}: {message}"
+            );
         }
     }
 

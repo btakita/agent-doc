@@ -1010,8 +1010,14 @@ pub struct QueueSubagentDispatch {
 pub struct QueueSubagentLifecycleContract {
     pub sequence: Vec<String>,
     pub claim_must_succeed_before_spawn: bool,
+    #[serde(default = "required_lifecycle_receipt")]
+    pub start_receipt_required_after_spawn: bool,
     pub claimed_state: String,
     pub running_state: String,
+}
+
+fn required_lifecycle_receipt() -> bool {
+    true
 }
 
 impl QueueSubagentLifecycleContract {
@@ -1023,6 +1029,7 @@ impl QueueSubagentLifecycleContract {
                 "start".to_string(),
             ],
             claim_must_succeed_before_spawn: true,
+            start_receipt_required_after_spawn: true,
             claimed_state: "claimed".to_string(),
             running_state: "running".to_string(),
         }
@@ -12076,12 +12083,17 @@ mod tests {
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("failed or skipped claim forbids spawn"));
         assert_eq!(entries[0].lifecycle.sequence, ["claim", "spawn", "start"]);
         assert!(entries[0].lifecycle.claim_must_succeed_before_spawn);
+        assert!(entries[0].lifecycle.start_receipt_required_after_spawn);
         assert_eq!(entries[0].lifecycle.claimed_state, "claimed");
         assert_eq!(entries[0].lifecycle.running_state, "running");
         let mut legacy_json = serde_json::to_value(&entries[0]).unwrap();
         assert_eq!(
             legacy_json["lifecycle"]["sequence"],
             serde_json::json!(["claim", "spawn", "start"])
+        );
+        assert_eq!(
+            legacy_json["lifecycle"]["start_receipt_required_after_spawn"],
+            true
         );
         legacy_json.as_object_mut().unwrap().remove("lifecycle");
         let legacy: QueueSubagentDispatch = serde_json::from_value(legacy_json).unwrap();

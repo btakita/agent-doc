@@ -1822,6 +1822,34 @@ Done.
     }
 
     #[test]
+    fn connected_plan_preserves_singular_subagent_marker_ownership() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content =
+            subagents_queue_doc().replace("priority subagents go", "priority subagent go");
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.task_class, "queue_subagent_dispatch");
+        assert_eq!(plan.queue_subagent_dispatch.len(), 2);
+        assert!(plan.prompt_targets.is_empty(), "{:#?}", plan.prompt_targets);
+        assert!(plan.queue_subagent_dispatch.iter().all(|entry| {
+            entry.lifecycle.claim_must_succeed_before_spawn
+                && entry.lifecycle.start_receipt_required_after_spawn
+                && entry.lifecycle.sequence == ["claim", "spawn", "start"]
+        }));
+    }
+
+    #[test]
     fn connected_plan_keeps_new_subagent_heads_out_of_inline_targets() {
         let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
         let dir = setup_project();

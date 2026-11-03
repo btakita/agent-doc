@@ -5765,17 +5765,36 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     // refuses closeout over it. Left unacknowledged, this test passed only when
     // it finished within 10s of wall clock, and failed under a loaded
     // `make check-fast`.
-    let (_, setup_claim) =
-        agent_doc_queue_io::queue_claim::claim(&doc, setup, "subagent:setup", 3600).unwrap();
-    agent_doc_queue_io::queue_claim::start_attempt(
-        &doc,
-        setup,
-        "subagent:setup",
-        "worker:setup",
-        3600,
-        setup_claim.generation,
-    )
-    .unwrap();
+    agent_doc_at_claim_clock(claim_clock)
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "claim",
+            doc.to_str().unwrap(),
+            "--item",
+            setup,
+            "--owner",
+            "subagent:setup",
+        ])
+        .assert()
+        .success();
+    agent_doc_at_claim_clock(claim_clock)
+        .current_dir(tmp.path())
+        .args([
+            "queue",
+            "start",
+            doc.to_str().unwrap(),
+            "--item",
+            setup,
+            "--owner",
+            "subagent:setup",
+            "--generation",
+            "1",
+            "--worker-id",
+            "worker:setup",
+        ])
+        .assert()
+        .success();
     agent_doc_at_claim_clock(claim_clock)
         .current_dir(tmp.path())
         .args(["finalize", doc.to_str().unwrap(), "--stream", "--origin", "skill"])
@@ -5791,8 +5810,10 @@ fn finalize_strikes_a_mid_turn_head_whose_reported_worker_was_released() {
     // claim is dispatching (`🟡`); only a generation-matched refresh/start
     // receipt can truthfully advance it to running (`🚧`).
     let current = fs::read_to_string(&doc).unwrap().replace(
-        &format!("- {setup}\n<!-- /agent:queue -->"),
-        &format!("- {setup}\n- {question}\n<!-- /agent:queue -->"),
+        &format!("- 🚧 [#subagent:setup#1] {setup}\n<!-- /agent:queue -->"),
+        &format!(
+            "- 🚧 [#subagent:setup#1] {setup}\n- {question}\n<!-- /agent:queue -->"
+        ),
     );
     fs::write(&doc, &current).unwrap();
     agent_doc_at_claim_clock(claim_clock)

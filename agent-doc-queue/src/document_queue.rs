@@ -4410,7 +4410,16 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
     if bare.trim().is_empty() {
         return None;
     }
-    if entry_is_group_parent(entries, index) || row_is_tracked_directive(&bare) {
+    // A generated stable q-id is an occurrence annotation, not authored
+    // tracked-work syntax. Classifying the full projected row after stripping
+    // its leading intent tag can expose only the trailing `[#q-*]` and make a
+    // nested leaf look tracked. That bypasses parent lineage and causes the
+    // durable claim repair to restore a duplicate row under the same parent.
+    let authored_for_directive_classification =
+        agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&bare);
+    if entry_is_group_parent(entries, index)
+        || row_is_tracked_directive(&authored_for_directive_classification)
+    {
         return Some(bare);
     }
     // A generated q-id normally remains part of a leaf's durable identity. It
@@ -4439,6 +4448,52 @@ pub fn lineage_claim_text(entries: &[QueueEntry], index: usize) -> Option<String
         return Some(bare);
     }
     Some(nest_vector_claim_at(entries, index, &canonical).unwrap_or(canonical))
+}
+
+#[cfg(test)]
+mod unique_child_vector_regression_tests {
+    use super::*;
+
+    #[test]
+    fn reported_equal_child_keeps_its_parent_vector_identity() {
+        let entries = parse(concat!(
+            "- https://github.com/haiven-dev/haiven-api/pull/822\n",
+            "  - 📥 #adversarial-pr\n",
+            "- https://github.com/haiven-dev/haiven-api/pull/823\n",
+            "  - ☑️ [#subagent:adversarial-pr-823#1] #adversarial-pr\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            lineage_claim_text(&entries, 3).as_deref(),
+            Some("https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr")
+        );
+
+        let projected = parse(concat!(
+            "- ### https://github.com/haiven-dev/haiven-api/pull/822\n",
+            "  - 📥 #adversarial-pr ⟦effect:1⟧ [#q-111111111111]\n",
+            "- ### https://github.com/haiven-dev/haiven-api/pull/823\n",
+            "  - ☑️ [#subagent:adversarial-pr-823#1] #adversarial-pr ⟦effect:2⟧ [#q-222222222222]\n",
+        ))
+        .unwrap();
+        assert!(!entry_is_group_parent(&projected, 3));
+        let projected_prompt = prompt_of(&projected[3]).unwrap();
+        let projected_bare = strip_in_progress_marker(projected_prompt.text.trim());
+        let projected_without_effect = strip_queue_effect_annotation(&projected_bare);
+        let projected_canonical =
+            agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+                &projected_without_effect,
+            );
+        assert_eq!(
+            nest_vector_claim_at(&projected, 3, &projected_canonical).as_deref(),
+            Some("https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr")
+        );
+        assert_eq!(
+            lineage_claim_text(&projected, 3).as_deref(),
+            Some(
+                "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr ⟦effect:2⟧ [#q-222222222222]"
+            )
+        );
+    }
 }
 
 /// Restore one nested executable row from the durable claim that was created
@@ -4486,7 +4541,13 @@ pub fn restore_missing_nested_claim_row(
         // That annotation identifies the same physical row; it must not make
         // missing-row recovery append the claim-time spelling as a duplicate.
         let bare = strip_in_progress_marker(prompt.text.trim());
-        let canonical = agent_doc_element_queue::strip_queue_prompt_stable_id_annotation(&bare);
+        // Effect and prompt-id annotations form one ordered projection. Strip
+        // the effect first so its parser can recover the generated q-id, then
+        // remove that q-id before comparing with the claim-time nest vector.
+        let without_effect = strip_queue_effect_annotation(&bare);
+        let canonical = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(
+            &without_effect,
+        );
         if canonical == bare {
             return false;
         }

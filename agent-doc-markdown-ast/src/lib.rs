@@ -109,6 +109,39 @@ pub fn parse(source: &str) -> Option<Block> {
     Some(build_block(tree.root_node(), source.as_bytes()))
 }
 
+/// Return byte ranges occupied by Markdown inline-code spans.
+///
+/// The block grammar deliberately does not interpret inline syntax. Queue and
+/// component overlays that recognize executable list-shaped text need this
+/// second AST projection so a literal `` `- text` `` string cannot become a
+/// list item merely because its payload starts with a Markdown bullet.
+pub fn inline_code_ranges(source: &str) -> Vec<std::ops::Range<usize>> {
+    fn collect(node: tree_sitter::Node<'_>, out: &mut Vec<std::ops::Range<usize>>) {
+        if node.kind() == "code_span" {
+            out.push(node.start_byte()..node.end_byte());
+            return;
+        }
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            collect(child, out);
+        }
+    }
+
+    let mut parser = tree_sitter::Parser::new();
+    if parser
+        .set_language(&tree_sitter_md::INLINE_LANGUAGE.into())
+        .is_err()
+    {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut ranges = Vec::new();
+    collect(tree.root_node(), &mut ranges);
+    ranges
+}
+
 fn build_block(node: tree_sitter::Node<'_>, src: &[u8]) -> Block {
     let kind = BlockKind::from_node_kind(node.kind());
     let start_byte = node.start_byte();
@@ -171,5 +204,19 @@ mod tests {
         let doc = parse(src).unwrap();
         // The document span covers the whole source.
         assert_eq!(doc.text(src), src);
+    }
+
+    #[test]
+    fn inline_code_ranges_cover_list_shaped_string_payloads() {
+        let source = "before `- ### quoted status` after\n`multi-line\n- string`\n";
+        let ranges = inline_code_ranges(source);
+
+        for needle in ["- ### quoted", "- string"] {
+            let byte = source.find(needle).unwrap();
+            assert!(
+                ranges.iter().any(|range| range.contains(&byte)),
+                "{needle:?} must be covered by an inline-code AST range: {ranges:?}"
+            );
+        }
     }
 }

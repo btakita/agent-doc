@@ -470,7 +470,7 @@ struct CapturedFinalizeResumeWorker {
 /// one repair edge instead of a retry storm.
 struct QueueProjectionSelfHealWorker {
     result: std::sync::mpsc::Receiver<
-        anyhow::Result<agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome>,
+        anyhow::Result<QueueProjectionSelfHealWorkerOutcome>,
     >,
     cancel: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -574,6 +574,31 @@ struct CapturedFinalizeResumeSignalWatch {
 
 struct DocumentDeliverySignalWatch {
     result: std::sync::mpsc::Receiver<()>,
+    latest: Arc<std::sync::Mutex<Option<DocumentDeliverySignal>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DocumentDeliverySignal {
+    cursor: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor,
+}
+
+#[derive(Debug)]
+struct QueueProjectionSelfHealWorkerOutcome {
+    projection: agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome,
+    /// Controller delivery frontier observed after the projection attempt
+    /// returned. A superseded attempt owns every delivery edge through this
+    /// cursor; only a strictly newer edge may re-arm repair.
+    terminal_delivery_cursor:
+        Option<agent_doc_controller_io::project_controller::ControllerStatePlaneCursor>,
+}
+
+fn document_delivery_signal_is_newer_than(
+    signal: &DocumentDeliverySignal,
+    terminal: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor,
+) -> bool {
+    signal.cursor.controller_generation > terminal.controller_generation
+        || (signal.cursor.controller_generation == terminal.controller_generation
+            && signal.cursor.plane_version > terminal.plane_version)
 }
 
 #[derive(Debug, Default)]
@@ -638,6 +663,8 @@ fn spawn_document_delivery_signal_watch(
     // Capacity one is deliberate: a burst of keystrokes is one invalidation,
     // not a durable queue of redundant reconcile effects.
     let (send, result) = std::sync::mpsc::sync_channel(1);
+    let latest = Arc::new(std::sync::Mutex::new(None));
+    let publish_latest = Arc::clone(&latest);
     std::thread::Builder::new()
         .name("doc-deliv-sig".into())
         .spawn(move || {
@@ -656,6 +683,13 @@ fn spawn_document_delivery_signal_watch(
                             },
                         );
                         if subscription.changed {
+                            *publish_latest.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                Some(DocumentDeliverySignal {
+                                    cursor: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                                        controller_generation: subscription.controller_generation,
+                                        plane_version: subscription.latest_version,
+                                    },
+                                });
                             match send.try_send(()) {
                                 Ok(()) | Err(std::sync::mpsc::TrySendError::Full(())) => {}
                                 Err(std::sync::mpsc::TrySendError::Disconnected(())) => return,
@@ -672,7 +706,7 @@ fn spawn_document_delivery_signal_watch(
                 }
             }
         })?;
-    Ok(DocumentDeliverySignalWatch { result })
+    Ok(DocumentDeliverySignalWatch { result, latest })
 }
 
 /// `#idleclearrestart`: park on the controller's queued-operator-clear edge for
@@ -686,6 +720,7 @@ fn spawn_operator_clear_signal_watch(
     stop: Arc<AtomicBool>,
 ) -> std::io::Result<DocumentDeliverySignalWatch> {
     let (send, result) = std::sync::mpsc::sync_channel(1);
+    let latest = Arc::new(std::sync::Mutex::new(None));
     std::thread::Builder::new()
         .name("op-clear-sig".into())
         .spawn(move || {
@@ -720,7 +755,7 @@ fn spawn_operator_clear_signal_watch(
                 }
             }
         })?;
-    Ok(DocumentDeliverySignalWatch { result })
+    Ok(DocumentDeliverySignalWatch { result, latest })
 }
 
 fn spawn_captured_finalize_resume_signal_watch(
@@ -793,13 +828,41 @@ fn spawn_queue_projection_self_heal_worker(
     let thread = std::thread::Builder::new()
         .name("queue-projection-self-heal".into())
         .spawn(move || {
-            let outcome =
+            let projection_cancel = Arc::clone(&worker_cancel);
+            let projection =
                 agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_with_effects(
                     &IdleQueueProjectionSelfHealEffects {
                         cancel: worker_cancel,
                     },
                     &file,
                 );
+            let outcome = projection.map(|projection| {
+                let terminal_delivery_cursor = matches!(
+                    projection,
+                    agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded
+                )
+                .then(|| loop {
+                    match agent_doc_controller_io::project_controller::subscribe_document_delivery_wakes_for_file(
+                            &file,
+                            None,
+                            std::time::Duration::ZERO,
+                        ) {
+                        Ok(subscription) => {
+                            break Some(agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                                controller_generation: subscription.controller_generation,
+                                plane_version: subscription.latest_version,
+                            });
+                        }
+                        Err(_) if projection_cancel.load(Ordering::Relaxed) => break None,
+                        Err(_) => std::thread::sleep(std::time::Duration::from_secs(1)),
+                    }
+                })
+                .flatten();
+                QueueProjectionSelfHealWorkerOutcome {
+                    projection,
+                    terminal_delivery_cursor,
+                }
+            });
             let _ = send.send(outcome);
         })?;
     Ok(QueueProjectionSelfHealWorker {
@@ -2704,6 +2767,9 @@ pub(super) fn spawn_idle_queue_watch_thread(
     let mut queue_projection_self_heal_worker: Option<QueueProjectionSelfHealWorker> = None;
     let mut queue_projection_self_heal_due = true;
     let mut queue_projection_self_heal_retry_at: Option<std::time::Instant> = None;
+    let mut queue_projection_self_heal_superseded_through: Option<
+        agent_doc_controller_io::project_controller::ControllerStatePlaneCursor,
+    > = None;
     let mut queue_projection_self_heal_not_before =
         std::time::Instant::now() + QUEUE_PROJECTION_SELF_HEAL_QUIET;
     // A retained closeout owns the document before derived queue repair. This
@@ -2759,11 +2825,16 @@ pub(super) fn spawn_idle_queue_watch_thread(
         let now = std::time::Instant::now();
         if let Some(worker) = queue_projection_self_heal_worker.as_ref() {
             match worker.result.try_recv() {
-                Ok(Ok(agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Settled {
-                    changed,
+                Ok(Ok(QueueProjectionSelfHealWorkerOutcome {
+                    projection:
+                        agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Settled {
+                            changed,
+                        },
+                    ..
                 })) => {
                     queue_projection_self_heal_worker = None;
                     queue_projection_self_heal_retry_at = None;
+                    queue_projection_self_heal_superseded_through = None;
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
@@ -2776,18 +2847,46 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         last_quiescent_maintenance = None;
                     }
                 }
-                Ok(Ok(agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded)) => {
+                Ok(Ok(QueueProjectionSelfHealWorkerOutcome {
+                    projection:
+                        agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded,
+                    terminal_delivery_cursor: Some(terminal_delivery_cursor),
+                })) => {
                     queue_projection_self_heal_worker = None;
-                    queue_projection_self_heal_due = true;
+                    // The operator's newer cut is authoritative. End this
+                    // repair edge completely: delivery signals observed while
+                    // the losing CAS was in flight may have been generated by
+                    // that same attempted write, so carrying them forward
+                    // recreates a self-sustaining merge storm. Only a document
+                    // edge observed after this terminal result may schedule a
+                    // fresh repair from a fresh authority cut.
+                    queue_projection_self_heal_due = false;
                     queue_projection_self_heal_retry_at = None;
-                    queue_projection_self_heal_not_before =
-                        now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
+                    queue_projection_self_heal_superseded_through =
+                        Some(terminal_delivery_cursor);
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
-                            "queue_projection_self_heal_superseded file={} action=await_quiet_authority_edge retry_after_ms={} authority=editor_crdt",
+                            "queue_projection_self_heal_superseded file={} action=await_newer_document_edge authority=editor_crdt losing_edge_retired=true controller_generation={} plane_version={}",
                             path.display(),
-                            QUEUE_PROJECTION_SELF_HEAL_QUIET.as_millis(),
+                            terminal_delivery_cursor.controller_generation,
+                            terminal_delivery_cursor.plane_version,
+                        ),
+                    );
+                }
+                Ok(Ok(QueueProjectionSelfHealWorkerOutcome {
+                    projection:
+                        agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded,
+                    terminal_delivery_cursor: None,
+                })) => {
+                    queue_projection_self_heal_worker = None;
+                    queue_projection_self_heal_due = false;
+                    queue_projection_self_heal_retry_at = None;
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "queue_projection_self_heal_cancelled file={} action=await_new_document_edge error=missing_superseded_controller_watermark",
+                            path.display(),
                         ),
                     );
                 }
@@ -2818,14 +2917,39 @@ pub(super) fn spawn_idle_queue_watch_thread(
             stale_recycle_deferral.observe(false);
             last_stale_recycle_reconcile = None;
         }
-        if document_delivery_signal_watch.as_ref().is_some_and(|watch| {
+        let document_delivery_signal = document_delivery_signal_watch.as_ref().and_then(|watch| {
             let mut observed = false;
             while watch.result.try_recv().is_ok() {
                 observed = true;
             }
-            observed
-        }) {
-            document_delivery_debounce.observe_edge(now);
+            observed.then(|| {
+                watch
+                    .latest
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone()
+            })
+            .flatten()
+        });
+        if let Some(signal) = document_delivery_signal {
+            let newer_than_superseded = queue_projection_self_heal_superseded_through
+                .is_none_or(|terminal| {
+                    document_delivery_signal_is_newer_than(&signal, terminal)
+                });
+            if newer_than_superseded {
+                queue_projection_self_heal_superseded_through = None;
+                document_delivery_debounce.observe_edge(now);
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    &path,
+                    &format!(
+                        "queue_projection_self_heal_delivery_edge_retired file={} controller_generation={} plane_version={} reason=superseded_attempt_watermark",
+                        path.display(),
+                        signal.cursor.controller_generation,
+                        signal.cursor.plane_version,
+                    ),
+                );
+            }
         }
         if document_delivery_debounce.take_ready(now) {
             document_delivery_reconcile_pending = true;
@@ -7385,6 +7509,54 @@ mod tests {
             true,
             true,
             CapturedFinalizePresence::Absent,
+        ));
+    }
+
+    #[test]
+    fn superseded_projection_rearms_only_after_a_newer_controller_delivery_edge() {
+        let terminal =
+            agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                controller_generation: 41,
+                plane_version: 900,
+            };
+        for plane_version in [899, 900] {
+            let signal = DocumentDeliverySignal {
+                cursor:
+                    agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                        controller_generation: 41,
+                        plane_version,
+                    },
+            };
+            assert!(!document_delivery_signal_is_newer_than(&signal, terminal));
+        }
+        let newer = DocumentDeliverySignal {
+            cursor: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                controller_generation: 41,
+                plane_version: 901,
+            },
+        };
+        assert!(document_delivery_signal_is_newer_than(&newer, terminal));
+
+        let replacement_controller = DocumentDeliverySignal {
+            cursor: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                controller_generation: 42,
+                plane_version: 1,
+            },
+        };
+        assert!(document_delivery_signal_is_newer_than(
+            &replacement_controller,
+            terminal
+        ));
+
+        let older_controller = DocumentDeliverySignal {
+            cursor: agent_doc_controller_io::project_controller::ControllerStatePlaneCursor {
+                controller_generation: 40,
+                plane_version: u64::MAX,
+            },
+        };
+        assert!(!document_delivery_signal_is_newer_than(
+            &older_controller,
+            terminal
         ));
     }
 

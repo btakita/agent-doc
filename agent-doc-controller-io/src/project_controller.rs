@@ -11422,13 +11422,16 @@ impl ControllerRuntime {
         let started = Instant::now();
         let mut memory = self.memory.lock();
         loop {
-            let projection = self.supervisor_recycle_projection_for(document_hash)?;
-            let in_flight = match document_hash {
-                Some(_) => {
-                    projection.phase == agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
-                }
-                None => self.supervisor_recycle_graph.in_flight(),
+            let projection = match document_hash {
+                Some(hash) => memory
+                    .state_projection
+                    .document(hash)
+                    .map(|document| document.supervisor.recycle.clone())
+                    .unwrap_or_default(),
+                None => memory.state_projection.project_supervisor_recycle(),
             };
+            let in_flight =
+                projection.phase == agent_doc_state_backbone::SupervisorRecyclePhase::InFlight;
             if !in_flight {
                 return Ok(projection);
             }
@@ -11550,7 +11553,6 @@ impl ControllerCoordinationGraph {
 struct ControllerSupervisorRecycleGraph {
     ctx: ThreadSafeContext,
     projection: Source<agent_doc_state_backbone::SupervisorRecycleProjection>,
-    in_flight: Computed<bool>,
 }
 
 impl ControllerSupervisorRecycleGraph {
@@ -11560,28 +11562,11 @@ impl ControllerSupervisorRecycleGraph {
     ) -> Self {
         let ctx = scope.ctx().clone();
         let projection = ctx.source(initial);
-        // `#lzcellkernel`: a derived value is a `Computed` read with `get`. The old
-        // `signal`/`get_signal` pair is the pre-kernel two-node shape (memo slot plus
-        // a puller effect) and is not the vocabulary this codebase derives in.
-        let in_flight = ctx.computed(move |ctx| {
-            matches!(
-                ctx.get(&projection).phase,
-                agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
-            )
-        });
-        Self {
-            ctx,
-            projection,
-            in_flight,
-        }
+        Self { ctx, projection }
     }
 
     fn set(&self, projection: agent_doc_state_backbone::SupervisorRecycleProjection) {
         self.ctx.set(&self.projection, projection);
-    }
-
-    fn in_flight(&self) -> bool {
-        self.ctx.get(&self.in_flight)
     }
 }
 
@@ -22393,6 +22378,79 @@ agent:queue\n\
     }
 
     #[test]
+    fn captured_wake_publication_never_blocks_the_next_state_event_ack() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let document_hash = "blocked-captured-wake-publication";
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(
+                    dir.path(),
+                    &preflight_started_event(document_hash),
+                )
+                .unwrap()
+        );
+        wait_for_projection_activation(&runtime);
+
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        runtime.install_state_plane_sink(
+            rpc::CAPTURED_FINALIZE_WAKE_STATE_CHANNEL,
+            Arc::new(GatedStatePlaneSink {
+                entered: entered_tx,
+                release: Mutex::new(release_rx),
+            }),
+        );
+        assert!(
+            runtime
+                .append_apply_state_event_serialized(
+                    dir.path(),
+                    &response_captured_event(document_hash),
+                )
+                .unwrap()
+        );
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let second = agent_doc_state_backbone::StateEvent::new(
+            format!("response-captured-{document_hash}-2"),
+            agent_doc_state_backbone::StateFact::ResponseCaptured {
+                document_hash: document_hash.to_string(),
+                cycle_id: "cycle-1".to_string(),
+                capture_id: "capture-2".to_string(),
+                response_sha256: "response-2".to_string(),
+                response_body: Some("second response body".to_string()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        );
+        let second_runtime = Arc::clone(&runtime);
+        let project_root = dir.path().to_path_buf();
+        let (ack_tx, ack_rx) = std::sync::mpsc::channel();
+        let append = std::thread::spawn(move || {
+            ack_tx
+                .send(
+                    second_runtime
+                        .append_apply_state_event_serialized(&project_root, &second)
+                        .unwrap(),
+                )
+                .unwrap();
+        });
+        assert_eq!(
+            ack_rx.recv_timeout(Duration::from_millis(500)).unwrap(),
+            true,
+            "capture ingress must not share the slow state-plane publication lock"
+        );
+
+        release_tx.send(()).unwrap();
+        release_tx.send(()).unwrap();
+        append.join().unwrap();
+        wait_for_projection_activation(&runtime);
+    }
+
+    #[test]
     fn second_state_event_ack_does_not_flush_installed_derived_effect() {
         let _test_lock = state_projection_effect_test_lock().lock();
         let dir = tempfile::TempDir::new().unwrap();
@@ -22891,6 +22949,22 @@ agent:queue\n\
             runtime
                 .wait_for_supervisor_recycle_settle_for(Some(&first_hash), Duration::ZERO)
                 .is_ok()
+        );
+        let waiting_runtime = runtime.clone();
+        let (project_done_tx, project_done_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            project_done_tx
+                .send(
+                    waiting_runtime
+                        .wait_for_supervisor_recycle_settle_for(None, Duration::ZERO)
+                        .is_err(),
+                )
+                .unwrap();
+        });
+        assert_eq!(
+            project_done_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            true,
+            "the project-wide waiter must inspect the held memory guard without relocking it"
         );
     }
 

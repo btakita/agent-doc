@@ -97,10 +97,9 @@ fn auto_queue_doc_content() -> String {
 }
 
 #[test]
-fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
-    // #codex-auto-queue-stalled-final-gate: a clean document that still owes an
-    // `agent:queue auto` continuation reports `queue_continuation_required=true`,
-    // exits 0 in default mode, and exits nonzero under `--codex-final-gate`.
+fn session_check_terminal_gate_leaves_active_auto_queue_to_background() {
+    // #coordinatordrain: a clean document with queue work is terminal in both
+    // ordinary and Codex-final-gate modes. Queue selection is supervisor work.
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -110,22 +109,18 @@ fn session_check_codex_final_gate_blocks_on_active_auto_queue() {
     // a cycle, defeating the clean-document scenario under test).
     init_git_repo(tmp.path(), &doc);
 
-    // Default mode: clean cycle is OK (exit 0) but surfaces the typed detail.
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("queue_continuation_required=true"))
-        .stdout(predicate::str::contains("do [#seopdp] deploy product page"));
-
-    // Strict Codex final gate: continuation required → nonzero exit.
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap(), "--codex-final-gate"])
-        .assert()
-        .failure()
-        .stdout(predicate::str::contains("queue_continuation_required=true"));
+    for final_gate in [false, true] {
+        let mut cmd = agent_doc();
+        cmd.current_dir(tmp.path())
+            .args(["session-check", doc.to_str().unwrap()]);
+        if final_gate {
+            cmd.arg("--codex-final-gate");
+        }
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("[session-check] ok"))
+            .stdout(predicate::str::contains("queue_continuation_required").not());
+    }
 }
 
 /// A committed cycle whose live document carries an operator prompt added
@@ -328,8 +323,8 @@ fn session_check_cli_still_interrupts_codex_console_replay_without_editor_proven
     }
 }
 
-#[test]
-fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
+#[allow(dead_code)]
+fn legacy_codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
     // Reproduces the sampleorders shape: a clean template/CRDT Codex
     // session doc has an active auto queue, the first Stop hook asks Codex to
     // continue in-pane, and the second Stop hook receives a plain final answer
@@ -447,6 +442,44 @@ fn codex_hook_cli_replays_plain_final_answer_after_repeated_auto_queue_stop() {
         !ops.contains("controller_shutdown_accepted"),
         "a CLI closeout must reuse the project controller, not shut it down:\n{ops}"
     );
+}
+
+#[test]
+fn codex_hook_cli_hands_queue_selection_to_background_after_terminal_closeout() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    fs::write(
+        &doc,
+        auto_queue_doc_content_with_prompts(&[
+            "do [#seopdp] deploy product page",
+            "do [#smoke] verify checkout",
+        ]),
+    )
+    .unwrap();
+    init_git_repo(tmp.path(), &doc);
+    track_codex_session(tmp.path(), &doc);
+
+    let stop = json!({
+        "session_id": "codex-session",
+        "turn_id": "turn-1",
+        "cwd": tmp.path().display().to_string(),
+        "last_assistant_message": "The current response is complete.",
+        "stop_hook_active": false,
+    });
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["hook", "codex-stop"])
+        .write_stdin(stop.to_string())
+        .assert()
+        .success()
+        .stdout(predicate::eq("{\"continue\":true}\n"));
+
+    let content = fs::read_to_string(&doc).unwrap();
+    assert!(content.contains("The current response is complete."));
+    assert!(!content.contains("- do [#seopdp] deploy product page"));
+    assert!(content.contains("- do [#smoke] verify checkout"));
 }
 
 #[test]

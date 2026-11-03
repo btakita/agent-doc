@@ -13292,8 +13292,11 @@ fn test_agent_doc_session_check_io_owns_guard_adapters() {
     assert!(
         session_check_command.contains("crate::resolve_current_document_content")
             && session_check_command.contains("\"latest_head_response_missing\"")
-            && !session_check_command.contains("std::fs::read_to_string(file)"),
-        "session-check command should route committed-response visibility checks through current-document authority"
+            && session_check_command.contains("read terminal closeout")
+            && session_check_command.contains(
+                "agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content"
+            ),
+        "ordinary guards use current-document authority, while the already-committed final gate uses a controller-free local read"
     );
     assert!(
         session_check_command

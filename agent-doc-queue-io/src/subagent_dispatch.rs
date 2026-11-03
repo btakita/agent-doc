@@ -214,6 +214,19 @@ pub fn coordinator_drain_decision_for_content(
     )
 }
 
+/// Synchronous closeout hands queue reconciliation to the document supervisor.
+///
+/// The committed closeout event is the actor ingress that wakes queue work.
+/// Stop/session-check must not rebuild the project payload, inspect worker
+/// integration debt, or project queue state while the UI is waiting for the
+/// response to persist. Returning the terminal identity here keeps that
+/// ownership boundary typed at every synchronous consumer; the background
+/// supervisor observes and drains the real coordinator state independently.
+pub fn terminal_queue_drain_handoff() -> agent_doc_queue::coordinator_drain::CoordinatorDrainDecision
+{
+    agent_doc_queue::coordinator_drain::CoordinatorDrainDecision::default()
+}
+
 /// The queue-level subagents attribute (`<!-- agent:queue subagents=N -->`)
 /// planned over every independent `subagents` queue against the raw claim
 /// ledger: which heads to dispatch now and which to hold (an explicit `=N`
@@ -801,6 +814,22 @@ queue: go
             vec![("do [#b]", "other"), ("do [#c]", "inactive")]
         );
         assert!(!decision.may_yield());
+    }
+
+    #[test]
+    fn synchronous_terminal_handoff_never_scans_or_blocks_on_queue_debt() {
+        let decision = terminal_queue_drain_handoff();
+
+        assert!(decision.is_terminal());
+        assert!(decision.snapshot.is_empty());
+        let source = include_str!("subagent_dispatch.rs");
+        let body = source
+            .split("pub fn terminal_queue_drain_handoff()")
+            .nth(1)
+            .and_then(|tail| tail.split("\n}\n").next())
+            .expect("terminal handoff function body");
+        assert!(!body.contains("build_project_queue_sync_payload"));
+        assert!(!body.contains("load_document_baseline"));
     }
 
     /// Exact `#inactive-run-stranding` repro from api.md: a pending nested

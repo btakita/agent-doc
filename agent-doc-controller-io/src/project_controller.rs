@@ -11691,8 +11691,8 @@ pub struct ControllerActorInspection {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QueueProjectionInspection {
-    /// `consistent`, `runtime_stale`, `runtime_missing`, `document_missing`,
-    /// `document_unavailable`, or `document_invalid`.
+    /// `consistent`, `runtime_stale`, `runtime_missing`, `generation_unknown`,
+    /// `document_missing`, `document_unavailable`, or `document_invalid`.
     pub status: String,
     #[serde(default)]
     pub actor_generation: Option<u64>,

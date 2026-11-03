@@ -21857,6 +21857,8 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 false,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::ZERO,
@@ -21882,6 +21884,8 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 false,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::from_secs(600),
@@ -21906,6 +21910,8 @@ agent:queue\n\
             controller_self_watchdog_should_suicide(
                 &runtime,
                 true,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::from_secs(600),
@@ -21964,6 +21970,8 @@ agent:queue\n\
             !controller_self_watchdog_should_suicide(
                 &runtime,
                 false,
+                false,
+                false,
                 None,
                 &socket_path(dir.path()),
                 Duration::ZERO,
@@ -21985,6 +21993,8 @@ agent:queue\n\
         assert!(
             controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
+                false,
                 false,
                 None,
                 &socket_path(dir.path()),
@@ -22025,6 +22035,8 @@ agent:queue\n\
         assert!(controller_self_watchdog_should_suicide(
             &runtime,
             false,
+            false,
+            false,
             Some(temp.as_path()),
             &socket_path(dir.path()),
             Duration::from_secs(600),
@@ -22049,6 +22061,8 @@ agent:queue\n\
         assert!(
             !controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
+                false,
                 false,
                 Some(temp.as_path()),
                 &socket_path(dir.path()),
@@ -22088,6 +22102,8 @@ agent:queue\n\
         assert!(
             controller_self_watchdog_should_suicide(
                 &runtime,
+                false,
+                false,
                 false,
                 Some(temp.as_path()),
                 &socket_path(dir.path()),

@@ -1257,15 +1257,19 @@ probe look `alive-busy`, the watch debounces that ready/busy conflict for the
   the strict launch gate.
   `#handoffsocketownership`: once a self-recycle worker owns the predecessor's
   outgoing handoff, the predecessor's stranded-controller self-watchdog is
-  disarmed only while the recorded handoff remains inside the stuck-handoff
-  threshold. Worker ownership is a lease, not an exemption: a background
-  launch/connect that leaves the public generation `Preparing` past that bound
-  fails the generation, allowing the next client to launch a clean controller,
-  hydrate reliable-sync liveness, and resume a retained closeout. This is
-  required for build-skew recovery where the old controller has no live CRDT
-  replica; otherwise its still-true in-flight bit could suppress the 45s
-  watchdog forever. After the private replacement socket is
-  renamed onto the public path, the predecessor must relinquish its listener's
+  disarmed only while the recorded *pre-promotion* handoff remains inside the
+  stuck-handoff threshold. Worker ownership is a lease, not an exemption: a
+  background launch/connect that leaves the public generation `Preparing` past
+  that bound fails the generation, allowing the next client to launch a clean
+  controller, hydrate reliable-sync liveness, and resume a retained closeout.
+  This is required for build-skew recovery where the old controller has no live
+  CRDT replica; otherwise its still-true in-flight bit could suppress the 45s
+  watchdog forever. Promotion starts a separate bounded lifecycle: the
+  predecessor may remain `Preparing` while it drains accepted clients and
+  workers, protected in-process by that drain's deadline and externally by its
+  exact pid+generation `predecessor_drain_lease` (up to the 360s drain budget).
+  After the private replacement socket is renamed onto the public path, the
+  predecessor must relinquish its listener's
   pathname-reclamation guard before exit; dropping the predecessor listener
   must never unlink the successor's live `controller.sock`.
   `#replacementdrain`: a supervisor replacement worker

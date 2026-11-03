@@ -18874,6 +18874,20 @@ fn controller_public_socket_lost(
 /// seen no client before it may retire instead of handing off.
 const IDLE_ROOT_RETIRE_QUIET: Duration = Duration::from_secs(60);
 
+/// Maximum number of accepted controller RPCs executing concurrently.
+///
+/// A caller's 5s response timeout does not cancel its server-side worker. When
+/// an RPC stalls, retrying clients can therefore create an unbounded
+/// thread/socket queue. Leaving new connections in the kernel accept backlog
+/// applies transport backpressure while admitted requests drain. Healthy
+/// long-lived controllers observed 13-28 client workers; the affected
+/// `sdk-dev.md` controller reached 116.
+const CONTROLLER_MAX_ACTIVE_CLIENTS: usize = 64;
+
+fn controller_accept_capacity_available(active_clients: usize) -> bool {
+    active_clients < CONTROLLER_MAX_ACTIVE_CLIENTS
+}
+
 /// Observe, from inside the controller, whether anybody uses its project root:
 /// live reliable-sync registrations and allocated editor models in this process,
 /// listening PID-scoped editor sockets, and open supervisors for this root.
@@ -19218,7 +19232,17 @@ pub(crate) fn serve_with_options(
     // controller's live socket, so retirement must not unlink it.
     let mut socket_pathname_relinquished = false;
     while !should_stop.load(Ordering::SeqCst) && !runtime.controller_generation_poisoned() {
-        match listener.accept() {
+        let accept_at_capacity =
+            !controller_accept_capacity_available(active_clients.load(Ordering::SeqCst));
+        let accept_result = if accept_at_capacity {
+            Err(std::io::Error::new(
+                ErrorKind::WouldBlock,
+                "project controller client capacity reached",
+            ))
+        } else {
+            listener.accept()
+        };
+        match accept_result {
             Ok(stream) => {
                 last_client_activity = Instant::now();
                 let runtime = Arc::clone(&runtime);
@@ -19237,7 +19261,16 @@ pub(crate) fn serve_with_options(
                 if let Some(remaining) =
                     controller_idle_tick_remaining(idle_tick_last, Instant::now())
                 {
-                    wait_for_pending_controller_client(&listener, remaining);
+                    if accept_at_capacity {
+                        // A readable listener stays readable while its backlog
+                        // is intentionally left unaccepted. Polling it here
+                        // would spin at 100% CPU, so wait briefly for an
+                        // admitted worker to retire while preserving the idle
+                        // maintenance cadence.
+                        std::thread::sleep(remaining.min(Duration::from_millis(10)));
+                    } else {
+                        wait_for_pending_controller_client(&listener, remaining);
+                    }
                     continue;
                 }
                 idle_tick_last = Some(Instant::now());
@@ -67525,6 +67558,20 @@ mod supthrash_idle_root_tests {
             "{log}"
         );
         assert!(log.contains("reason=idle_current_binary"), "{log}");
+    }
+
+    #[test]
+    fn controller_accept_capacity_bounds_server_side_timeout_backlog() {
+        assert!(controller_accept_capacity_available(0));
+        assert!(controller_accept_capacity_available(
+            CONTROLLER_MAX_ACTIVE_CLIENTS - 1
+        ));
+        assert!(!controller_accept_capacity_available(
+            CONTROLLER_MAX_ACTIVE_CLIENTS
+        ));
+        assert!(!controller_accept_capacity_available(
+            CONTROLLER_MAX_ACTIVE_CLIENTS + 1
+        ));
     }
 
     #[test]

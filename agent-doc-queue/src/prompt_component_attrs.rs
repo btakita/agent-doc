@@ -199,4 +199,16 @@ mod tests {
         let content = "<!-- agent:exchange subagents=2 -->\nfix it\n<!-- /agent:exchange -->\n";
         assert!(!prompt_component_attrs(content, "exchange").subagents);
     }
+
+    #[test]
+    fn singular_subagent_marker_alias_preserves_prompt_intent() {
+        for name in ["queue", "exchange"] {
+            let content =
+                format!("<!-- agent:{name} subagent -->\nfix it\n<!-- /agent:{name} -->\n");
+            assert!(
+                prompt_component_attrs(&content, name).subagents,
+                "singular compatibility alias must not downgrade {name} ownership"
+            );
+        }
+    }
 }

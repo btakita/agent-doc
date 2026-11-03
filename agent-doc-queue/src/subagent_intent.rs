@@ -39,10 +39,106 @@ pub fn carries_subagent_intent_tag(text: &str) -> bool {
         .any(is_subagent_intent_tag)
 }
 
-/// Queue-marker attributes that dispatch every queue head to a subagent
-/// (`<!-- agent:queue subagents -->`, alias `fan-out`), so the operator does
-/// not have to tag each line. Plan: `tasks/agent-doc/plan-queue-subagents-attribute.md`.
-pub const QUEUE_SUBAGENTS_ATTRS: [&str; 2] = ["subagents", "fan-out"];
+/// Queue-marker attributes that dispatch every queue head to a subagent.
+/// `subagents` is canonical; singular `subagent` is a compatibility alias for
+/// documents that used the already-supported per-item intent spelling, and
+/// `fan-out` is the explicit behavior alias.
+///
+/// Plan: `tasks/agent-doc/plan-queue-subagents-attribute.md`.
+pub const QUEUE_SUBAGENTS_ATTRS: [&str; 3] = ["subagents", "subagent", "fan-out"];
+
+/// True when `key` is accepted for compatibility but should be rewritten to
+/// the canonical marker spelling. Keeping this separate from recognition lets
+/// lint/preflight teach the migration without changing queue ownership.
+pub fn is_queue_subagents_compat_alias(key: &str) -> bool {
+    key.trim().eq_ignore_ascii_case("subagent")
+}
+
+/// Return a blocking diagnostic for an attribute that looks like subagent
+/// ownership but is not a supported spelling. Queue planning uses this guard
+/// in addition to lint so a typo can never silently become `main_inline` when
+/// a caller projects a document without first running the full lint command.
+pub fn queue_subagents_attr_near_miss<'a, I>(attrs: I) -> Option<String>
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
+    attrs.into_iter().find_map(|(key, _)| {
+        if is_queue_subagents_attr(key) {
+            return None;
+        }
+        let normalized = key
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|ch| !matches!(ch, '-' | '_'))
+            .collect::<String>();
+        ["subagents", "subagent", "fanout"]
+            .iter()
+            .any(|candidate| one_edit_or_equal(&normalized, candidate))
+            .then(|| {
+                format!(
+                    "`{key}` looks like a subagent queue attribute but is not supported; use canonical `subagents`"
+                )
+            })
+    })
+}
+
+fn one_edit_or_equal(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left.as_bytes(), right.as_bytes())
+    } else {
+        (right.as_bytes(), left.as_bytes())
+    };
+    if longer.len() - shorter.len() > 1 {
+        return false;
+    }
+    if longer.len() == shorter.len() {
+        return shorter
+            .iter()
+            .zip(longer)
+            .filter(|(left, right)| left != right)
+            .count()
+            <= 1;
+    }
+    let mut short = 0;
+    let mut long = 0;
+    let mut skipped = false;
+    while short < shorter.len() && long < longer.len() {
+        if shorter[short] == longer[long] {
+            short += 1;
+            long += 1;
+        } else if skipped {
+            return false;
+        } else {
+            skipped = true;
+            long += 1;
+        }
+    }
+    true
+}
+
+/// Validate queue-level subagent ownership before planning. Invalid values and
+/// near-miss spellings are ownership errors, not permission to drain inline.
+pub fn validate_queue_subagents_attrs<'a, I>(attrs: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = (&'a String, &'a String)>,
+{
+    let attrs = attrs.into_iter().collect::<Vec<_>>();
+    if let Some(error) = queue_subagents_attr_near_miss(attrs.iter().copied()) {
+        return Err(error);
+    }
+    for (key, value) in attrs {
+        if is_queue_subagents_attr(key) {
+            parse_queue_subagents_value(value).map_err(|reason| {
+                format!("invalid `{key}={value}` subagent queue attribute: {reason}")
+            })?;
+        }
+    }
+    Ok(())
+}
 
 /// Line tags that keep one queue line out of the queue-level attribute.
 pub const QUEUE_SUBAGENTS_OPT_OUT_TAGS: [&str; 2] = ["[inline]", "[operator-verify]"];
@@ -255,6 +351,48 @@ mod tests {
         assert_eq!(mode(&[("preset", "#subagents"), ("go", "")]), None);
         assert_eq!(mode(&[("subagents", "0")]), None);
         assert_eq!(mode(&[("subagents", "lots")]), None);
+    }
+
+    #[test]
+    fn singular_queue_subagent_attr_is_a_compatibility_alias() {
+        assert!(is_queue_subagents_compat_alias("subagent"));
+        assert_eq!(
+            mode(&[("subagent", "")]),
+            Some(QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::AllEligible,
+            })
+        );
+        assert_eq!(
+            mode(&[("subagent", "3")]),
+            Some(QueueSubagentsMode {
+                capacity: QueueSubagentsCapacity::Limited(std::num::NonZeroUsize::new(3).unwrap()),
+            })
+        );
+    }
+
+    #[test]
+    fn marker_attr_near_misses_fail_closed() {
+        for typo in ["subagnt", "sub-agent", "subagentx", "fanout", "fan_out"] {
+            let attrs = attrs(&[(typo, "")]);
+            let error = validate_queue_subagents_attrs(attrs.iter().map(|(k, v)| (k, v)))
+                .expect_err("subagent marker near-miss must block planning");
+            assert!(
+                error.contains("use canonical `subagents`"),
+                "{typo}: {error}"
+            );
+        }
+        let attrs = attrs(&[("subject", "")]);
+        assert!(validate_queue_subagents_attrs(attrs.iter().map(|(k, v)| (k, v))).is_ok());
+    }
+
+    #[test]
+    fn invalid_subagent_capacity_fails_closed_before_planning() {
+        for value in ["0", "many"] {
+            let attrs = attrs(&[("subagents", value)]);
+            let error = validate_queue_subagents_attrs(attrs.iter().map(|(k, v)| (k, v)))
+                .expect_err("invalid capacity must not downgrade ownership");
+            assert!(error.contains("positive concurrency cap"), "{error}");
+        }
     }
 
     #[test]

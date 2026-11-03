@@ -28,7 +28,7 @@ const QUEUE_ONLY_COMPONENT_ATTRS: &[&str] = &[
 ];
 
 /// Prompt defaults shared by `agent:queue` and `agent:exchange`.
-const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "presets", "subagents", "fan-out"];
+const PROMPT_COMPONENT_ATTRS: &[&str] = &["preset", "presets", "subagents", "subagent", "fan-out"];
 /// `queue-legend` toggles the binary-owned queue marker legend line
 /// (`#queuemarkerlegend`); `queue-legend=off` opts the document out.
 const STATUS_COMPONENT_ATTRS: &[&str] = &["sync", "sync-mode", "queue-legend"];
@@ -75,6 +75,7 @@ pub fn is_queue_bare_flag_attr(key: &str) -> bool {
             | "go"
             | "stop"
             | "subagents"
+            | "subagent"
             | "fan-out"
             | "clear"
             | "disable-auto-clear"
@@ -134,7 +135,7 @@ pub fn is_recognized_bare_flag_attr(component: &str, key: &str) -> bool {
     if !is_queue_marker_component(component) && component != "agent:exchange" {
         return true;
     }
-    matches!(key, "subagents" | "fan-out")
+    matches!(key, "subagents" | "subagent" | "fan-out")
 }
 
 /// Component attribute keys recognized anywhere in the document, excluding the
@@ -153,6 +154,7 @@ const KNOWN_COMPONENT_ATTRS: &[&str] = &[
 pub struct ComponentAttrWarning {
     pub issues: Vec<String>,
     pub has_fatal_schedule_issue: bool,
+    pub compatibility_migration_count: usize,
 }
 
 impl ComponentAttrWarning {
@@ -160,6 +162,18 @@ impl ComponentAttrWarning {
         if self.has_fatal_schedule_issue {
             return format!(
                 "{}. Invalid schedule syntax is fail-closed: only the affected queue is held until corrected; sibling queues remain independent. Other invalid attributes are ignored (no mutation).",
+                self.issues.join("; ")
+            );
+        }
+        if self.compatibility_migration_count == self.issues.len() {
+            return format!(
+                "{}. The compatibility alias remains active, so ownership is preserved; rewrite the marker to the canonical spelling.",
+                self.issues.join("; ")
+            );
+        }
+        if self.compatibility_migration_count > 0 {
+            return format!(
+                "{}. Compatibility aliases remain active, so their ownership is preserved; rewrite them to the canonical spelling. Other invalid attributes are ignored (no mutation).",
                 self.issues.join("; ")
             );
         }
@@ -174,6 +188,7 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     let components = element::parse(content).ok()?;
     let mut issues: Vec<String> = Vec::new();
     let mut has_fatal_schedule_issue = false;
+    let mut compatibility_migration_count = 0;
     for component in &components {
         if component.name == "queue" {
             // `#queueschedule`: invalid `interval`/`time`/`loop` values are
@@ -195,6 +210,15 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
             }
         }
         for (key, value) in &component.attrs {
+            if matches!(component.name.as_str(), "queue" | "exchange")
+                && crate::subagent_intent::is_queue_subagents_compat_alias(key)
+            {
+                issues.push(format!(
+                    "`subagent` on `agent:{}` is a compatibility alias for canonical `subagents`; migrate this marker to `subagents`",
+                    component.name
+                ));
+                compatibility_migration_count += 1;
+            }
             if key == crate::queue_schedule::QUEUE_INTERVAL_ATTR {
                 if !matches!(component.name.as_str(), "queue" | "status") {
                     issues.push(format!(
@@ -288,6 +312,7 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
     Some(ComponentAttrWarning {
         issues,
         has_fatal_schedule_issue,
+        compatibility_migration_count,
     })
 }
 
@@ -678,6 +703,22 @@ mod tests {
             .message_body();
         assert!(body.contains("prompt-component attribute"), "{body}");
         assert!(body.contains("fan-out"), "{body}");
+    }
+
+    #[test]
+    fn singular_subagent_attr_preserves_intent_and_warns_to_migrate() {
+        for component in ["queue", "exchange"] {
+            let content = format!(
+                "<!-- agent:{component} subagent -->\n- do [#a]\n<!-- /agent:{component} -->\n"
+            );
+            let warning = component_attr_warning(&content)
+                .expect("compatibility spelling should produce migration guidance");
+            let body = warning.message_body();
+            assert!(body.contains("compatibility alias"), "{body}");
+            assert!(body.contains("canonical `subagents`"), "{body}");
+            assert!(body.contains("ownership is preserved"), "{body}");
+            assert!(!body.contains("attribute is ignored"), "{body}");
+        }
     }
 
     #[test]

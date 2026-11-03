@@ -16,7 +16,7 @@ use crate::queue_claim::{QueueClaim, QueueClaimState, claim_identity_at};
 use crate::queue_graph::QueueGraph;
 
 /// Main-agent instructions paired with a non-empty sync payload.
-pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, claim then spawn then start the worker and retain coordinator ownership. For `main_inline`, do not spawn: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
+pub const QUEUE_SYNC_GUIDANCE: &str = "Beginning-of-turn queue reconciliation found incomplete work. Handle every entry before treating the turn as terminal. The main agent owns document convergence, claims, dispatch/start acknowledgement, steering, waiting, integration, and closeout. For `subagent_dispatch`, the only authorized native-spawn path is claim successfully, observe the durable claimed projection, spawn, then immediately persist the worker-bound start receipt; an absent or failed claim forbids spawn, and an absent start receipt is nonterminal dispatch debt. For `main_inline`, native spawn is forbidden: execute inline and reconcile the row. Running work must be waited on or steered; reported/checkmark work must be integrated and closed; lost work must be recovered or requeued. Every reported or `lost_reported` / `⚠️☑️` row is urgent nonterminal coordinator debt: compare its durable outbox/report receipt and exact retained agent-history response with the root-authored exchange response. A worker report, side-worktree commit, or published side branch is completion evidence, not integration proof. Before striking the row, move the exact result into the queue item's designated sink (for example the named integration/main branch or the PR branch), verify the authorized delivery boundary and commit reachability there, and then strike it immediately in this turn. If the result cannot be integrated, keep the row live and record the exact integration command, conflict, or external blocker as its next action; never call it done. An abbreviated receipt is valid completion evidence but is not proof that the full worker result reached exchange. Materialize every `recovered_response` in the root response exactly once, integrate effects, close, and strike in this turn. `consolidated_exchange` means that exact result is already present outside binary completion cells and must not be replayed. If response history is missing, ambiguous, or unsupported, keep the row open, surface `missing_response_debt` as the concrete blocker, and never redispatch or silently strike it. Reconcile/unknown, unresolved backlog queue placement, and scan errors must be investigated; operator-gated work must remain explicitly gated. Workers never self-claim or self-close.";
 
 /// Normalize TTL expiry before projection. The caller supplies one clock cut so
 /// every document in an aggregate scan uses the same notion of "now".
@@ -511,6 +511,8 @@ pub fn project_document_queue_sync(
     let mut payload = QueueSyncPayload::default();
 
     for block in graph.blocks() {
+        crate::subagent_intent::validate_queue_subagents_attrs(&block.component.attrs)
+            .map_err(anyhow::Error::msg)?;
         let queue_paused = crate::control_binding::explicit_queue_pause_mode(
             &block.component.attrs,
             frontmatter_queue.as_deref(),
@@ -1131,6 +1133,42 @@ mod tests {
             payload.reconcile_unknown[0].operation,
             QueueSyncOperation::Reconcile
         );
+        assert!(QUEUE_SYNC_GUIDANCE.contains("For `main_inline`, native spawn is forbidden"));
+        assert!(QUEUE_SYNC_GUIDANCE.contains("only authorized native-spawn path"));
+        assert!(QUEUE_SYNC_GUIDANCE.contains("start receipt is nonterminal dispatch debt"));
+    }
+
+    #[test]
+    fn singular_subagent_attr_projects_delegated_ownership() {
+        let content = "<!-- agent:run id=main subagent -->\n- review Unreal\n<!-- /agent:run -->\n";
+        let payload = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(payload.pending.len(), 1);
+        let item = &payload.pending[0];
+        assert_eq!(item.execution_mode, QueueExecutionMode::SubagentDispatch);
+        assert_eq!(item.operation, QueueSyncOperation::Dispatch);
+        assert_eq!(item.executor_role, QueueExecutorRole::Subagent);
+    }
+
+    #[test]
+    fn subagent_attr_near_miss_blocks_plan_instead_of_downgrading_inline() {
+        let content =
+            "<!-- agent:run id=main sub-agent -->\n- review Unreal\n<!-- /agent:run -->\n";
+        let error = project_document_queue_sync(
+            "/tmp/session.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &[],
+        )
+        .expect_err("near-miss ownership marker must fail closed");
+        assert!(error.to_string().contains("use canonical `subagents`"));
     }
 
     #[test]

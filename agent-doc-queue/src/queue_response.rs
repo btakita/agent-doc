@@ -865,6 +865,7 @@ fn first_submitted_in_document(
     skip: &impl Fn(&str) -> bool,
 ) -> Option<String> {
     for entries in parsed_queue_bodies(content) {
+        let executable = crate::document_queue::executable_prompt_indexes(&entries);
         for (index, entry) in entries.iter().enumerate() {
             let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
                 continue;
@@ -873,10 +874,19 @@ fn first_submitted_in_document(
                 continue;
             }
             if crate::document_queue::entry_is_group_parent(&entries, index) {
+                let row_matches =
+                    crate::document_queue::row_matches_head_text(&entries, index, head_text);
+                // Waiting-on-you deliberately promotes its durable item parent
+                // to the executable selector once the operator adds a child
+                // response edge. It is still structurally a group parent, so
+                // submit its tree instead of dropping the operator's words.
+                if row_matches && executable.contains(&index) {
+                    return crate::document_queue::submitted_group_prompt_at(&entries, index);
+                }
                 // A directly named group remains context-only and preserves the historical
                 // raw-head result. A nested lineage head may still identify that group so its
                 // prompt tree can accompany authorization and later-section dispatch.
-                if !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                if !row_matches
                     && crate::document_queue::row_matches_submitted_head_text(
                         &entries, index, head_text,
                     )
@@ -899,6 +909,7 @@ fn first_submitted_with_context_in_document(
     skip: &impl Fn(&str) -> bool,
 ) -> Option<String> {
     for entries in parsed_queue_bodies(content) {
+        let executable = crate::document_queue::executable_prompt_indexes(&entries);
         for (index, entry) in entries.iter().enumerate() {
             let crate::document_queue::QueueEntry::Prompt(prompt) = entry else {
                 continue;
@@ -907,7 +918,14 @@ fn first_submitted_with_context_in_document(
                 continue;
             }
             if crate::document_queue::entry_is_group_parent(&entries, index) {
-                if !crate::document_queue::row_matches_head_text(&entries, index, head_text)
+                let row_matches =
+                    crate::document_queue::row_matches_head_text(&entries, index, head_text);
+                if row_matches && executable.contains(&index) {
+                    return crate::document_queue::submitted_group_prompt_with_context_at(
+                        &entries, index,
+                    );
+                }
+                if !row_matches
                     && crate::document_queue::row_matches_submitted_head_text(
                         &entries, index, head_text,
                     )
@@ -3833,6 +3851,42 @@ queue_active: true
         assert!(!body.contains("Deployment is blocked"), "{body}");
         assert!(!body.contains("**staging**"), "{body}");
         assert!(!body.contains("**production**"), "{body}");
+    }
+
+    #[test]
+    fn executable_waiting_parent_submits_operator_prompt_beneath_response_metadata() {
+        let head = concat!(
+            "Confirm the game integrator can git ls-remote private haiven-dev/haiven-sdk ",
+            "from their account <!-- agent-doc:waiting-item -->"
+        );
+        let question = "What is the \"game integrator\"? Why do you need this?";
+        let content = format!(
+            concat!(
+                "<!-- agent:run id=main subagents go -->\n",
+                "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+                "  - {head}\n",
+                "    - **Response:** Confirm repository access. <!-- agent-doc:waiting-metadata -->\n",
+                "      - **Next actions:** <!-- agent-doc:waiting-metadata -->\n",
+                "        - **Action:** Confirm repository access. <!-- agent-doc:waiting-metadata -->\n",
+                "        - {question}\n",
+                "<!-- /agent:run -->\n"
+            ),
+            head = head,
+            question = question,
+        );
+
+        let submitted = submitted_queue_prompt_with_context(&content, head);
+        let (packet, body) = agent_doc_prompt_context::lineage::split(&submitted);
+        let packet = packet.expect("the waiting selector carries its operator response edge");
+
+        assert_eq!(packet.decision_evidence, [question]);
+        assert!(body.contains(head), "{body}");
+        assert!(body.contains(question), "{body}");
+        assert!(body.contains("Prompt tree (`#nestsubmit`"), "{body}");
+        assert!(
+            submitted_queue_prompt(&content, head).contains(question),
+            "the non-envelope submission path must carry the same operator prompt"
+        );
     }
 
     #[test]

@@ -5174,6 +5174,11 @@ enum QueueAction {
         /// proof-complete repairs without mutating document or queue state.
         #[arg(long)]
         plan: bool,
+        /// Reset only this document's queue-attempt claims and reported-release
+        /// receipts, then reproject its current visible queue rows. Refuses an
+        /// open cycle, live claimed/running worker, or completion handoff.
+        #[arg(long, conflicts_with = "plan")]
+        clean_slate: bool,
     },
     /// Explicitly strike the leading free-text queue head(s) already answered by
     /// this turn's response(s). Use when a single cycle answered multiple
@@ -9059,10 +9064,21 @@ fn try_main() -> anyhow::Result<()> {
                 max_git_versions,
                 restore_patch,
             } => queue_recovery::run(&file, json, max_git_versions, restore_patch.as_deref()),
-            QueueAction::Sync { file, plan } => {
+            QueueAction::Sync {
+                file,
+                plan,
+                clean_slate,
+            } => {
                 let queue_effects = CliQueueCommandEffects;
                 if plan {
                     agent_doc_queue_io::queue_cmd::plan_with_effects(&queue_effects, &file)
+                } else if clean_slate {
+                    let outcome = agent_doc_queue_io::queue_cmd::clean_slate_with_effects(
+                        &queue_effects,
+                        &file,
+                    )?;
+                    println!("{}", serde_json::to_string_pretty(&outcome)?);
+                    Ok(())
                 } else {
                     agent_doc_queue_io::queue_cmd::sync_with_effects(&queue_effects, &file)
                 }

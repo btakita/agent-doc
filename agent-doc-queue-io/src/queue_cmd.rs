@@ -860,6 +860,174 @@ pub enum QueueRuntimeProjectionOnceOutcome {
     Superseded,
 }
 
+/// Result of an explicit document-local queue clean-slate repair.
+///
+/// Historical lineage, operator-delete tombstones, queue schedules, and every
+/// document byte are outside the two cleared state families and remain intact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct QueueCleanSlateOutcome {
+    pub cleared_claims: usize,
+    pub cleared_release_receipts: usize,
+    pub projection: QueueRuntimeProjectionOnceOutcome,
+}
+
+impl Serialize for QueueRuntimeProjectionOnceOutcome {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Settled { changed } => serializer.serialize_str(if *changed {
+                "settled_changed"
+            } else {
+                "settled_unchanged"
+            }),
+            Self::Superseded => serializer.serialize_str("superseded_deferred"),
+        }
+    }
+}
+
+/// Explicit, document-local recovery for queue/runtime projection drift.
+///
+/// This is intentionally an actorless one-shot repair boundary: it is never a
+/// hot-path claim transition. The queue-edit lease and SQLite immediate
+/// transaction serialize it with other actorless queue writers; the command
+/// refuses every live worker/cycle edge before deleting only the two derived
+/// attempt-projection state families. Durable lineage, delete tombstones,
+/// schedules, continuation state, and document text are separate families and
+/// remain untouched.
+pub fn clean_slate_with_effects(
+    effects: &(impl QueueRuntimeProjectionEffects + ?Sized),
+    file: &Path,
+) -> Result<QueueCleanSlateOutcome> {
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
+    if let Some(cycle) = agent_doc_cycle_state_io::load_with_closeout_projection(file)?
+        && cycle.is_open()
+    {
+        bail!(
+            "queue clean-slate refused: cycle {} is still open in phase {:?}; finish or recover that cycle first",
+            cycle.cycle_id,
+            cycle.phase,
+        );
+    }
+
+    let content = effects.current_document_content(file, "queue_clean_slate_preflight")?;
+    let completion_count =
+        agent_doc_document::subagent_completion::completion_evidence(&content).len();
+    if completion_count > 0 {
+        bail!(
+            "queue clean-slate refused: {completion_count} worker completion handoff(s) remain in the document; integrate/finalize them before resetting attempt projections"
+        );
+    }
+
+    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
+        bail!(
+            "{} is not inside an agent-doc project; queue clean-slate needs project state.db",
+            file.display()
+        );
+    };
+    let document_hash = agent_doc_hash::path_hash(file)
+        .with_context(|| format!("canonicalize queue clean-slate document: {}", file.display()))?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .context("begin queue clean-slate transaction")?;
+    let cleared = (|| {
+        let claim_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+        )?;
+        let claims = claim_record
+            .as_ref()
+            .map(|record| {
+                agent_doc_queue::queue_claim::QueueClaimLedger::from_state_payload(
+                    &record.payload_json,
+                )
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let live_workers = claims
+            .claims
+            .iter()
+            .filter(|claim| {
+                matches!(
+                    claim.state,
+                    agent_doc_queue::queue_claim::QueueClaimState::Claimed
+                        | agent_doc_queue::queue_claim::QueueClaimState::Running
+                )
+            })
+            .map(|claim| {
+                format!(
+                    "{}#{} ({:?})",
+                    claim.owner, claim.generation, claim.state
+                )
+            })
+            .collect::<Vec<_>>();
+        if !live_workers.is_empty() {
+            bail!(
+                "queue clean-slate refused: live claimed/running worker attempt(s): {}",
+                live_workers.join(", ")
+            );
+        }
+
+        let receipt_record = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+        )?;
+        let receipts = receipt_record
+            .as_ref()
+            .map(|record| {
+                serde_json::from_str::<
+                    agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger,
+                >(&record.payload_json)
+                .context("parse queue release receipts for clean-slate")
+            })
+            .transpose()?
+            .unwrap_or_default();
+
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+        )?;
+        agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+            &conn,
+            &document_hash,
+            agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+        )?;
+        Ok::<_, anyhow::Error>((claims.claims.len(), receipts.receipts.len()))
+    })();
+    let (cleared_claims, cleared_release_receipts) = match cleared {
+        Ok(counts) => {
+            conn.execute_batch("COMMIT")
+                .context("commit queue clean-slate transaction")?;
+            counts
+        }
+        Err(error) => {
+            if let Err(rollback) = conn.execute_batch("ROLLBACK") {
+                eprintln!(
+                    "[queue clean-slate] WARNING: rollback failed after {error:#}: {rollback}"
+                );
+            }
+            return Err(error);
+        }
+    };
+
+    let projection = project_all_queue_runtime_state_once_with_effects(effects, file)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_clean_slate cleared_claims={cleared_claims} cleared_release_receipts={cleared_release_receipts} projection={projection:?}"
+        ),
+    );
+    Ok(QueueCleanSlateOutcome {
+        cleared_claims,
+        cleared_release_receipts,
+        projection,
+    })
+}
+
 #[derive(Debug)]
 struct QueueRuntimeProjectionSuperseded;
 
@@ -3785,5 +3953,141 @@ mod tests {
             "a superseded background CAS must defer"
         );
         assert_eq!(effects.convergence_attempts.get(), 1);
+    }
+
+    fn upsert_test_state(doc: &Path, state_kind: &str, payload_json: String) {
+        let root = agent_doc_fs::find_project_root(doc).unwrap();
+        let document_hash = agent_doc_hash::path_hash(doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash,
+                state_kind: state_kind.to_string(),
+                canonical_path: doc.canonicalize().unwrap().display().to_string(),
+                payload_json,
+                updated_at_secs: crate::queue_claim::claim_clock_now_secs(),
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn clean_slate_clears_only_attempt_projection_state_and_reprojects_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "<!-- agent:queue -->\n- repair projection drift\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, content).unwrap();
+
+        let (_, mut claim) = crate::queue_claim::claim(
+            &doc,
+            "repair projection drift",
+            "subagent:finished",
+            60,
+        )
+        .unwrap();
+        claim.state = agent_doc_queue::queue_claim::QueueClaimState::Lost;
+        claim.expires_at_secs = 0;
+        let claims = agent_doc_queue::queue_claim::QueueClaimLedger {
+            claims: vec![claim.clone()],
+            cancellations: Vec::new(),
+        };
+        upsert_test_state(
+            &doc,
+            agent_doc_queue::queue_claim::QUEUE_CLAIMS_STATE_KIND,
+            serde_json::to_string(&claims).unwrap(),
+        );
+        let receipt = agent_doc_queue::claim_release_receipt::ClaimReleaseReceipt {
+            identity: claim.identity.clone(),
+            item_text: claim.item_text.clone(),
+            owner: claim.owner.clone(),
+            generation: claim.generation,
+            completion_recovered_after_loss: false,
+            owner_session: None,
+            publication_state: None,
+            claimed_at_secs: claim.claimed_at_secs,
+            worker_id: None,
+            completion_key: None,
+            response: None,
+            released_at_secs: 1,
+            expires_at_secs: 2,
+        };
+        upsert_test_state(
+            &doc,
+            agent_doc_queue::claim_release_receipt::CLAIM_RELEASE_RECEIPTS_STATE_KIND,
+            serde_json::to_string(
+                &agent_doc_queue::claim_release_receipt::ClaimReleaseReceiptLedger {
+                    receipts: vec![receipt],
+                },
+            )
+            .unwrap(),
+        );
+        upsert_test_state(
+            &doc,
+            crate::queue_lineage::QUEUE_LINEAGE_STATE_KIND,
+            serde_json::to_string(&crate::queue_lineage::QueueLineageLedger::default()).unwrap(),
+        );
+        upsert_test_state(&doc, "operator_delete_tombstones", "{}".to_string());
+
+        let effects = FakeEffects::with_current(content);
+        let outcome = clean_slate_with_effects(&effects, &doc).unwrap();
+        assert_eq!(outcome.cleared_claims, 1);
+        assert_eq!(outcome.cleared_release_receipts, 1);
+        assert_eq!(
+            outcome.projection,
+            QueueRuntimeProjectionOnceOutcome::Settled { changed: true }
+        );
+        assert!(crate::queue_claim::load_ledger(&doc).unwrap().claims.is_empty());
+        assert!(crate::claim_release_receipt::load(&doc).unwrap().receipts.is_empty());
+
+        let root = agent_doc_fs::find_project_root(&doc).unwrap();
+        let document_hash = agent_doc_hash::path_hash(&doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        for preserved in [
+            crate::queue_lineage::QUEUE_LINEAGE_STATE_KIND,
+            "operator_delete_tombstones",
+        ] {
+            assert!(
+                agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+                    &conn,
+                    &document_hash,
+                    preserved,
+                )
+                .unwrap()
+                .is_some(),
+                "clean-slate removed preserved state family {preserved}"
+            );
+        }
+        let projected = std::fs::read_to_string(&doc).unwrap();
+        assert!(projected.contains("- 📥 repair projection drift"), "{projected}");
+    }
+
+    #[test]
+    fn clean_slate_refuses_a_live_worker_or_completion_handoff_without_clearing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = "<!-- agent:queue -->\n- live worker\n<!-- /agent:queue -->\n";
+        std::fs::write(&doc, content).unwrap();
+        crate::queue_claim::claim(&doc, "live worker", "subagent:live", 3600).unwrap();
+        let effects = FakeEffects::with_current(content);
+        let error = clean_slate_with_effects(&effects, &doc).unwrap_err();
+        assert!(error.to_string().contains("live claimed/running worker"));
+        assert_eq!(crate::queue_claim::load_ledger(&doc).unwrap().claims.len(), 1);
+
+        let completion = agent_doc_document::subagent_completion::cell(
+            "subagent:finished",
+            "live worker",
+            "completion-key",
+        );
+        let with_completion = format!(
+            "<!-- agent:exchange -->\n{completion}\n<!-- /agent:exchange -->\n{content}"
+        );
+        std::fs::write(&doc, &with_completion).unwrap();
+        let effects = FakeEffects::with_current(with_completion);
+        let error = clean_slate_with_effects(&effects, &doc).unwrap_err();
+        assert!(error.to_string().contains("worker completion handoff"));
+        assert_eq!(crate::queue_claim::load_ledger(&doc).unwrap().claims.len(), 1);
     }
 }

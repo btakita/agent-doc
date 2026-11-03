@@ -2305,6 +2305,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-state-observer-io",
  "agent-doc-state-scope",
  "agent-doc-supervisor",

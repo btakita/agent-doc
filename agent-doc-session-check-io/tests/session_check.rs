@@ -7509,6 +7509,296 @@ Body\n\
             "operator-authored context from the response capture baseline is not response contamination"
         );
     }
+    /// `#qcontam-stale-capture-head`: a retained capture can be older than a
+    /// queue row that the same closeout subsequently committed.  The assistant
+    /// may echo the entire nested prompt tree while explaining/dispatching that
+    /// row; exact terminal proof makes that post-capture HEAD safe provenance.
+    #[test]
+    fn queue_contamination_guard_trusts_exact_post_capture_terminal_head_proof() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let doc = tmp.path().join("doc.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+            "\n<!-- agent:queue subagents -->\n",
+            "- [#older] Existing queue work.\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
+        let capture = agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            "### Re: earlier — gpt-5\n\nEarlier response.\n",
+            baseline,
+        )
+        .unwrap();
+
+        let nested = "[#vscodecodersmoke] Run scripts/vscode-remote-smoke.py on a real Coder workspace; then update the VS Code status cell.";
+        let committed = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: earlier — gpt-5\n\nEarlier response.\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue subagents -->\n",
+                "- [#older] Existing queue work.\n",
+                "  - {nested}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            nested = nested,
+        );
+        fs::write(&doc, &committed).unwrap();
+        Command::new("git")
+            .args(["add", "doc.md"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "operator queue edit"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        let committed_hash = agent_doc_hash::content_hash(&committed);
+        agent_doc_cycle_state_io::append_terminal_closeout_proof(
+            &doc,
+            agent_doc_cycle_state_io::TerminalCloseoutProofInput {
+                cycle_id: &capture.cycle_id,
+                last_event: "commit_success",
+                did_commit: true,
+                file_hash: &committed_hash,
+                snapshot_hash: &committed_hash,
+                head_hash: &committed_hash,
+                state_file_hash_matches: true,
+                state_snapshot_hash_matches: true,
+                agreement: agent_doc_state_backbone::TerminalCloseoutAgreement::FileSnapshotHead,
+                response_materialized_in_head: true,
+                capture_id: Some(&capture.capture_id),
+                response_sha256: Some(&capture.response_sha256),
+                recorded_at_ms: capture.captured_at.saturating_mul(1_000).saturating_add(1),
+            },
+        )
+        .unwrap();
+
+        let current = committed.replace(
+            "<!-- agent:exchange -->\n",
+            &format!(
+                concat!(
+                    "<!-- agent:exchange -->\n",
+                    "### Re: queue dispatch — gpt-5\n\n",
+                    "Prompt tree (`#nestsubmit`, context only):\n",
+                    "  - {nested}\n",
+                ),
+                nested = nested,
+            ),
+        );
+        fs::write(&doc, current).unwrap();
+
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::None
+            ),
+            "a committed queue row remains proven even when a stale capture predates it and a response prompt tree echoes it"
+        );
+    }
+    /// A terminal proof can be older than a refreshed projection of the same
+    /// capture id/response hash.  When that refresh records an operator deletion,
+    /// the older proof and HEAD cannot justify a later response-generated
+    /// reintroduction of the deleted row.
+    #[test]
+    fn queue_contamination_guard_does_not_trust_proof_before_same_capture_refresh() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let doc = tmp.path().join("doc.md");
+        let removed = "[#removed] Run the deleted operator task.";
+        let baseline = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue subagents -->\n- {removed}\n<!-- /agent:queue -->\n",
+            ),
+            removed = removed,
+        );
+        fs::write(&doc, &baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&baseline), Some(&baseline)).unwrap();
+        let response = "### Re: queue dispatch — gpt-5\n\nInitial dispatch complete.\n";
+        let capture =
+            agent_doc_capture_io::capture_response_with_current_content(&doc, response, &baseline)
+                .unwrap();
+
+        let committed = baseline.replace(
+            "<!-- agent:exchange -->\n",
+            &format!("<!-- agent:exchange -->\n{response}"),
+        );
+        fs::write(&doc, &committed).unwrap();
+        Command::new("git")
+            .args(["add", "doc.md"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "queue row before capture refresh"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            Some(&committed),
+            Some(&committed),
+        )
+        .unwrap();
+        let committed_hash = agent_doc_hash::content_hash(&committed);
+        agent_doc_cycle_state_io::append_terminal_closeout_proof(
+            &doc,
+            agent_doc_cycle_state_io::TerminalCloseoutProofInput {
+                cycle_id: &capture.cycle_id,
+                last_event: "commit_success",
+                did_commit: true,
+                file_hash: &committed_hash,
+                snapshot_hash: &committed_hash,
+                head_hash: &committed_hash,
+                state_file_hash_matches: true,
+                state_snapshot_hash_matches: true,
+                agreement: agent_doc_state_backbone::TerminalCloseoutAgreement::FileSnapshotHead,
+                response_materialized_in_head: true,
+                capture_id: Some(&capture.capture_id),
+                response_sha256: Some(&capture.response_sha256),
+                recorded_at_ms: capture.captured_at.saturating_mul(1_000).saturating_add(1),
+            },
+        )
+        .unwrap();
+
+        let after_deletion = committed.replace(&format!("- {removed}\n"), "");
+        fs::write(&doc, &after_deletion).unwrap();
+        // Same capture id and response hash, but a newer durable capture fact
+        // records the operator's queue deletion after the terminal proof.
+        agent_doc_capture_io::capture_response_with_current_content(
+            &doc,
+            response,
+            &after_deletion,
+        )
+        .unwrap();
+
+        let contaminated = after_deletion.replace(
+            "<!-- /agent:exchange -->",
+            &format!(
+                "### Re: later dispatch — gpt-5\n\nPrompt tree:\n  - {removed}\n<!-- /agent:exchange -->"
+            ),
+        );
+        let contaminated = contaminated.replace(
+            "<!-- agent:queue subagents -->\n",
+            &format!("<!-- agent:queue subagents -->\n- {removed}\n"),
+        );
+        fs::write(&doc, contaminated).unwrap();
+
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::Error(_)
+            ),
+            "a terminal proof older than the exact capture projection must not erase its operator deletion"
+        );
+    }
+    /// A contaminated document that is itself the current committed HEAD has no
+    /// older committed provenance.  HEAD equality must not grandfather the
+    /// response-generated row merely because the bad projection was committed.
+    #[test]
+    fn queue_contamination_guard_does_not_trust_current_head_as_older_provenance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc/logs")).unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        let doc = tmp.path().join("doc.md");
+        let prose =
+            "Done — all child stories now have concrete implementation notes and RICE scores.";
+        let contaminated = format!(
+            concat!(
+                "---\nagent_doc_session: test\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: story audit — gpt-5\n\n",
+                "{prose}\n",
+                "<!-- /agent:exchange -->\n",
+                "\n<!-- agent:queue auto -->\n",
+                "- {prose}\n",
+                "<!-- /agent:queue -->\n",
+            ),
+            prose = prose,
+        );
+        fs::write(&doc, contaminated).unwrap();
+        Command::new("git")
+            .args(["add", "doc.md"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-qm", "committed contaminated projection"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+
+        assert!(
+            matches!(
+                check_queue_response_contamination_guard(&doc).unwrap(),
+                GuardResult::Error(_)
+            ),
+            "current HEAD equality is not older provenance for response-generated queue prose"
+        );
+    }
     /// `#jb-run-agent-doc-response-queue-contamination` blockquote-echo false
     /// positive: a still-live free-text queue HEAD whose verbatim text the
     /// answering `### Re:` response quotes in its `> **Queue prompt:**` echo must

@@ -77,6 +77,7 @@ agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.567" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.567" }
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.567" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.567" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.567" }
 agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.567" }
 agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.567" }
 serde_json = "1"

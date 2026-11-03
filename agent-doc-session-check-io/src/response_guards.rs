@@ -87,30 +87,63 @@ pub fn check_queue_response_contamination_guard(
         None => None,
     };
     let head_content = rc.head_content();
-    let baseline_content = capture
-        .as_ref()
-        .and_then(|capture| capture.baseline_content.as_deref())
-        .or_else(|| {
-            head_content
-                .as_deref()
-                .map(String::as_str)
-                .filter(|head| *head != content)
-        });
-    let baseline_components =
-        baseline_content.and_then(|baseline| agent_doc_element::element::parse(baseline).ok());
-    let baseline_queue_body = baseline_content.and_then(|baseline| {
-        baseline_components.as_ref().and_then(|components| {
-            components
-                .iter()
-                .find(|component| component.name == "queue")
-                .map(|component| component.content(baseline))
-        })
-    });
+    // A long-running capture can predate later operator queue edits that have
+    // already reached HEAD.  Only supplement the capture baseline with HEAD
+    // when terminal-closeout evidence proves this exact HEAD was committed by
+    // this capture after it was recorded.  Merely observing a different HEAD
+    // is insufficient: it may be older than a capture in which the operator
+    // deliberately removed that row (`#qcontam-stale-capture-head`).
+    let proven_post_capture_head = match (
+        capture.as_ref(),
+        head_content.as_deref().map(String::as_str),
+    ) {
+        (Some(capture), Some(head)) if head != content.as_str() => {
+            agent_doc_cycle_state_io::terminal_proof_follows_capture_projection(
+                file,
+                agent_doc_cycle_state_io::CaptureProjectionTerminalProofInput {
+                    cycle_id: &capture.cycle_id,
+                    capture_id: &capture.capture_id,
+                    response_sha256: &capture.response_sha256,
+                    baseline_content: capture.baseline_content.as_deref(),
+                    head_hash: &agent_doc_hash::content_hash(head),
+                },
+            )?
+            .then_some(head)
+        }
+        _ => None,
+    };
+    let mut proven_queue_bodies = Vec::new();
+    for proven_content in [
+        capture
+            .as_ref()
+            .and_then(|capture| capture.baseline_content.as_deref()),
+        proven_post_capture_head,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let Some(body) = agent_doc_element::element::parse(proven_content)
+            .ok()
+            .and_then(|components| {
+                components
+                    .iter()
+                    .find(|component| component.name == "queue")
+                    .map(|component| component.content(proven_content).to_string())
+            })
+        else {
+            continue;
+        };
+        if !proven_queue_bodies.contains(&body) {
+            proven_queue_bodies.push(body);
+        }
+    }
+    let baseline_queue_body =
+        (!proven_queue_bodies.is_empty()).then(|| proven_queue_bodies.join("\n"));
     let contaminated =
         agent_doc_workflow::session_check::queue_response_contamination_candidates_since_baseline(
             queue_body,
             exchange.content(&content),
-            baseline_queue_body,
+            baseline_queue_body.as_deref(),
         );
 
     if contaminated.is_empty() {

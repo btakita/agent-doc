@@ -921,13 +921,14 @@ fn should_enforce_route_owned_queue_control(
     route_owned: bool,
     admission: StartRuntimeAdmission,
     start_purpose: RouteOwnedStartPurpose,
+    control_state: &str,
 ) -> bool {
     let admission = if admission.preserves_session_lifecycle() {
         RouteOwnedStartAdmission::SupervisorReentry
     } else {
         RouteOwnedStartAdmission::NewSession(start_purpose)
     };
-    route_owned_start_blocked_by_queue_control(route_owned, admission)
+    route_owned_start_blocked_by_queue_control(route_owned, admission, control_state)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1533,12 +1534,15 @@ fn prepare_start_runtime_with_admission(
     // command itself was already submitted. Re-check durable queue control at
     // the lifecycle boundary to close the pause-vs-route race. Supervisor
     // exec-reentry is exempt because it preserves an already-running child.
-    if should_enforce_route_owned_queue_control(route_owned, admission, start_purpose)
-        && let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
-            &project_root,
-            &canonical,
-        )?
-    {
+    if let Some(control) = agent_doc_sqlite::state_store::load_effective_queue_control_for_path(
+        &project_root,
+        &canonical,
+    )? && should_enforce_route_owned_queue_control(
+        route_owned,
+        admission,
+        start_purpose,
+        &control.state,
+    ) {
         let reason = control.reason.as_deref().unwrap_or("unspecified");
         agent_doc_ops_log_io::log_op(
             file,
@@ -2973,21 +2977,31 @@ mod tests {
             true,
             StartRuntimeAdmission::NewSession,
             RouteOwnedStartPurpose::Dispatch,
+            "paused",
         ));
         assert!(!should_enforce_route_owned_queue_control(
             true,
             StartRuntimeAdmission::SupervisorReexecPreservingChild,
             RouteOwnedStartPurpose::Dispatch,
+            "paused",
         ));
         assert!(!should_enforce_route_owned_queue_control(
             true,
             StartRuntimeAdmission::NewSession,
             RouteOwnedStartPurpose::LayoutProvision,
+            "paused",
         ));
         assert!(!should_enforce_route_owned_queue_control(
             false,
             StartRuntimeAdmission::NewSession,
             RouteOwnedStartPurpose::Dispatch,
+            "paused",
+        ));
+        assert!(!should_enforce_route_owned_queue_control(
+            true,
+            StartRuntimeAdmission::NewSession,
+            RouteOwnedStartPurpose::Dispatch,
+            "draining",
         ));
     }
 

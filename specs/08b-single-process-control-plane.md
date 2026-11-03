@@ -250,8 +250,10 @@ authorities once the controller record exists.
   `write_all` call per logical record so concurrent process or thread writers
   cannot interleave another record between the body and its newline.
 - The pure route-owned lifecycle policy distinguishes a dispatching new session,
-  a provision-only editor-layout session, and supervisor reentry. Effective queue
-  control blocks only the dispatching new-session transition. Route provisioning
+  a provision-only editor-layout session, and supervisor reentry. An effective
+  **pause** blocks only the dispatching new-session transition; a drain is bound
+  to its existing actor generation/target and cannot block creation of a fresh
+  owner. Route provisioning
   and the spawned start process must apply the same typed decision so a pause race
   cannot dispatch work, while an idle structural owner can still converge the
   desired pane layout and quiesce its reconciliation effect.
@@ -1029,7 +1031,14 @@ Controller queue state is stored in SQLite rather than loose marker files:
 - `queue_heads`: document id, queue name, actor generation when known, head id,
   prompt text, state, priority, selected timestamp, and updated timestamp;
 - `queue_controls`: document/project scope, paused/resumed/draining state,
-  operator reason, linked admin operation receipt id, and updated timestamp;
+  operator reason, linked admin operation receipt id, actor generation, drain
+  target item id, lease expiry, and updated timestamp. A drain remains effective
+  past its nominal lease while its target is present or its same-generation
+  actor is live. At an idle boundary it retires when the lease expires; actor
+  generation replacement retires it immediately. Legacy rows with no structured
+  target/generation migrate through the same conservative rule (live actor keeps
+  the fence, idle expired row is stale). A pause has no lease and survives
+  restart/generation replacement until explicit resume;
 - `queue_backpressure`: document id, actor generation when known, rejected or
   blocked command kind, capacity class (`queue_full`, `queue_paused`,
   `actor_busy_draining`, etc.), reason, linked dispatch receipt id, and
@@ -1037,7 +1046,11 @@ Controller queue state is stored in SQLite rather than loose marker files:
 
 Actor inspection responses include the current queue head/control state and
 recent typed queue backpressure receipts, alongside dispatch/admin receipts and
-projection diagnostics. They also join reliable-sync editor liveness with the
+projection diagnostics. Queue-control inspection returns the retained audit
+state plus `effective` and an explicit effectiveness reason (for example
+`drain_generation_superseded` or `legacy_drain_lease_expired_at_idle`), so a
+stale drain is visible without being mistaken for an admission fence. They also
+join reliable-sync editor liveness with the
 controller relay hub as `editor_replica`: `detached`, `attached`,
 `registration_missing`, `orphaned_replica`, or `membership_mismatch`, plus both
 counts and a remedy for unhealthy states. Actor `state=ready`, controller binary
@@ -1171,6 +1184,12 @@ the dispatch actor and produce receipts.
   "Ready" is the durable actor record, written by the owner: the gate accepts
   no route-supplied pane evidence, and a stale `Busy` drains once the
   supervisor's `idle_pane_reconcile` lands (`#drainbusymask`).
+- Controller dispatch admission also observes the authoritative pane's
+  harness-specific active-turn cue before creating an accepted receipt. A live
+  cue returns `Blocked` with `failed_stage=actor_turn_busy`; its age never makes
+  it safe. This controller-owned fence is the final check before route input,
+  so a stale `Ready` projection cannot inject into a long-running turn even if a
+  route-side probe raced it.
 - A redundant in-flight re-dispatch (an identical dispatch for the same cycle is
   already accepted and unconsumed) is coalesced: the controller records the
   `coalesced_in_flight` receipt and suppresses the re-send so the routed trigger is

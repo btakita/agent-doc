@@ -15259,6 +15259,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 state: "paused",
                 reason: Some("operator pause"),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();
@@ -15288,6 +15291,9 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
                 state: "resumed",
                 reason: Some("operator resume"),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();

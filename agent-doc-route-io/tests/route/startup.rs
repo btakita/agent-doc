@@ -4526,6 +4526,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 state: "paused",
                 reason: Some("operator pause"),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();

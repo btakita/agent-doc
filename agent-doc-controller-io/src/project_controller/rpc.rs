@@ -6779,6 +6779,9 @@ fn resume_document_queue_control(
             state: "resumed",
             reason: Some(reason),
             operation_receipt_id: None,
+            actor_generation: None,
+            target_item_id: None,
+            lease_expires_at: None,
         },
     )?;
     agent_doc_ops_log_io::log_op(file, reason);
@@ -28245,6 +28248,23 @@ pub(crate) fn handle_actor_binding(
     })
 }
 
+fn controller_dispatch_turn_fence(live_turn_busy_cue: Option<&str>) -> bool {
+    live_turn_busy_cue.is_some()
+}
+
+fn controller_live_turn_busy_cue(
+    record: &agent_doc_controller::actor::ActorRecord,
+) -> Option<String> {
+    if record.pane_id.is_empty() {
+        return None;
+    }
+    let tmux = agent_doc_tmux_io::configured_tmux();
+    let captured = agent_doc_tmux_io::capture_pane_with_ansi(&tmux, &record.pane_id)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(&tmux, &record.pane_id))
+        .ok()?;
+    agent_doc_harness::HarnessConfig::from_agent_name(&record.harness).busy_proof_line(&captured)
+}
+
 pub(crate) fn handle_dispatch(
     bootstrap: &ControllerBootstrap,
     runtime: Option<&ControllerRuntime>,
@@ -28373,6 +28393,12 @@ pub(crate) fn handle_dispatch(
     }
     let record = actor_record_from_authority(bootstrap, runtime, &document_id)?
         .with_context(|| format!("missing actor record for dispatch {}", file.display()))?;
+    // The controller is the final owner of dispatch admission. A route-side
+    // pane probe is useful UI evidence, but it cannot be the safety fence: a
+    // Ready projection can race a still-running turn between that probe and
+    // this RPC. Re-observe the authoritative pane here before issuing a
+    // dispatch receipt so no caller can inject into a live turn.
+    let live_turn_busy_cue = controller_live_turn_busy_cue(&record);
     let mut queue_control = {
         let conn = open_state_db(&bootstrap.project_root)?;
         state_store::load_effective_queue_control_from_db(
@@ -28402,41 +28428,51 @@ pub(crate) fn handle_dispatch(
     {
         queue_control = None;
     }
-    let queue_block_stage = queue_control.as_ref().and_then(|control| {
-        if control.state == "paused" {
-            // `#qpauserun`: a deliberate operator/admin `paused` queue control
-            // suppresses UNATTENDED auto-dispatch (idle-watch / `/loop`
-            // continuation), but an EXPLICIT operator reopen (JB `Run Agent Doc`
-            // → route managed / dispatch-only reopen) must still start — the pause
-            // is about auto-draining the queue, not about whether the operator can
-            // run a cycle. Allowing the explicit reopen is one-shot: the pause row
-            // stays in place, so future auto callers remain blocked until
-            // `admin queue resume`. EXCEPTION: a stale-supervisor churn-stop pause
-            // (`#jbrestale`) is NOT a deliberate operator pause — it still blocks
-            // every caller so the route path restarts the stale supervisor and
-            // re-dispatches once, rather than admitting a reopen against a stale
-            // supervisor.
-            let stale_supervisor_pause = pause_reason_is_stale_supervisor_churn_stop(
-                control.reason.as_deref().unwrap_or(""),
-            );
-            if dispatch_command_kind_is_operator_reopen(&command_kind) && !stale_supervisor_pause {
-                None
+    let queue_block_stage = if controller_dispatch_turn_fence(live_turn_busy_cue.as_deref()) {
+        Some("actor_turn_busy")
+    } else {
+        queue_control.as_ref().and_then(|control| {
+            if control.state == "paused" {
+                // `#qpauserun`: a deliberate operator/admin `paused` queue control
+                // suppresses UNATTENDED auto-dispatch (idle-watch / `/loop`
+                // continuation), but an EXPLICIT operator reopen (JB `Run Agent Doc`
+                // → route managed / dispatch-only reopen) must still start — the pause
+                // is about auto-draining the queue, not about whether the operator can
+                // run a cycle. Allowing the explicit reopen is one-shot: the pause row
+                // stays in place, so future auto callers remain blocked until
+                // `admin queue resume`. EXCEPTION: a stale-supervisor churn-stop pause
+                // (`#jbrestale`) is NOT a deliberate operator pause — it still blocks
+                // every caller so the route path restarts the stale supervisor and
+                // re-dispatches once, rather than admitting a reopen against a stale
+                // supervisor.
+                let stale_supervisor_pause = pause_reason_is_stale_supervisor_churn_stop(
+                    control.reason.as_deref().unwrap_or(""),
+                );
+                if dispatch_command_kind_is_operator_reopen(&command_kind)
+                    && !stale_supervisor_pause
+                {
+                    None
+                } else {
+                    Some("queue_paused")
+                }
+            } else if control.state == "draining"
+                && record.state != agent_doc_controller::actor::ActorState::Ready
+            {
+                Some("actor_busy_draining")
             } else {
-                Some("queue_paused")
+                None
             }
-        } else if control.state == "draining"
-            && record.state != agent_doc_controller::actor::ActorState::Ready
-        {
-            Some("actor_busy_draining")
-        } else {
-            None
-        }
-    });
+        })
+    };
     if let Some(stage) = queue_block_stage {
-        let reason = queue_control
-            .as_ref()
-            .and_then(|control| control.reason.as_deref())
-            .unwrap_or(stage);
+        let reason = if stage == "actor_turn_busy" {
+            live_turn_busy_cue.as_deref().unwrap_or(stage)
+        } else {
+            queue_control
+                .as_ref()
+                .and_then(|control| control.reason.as_deref())
+                .unwrap_or(stage)
+        };
         let file_path = if file.is_absolute() {
             file.to_path_buf()
         } else {
@@ -28826,11 +28862,15 @@ pub(crate) fn handle_inspect_actor(
         None => None,
     };
     let queue_control = match document_id.as_deref() {
-        Some(document_id) => state_store::load_effective_queue_control_from_db(
-            &conn,
-            document_id,
-            &bootstrap.project_root.to_string_lossy(),
-        )?,
+        Some(document_id) => {
+            state_store::load_queue_control_from_db(&conn, "document", document_id)?.or(
+                state_store::load_queue_control_from_db(
+                    &conn,
+                    "project",
+                    &bootstrap.project_root.to_string_lossy(),
+                )?,
+            )
+        }
         None => None,
     };
     let dispatch_attempts = match document_id.as_deref() {
@@ -39729,12 +39769,24 @@ pub(crate) fn handle_queue_control(
             state: control_state,
             reason: Some(reason),
             operation_receipt_id: Some(receipt.receipt_id),
+            actor_generation: (control_state == "draining")
+                .then(|| record.as_ref().map(|record| record.generation))
+                .flatten(),
+            target_item_id: (control_state == "draining").then_some(item_id).flatten(),
+            lease_expires_at: (control_state == "draining").then(|| {
+                timestamp_secs().saturating_add(state_store::DEFAULT_QUEUE_DRAIN_LEASE_SECS)
+            }),
         },
     )?;
     let mut receipt = receipt;
     receipt.diagnostic_payload = Some(format!(
-        "{diagnostic_payload} scope_kind={} scope_id={} control_receipt_id={}",
-        control.scope_kind, control.scope_id, control.receipt_id
+        "{diagnostic_payload} scope_kind={} scope_id={} control_receipt_id={} actor_generation={:?} target_item_id={:?} lease_expires_at={:?}",
+        control.scope_kind,
+        control.scope_id,
+        control.receipt_id,
+        control.actor_generation,
+        control.target_item_id,
+        control.lease_expires_at,
     ));
     Ok(receipt)
 }
@@ -42475,6 +42527,11 @@ mod tests {
             state: "paused".to_string(),
             reason: Some("operator quarantine".to_string()),
             operation_receipt_id: Some(2),
+            actor_generation: None,
+            target_item_id: None,
+            lease_expires_at: None,
+            effective: true,
+            effectiveness_reason: Some("explicit_pause".to_string()),
             updated_at: 3,
         };
         let resumed = state_store::QueueControlStatus {
@@ -63666,6 +63723,15 @@ mod tests {
             format!("{err:#}").contains("actor_busy_draining"),
             "{err:#}"
         );
+    }
+
+    #[test]
+    fn controller_dispatch_fence_never_ages_out_a_live_turn() {
+        assert!(controller_dispatch_turn_fence(Some(
+            "Working (69h 4m; esc to interrupt)"
+        )));
+        assert!(controller_dispatch_turn_fence(Some("active codex turn")));
+        assert!(!controller_dispatch_turn_fence(None));
     }
     #[test]
     fn resolve_supervisor_auto_recycle_precedence() {

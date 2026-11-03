@@ -21256,7 +21256,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             && supervisor_route_owned.contains("pub enum RouteOwnedStartPurpose")
             && supervisor_route_owned.contains("pub enum RouteOwnedStartAdmission")
             && supervisor_route_owned
-                .contains("pub const fn route_owned_start_blocked_by_queue_control("),
+                .contains("pub fn route_owned_start_blocked_by_queue_control("),
         "agent-doc-start-io should own start admission/session-owner IO while start/run.rs calls it directly"
     );
     for forbidden in [

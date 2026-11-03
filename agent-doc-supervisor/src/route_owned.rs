@@ -145,15 +145,20 @@ pub enum RouteOwnedStartAdmission {
 /// This is the single policy owner shared by route provisioning and the spawned
 /// `agent-doc start` process, closing their pause-vs-start race without making a
 /// tmux layout effect retry forever.
-pub const fn route_owned_start_blocked_by_queue_control(
+pub fn route_owned_start_blocked_by_queue_control(
     route_owned: bool,
     admission: RouteOwnedStartAdmission,
+    control_state: &str,
 ) -> bool {
     route_owned
         && matches!(
             admission,
             RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch)
         )
+        // A drain is scoped to the actor generation/target that requested it.
+        // It may fence another dispatch into that owner, but it must not behave
+        // like a durable pause and prevent a fresh owner from starting.
+        && !matches!(control_state, "resumed" | "draining")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -681,18 +686,27 @@ mod tests {
         assert!(route_owned_start_blocked_by_queue_control(
             true,
             RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+            "paused",
         ));
         assert!(!route_owned_start_blocked_by_queue_control(
             true,
             RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::LayoutProvision),
+            "paused",
         ));
         assert!(!route_owned_start_blocked_by_queue_control(
             true,
             RouteOwnedStartAdmission::SupervisorReentry,
+            "paused",
         ));
         assert!(!route_owned_start_blocked_by_queue_control(
             false,
             RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+            "paused",
+        ));
+        assert!(!route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+            "draining",
         ));
     }
 

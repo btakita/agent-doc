@@ -295,7 +295,7 @@ pub fn inspect(
             .map(|health| health.live_replicas)
             .unwrap_or_default();
         println!(
-            "{} [{}] pane={} gen={} state={} queue_control={} projection_lag={} editor_replica={} live_editors={} live_replicas={} freshness={}",
+            "{} [{}] pane={} gen={} state={} queue_control={} queue_control_effective={} queue_control_reason={} projection_lag={} editor_replica={} live_editors={} live_replicas={} freshness={}",
             inspection
                 .document_id
                 .as_deref()
@@ -308,6 +308,15 @@ pub fn inspect(
                 .queue_control
                 .as_ref()
                 .map(|control| control.state.as_str())
+                .unwrap_or("none"),
+            inspection
+                .queue_control
+                .as_ref()
+                .is_some_and(|control| control.effective),
+            inspection
+                .queue_control
+                .as_ref()
+                .and_then(|control| control.effectiveness_reason.as_deref())
                 .unwrap_or("none"),
             inspection.projection_lag,
             replica_status,

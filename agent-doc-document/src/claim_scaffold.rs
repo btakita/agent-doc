@@ -55,6 +55,23 @@ pub fn render_empty_template_scaffold(session_id: &str) -> String {
     render_empty_template_scaffold_with_title(session_id, "")
 }
 
+fn escape_session_title(title: &str) -> String {
+    let mut escaped = String::with_capacity(title.len());
+    for character in title.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            character if character.is_ascii_punctuation() => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 /// Render a new empty session with the canonical one-title hierarchy.
 ///
 /// This is creation-time behavior only. Existing documents are never given an
@@ -66,7 +83,7 @@ pub fn render_empty_template_scaffold_with_title(session_id: &str, title: &str) 
     let heading = if title.is_empty() {
         "# Session".to_string()
     } else {
-        format!("# Session: {title}")
+        format!("# Session: {}", escape_session_title(title))
     };
     format!(
         "---\nagent_doc_session: {session_id}\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n{heading}{}",
@@ -294,7 +311,7 @@ mod tests {
     fn path_scaffold_uses_filename_for_the_single_document_title() {
         let scaffold =
             render_empty_template_scaffold_for_path("session-1", Path::new("tasks/sdk/sdk-dev.md"));
-        assert!(scaffold.contains("\n# Session: sdk-dev\n"));
+        assert!(scaffold.contains("\n# Session: sdk\\-dev\n"));
         assert_eq!(
             scaffold
                 .lines()
@@ -303,6 +320,30 @@ mod tests {
             1
         );
         assert!(scaffold.contains("\n## Exchange <!-- agent:exchange"));
+    }
+
+    #[test]
+    fn path_scaffold_escapes_adversarial_filename_without_creating_structure() {
+        let scaffold = render_empty_template_scaffold_for_path(
+            "session-1",
+            Path::new("tasks/foo&<!-- agent:rogue --> [x] *y* #z.md"),
+        );
+        assert!(scaffold.contains(concat!(
+            "\n# Session: ",
+            "foo&amp;&lt;\\!\\-\\- agent\\:rogue \\-\\-&gt; ",
+            "\\[x\\] \\*y\\* \\#z\n",
+        )));
+        assert!(!scaffold.contains("<!-- agent:rogue -->"));
+        let components = agent_doc_element::element::parse(&scaffold)
+            .expect("an adversarial filename must still produce a parseable component tree");
+        assert_eq!(components.len(), 10);
+        assert_eq!(
+            scaffold
+                .lines()
+                .filter(|line| line.starts_with("# "))
+                .count(),
+            1
+        );
     }
 
     #[test]

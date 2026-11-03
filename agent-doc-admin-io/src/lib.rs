@@ -280,7 +280,17 @@ pub fn inspect(
     let inspection = effects.inspect_actor(&root, document, session, pane)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&inspection)?);
-    } else if let Some(record) = inspection.record.as_ref() {
+    } else {
+        for line in inspect_text_lines(&inspection) {
+            println!("{line}");
+        }
+    }
+    Ok(())
+}
+
+fn inspect_text_lines(inspection: &ControllerActorInspectionView) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(record) = inspection.record.as_ref() {
         let replica_status = inspection
             .editor_replica
             .as_ref()
@@ -296,7 +306,7 @@ pub fn inspect(
             .as_ref()
             .map(|health| health.live_replicas)
             .unwrap_or_default();
-        println!(
+        lines.push(format!(
             "{} [{}] pane={} gen={} state={} queue_control={} queue_control_effective={} queue_control_reason={} projection_lag={} editor_replica={} live_editors={} live_replicas={} freshness={}",
             inspection
                 .document_id
@@ -325,31 +335,48 @@ pub fn inspect(
             live_editors,
             live_replicas,
             controller_freshness_summary(inspection.freshness.as_ref())
-        );
+        ));
         if let Some(remedy) = inspection
             .editor_replica
             .as_ref()
             .and_then(|health| health.remedy.as_deref())
         {
-            println!("  editor_replica_remedy={remedy}");
-        }
-        for control in &inspection.queue_controls {
-            println!(
-                "  retained_queue_control scope={}:{} state={} effective={} reason={} actor_generation={:?} target_item_id={:?} lease_expires_at={:?}",
-                control.scope_kind,
-                control.scope_id,
-                control.state,
-                control.effective,
-                control.effectiveness_reason.as_deref().unwrap_or("none"),
-                control.actor_generation,
-                control.target_item_id,
-                control.lease_expires_at,
-            );
+            lines.push(format!("  editor_replica_remedy={remedy}"));
         }
     } else {
-        println!("No actor found for {}", inspection.target);
+        lines.push(format!(
+            "No actor found for {} queue_control={} queue_control_effective={} queue_control_reason={}",
+            inspection.target,
+            inspection
+                .queue_control
+                .as_ref()
+                .map(|control| control.state.as_str())
+                .unwrap_or("none"),
+            inspection
+                .queue_control
+                .as_ref()
+                .is_some_and(|control| control.effective),
+            inspection
+                .queue_control
+                .as_ref()
+                .and_then(|control| control.effectiveness_reason.as_deref())
+                .unwrap_or("none"),
+        ));
     }
-    Ok(())
+    for control in &inspection.queue_controls {
+        lines.push(format!(
+            "  retained_queue_control scope={}:{} state={} effective={} reason={} actor_generation={:?} target_item_id={:?} lease_expires_at={:?}",
+            control.scope_kind,
+            control.scope_id,
+            control.state,
+            control.effective,
+            control.effectiveness_reason.as_deref().unwrap_or("none"),
+            control.actor_generation,
+            control.target_item_id,
+            control.lease_expires_at,
+        ));
+    }
+    lines
 }
 
 /// Anchor an admin document argument to the process working directory.
@@ -698,6 +725,70 @@ mod tests {
             Some(missing)
         );
         assert!(admin_document_anchored_to_cwd(None).is_none());
+    }
+
+    #[test]
+    fn actorless_inspect_text_keeps_effective_and_retained_queue_controls() {
+        let project_pause = QueueControlStatus {
+            receipt_id: 42,
+            scope_kind: "project".to_string(),
+            scope_id: "/work/project".to_string(),
+            state: "paused".to_string(),
+            reason: Some("maintenance".to_string()),
+            operation_receipt_id: None,
+            actor_generation: None,
+            target_item_id: None,
+            lease_expires_at: None,
+            effective: true,
+            effectiveness_reason: Some("explicit_pause".to_string()),
+            updated_at: 10,
+        };
+        let document_drain = QueueControlStatus {
+            receipt_id: 41,
+            scope_kind: "document".to_string(),
+            scope_id: "/work/project/task.md".to_string(),
+            state: "draining".to_string(),
+            reason: Some("legacy drain".to_string()),
+            operation_receipt_id: None,
+            actor_generation: Some(20),
+            target_item_id: Some("#target".to_string()),
+            lease_expires_at: Some(99),
+            effective: false,
+            effectiveness_reason: Some("drain_actor_absent".to_string()),
+            updated_at: 9,
+        };
+        let inspection = ControllerActorInspectionView {
+            target: "/work/project/task.md".to_string(),
+            document_id: Some("/work/project/task.md".to_string()),
+            record: None,
+            supervisor_lease: None,
+            freshness: None,
+            queue_head: None,
+            queue_control: Some(project_pause.clone()),
+            queue_controls: vec![document_drain, project_pause],
+            queue_backpressure: Vec::new(),
+            editor_replica: None,
+            projection_lag: false,
+            dispatch_attempts: Vec::new(),
+            admin_operations: Vec::new(),
+            projection_diagnostics: Vec::new(),
+        };
+
+        let rendered = inspect_text_lines(&inspection).join("\n");
+        assert!(rendered.contains("No actor found"), "{rendered}");
+        assert!(rendered.contains("queue_control=paused"), "{rendered}");
+        assert!(
+            rendered.contains("queue_control_reason=explicit_pause"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("scope=document:/work/project/task.md state=draining effective=false reason=drain_actor_absent"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("scope=project:/work/project state=paused effective=true reason=explicit_pause"),
+            "{rendered}"
+        );
     }
 
     #[test]

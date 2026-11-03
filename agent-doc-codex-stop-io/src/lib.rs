@@ -766,8 +766,10 @@ fn claude_reported_writeback_reason(file_display: &str, debts: &[ReportedWriteba
     format!(
         "{REPORTED_WRITEBACK_MARKER}\n\
          {count} queue row(s) in {file_display} have a worker result that no closeout has persisted. \
-         The result is only in your context and the uncommitted completion cell; the row stays open \
-         and is served again until a closeout strikes it. Persist it in THIS turn before the final \
+         The result is durable in agent-doc's completion evidence (preflight surfaces it as \
+         `queue_sync.reported_checkmark` `recovered_response`), so a harness switch or `/clear` does \
+         not lose it, but the document has not recorded it: the row stays open and is served again \
+         until a closeout strikes it. Persist it in THIS turn before the final \
          answer (`#reportedwritebackdebt`):\n{rows}\n\
          Do NOT dispatch a new subagent for these rows and do NOT re-claim them. If a concrete \
          blocker prevents persisting now, keep the row open and surface that blocker. A recovered-after-loss \
@@ -796,6 +798,21 @@ fn claude_reported_writeback_continuation(
     input: &ClaudeStopInput,
     file: &Path,
 ) -> Option<ClaudeStopContinuation> {
+    claude_reported_writeback_continuation_with(input, file, |file| {
+        agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
+            file,
+            "claude_stop_reported_writeback",
+        )
+    })
+}
+
+/// [`claude_reported_writeback_continuation`] with the retained-write
+/// admission probe injected.
+fn claude_reported_writeback_continuation_with(
+    input: &ClaudeStopInput,
+    file: &Path,
+    retained_write_pending: impl Fn(&Path) -> bool,
+) -> Option<ClaudeStopContinuation> {
     let debts = match current_document_content(file, "claude_stop_reported_writeback")
         .and_then(|content| reported_writeback_debts(file, &content))
     {
@@ -816,6 +833,63 @@ fn claude_reported_writeback_continuation(
     let urgent_recovered_loss = debts.iter().any(|debt| debt.recovered_after_loss);
     if input.stop_hook_active && !urgent_recovered_loss {
         return None;
+    }
+    // `#reportedwritebackrefusal`: while a retained document write is pending,
+    // preflight refuses admission and forbids document writes, so every
+    // closeout this gate could prescribe is refused too. Demanding one in that
+    // turn contradicted the binary's own refusal (2026-11-03,
+    // agent-doc-bugs.md). The debt survives; the next admitted turn sees it.
+    if retained_write_pending(file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_reported_writeback_skipped rows={} reason=retained_document_write_pending action=allow_final_answer (#reportedwritebackrefusal)",
+                debts.len(),
+            ),
+        );
+        return None;
+    }
+    // `#reportedwritebackloop`: remind once per distinct debt set per harness
+    // session. Re-emitting the identical reminder at every Stop after the
+    // coordinator already acted on it (or found it impossible) is a loop, not a
+    // reminder. A recovered-after-loss row stays urgent and is never muted.
+    let fingerprint = agent_doc_queue_io::reported_writeback_reminder::debts_fingerprint(
+        debts.iter().map(|debt| {
+            (
+                debt.item_text.as_str(),
+                debt.owner.as_str(),
+                debt.held_generation.unwrap_or(0),
+            )
+        }),
+    );
+    if !urgent_recovered_loss
+        && agent_doc_queue_io::reported_writeback_reminder::already_reminded(
+            file,
+            &input.session_id,
+            &fingerprint,
+        )
+        .unwrap_or(false)
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_reported_writeback_skipped rows={} reason=already_reminded_this_session action=allow_final_answer (#reportedwritebackloop)",
+                debts.len(),
+            ),
+        );
+        return None;
+    }
+    if let Err(err) = agent_doc_queue_io::reported_writeback_reminder::record(
+        file,
+        &input.session_id,
+        &fingerprint,
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "claude_stop_reported_writeback_reminder_record_failed error={err:#} (#reportedwritebackloop)"
+            ),
+        );
     }
     agent_doc_ops_log_io::log_op(
         file,
@@ -9566,6 +9640,60 @@ Reviewed the gated items.\n\
         assert!(
             ops.contains("claude_stop_reported_writeback_unpersisted rows=1 held=0 released=1"),
             "{ops}"
+        );
+
+        // `#reportedwritebackloop`: the next Stop of the same session with the
+        // identical debt set does not re-emit the reminder; the result's
+        // location is named instead of "only in your context".
+        assert!(
+            !held.reason.contains("only in your context"),
+            "{}",
+            held.reason
+        );
+        assert!(
+            held.reason.contains("recovered_response"),
+            "{}",
+            held.reason
+        );
+        assert!(
+            apply_claude_stop_with_drain_readiness(&input, |_: &Path| {
+                agent_doc_controller::status::SupervisorDrainReadiness::NoLiveSupervisor
+            })
+            .unwrap()
+            .is_none(),
+            "an identical reminder must not loop across stops of one session"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains(
+                "claude_stop_reported_writeback_skipped rows=1 reason=already_reminded_this_session"
+            ),
+            "{ops}"
+        );
+        // A new harness session (a /clear or harness switch) is reminded again.
+        let fresh = ClaudeStopInput {
+            session_id: "fresh-session".to_string(),
+            ..input
+        };
+        // `#reportedwritebackrefusal`: while preflight forbids document writes
+        // (a retained document write is pending) no closeout can land, so the
+        // gate must not demand one.
+        let another = ClaudeStopInput {
+            session_id: "refused-session".to_string(),
+            ..fresh.clone()
+        };
+        assert!(
+            claude_reported_writeback_continuation_with(&another, &doc, |_| true).is_none(),
+            "a refused-admission turn must not be ordered to write a closeout"
+        );
+        let ops = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops.contains("reason=retained_document_write_pending"),
+            "{ops}"
+        );
+        assert!(
+            claude_reported_writeback_continuation(&fresh, &doc).is_some(),
+            "a different session must still be told about the open debt"
         );
     }
 

@@ -3481,6 +3481,18 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
             .filter(|prior| projection_identity(prior.item.work_text()) == stable_identity)
             .map(|prior| prior.item.text.as_str())
             .collect::<Vec<_>>();
+        let prior_targets = prior_spellings
+            .iter()
+            .flat_map(|prior| {
+                let mut targets = vec![(*prior).to_string()];
+                if let Some(vector) = crate::queue_response::nest_vector_in_document(before, prior)
+                    && !targets.contains(&vector)
+                {
+                    targets.push(vector);
+                }
+                targets
+            })
+            .collect::<Vec<_>>();
         let matching = response_candidates
             .iter()
             .enumerate()
@@ -3492,7 +3504,7 @@ pub fn annotate_newly_struck_queue_items_with_response_id_at(
                 ) || crate::queue_response::response_explicitly_targets_queue_head(
                     &candidate.body,
                     &node.item.text,
-                ) || prior_spellings.iter().any(|prior| {
+                ) || prior_targets.iter().any(|prior| {
                     crate::queue_response::queue_head_answered_by_response(
                         before,
                         &candidate.body,

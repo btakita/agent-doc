@@ -212,6 +212,13 @@ pub fn component_attr_warning(content: &str) -> Option<ComponentAttrWarning> {
         for (key, value) in &component.attrs {
             if matches!(component.name.as_str(), "queue" | "exchange")
                 && crate::subagent_intent::is_queue_subagents_compat_alias(key)
+                && match component.name.as_str() {
+                    "queue" => {
+                        crate::subagent_intent::parse_queue_subagents_value(value).is_ok()
+                    }
+                    "exchange" => value.trim().is_empty(),
+                    _ => false,
+                }
             {
                 issues.push(format!(
                     "`subagent` on `agent:{}` is a compatibility alias for canonical `subagents`; migrate this marker to `subagents`",
@@ -718,6 +725,25 @@ mod tests {
             assert!(body.contains("canonical `subagents`"), "{body}");
             assert!(body.contains("ownership is preserved"), "{body}");
             assert!(!body.contains("attribute is ignored"), "{body}");
+        }
+
+        let limited =
+            "<!-- agent:queue subagent=2 -->\n- do [#a]\n<!-- /agent:queue -->\n";
+        let body = component_attr_warning(limited).unwrap().message_body();
+        assert!(body.contains("ownership is preserved"), "{body}");
+    }
+
+    #[test]
+    fn invalid_singular_alias_value_never_claims_ownership_is_preserved() {
+        for content in [
+            "<!-- agent:queue subagent=0 -->\n- do [#a]\n<!-- /agent:queue -->\n",
+            "<!-- agent:exchange subagent=2 -->\nfix it\n<!-- /agent:exchange -->\n",
+        ] {
+            let body = component_attr_warning(content)
+                .expect("invalid valued alias must warn")
+                .message_body();
+            assert!(!body.contains("ownership is preserved"), "{body}");
+            assert!(body.contains("attribute is ignored"), "{body}");
         }
     }
 

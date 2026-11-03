@@ -128,7 +128,7 @@ fn subagent_dispatch_candidates_for_content(file: &Path, content: &str) -> Resul
     // answered question (haiven-dev tasks/docs.md, 2026-10-15).
     let reported = crate::claim_release_receipt::reported_items_for_content(file, content);
     let keys = executable_row_keys(content);
-    if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets) {
+    if let Some(plan) = queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)? {
         return Ok(plan
             .dispatch
             .into_iter()
@@ -237,13 +237,14 @@ pub fn terminal_queue_drain_handoff() -> agent_doc_queue::coordinator_drain::Coo
 /// has owner-available work gates later queues. A paused earlier queue does
 /// not: a `pause` control (a legacy marker `stop` included) leaves the other
 /// runs in that turn. `None` when no non-empty queue has a valid attribute,
-/// so the per-line "new since seed" path still runs.
+/// so the per-line "new since seed" path still runs. Invalid or near-miss
+/// subagent ownership attributes return an error; they never mean inline mode.
 pub fn queue_attr_subagent_plan(
     file: &Path,
     content: &str,
-) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
+) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
     let prompt_presets =
-        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file).ok()?;
+        agent_doc_frontmatter_io::session::effective_prompt_presets_for_file(content, file)?;
     queue_attr_subagent_plan_with_presets(file, content, &prompt_presets)
 }
 
@@ -265,9 +266,9 @@ fn queue_attr_subagent_plan_with_presets(
     file: &Path,
     content: &str,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
-) -> Option<agent_doc_queue::subagent_intent::QueueSubagentPlan> {
-    let components = agent_doc_element::element::parse(content).ok()?;
-    let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components).ok()?;
+) -> Result<Option<agent_doc_queue::subagent_intent::QueueSubagentPlan>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let graph = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
     // `#queueschedule`: a closed schedule window dispatches nothing.
     // Do not call `claimed_items_for_content` here: it folds this plan's held
     // heads back in and would recurse.
@@ -278,7 +279,7 @@ fn queue_attr_subagent_plan_with_presets(
         .with_claimed(&crate::claim_release_receipt::reported_items_for_content(
             file, content,
         ));
-    let claim_states = crate::queue_claim::claim_states_for_content(file, content).ok()?;
+    let claim_states = crate::queue_claim::claim_states_for_content(file, content)?;
     let occupied = agent_doc_queue::queue_claim::ClaimedQueueItems::from_identities(
         claim_states
             .iter()
@@ -296,8 +297,8 @@ fn queue_attr_subagent_plan_with_presets(
         .filter(|claim| claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost)
         .collect::<Vec<_>>();
     let lineage = (!lost.is_empty())
-        .then(|| crate::queue_lineage::load(file).ok())
-        .flatten();
+        .then(|| crate::queue_lineage::load(file))
+        .transpose()?;
     let unsafe_lost = lost
         .into_iter()
         .filter(|claim| {
@@ -355,6 +356,16 @@ fn queue_attr_subagent_plan_with_presets(
     let mut combined = agent_doc_queue::subagent_intent::QueueSubagentPlan::default();
     let mut saw_attr = false;
     for block in graph.blocks() {
+        agent_doc_queue::subagent_intent::validate_queue_subagents_attrs(
+            &block.component.attrs,
+        )
+        .map_err(anyhow::Error::msg)
+        .with_context(|| {
+            format!(
+                "refusing to plan queue `{}` with ambiguous subagent ownership",
+                block.id
+            )
+        })?;
         let predecessor_live = block.dependencies.iter().any(|dependency| {
             graph.block(dependency).is_some_and(|predecessor| {
                 predecessor.state() != agent_doc_queue::queue_set::QueueNodeState::Empty
@@ -403,19 +414,29 @@ fn queue_attr_subagent_plan_with_presets(
         combined.dispatch.extend(plan.dispatch);
         combined.held.extend(plan.held);
     }
-    saw_attr.then_some(combined)
+    Ok(saw_attr.then_some(combined))
 }
 
-/// [`pending_subagent_dispatch_for_content`] that reports a failure and
-/// degrades to "no dispatch items" (the pre-feature behaviour: the line drains
-/// in queue order) instead of refusing the cycle.
+/// Every executable row in `content`, addressed by its lineage claim key.
+/// This is the conservative hold set when a non-Result compatibility caller
+/// encounters a malformed subagent ownership marker: no row may drain inline.
+fn fail_closed_queue_heads(content: &str) -> Vec<String> {
+    executable_row_keys(content)
+        .into_iter()
+        .map(|(_, lineage)| lineage)
+        .collect()
+}
+
+/// [`pending_subagent_dispatch_for_content`] that reports a failure and emits
+/// no spawn authorization. The out-of-loop ownership projection independently
+/// holds every queue head on the same error, so none can drain inline.
 pub fn pending_subagent_dispatch_or_warn(file: &Path, content: &str) -> Vec<String> {
     match pending_subagent_dispatch_for_content(file, content) {
         Ok(heads) => heads,
         Err(err) => {
             eprintln!(
-                "[queue] WARNING: could not compute subagent dispatch intent for {}; new \
-                 subagent-tagged items drain in queue order this cycle: {err:#}",
+                "[queue] ERROR: could not compute subagent dispatch intent for {}; no worker \
+                 spawn is authorized and queue heads remain held: {err:#}",
                 file.display()
             );
             agent_doc_ops_log_io::log_op(
@@ -435,8 +456,8 @@ fn subagent_dispatch_candidates_or_warn(file: &Path, content: &str) -> Vec<Strin
         Ok(heads) => heads,
         Err(err) => {
             eprintln!(
-                "[queue] WARNING: could not compute subagent dispatch ownership for {}; new \
-                 subagent-tagged items drain in queue order this cycle: {err:#}",
+                "[queue] ERROR: could not compute subagent dispatch ownership for {}; no worker \
+                 spawn is authorized and queue heads remain held: {err:#}",
                 file.display()
             );
             agent_doc_ops_log_io::log_op(
@@ -474,9 +495,17 @@ pub fn out_of_loop_items_for_content(
         .iter()
         .map(|head| lineage_hold_for_head(&keys, head))
         .collect();
-    let held = queue_attr_subagent_plan(file, content)
-        .map(|plan| plan.held)
-        .unwrap_or_default()
+    let held = match queue_attr_subagent_plan(file, content) {
+        Ok(Some(plan)) => plan.held,
+        Ok(None) => Vec::new(),
+        Err(error) => {
+            eprintln!(
+                "[queue] ERROR: holding every queue head because subagent ownership planning failed for {}: {error:#}",
+                file.display()
+            );
+            fail_closed_queue_heads(content)
+        }
+    }
         .into_iter()
         .filter(|head| !reported.claims(head))
         .collect::<Vec<_>>();
@@ -495,8 +524,16 @@ pub fn out_of_loop_items_for_content(
 /// answered-free-text strike keeps it queued and reports it.
 pub fn inline_answer_vetoed_heads_for_content(file: &Path, content: &str) -> Vec<String> {
     let mut owned = subagent_dispatch_candidates_or_warn(file, content);
-    if let Some(plan) = queue_attr_subagent_plan(file, content) {
-        owned.extend(plan.held);
+    match queue_attr_subagent_plan(file, content) {
+        Ok(Some(plan)) => owned.extend(plan.held),
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!(
+                "[queue] ERROR: vetoing inline closeout because subagent ownership planning failed for {}: {error:#}",
+                file.display()
+            );
+            owned.extend(fail_closed_queue_heads(content));
+        }
     }
     if owned.is_empty() {
         return owned;
@@ -1387,6 +1424,28 @@ queue: go
     }
 
     #[test]
+    fn pending_dispatch_rejects_subagent_marker_near_miss_before_inline_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("task.md");
+        let content = attr_doc("sub-agent", &["review Unreal"]);
+        std::fs::write(&file, &content).unwrap();
+
+        let error = pending_subagent_dispatch_for_content(&file, &content)
+            .expect_err("ambiguous ownership must block pending dispatch planning");
+        let message = format!("{error:#}");
+        assert!(message.contains("ambiguous subagent ownership"), "{message}");
+        assert!(message.contains("use canonical `subagents`"), "{message}");
+
+        let error = queue_attr_subagent_plan(&file, &content)
+            .expect_err("the public plan boundary must propagate the same error");
+        assert!(
+            format!("{error:#}").contains("use canonical `subagents`"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
     fn bare_queue_attr_dispatches_all_eligible_heads() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -1413,7 +1472,9 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             expected
         );
-        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content)
+            .unwrap()
+            .unwrap();
         assert!(plan.held.is_empty(), "a bare attr has no capacity hold");
     }
 
@@ -1525,7 +1586,9 @@ queue: go
             listed.iter().all(|head| !head.contains("do [#owned]")),
             "the claimed head stays off the list: {listed:?}"
         );
-        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content)
+            .unwrap()
+            .unwrap();
         assert!(
             plan.held
                 .iter()
@@ -1550,7 +1613,9 @@ queue: go
             pending_subagent_dispatch_for_content(&file, &content).unwrap(),
             vec!["do [#a]".to_string(), "do [#c]".to_string()]
         );
-        let plan = queue_attr_subagent_plan(&file, &content).unwrap();
+        let plan = queue_attr_subagent_plan(&file, &content)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             plan.held,
             vec!["do [#b]".to_string(), "do [#d]".to_string()]

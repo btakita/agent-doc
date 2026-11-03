@@ -276,7 +276,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             );
         let mut suppressed = owner_selection.clone();
         if let Some(queue_subagent_plan) =
-            agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan(file, &content)
+            agent_doc_queue_io::subagent_dispatch::queue_attr_subagent_plan(file, &content)?
         {
             suppressed = suppressed
                 .with_heads(&pending_queue_subagent_dispatch)
@@ -1847,6 +1847,28 @@ Done.
                 && entry.lifecycle.start_receipt_required_after_spawn
                 && entry.lifecycle.sequence == ["claim", "spawn", "start"]
         }));
+    }
+
+    #[test]
+    fn connected_plan_fails_closed_on_subagent_marker_near_miss() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content =
+            subagents_queue_doc().replace("priority subagents go", "priority sub-agent go");
+        std::fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
+
+        let error = build(&doc).expect_err("ambiguous subagent ownership must block plan");
+        let message = format!("{error:#}");
+        assert!(message.contains("ambiguous subagent ownership"), "{message}");
+        assert!(message.contains("use canonical `subagents`"), "{message}");
     }
 
     #[test]

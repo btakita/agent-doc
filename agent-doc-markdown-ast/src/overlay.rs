@@ -38,10 +38,16 @@ const AGENT_PIN_MARKERS: [&str; 6] = [
     "📍",
 ];
 
-/// Binary-owned marker attached to the legacy visible response tree under a
-/// `waiting-item`. These rows explain an operator decision or next action; they
-/// are metadata, never independent queue work.
-const WAITING_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+/// Namespaced ownership proof attached to agent-doc-generated reply rows under
+/// a `waiting-item`. The visible glyph is presentation only: an operator-authored
+/// row containing `▫️` must remain ordinary queue work.
+const AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:reply -->";
+const AGENT_DOC_REPLY_PRESENTATION: &str = "▫️";
+const LEGACY_AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+
+fn is_agent_doc_reply_row(body: &str) -> bool {
+    body.contains(AGENT_DOC_REPLY_MARKER) || body.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
+}
 
 /// Deterministic, visible separator that introduces the auto-struck explanation
 /// note appended *outside* the `~~…~~` strike wrapper (`#qstrikenote`). A struck
@@ -711,18 +717,17 @@ fn related_row_child_end(
     Some(opener_index + 1)
 }
 
-/// Reserve one legacy waiting-response metadata row without swallowing any
+/// Reserve one agent-doc-generated reply row without swallowing any
 /// operator-authored child beneath it. The marker is the ownership proof: the
 /// visible label is intentionally not parsed because older projections used
 /// several labels (`Response`, `Question`, `Summary`, `Choices`, `Action`, ...).
-fn waiting_metadata_child_end(
+fn agent_doc_reply_child_end(
     lines: &[&str],
     opener_index: usize,
     _item_indent: usize,
 ) -> Option<usize> {
     let body = strip_bullet(lines.get(opener_index)?)?;
-    body.contains(WAITING_METADATA_MARKER)
-        .then_some(opener_index + 1)
+    is_agent_doc_reply_row(body).then_some(opener_index + 1)
 }
 
 /// Return the end of an inert list child.
@@ -736,7 +741,7 @@ pub fn inert_list_child_end(
     item_indent: usize,
 ) -> Option<usize> {
     multiline_list_comment_end(lines, opener_index, item_indent)
-        .or_else(|| waiting_metadata_child_end(lines, opener_index, item_indent))
+        .or_else(|| agent_doc_reply_child_end(lines, opener_index, item_indent))
         .or_else(|| response_details_child_end(lines, opener_index, item_indent))
         .or_else(|| response_row_child_end(lines, opener_index, item_indent))
         .or_else(|| response_back_reference_child_end(lines, opener_index, item_indent))
@@ -752,10 +757,11 @@ pub fn inert_list_child_end(
         .or_else(|| related_row_child_end(lines, opener_index, item_indent))
 }
 
-/// Remove legacy strike wrappers from binary-owned waiting metadata rows.
+/// Normalize binary-owned reply rows to the canonical hidden ownership marker
+/// plus compact presentation glyph, and remove legacy strike wrappers.
 /// Operator-authored descendants and unmarked lookalikes remain byte-for-byte
-/// unchanged.
-pub fn normalize_waiting_metadata_strikes(source: &str) -> String {
+/// unchanged. In particular, the glyph alone never establishes ownership.
+pub fn normalize_agent_doc_reply_rows(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     for line in source.split_inclusive('\n') {
         let Some(body) = strip_bullet(line) else {
@@ -767,14 +773,26 @@ pub fn normalize_waiting_metadata_strikes(source: &str) -> String {
             .map(|core| (core, "\r\n"))
             .or_else(|| body.strip_suffix('\n').map(|core| (core, "\n")))
             .unwrap_or((body, ""));
-        let (struck, inner) = split_struck_body(core);
-        if !struck || !inner.contains(WAITING_METADATA_MARKER) {
+        let (_, inner) = split_struck_body(core);
+        if !is_agent_doc_reply_row(inner) {
             out.push_str(line);
             continue;
         }
         let body_offset = body.as_ptr() as usize - line.as_ptr() as usize;
         out.push_str(&line[..body_offset]);
-        out.push_str(inner);
+        let canonical = inner.replace(LEGACY_AGENT_DOC_REPLY_MARKER, AGENT_DOC_REPLY_MARKER);
+        if let Some(marker_at) = canonical.find(AGENT_DOC_REPLY_MARKER) {
+            let before_marker = canonical[..marker_at].trim_end();
+            out.push_str(before_marker);
+            if !before_marker.ends_with(AGENT_DOC_REPLY_PRESENTATION) {
+                out.push(' ');
+                out.push_str(AGENT_DOC_REPLY_PRESENTATION);
+            }
+            out.push(' ');
+            out.push_str(&canonical[marker_at..]);
+        } else {
+            unreachable!("reply ownership was checked before normalization");
+        }
         out.push_str(newline);
     }
     out
@@ -810,7 +828,7 @@ pub fn normalize_generated_response_lifecycle_markers(source: &str) -> String {
         let line = normalized_lines[index];
         let item_indent = line.len() - line.trim_start_matches([' ', '\t']).len();
         let generated = response_details_child_end(&normalized_lines, index, item_indent).is_some()
-            || waiting_metadata_child_end(&normalized_lines, index, item_indent).is_some()
+            || agent_doc_reply_child_end(&normalized_lines, index, item_indent).is_some()
             || response_row_child_end(&normalized_lines, index, item_indent).is_some()
             || response_back_reference_child_end(&normalized_lines, index, item_indent).is_some()
             || response_timestamp_child_end(&normalized_lines, index, item_indent).is_some()
@@ -2349,7 +2367,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_metadata_is_inert_and_repairs_accidental_lifecycle_markers() {
+    fn agent_doc_reply_rows_are_inert_and_repair_accidental_lifecycle_markers() {
         let source = concat!(
             "<!-- agent:queue -->\n",
             "- 📥 [#tdunityrunner20261202] Renew the Unity license. <!-- agent-doc:waiting-item -->\n",
@@ -2409,6 +2427,44 @@ mod tests {
                 .all(|text| !text.contains("Before 2026-12-02T14:24:21Z")),
             "reserved waiting metadata must not become typed work: {texts:#?}"
         );
+    }
+
+    #[test]
+    fn reply_normalization_migrates_legacy_marker_but_never_claims_glyph_only_rows() {
+        let operator_row = "  - ▫️ operator-authored queue work\n";
+        assert_eq!(
+            normalize_agent_doc_reply_rows(operator_row),
+            operator_row,
+            "the presentation glyph alone must not establish generated ownership"
+        );
+        assert!(
+            components(&format!(
+                "<!-- agent:queue -->\n{operator_row}<!-- /agent:queue -->\n"
+            ))[0]
+                .items
+                .iter()
+                .any(|item| item.text.contains("operator-authored queue work")),
+            "an operator glyph row remains runnable"
+        );
+
+        let legacy = concat!(
+            "    - ~~**Response:** choose local <!-- agent-doc:waiting-metadata -->~~\n",
+            "      - operator child remains byte-stable\n",
+        );
+        let normalized = normalize_agent_doc_reply_rows(legacy);
+        assert!(
+            normalized.contains("    - **Response:** choose local ▫️ <!-- agent-doc:reply -->\n"),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("      - operator child remains byte-stable\n"),
+            "{normalized}"
+        );
+        assert!(
+            !normalized.contains("agent-doc:waiting-metadata"),
+            "{normalized}"
+        );
+        assert_eq!(normalize_agent_doc_reply_rows(&normalized), normalized);
     }
 
     #[test]

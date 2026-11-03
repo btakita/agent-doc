@@ -508,9 +508,7 @@ fn derive_runtime_projection_scoped(
                         agent_doc_queue::queue_consume::WAITING_ON_YOU_ROOT_MARKER,
                     ) || prompt.text.contains(
                         agent_doc_queue::queue_consume::WAITING_ON_YOU_ITEM_MARKER,
-                    ) || prompt.text.contains(
-                        agent_doc_queue::queue_consume::WAITING_ON_YOU_METADATA_MARKER,
-                    ) {
+                    ) || agent_doc_queue::queue_consume::is_agent_doc_reply_row(&prompt.text) {
                         return None;
                     }
                     let struck = matches!(entry, QueueEntry::Completed(_));
@@ -2352,10 +2350,14 @@ mod tests {
             "{repaired}"
         );
         assert!(
-            repaired.contains(
-                "- **Response:** Approve and merge PR #42. <!-- agent-doc:waiting-metadata -->"
-            ) && !repaired.contains("~~**Response:** Approve and merge PR #42."),
-            "binary metadata remains inert without being struck: {repaired}"
+            repaired
+                .contains("- **Response:** Approve and merge PR #42. ▫️ <!-- agent-doc:reply -->")
+                && !repaired.contains("~~**Response:** Approve and merge PR #42."),
+            "agent-doc reply rows remain inert without being struck: {repaired}"
+        );
+        assert!(
+            !repaired.contains("agent-doc:waiting-metadata"),
+            "{repaired}"
         );
 
         sync_with_effects(&effects, &doc).expect("the waiting repair should be idempotent");

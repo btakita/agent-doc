@@ -2003,9 +2003,7 @@ fn group_parent_all_leaves_struck(entries: &[QueueEntry], index: usize) -> Optio
                     && !matches!(
                         &entries[descendant],
                         QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt)
-                            if prompt.text.contains(
-                                crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER
-                            )
+                            if crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
                     ) =>
             {
                 saw_leaf = true;
@@ -3781,7 +3779,7 @@ fn waiting_item_has_operator_reply(entries: &[QueueEntry], item_idx: usize) -> b
         .take_while(|entry| entry_indent(entry).is_none_or(|indent| indent > item.indent))
         .any(|entry| {
             matches!(entry, QueueEntry::Prompt(prompt)
-                if !prompt.text.contains(crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER)
+                if !crate::queue_consume::is_agent_doc_reply_row(&prompt.text)
                     && !nest_row_work_text(&prompt.text).trim().is_empty())
         })
 }
@@ -4279,10 +4277,7 @@ pub fn prompt_context_packet_at(
             let Some(prompt) = prompt_of(entry) else {
                 continue;
             };
-            if prompt
-                .text
-                .contains(crate::queue_consume::WAITING_ON_YOU_METADATA_MARKER)
-            {
+            if crate::queue_consume::is_agent_doc_reply_row(&prompt.text) {
                 continue;
             }
             let evidence = nest_row_work_text(&prompt.text);
@@ -13465,7 +13460,7 @@ mod tests {
     }
 
     #[test]
-    fn waiting_metadata_never_projects_as_queue_work() {
+    fn legacy_waiting_metadata_never_projects_as_queue_work() {
         let body = concat!(
             "- 📥 [#tdunityrunner20261202] Renew the Unity license. <!-- agent-doc:waiting-item -->\n",
             "  - 📥 **Response:** Before 2026-12-02T14:24:21Z, log in to desktop Unity Hub so the cachyos-unity-2022 runner Unity Personal license can be renewed, or provide a self-renewing license (Pro/Plus serial or floating license server) <!-- agent-doc:waiting-metadata -->\n",
@@ -13501,6 +13496,26 @@ mod tests {
                 .text
                 .contains("I renewed the license; verify the runner.")),
             "the operator-authored child remains actionable: {rows:#?}"
+        );
+    }
+
+    #[test]
+    fn canonical_reply_marker_is_inert_but_operator_glyph_row_remains_runnable() {
+        let body = concat!(
+            "- **Response:** Choose a target. ▫️ <!-- agent-doc:reply -->\n",
+            "- **Timestamp:** 2026-11-03T10:00-05:00 ▫️ <!-- agent-doc:reply -->\n",
+            "- ▫️ operator-authored choice\n",
+        );
+        let entries = parse(body).unwrap();
+        let executable = executable_prompt_indexes(&entries);
+        assert_eq!(executable.len(), 1, "{entries:#?}");
+        let prompt = prompt_of(&entries[executable[0]]).expect("operator row stays a prompt");
+        assert_eq!(prompt.text, "▫️ operator-authored choice");
+
+        let rendered = render(&entries);
+        assert!(
+            rendered.contains("- ▫️ operator-authored choice\n"),
+            "operator-authored glyph content stays byte-stable: {rendered}"
         );
     }
 

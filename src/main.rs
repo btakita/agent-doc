@@ -459,7 +459,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         actor.submit(
             agent_doc_document_realtime::session_ops::SessionOpKind::QueueHead,
             move |_ctx| {
-                let result =
+                let result = if invocation.live_write_required {
                     agent_doc_queue_io::queue_consume::require_integrated_reported_repo_work_for_successor(
                         &file,
                         &invocation.expected_content,
@@ -475,7 +475,10 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                                 "answered_free_text_projection",
                             )
                         })
-                    });
+                    })
+                } else {
+                    Ok(())
+                };
                 match &result {
                     Ok(()) => {
                         let snapshot_projection = (|| -> anyhow::Result<()> {
@@ -529,22 +532,24 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                         // struck rows' completion cells; their reported/terminal
                         // claim attempts and reported-release receipts end at
                         // this same boundary.
-                        agent_doc_queue_io::claim_release_receipt::retire_struck_by_successor_or_warn(
-                            &file,
-                            &invocation.expected_content,
-                            &invocation.target_content,
-                            "answered_free_text_projection",
-                        );
-                        if let Err(error) =
-                            agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(
+                        if invocation.live_write_required {
+                            agent_doc_queue_io::claim_release_receipt::retire_struck_by_successor_or_warn(
                                 &file,
+                                &invocation.expected_content,
                                 &invocation.target_content,
-                            )
-                        {
-                            eprintln!(
-                                "[queue] answered free-text authority publication failed for {}: {error}",
-                                file.display()
+                                "answered_free_text_projection",
                             );
+                            if let Err(error) =
+                                agent_doc_queue_io::queue_consume::observe_authoritative_queue_state(
+                                    &file,
+                                    &invocation.target_content,
+                                )
+                            {
+                                eprintln!(
+                                    "[queue] answered free-text authority publication failed for {}: {error}",
+                                    file.display()
+                                );
+                            }
                         }
                         agent_doc_ops_log_io::log_op(
                             &file,

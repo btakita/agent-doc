@@ -2126,6 +2126,50 @@ pub fn project_committed_heading_replay_free_text_strike_with_claims(
     project_free_text_strike_of_node_keys(content, None, node_keys, "")
 }
 
+/// Whether a terminal queue row is owned by one of the exact durable head
+/// identities supplied by the caller.
+///
+/// This is deliberately narrower than substring/search matching: controller
+/// replay uses it only to prove that a selected or claimed head introduced
+/// after the response baseline already reached its terminal live successor.
+pub fn struck_queue_contains_owned_head(content: &str, heads: &[String]) -> bool {
+    if heads.is_empty() {
+        return false;
+    }
+    let owned = crate::queue_claim::ClaimedQueueItems::none().with_heads(heads);
+    agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+        .ok()
+        .is_some_and(|nodes| {
+            nodes
+                .into_iter()
+                .any(|node| node.item.struck && owned.claims(node.item.text.trim()))
+        })
+}
+
+/// Whether this exact response carries answer evidence for an already terminal
+/// free-text queue row.
+///
+/// This is restart proof for a split landing: the live queue may already hold
+/// the strike while a separately persisted recovery snapshot still needs the
+/// same terminal projection. Pending rows are excluded before answer matching,
+/// so a weak mention or dispatch veto cannot manufacture a terminal effect.
+pub fn struck_queue_contains_head_answered_by(
+    content: &str,
+    response_body: &str,
+) -> bool {
+    agent_doc_markdown_ast::mutations::item_nodes_all(content, "queue")
+        .ok()
+        .is_some_and(|nodes| {
+            nodes.into_iter().any(|node| {
+                node.item.struck
+                    && crate::queue_response::free_text_head_answered_by_response(
+                        response_body,
+                        node.item.text.trim(),
+                    )
+            })
+        })
+}
+
 /// Normalized topics of every `### Re:` answer heading in `agent:exchange`:
 /// the text after `### Re:` up to the attribution's last spaced em dash
 /// (`### Re: topic — model · time`), whitespace-collapsed and lowercased.

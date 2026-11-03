@@ -19,17 +19,20 @@ use agent_doc_queue::{
     queue_consume::{
         ApprovedQueueHead, IpcNodeOp, QueueConsumptionPlan, approved_queue_head_matches,
         consume_queue_nodes_by_key, consume_queue_prompts_by_exact_spans,
-        first_n_queue_prompt_texts, head_id_names_open_backlog_item, id_backed_head_node_keys,
+        first_n_queue_prompt_response_echoes, first_n_queue_prompt_texts,
+        head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
         project_committed_heading_replay_free_text_strike_with_claims,
         queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
         queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
+        queue_prompt_response_echoes_for_done_ids,
         reported_attempt_projection_node_keys_for_parent_id, strike_all_noise_queue_heads,
     },
     queue_recency::annotate_newly_struck_rows,
     queue_response::{
-        embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
-        queue_prompt_done_id, queue_prompt_text_is_free_text,
+        embed_consumed_prompt_echoes_in_response, embed_consumed_prompt_in_response,
+        first_nonempty_line, queue_head_is_free_text_prompt, queue_prompt_done_id,
+        queue_prompt_text_is_free_text,
     },
 };
 
@@ -3454,6 +3457,16 @@ fn plan_queue_prompt_consumption_inner(
         let (completed_entries, consumed_texts) =
             mark_entries_completed_by_done_ids(&entries, done_ids);
         if !consumed_texts.is_empty() {
+            let consumed_response_echoes =
+                queue_prompt_response_echoes_for_done_ids(&entries, done_ids);
+            debug_assert_eq!(
+                consumed_response_echoes
+                    .iter()
+                    .map(|echo| echo.identity.as_str())
+                    .collect::<Vec<_>>(),
+                consumed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+                "done-id response echoes must select the same concrete rows as queue completion"
+            );
             let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
                 anyhow::anyhow!(
                     "queue consume: done-id consumption matched no queue prompt to consume"
@@ -3535,9 +3548,9 @@ fn plan_queue_prompt_consumption_inner(
                 ConsumedPromptEcho::StrikeOnly => None,
             };
             if let Some(response_first_line) = response_locator.as_ref() {
-                current = embed_consumed_prompt_in_response(
+                current = embed_consumed_prompt_echoes_in_response(
                     &current,
-                    &consumed_texts,
+                    &consumed_response_echoes,
                     response_first_line.as_deref(),
                 );
             }
@@ -3641,9 +3654,9 @@ fn plan_queue_prompt_consumption_inner(
                     }
                     Ok(Some(
                         if let Some(response_first_line) = response_locator.as_ref() {
-                            embed_consumed_prompt_in_response(
+                            embed_consumed_prompt_echoes_in_response(
                                 &new_snap,
-                                &consumed_texts,
+                                &consumed_response_echoes,
                                 response_first_line.as_deref(),
                             )
                         } else {
@@ -3888,6 +3901,15 @@ fn plan_queue_prompt_consumption_inner(
             }
         }
     }
+    let consumed_response_echoes = first_n_queue_prompt_response_echoes(&entries, consume_count);
+    debug_assert_eq!(
+        consumed_response_echoes
+            .iter()
+            .map(|echo| echo.identity.as_str())
+            .collect::<Vec<_>>(),
+        consumed_texts.iter().map(String::as_str).collect::<Vec<_>>(),
+        "free-text response echoes must select the same concrete rows as queue consumption"
+    );
     let consumed_node_keys = queue_prompt_node_keys_for_count(content, consume_count)?;
     let completed_entries =
         agent_doc_queue::document_queue::mark_first_n_prompts_completed(&entries, consume_count);
@@ -3965,9 +3987,9 @@ fn plan_queue_prompt_consumption_inner(
         ConsumedPromptEcho::StrikeOnly => None,
     };
     if let Some(response_first_line) = response_locator.as_ref() {
-        current = embed_consumed_prompt_in_response(
+        current = embed_consumed_prompt_echoes_in_response(
             &current,
-            &consumed_texts,
+            &consumed_response_echoes,
             response_first_line.as_deref(),
         );
     }
@@ -4099,9 +4121,9 @@ fn plan_queue_prompt_consumption_inner(
             }
             Ok(Some(
                 if let Some(response_first_line) = response_locator.as_ref() {
-                    embed_consumed_prompt_in_response(
+                    embed_consumed_prompt_echoes_in_response(
                         &new_snap,
-                        &consumed_texts,
+                        &consumed_response_echoes,
                         response_first_line.as_deref(),
                     )
                 } else {
@@ -8392,6 +8414,95 @@ mod core_tests {
             Some("consume")
         );
     }
+
+    fn nested_duplicate_plan(queue_body: &str) -> QueueConsumptionPlan {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("nested-duplicate.md");
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n",
+                "### Re: nested duplicate\n\nDone.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue go -->\n",
+                "{}",
+                "<!-- /agent:queue -->\n",
+            ),
+            queue_body
+        );
+        plan_queue_prompt_consumption_with_snapshot_and_count(
+            &doc,
+            &content,
+            Some(&content),
+            &[],
+            1,
+        )
+        .unwrap()
+        .expect("one nested duplicate should be consumed")
+    }
+
+    #[test]
+    fn consuming_same_leaf_under_parent_a_echoes_a_and_preserves_parent_b() {
+        let plan = nested_duplicate_plan(concat!(
+            "- Parent A\n",
+            "  - same leaf\n",
+            "- Parent B\n",
+            "  - same leaf\n",
+        ));
+
+        assert!(
+            plan.new_document
+                .contains("> Parent A: same leaf"),
+            "the response must retain the consumed occurrence's full vector:\n{}",
+            plan.new_document
+        );
+        assert!(
+            plan.new_document.contains("- Parent B\n  - same leaf\n"),
+            "consuming A must leave the identical B occurrence live:\n{}",
+            plan.new_document
+        );
+        assert_eq!(plan.new_document.matches("  - same leaf\n").count(), 1);
+    }
+
+    #[test]
+    fn consuming_same_leaf_under_parent_b_echoes_b_and_preserves_parent_a() {
+        let plan = nested_duplicate_plan(concat!(
+            "- Parent B\n",
+            "  - same leaf\n",
+            "- Parent A\n",
+            "  - same leaf\n",
+        ));
+
+        assert!(
+            plan.new_document
+                .contains("> Parent B: same leaf"),
+            "the response must retain the second occurrence's full vector:\n{}",
+            plan.new_document
+        );
+        assert!(
+            plan.new_document
+                .contains("- Parent A\n  - same leaf\n"),
+            "consuming B must leave the identical A occurrence live:\n{}",
+            plan.new_document
+        );
+    }
+
+    #[test]
+    fn drained_nested_leaf_echo_uses_preconsume_three_level_vector() {
+        let plan = nested_duplicate_plan(concat!(
+            "- Grandparent\n",
+            "  - Parent\n",
+            "    - leaf\n",
+        ));
+
+        assert!(
+            plan.new_document
+                .contains("> Grandparent: Parent: leaf"),
+            "removing the drained queue tree must not erase response ancestry:\n{}",
+            plan.new_document
+        );
+    }
+
     #[test]
     fn consume_decision_strikes_answered_free_text_head() {
         let dir = tempfile::tempdir().unwrap();

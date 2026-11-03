@@ -1286,6 +1286,18 @@ fn echo_texts_for_embed(content: &str, consumed_texts: &[String]) -> Vec<String>
         .collect()
 }
 
+/// One consumed queue row's stable response identity and visible echo text.
+///
+/// `identity` is the text used by response matching and idempotency. `display`
+/// is the parent-qualified nest vector captured while the concrete queue row
+/// still exists. Keeping the two together prevents a post-consume lookup from
+/// resolving an identical surviving leaf under a different parent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumedPromptResponseEcho {
+    pub identity: String,
+    pub display: String,
+}
+
 fn prompt_line_present_in_region(region: &str, prompt: &str) -> bool {
     let Some(first) = first_nonempty_line(prompt) else {
         return false;
@@ -1404,11 +1416,41 @@ pub fn embed_consumed_prompt_in_response(
     consumed_texts: &[String],
     response_first_line: Option<&str>,
 ) -> String {
-    if consumed_texts.iter().all(|t| t.trim().is_empty()) {
+    let display_texts = echo_texts_for_embed(content, consumed_texts);
+    let echoes = consumed_texts
+        .iter()
+        .cloned()
+        .zip(display_texts)
+        .map(|(identity, display)| ConsumedPromptResponseEcho { identity, display })
+        .collect::<Vec<_>>();
+    embed_consumed_prompt_echoes_in_response(content, &echoes, response_first_line)
+}
+
+/// Embed queue prompt echoes whose parent-qualified display vectors were
+/// captured before queue mutation.
+///
+/// Queue consumption removes or strikes rows before it edits the response.
+/// Looking up a leaf in that post-consume document can therefore lose its
+/// ancestry or resolve the same leaf under another parent. Callers that mutate
+/// queue rows must use this API with echoes derived from the authoritative
+/// pre-consume entries.
+pub fn embed_consumed_prompt_echoes_in_response(
+    content: &str,
+    echoes: &[ConsumedPromptResponseEcho],
+    response_first_line: Option<&str>,
+) -> String {
+    if echoes.iter().all(|echo| echo.identity.trim().is_empty()) {
         return content.to_string();
     }
-    let display_texts = echo_texts_for_embed(content, consumed_texts);
-    let content = rewrite_bare_nest_echoes(content, consumed_texts, &display_texts);
+    let consumed_texts = echoes
+        .iter()
+        .map(|echo| echo.identity.clone())
+        .collect::<Vec<_>>();
+    let display_texts = echoes
+        .iter()
+        .map(|echo| echo.display.clone())
+        .collect::<Vec<_>>();
+    let content = rewrite_bare_nest_echoes(content, &consumed_texts, &display_texts);
     let Ok(components) = agent_doc_element::element::parse(&content) else {
         return content.to_string();
     };

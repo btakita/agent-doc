@@ -48,7 +48,7 @@ use state_store::{
     Connection, insert_state_event_in_db, load_actor_record_from_db, load_actor_store_from_db,
     load_control_plane_store_counts, load_layout_state_from_db,
     load_session_operator_status_from_db, load_state_events_from_db, load_supervisor_lease_from_db,
-    open_state_db, store_layout_state_in_db, timestamp_secs,
+    open_state_db, open_state_db_for_event_ingress, store_layout_state_in_db, timestamp_secs,
 };
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
@@ -12133,7 +12133,11 @@ pub(crate) fn append_state_event(
     project_root: &Path,
     event: &agent_doc_state_backbone::StateEvent,
 ) -> Result<bool> {
-    let conn = open_state_db(project_root)?;
+    // The caller holds the controller-wide state-event ingress mutex. Schema
+    // convergence and retention are maintenance, not append semantics; keep
+    // them out of this serialized lane so one large database cannot starve
+    // unrelated documents behind a multi-second retention pass.
+    let conn = open_state_db_for_event_ingress(project_root)?;
     let payload_json = serde_json::to_string(event).context("serialize state backbone event")?;
     insert_state_event_in_db(
         &conn,

@@ -84,6 +84,13 @@ fail-closed; socket-only adoption applies only while status is not yet ready.
 - Projection workers emit cold recovery files and diagnostics from committed
   controller state. They never establish ownership and never block command
   admission.
+- State-event append holds the project ingress mutex only for the durable
+  append. Once this process has initialized `state.db`, that hot path opens a
+  configured connection without whole-ledger row convergence or retention;
+  ordinary controller reads continue to own that maintenance outside the
+  serialized ingress lane. A large ledger therefore cannot turn one retention
+  pass into project-wide admission latency, and a caller deadline does not
+  authorize an immediate duplicate append while the first request continues.
 
 ### Queue scheduler (`#queueschedule`)
 

@@ -62,6 +62,24 @@ const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration
 /// eligible.
 const EMPTY_PREFLIGHT_RECLAIM_TICK_INTERVAL: u32 = 30;
 const REEXEC_DOCUMENT_VALIDATION_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
+/// A timed-out controller request continues executing after its client gives
+/// up. Retrying the retained closeout every 2-30 seconds therefore queues more
+/// copies behind the original and turns pressure into an event storm. State
+/// edges still wake recovery immediately; this is only the no-edge watchdog.
+const CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY: std::time::Duration =
+    std::time::Duration::from_secs(120);
+
+fn captured_finalize_effect_retry_delay(attempt: u32, reason: &str) -> std::time::Duration {
+    let ordinary = captured_finalize_resume_retry_delay(attempt);
+    let controller_request_continues = reason.contains("waiting for project controller response")
+        || reason.contains("idempotent state-event retry failed after controller deadline")
+        || reason.contains("controller deadline");
+    if controller_request_continues {
+        ordinary.max(CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY)
+    } else {
+        ordinary
+    }
+}
 
 /// `#reclaimliveturn`: may the idle supervisor try to reclaim the empty
 /// preflight on this tick?
@@ -302,6 +320,10 @@ const IDLE_WATCH_QUIESCENT_MAINTENANCE_INTERVAL: std::time::Duration =
 const IDLE_WATCH_SAFETY_REVISION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const IDLE_WATCH_ZOMBIE_REAP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 const DOCUMENT_DELIVERY_WAKE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(500);
+/// Queue/Todo repair is heavier than observing a delivery edge and may publish
+/// a retained CAS. Give operator typing a real quiet window; every new edge
+/// moves this deadline forward, so edits coalesce instead of racing repair.
+const QUEUE_PROJECTION_SELF_HEAL_QUIET: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug, Default)]
 struct AgentChangeFrontmatterRefresh {
@@ -437,6 +459,72 @@ fn record_idle_watch_queue_observation_attempt(
 struct CapturedFinalizeResumeWorker {
     key: agent_doc_repair_command_io::CapturedFinalizeResumeKey,
     result: std::sync::mpsc::Receiver<agent_doc_repair_command_io::CapturedFinalizeResumeOutcome>,
+}
+
+/// One document-local queue projection repair owned by the supervisor.
+///
+/// The worker is deliberately outside the idle-watch thread: resolving editor
+/// authority and landing a retained CAS can wait on a degraded controller, but
+/// that must never stop stale-binary recycle, turn observation, or operator
+/// input. A supervisor owns at most one worker, so a changed document creates
+/// one repair edge instead of a retry storm.
+struct QueueProjectionSelfHealWorker {
+    result: std::sync::mpsc::Receiver<
+        anyhow::Result<agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome>,
+    >,
+    cancel: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for QueueProjectionSelfHealWorker {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+struct IdleQueueProjectionSelfHealEffects {
+    cancel: Arc<AtomicBool>,
+}
+
+impl IdleQueueProjectionSelfHealEffects {
+    fn ensure_active(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            !self.cancel.load(Ordering::Acquire),
+            "queue projection self-heal cancelled before mutation"
+        );
+        Ok(())
+    }
+}
+
+impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
+    for IdleQueueProjectionSelfHealEffects
+{
+    fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
+        self.ensure_active()?;
+        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+    }
+
+    fn converge_document_or_disk(
+        &self,
+        file: &Path,
+        target_content: &str,
+        source_content: &str,
+        reason: &str,
+    ) -> anyhow::Result<()> {
+        self.ensure_active()?;
+        agent_doc_write_converge_io::converge_document_or_disk(
+            &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
+            file,
+            target_content,
+            source_content,
+            reason,
+        )?;
+        agent_doc_document_realtime_io::invalidate_current_document_projection(file);
+        Ok(())
+    }
 }
 
 struct CapturedFinalizeResumeRetry {
@@ -694,6 +782,52 @@ fn spawn_captured_finalize_resume_worker(
             let _ = send.send(outcome);
         })?;
     Ok(CapturedFinalizeResumeWorker { key, result })
+}
+
+fn spawn_queue_projection_self_heal_worker(
+    file: PathBuf,
+) -> std::io::Result<QueueProjectionSelfHealWorker> {
+    let (send, result) = std::sync::mpsc::channel();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    let thread = std::thread::Builder::new()
+        .name("queue-projection-self-heal".into())
+        .spawn(move || {
+            let outcome =
+                agent_doc_queue_io::queue_cmd::project_all_queue_runtime_state_once_with_effects(
+                    &IdleQueueProjectionSelfHealEffects {
+                        cancel: worker_cancel,
+                    },
+                    &file,
+                );
+            let _ = send.send(outcome);
+        })?;
+    Ok(QueueProjectionSelfHealWorker {
+        result,
+        cancel,
+        thread: Some(thread),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CapturedFinalizePresence {
+    Unknown,
+    Absent,
+    Present,
+}
+
+fn queue_projection_self_heal_can_start(
+    turn_boundary: bool,
+    due: bool,
+    retry_ready: bool,
+    quiet_ready: bool,
+    captured_finalize_presence: CapturedFinalizePresence,
+) -> bool {
+    turn_boundary
+        && due
+        && retry_ready
+        && quiet_ready
+        && captured_finalize_presence == CapturedFinalizePresence::Absent
 }
 
 /// `#sdkclearwedge`: has the deferred clear's target pane already started an
@@ -2562,6 +2696,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
         // queue-watch thread; `resume_worker` is the local keyed-single-flight
         // latch. Only a failed effect receives a timed retry edge.
     let mut resume_worker: Option<CapturedFinalizeResumeWorker> = None;
+    // `#sdkdocumentselfheal`: queue markers are derived state. Reconcile them
+    // once on supervisor start and after document-delivery edges, but keep the
+    // potentially slow editor/controller round trips off this watch thread.
+    // The Option is the single-flight lease: no retry can start while one
+    // document-local repair still owns the effect.
+    let mut queue_projection_self_heal_worker: Option<QueueProjectionSelfHealWorker> = None;
+    let mut queue_projection_self_heal_due = true;
+    let mut queue_projection_self_heal_retry_at: Option<std::time::Instant> = None;
+    let mut queue_projection_self_heal_not_before =
+        std::time::Instant::now() + QUEUE_PROJECTION_SELF_HEAL_QUIET;
+    // A retained closeout owns the document before derived queue repair. This
+    // latch is refreshed from the authoritative captured-finalize key below;
+    // it prevents two background writers from racing the same operator cut.
+    let mut captured_finalize_presence = CapturedFinalizePresence::Unknown;
     let mut resume_retry: Option<CapturedFinalizeResumeRetry> = None;
     let resume_triggers = CapturedFinalizeResumeTriggers::new();
     let resume_signal_watch =
@@ -2609,6 +2757,63 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // and does not touch the controller or editor.
         let supervisor_stale_fast = shared.refresh_binary_stale();
         let now = std::time::Instant::now();
+        if let Some(worker) = queue_projection_self_heal_worker.as_ref() {
+            match worker.result.try_recv() {
+                Ok(Ok(agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Settled {
+                    changed,
+                })) => {
+                    queue_projection_self_heal_worker = None;
+                    queue_projection_self_heal_retry_at = None;
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "queue_projection_self_heal_completed file={} changed={} authority=editor_crdt single_flight=true",
+                            path.display(), changed,
+                        ),
+                    );
+                    if changed {
+                        document_delivery_reconcile_pending = true;
+                        last_quiescent_maintenance = None;
+                    }
+                }
+                Ok(Ok(agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionOnceOutcome::Superseded)) => {
+                    queue_projection_self_heal_worker = None;
+                    queue_projection_self_heal_due = true;
+                    queue_projection_self_heal_retry_at = None;
+                    queue_projection_self_heal_not_before =
+                        now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "queue_projection_self_heal_superseded file={} action=await_quiet_authority_edge retry_after_ms={} authority=editor_crdt",
+                            path.display(),
+                            QUEUE_PROJECTION_SELF_HEAL_QUIET.as_millis(),
+                        ),
+                    );
+                }
+                Ok(Err(error)) => {
+                    queue_projection_self_heal_worker = None;
+                    queue_projection_self_heal_due = true;
+                    queue_projection_self_heal_retry_at =
+                        Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                    agent_doc_ops_log_io::log_op(
+                        &path,
+                        &format!(
+                            "queue_projection_self_heal_deferred file={} retry_after_ms={} error={error:#}",
+                            path.display(),
+                            IDLE_WATCH_CONTROLLER_BACKOFF.as_millis(),
+                        ),
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    queue_projection_self_heal_worker = None;
+                    queue_projection_self_heal_due = true;
+                    queue_projection_self_heal_retry_at =
+                        Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if !supervisor_stale_fast {
             stale_recycle_deferral.observe(false);
             last_stale_recycle_reconcile = None;
@@ -2624,6 +2829,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
         }
         if document_delivery_debounce.take_ready(now) {
             document_delivery_reconcile_pending = true;
+            queue_projection_self_heal_due = true;
+            queue_projection_self_heal_not_before = now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
             let operator_gate_cleared = observe_captured_finalize_document_edge(
                 &resume_triggers,
                 &mut resume_retry,
@@ -2725,6 +2932,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed {
                             repair_outcome,
                 } => {
+                    captured_finalize_presence = CapturedFinalizePresence::Unknown;
+                    resume_key_refresh_pending = true;
                     resume_retry = None;
                     resume_triggers.observe_operation(None);
                     let event = format!(
@@ -2739,6 +2948,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded => {
+                    captured_finalize_presence = CapturedFinalizePresence::Unknown;
+                    resume_key_refresh_pending = true;
                     resume_retry = None;
                     resume_triggers.observe_operation(None);
                             let event = format!(
@@ -2752,6 +2963,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             agent_doc_ops_log_io::log_op(&path, &event);
                         }
                 agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::ClosedIgnoredPath => {
+                    captured_finalize_presence = CapturedFinalizePresence::Unknown;
+                    resume_key_refresh_pending = true;
                     // `#splicectlcommit`: terminal without a commit — stop
                     // retrying this capture, exactly like a commit receipt.
                     resume_retry = None;
@@ -2819,7 +3032,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 .as_ref()
                                 .filter(|retry| retry.key == key)
                                 .map_or(1, |retry| retry.attempts.saturating_add(1));
-                            let delay = captured_finalize_resume_retry_delay(attempts);
+                            let delay = captured_finalize_effect_retry_delay(attempts, &reason);
                             resume_retry = Some(CapturedFinalizeResumeRetry {
                                 key: key.clone(),
                                 attempts,
@@ -2829,7 +3042,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         unlandable: false,
                             });
                             let event = format!(
-                                "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true",
+                                "captured_finalize_resume_retry_scheduled file={} cycle_id={} capture_id={} response_sha256={} attempt={} delay_ms={} reason_bytes={} reason_sha256={} authority=editor_crdt no_force_disk=true controller_pressure_single_flight={}",
                                 path.display(),
                                 key.cycle_id,
                                 key.capture_id,
@@ -2838,6 +3051,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 delay.as_millis(),
                                 reason.len(),
                                 agent_doc_hash::content_hash(&reason),
+                                delay >= CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY,
                             );
                             log_event(&mut session_log, &event);
                             agent_doc_ops_log_io::log_op(&path, &event);
@@ -3013,6 +3227,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
         if maintenance_due && (resume_key_refresh_pending || resume_triggers.ready()) {
             match agent_doc_repair_command_io::captured_finalize_resume_key(&path) {
                 Ok(Some(key)) => {
+                    captured_finalize_presence = CapturedFinalizePresence::Present;
+                    if queue_projection_self_heal_worker.is_some() {
+                        // A newly retained closeout preempts derived repair.
+                        // Dropping the worker cancels it and joins its thread,
+                        // so captured-finalize admission cannot overlap the
+                        // older queue projection CAS.
+                        queue_projection_self_heal_worker = None;
+                        queue_projection_self_heal_due = true;
+                        queue_projection_self_heal_not_before =
+                            now + QUEUE_PROJECTION_SELF_HEAL_QUIET;
+                        agent_doc_ops_log_io::log_op(
+                            &path,
+                            &format!(
+                                "queue_projection_self_heal_preempted file={} reason=captured_finalize_present authority=controller",
+                                path.display(),
+                            ),
+                        );
+                    }
                     resume_key_refresh_pending = false;
                     last_resume_key_error_hash = None;
                     resume_triggers.observe_operation(Some(format!(
@@ -3107,6 +3339,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             }
                 }
                 Ok(None) => {
+                    captured_finalize_presence = CapturedFinalizePresence::Absent;
                     resume_key_refresh_pending = false;
                     last_resume_key_error_hash = None;
                     if resume_worker.is_none() {
@@ -3115,6 +3348,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                 }
                 Err(err) => {
+                    captured_finalize_presence = CapturedFinalizePresence::Unknown;
                     resume_key_refresh_pending = false;
                     let reason = format!("{err:#}");
                             let reason_hash = agent_doc_hash::content_hash(&reason);
@@ -4228,6 +4462,53 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // never trips it.
                 turn_boundary = prompt_visible && !turn_active;
                 head_pending = active_head.is_some();
+                // Derived queue/Todo state repairs at a quiet actor boundary,
+                // before this supervisor auto-dispatches another row. The
+                // repair itself is background single-flight; while it owns the
+                // projection edge, leave auto-dispatch parked but continue the
+                // outer watch loop so recycle, operator input, and health
+                // observation remain live.
+                if queue_projection_self_heal_worker.is_some() {
+                    break 'drain;
+                }
+                let self_heal_retry_ready = queue_projection_self_heal_retry_at
+                    .is_none_or(|retry_at| now >= retry_at);
+                if queue_projection_self_heal_can_start(
+                    turn_boundary,
+                    queue_projection_self_heal_due,
+                    self_heal_retry_ready,
+                    now >= queue_projection_self_heal_not_before,
+                    captured_finalize_presence,
+                ) {
+                    match spawn_queue_projection_self_heal_worker(path.clone()) {
+                        Ok(worker) => {
+                            queue_projection_self_heal_worker = Some(worker);
+                            queue_projection_self_heal_due = false;
+                            queue_projection_self_heal_retry_at = None;
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "queue_projection_self_heal_started file={} boundary=actor_ready_quiet authority=editor_crdt single_flight=true cas_attempts=1 quiet_ms={}",
+                                    path.display(),
+                                    QUEUE_PROJECTION_SELF_HEAL_QUIET.as_millis(),
+                                ),
+                            );
+                        }
+                        Err(error) => {
+                            queue_projection_self_heal_retry_at =
+                                Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
+                            agent_doc_ops_log_io::log_op(
+                                &path,
+                                &format!(
+                                    "queue_projection_self_heal_spawn_deferred file={} retry_after_ms={} error={error}",
+                                    path.display(),
+                                    IDLE_WATCH_CONTROLLER_BACKOFF.as_millis(),
+                                ),
+                            );
+                        }
+                    }
+                    break 'drain;
+                }
                 // GH #243: a route that finds a protected duplicate supervisor
                 // leaves a process-targeted request for this exact pid/pane. The
                 // existing idle watcher is the lifecycle boundary that can safely
@@ -7087,6 +7368,47 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_projection_self_heal_fails_closed_until_closeout_absence_is_proven() {
+        for presence in [
+            CapturedFinalizePresence::Unknown,
+            CapturedFinalizePresence::Present,
+        ] {
+            assert!(!queue_projection_self_heal_can_start(
+                true, true, true, true, presence,
+            ));
+        }
+        assert!(queue_projection_self_heal_can_start(
+            true,
+            true,
+            true,
+            true,
+            CapturedFinalizePresence::Absent,
+        ));
+    }
+
+    #[test]
+    fn controller_timeout_retries_are_watchdogs_not_pressure_loops() {
+        assert_eq!(
+            captured_finalize_effect_retry_delay(
+                1,
+                "timed out after 5.0s waiting for project controller response",
+            ),
+            CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY,
+        );
+        assert_eq!(
+            captured_finalize_effect_retry_delay(
+                7,
+                "idempotent state-event retry failed after controller deadline",
+            ),
+            CAPTURED_FINALIZE_CONTROLLER_PRESSURE_RETRY,
+        );
+        assert_eq!(
+            captured_finalize_effect_retry_delay(1, "editor endpoint disconnected"),
+            captured_finalize_resume_retry_delay(1),
+        );
+    }
 
     /// `#reportedwritebackdebt`: api.md accumulated `☑️` rows in both its
     /// `main` and `contracts-prs` runs after workers reported while the

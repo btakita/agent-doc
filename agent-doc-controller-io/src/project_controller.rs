@@ -27564,6 +27564,11 @@ revised operator request
         // delivery edge. Generation zero must retain the signal without
         // applying it.
         let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        // This test deliberately bypasses `new_arc`, so explicitly perform the
+        // activation that the production background worker owns.
+        runtime
+            .document_graphs
+            .activate_current_projection(&document_hash);
         runtime.document_retained_write_observe_delivery(
             &document_hash,
             Some(RetainedDeliveryObservation {

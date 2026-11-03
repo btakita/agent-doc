@@ -215,8 +215,11 @@ unchanged, and an automated origin against a `ready`, `starting`, `blocked`,
 editor's complete `--col` / `--focus` projection. Before publication, the
 controller canonicalizes editor-relative paths. If focus is absent from the
 columns, it may materialize focus only into one unique explicit empty-column
-placeholder. The controller then publishes exact-visible desired state and
-waits for tmux convergence before dispatching. A missing layout, zero or
+placeholder. The controller then publishes exact-visible desired state. Before
+dispatch it waits for either tmux convergence or a generation-fenced
+`route_focus_ready_structure_pending` receipt that proves the current actor
+pane was promoted/focused in the accepted target window; structural reconcile
+continues asynchronously after that receipt. A missing layout, zero or
 multiple candidate empty slots, or a routed document outside the converged
 columns fails closed before desired-state publication or dispatch. Every
 foreground `Run Agent Doc` publication is a fresh intent generation, even when

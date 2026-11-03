@@ -34846,6 +34846,158 @@ fn apply_pane_layout_focus_effect(
     }
 }
 
+/// Complete an editor route's latency-critical active-surface effect before
+/// its structural reconcile. Only a current actor binding is eligible. A pane
+/// already in the target window is selected immediately; a stashed pane is
+/// promoted and re-observed first. Other-window and unknown placements remain
+/// fail-closed so this fast path cannot steal a pane from another surface.
+struct EditorRouteFastFocusInput<'a> {
+    project_root: &'a Path,
+    worker_state: &'a Mutex<agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState>,
+    generation: u64,
+    focus: Option<&'a str>,
+    focus_suppressed: bool,
+    actor_bindings: &'a [ControllerTmuxActorBinding],
+    layout_window: Option<&'a str>,
+}
+
+fn apply_editor_route_fast_focus_effect(
+    input: EditorRouteFastFocusInput<'_>,
+    mut observe_pane_window: impl FnMut(&str) -> Option<LivePaneWindow>,
+    promote_pane: impl FnOnce(&str) -> Result<bool>,
+    select_pane: impl FnOnce(&str) -> Result<()>,
+) -> (PaneLayoutFocusEffectReceipt, Vec<(String, String)>) {
+    let EditorRouteFastFocusInput {
+        project_root,
+        worker_state,
+        generation,
+        focus,
+        focus_suppressed,
+        actor_bindings,
+        layout_window,
+    } = input;
+    let Some(focus) = focus.filter(|_| !focus_suppressed) else {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: focus.is_some(),
+                applied: false,
+                reason: if focus_suppressed {
+                    "focus_suppressed_desktop_editor_inactive".to_string()
+                } else {
+                    "focus_not_requested".to_string()
+                },
+            },
+            Vec::new(),
+        );
+    };
+    let focus_id = canonical_layout_document_id(project_root, focus);
+    let Some(binding) = actor_bindings.iter().find(|binding| {
+        canonical_layout_document_id(project_root, &binding.document_path) == focus_id
+    }) else {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: format!("route_focus_actor_binding_missing:{focus}"),
+            },
+            Vec::new(),
+        );
+    };
+    let file_panes = vec![(binding.document_path.clone(), binding.pane_id.clone())];
+    let pane = binding.pane_id.as_str();
+    let Some(layout_window) = layout_window
+        .map(str::trim)
+        .filter(|window| !window.is_empty())
+    else {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: format!("route_focus_window_unknown:{focus}:{pane}"),
+            },
+            file_panes,
+        );
+    };
+
+    let mut live = observe_pane_window(pane);
+    if live
+        .as_ref()
+        .is_some_and(|window| window.id != layout_window)
+    {
+        if !live.as_ref().is_some_and(|window| {
+            agent_doc_controller::pane_layout::pane_is_stashed(Some(&window.name))
+        }) {
+            return (
+                PaneLayoutFocusEffectReceipt {
+                    required: true,
+                    applied: false,
+                    reason: format!("route_focus_pane_outside_surface:{focus}:{pane}"),
+                },
+                file_panes,
+            );
+        }
+        if worker_state.lock().is_superseded(generation) {
+            return (
+                PaneLayoutFocusEffectReceipt {
+                    required: true,
+                    applied: false,
+                    reason: "focus_superseded_by_newer_layout_state".to_string(),
+                },
+                file_panes,
+            );
+        }
+        match promote_pane(pane) {
+            Ok(true) => live = observe_pane_window(pane),
+            Ok(false) => {}
+            Err(error) => {
+                return (
+                    PaneLayoutFocusEffectReceipt {
+                        required: true,
+                        applied: false,
+                        reason: format!("route_focus_promotion_failed:{error:#}"),
+                    },
+                    file_panes,
+                );
+            }
+        }
+    }
+    if live.as_ref().map(|window| window.id.as_str()) != Some(layout_window) {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: format!("route_focus_pane_not_visible:{focus}:{pane}"),
+            },
+            file_panes,
+        );
+    }
+
+    let state = worker_state.lock();
+    if state.is_superseded(generation) {
+        return (
+            PaneLayoutFocusEffectReceipt {
+                required: true,
+                applied: false,
+                reason: "focus_superseded_by_newer_layout_state".to_string(),
+            },
+            file_panes,
+        );
+    }
+    let receipt = match select_pane(pane) {
+        Ok(()) => PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: true,
+            reason: format!("route_focus_applied:{focus}:{pane}"),
+        },
+        Err(error) => PaneLayoutFocusEffectReceipt {
+            required: true,
+            applied: false,
+            reason: format!("route_focus_effect_failed:{error:#}"),
+        },
+    };
+    (receipt, file_panes)
+}
+
 #[cfg_attr(any(test, feature = "test-support"), allow(dead_code))]
 fn pane_layout_effect_worker(
     runtime: std::sync::Weak<ControllerRuntime>,
@@ -35268,6 +35420,36 @@ fn pane_layout_effect_worker(
             );
         }
         let projected_focus = guarded_invocation.focus.clone();
+        // `#tmuxroutefastfocus`: the routed document's live actor binding is a
+        // sufficient active-surface fact. Promote/focus it before entering the
+        // expensive structural reconciler, then leave that reconciler on this
+        // worker thread as background convergence work. The route waiter is
+        // released by the explicit in-flight receipt below.
+        let route_fast_focus = if desired.invocation.caller_kind == "editor_route" {
+            let tmux = agent_doc_tmux_io::configured_tmux();
+            let layout_window = pane_layout_target_window_id_for_lane(
+                &bootstrap.project_root,
+                &tmux,
+                desired.invocation.window.as_deref(),
+                lane_observation_session.as_deref(),
+            );
+            Some(apply_editor_route_fast_focus_effect(
+                EditorRouteFastFocusInput {
+                    project_root: &bootstrap.project_root,
+                    worker_state: &state,
+                    generation: work_revision,
+                    focus: projected_focus.as_deref(),
+                    focus_suppressed,
+                    actor_bindings: &actor_bindings,
+                    layout_window: layout_window.as_deref(),
+                },
+                |pane| observe_pane_window_id(&tmux, pane),
+                |pane| runtime_effects()?.promote_pane_to_agent_doc_window(&tmux, pane),
+                |pane| tmux.select_pane(pane),
+            ))
+        } else {
+            None
+        };
         let reusable_structure =
             pane_layout_invocation_allows_structural_reuse(&desired.invocation)
                 .then(|| graph.reusable_structural_receipt(&desired, &actor_bindings))
@@ -35276,19 +35458,29 @@ fn pane_layout_effect_worker(
             .as_ref()
             .map(|receipt| receipt.file_panes.clone())
             .unwrap_or_default();
+        let fast_focus_applied = route_fast_focus
+            .as_ref()
+            .is_some_and(|(receipt, _)| receipt.applied);
+        let in_flight_file_panes = route_fast_focus
+            .as_ref()
+            .map(|(_, file_panes)| file_panes.clone())
+            .filter(|file_panes| !file_panes.is_empty())
+            .unwrap_or(reusable_file_panes);
         graph.record_receipt(PaneLayoutEffectReceipt {
             generation: desired.generation,
             actor_bindings: actor_bindings.clone(),
             attempt,
             phase: PaneLayoutEffectPhase::InFlight,
-            reason: if reusable_structure.is_some() {
+            reason: if fast_focus_applied {
+                PANE_LAYOUT_ROUTE_FOCUS_READY_REASON.to_string()
+            } else if reusable_structure.is_some() {
                 "reusable_layout_focus_effect_in_flight".to_string()
             } else {
                 "tmux_effect_in_flight".to_string()
             },
-            file_panes: reusable_file_panes,
+            file_panes: in_flight_file_panes,
             focus_required: projected_focus.is_some(),
-            focus_applied: false,
+            focus_applied: fast_focus_applied,
         });
         publish_pane_layout_lane_status(&runtime, &lane);
 
@@ -38309,7 +38501,11 @@ fn editor_route_layout_receipt(
     await_timeout: Duration,
 ) -> ControllerTmuxLayoutSyncReceipt {
     let effect_state = graph.await_route_document(document, await_timeout);
-    let (applied, reason) = pane_layout_route_await_outcome(&effect_state, document);
+    let (applied, reason) = if graph.route_focus_ready(document) {
+        (true, PANE_LAYOUT_ROUTE_FOCUS_READY_REASON)
+    } else {
+        pane_layout_route_await_outcome(&effect_state, document)
+    };
     // Preserve the target that won arbitration, even when it omits the
     // routed document. Falling back to the route's original columns hid the
     // superseding publisher and made a terminal foreground supersession look
@@ -38734,6 +38930,94 @@ mod tmux_layout_effect_state_dispatch_tests {
         assert_eq!(selected.as_deref(), Some("%76"));
         assert!(receipt.required);
         assert!(receipt.applied);
+    }
+
+    #[test]
+    fn editor_route_promotes_and_focuses_known_stashed_pane_before_structure() {
+        use std::cell::Cell;
+
+        let state =
+            Mutex::new(agent_doc_controller::pane_layout::LatestTmuxEffectWorkerState::default());
+        assert!(state.lock().schedule(7));
+        let promoted = Cell::new(false);
+        let selected = Cell::new(false);
+        let bindings = vec![ControllerTmuxActorBinding {
+            document_path: "/repo/tasks/fpe.md".into(),
+            session_id: "session-fpe".into(),
+            pane_id: "%15".into(),
+            generation: 41,
+        }];
+
+        let (receipt, file_panes) = apply_editor_route_fast_focus_effect(
+            EditorRouteFastFocusInput {
+                project_root: Path::new("/repo"),
+                worker_state: &state,
+                generation: 7,
+                focus: Some("tasks/fpe.md"),
+                focus_suppressed: false,
+                actor_bindings: &bindings,
+                layout_window: Some("@3"),
+            },
+            |pane| {
+                assert_eq!(pane, "%15");
+                Some(LivePaneWindow {
+                    id: if promoted.get() { "@3" } else { "@9" }.into(),
+                    name: if promoted.get() { "agent-doc" } else { "stash" }.into(),
+                    active: Some(promoted.get()),
+                })
+            },
+            |pane| {
+                assert_eq!(pane, "%15");
+                promoted.set(true);
+                Ok(true)
+            },
+            |pane| {
+                assert_eq!(pane, "%15");
+                selected.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(promoted.get());
+        assert!(selected.get());
+        assert!(receipt.required && receipt.applied);
+        assert_eq!(
+            file_panes,
+            vec![("/repo/tasks/fpe.md".to_string(), "%15".to_string())]
+        );
+    }
+
+    #[test]
+    fn editor_route_receipt_reports_focus_ready_while_structure_is_in_flight() {
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let actors = ControllerActorGraph::new_in(&scope, BTreeMap::new());
+        let graph = ControllerPaneLayoutGraph::new_in(&scope, actors.live_bindings_handle());
+        let mut invocation = invocation("editor_route", false);
+        invocation.columns = vec!["tasks/fpe.md".into(), "tasks/sdk.md".into()];
+        invocation.focus = Some("tasks/fpe.md".into());
+        invocation.caller_kind = "editor_route".into();
+        let desired = graph.set_fresh_route_desired(invocation.clone(), None);
+        graph.record_receipt(PaneLayoutEffectReceipt {
+            generation: desired.generation,
+            actor_bindings: graph.actor_bindings(),
+            attempt: 1,
+            phase: PaneLayoutEffectPhase::InFlight,
+            reason: PANE_LAYOUT_ROUTE_FOCUS_READY_REASON.into(),
+            file_panes: vec![("tasks/fpe.md".into(), "%15".into())],
+            focus_required: true,
+            focus_applied: true,
+        });
+
+        let receipt = editor_route_layout_receipt(
+            &graph,
+            desired.generation,
+            invocation,
+            "tasks/fpe.md",
+            Duration::ZERO,
+        );
+        assert!(receipt.applied);
+        assert_eq!(receipt.reason, PANE_LAYOUT_ROUTE_FOCUS_READY_REASON);
+        assert_eq!(receipt.file_panes, vec![("tasks/fpe.md".into(), "%15".into())]);
     }
 
     /// `#panewindowdrift`: the operator-reported shape. The layout's file→pane

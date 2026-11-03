@@ -131,6 +131,21 @@ mod main_layout_eligibility_tests {
     use super::*;
 
     #[test]
+    fn queue_projection_write_fence_blocks_captured_finalize_but_not_a_long_preflight() {
+        let mut projected = agent_doc_state_backbone::DocumentStateProjection::new("doc");
+        projected.closeout.phase = Some(agent_doc_turn::CyclePhase::PreflightStarted);
+        assert!(!queue_projection_active_write_fence(&projected).unwrap());
+
+        projected.closeout.phase = Some(agent_doc_turn::CyclePhase::ResponseCaptured);
+        projected.closeout.capture_id = Some("capture-1".into());
+        projected.closeout.response_sha256 = Some("response-1".into());
+        assert!(queue_projection_active_write_fence(&projected).unwrap());
+
+        projected.closeout.phase = Some(agent_doc_turn::CyclePhase::WriteApplied);
+        assert!(queue_projection_active_write_fence(&projected).unwrap());
+    }
+
+    #[test]
     fn eligibility_filter_canonicalizes_aliases_and_removes_empty_columns() {
         let root = tempfile::tempdir().unwrap();
         let tasks = root.path().join("tasks");
@@ -39961,6 +39976,25 @@ fn queue_repair_generation_from_db(
         .generation)
 }
 
+fn queue_projection_active_write_fence(
+    projected: &agent_doc_state_backbone::DocumentStateProjection,
+) -> Result<bool> {
+    let cycle = agent_doc_cycle_state_io::reconstruct_cycle_state(projected)?;
+    let projected_capture = matches!(
+        projected.closeout.phase,
+        Some(
+            agent_doc_turn::CyclePhase::ResponseCaptured | agent_doc_turn::CyclePhase::WriteApplied
+        )
+    ) && projected.closeout.capture_id.is_some()
+        && projected.closeout.response_sha256.is_some();
+    Ok(projected_capture
+        || cycle
+            .as_ref()
+            .is_some_and(agent_doc_cycle_state_io::CycleState::has_durable_response_capture)
+        || projected.document.pending_write.is_some()
+        || !projected.document.pending_write_journal.is_empty())
+}
+
 fn handle_queue_projection_generation_write(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -39977,6 +40011,17 @@ fn handle_queue_projection_generation_write(
     let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
     if queue_repair_generation_from_db(&conn, &document_hash)? != payload.generation {
         return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+    }
+
+    // Derived queue markers never overtake a retained agent write. The idle
+    // supervisor checks captured-finalize before launch, but a response can be
+    // captured after that observation and before this controller-owned CAS.
+    // Revalidate under the same document maintenance fence that guards the
+    // generation so a queue repair cannot splice itself into closeout.
+    if let Some(projected) = runtime.document_state_projection(&document_hash)? {
+        if queue_projection_active_write_fence(&projected)? {
+            return Ok(QueueProjectionGenerationWriteOutcome::Superseded);
+        }
     }
 
     let authority = crdt_authority_for_file(&canonical.to_string_lossy());

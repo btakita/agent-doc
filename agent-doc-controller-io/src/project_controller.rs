@@ -11670,6 +11670,11 @@ pub struct ControllerActorInspection {
     pub freshness: Option<ControllerFreshnessStatus>,
     #[serde(default)]
     pub queue_head: Option<QueueHeadStatus>,
+    /// Comparison of the durable runtime head with the head currently projected
+    /// by the document. `queue_head` is the effective document-observed head;
+    /// the retained runtime facts remain available here when they are stale.
+    #[serde(default)]
+    pub queue_projection: QueueProjectionInspection,
     #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
@@ -11682,6 +11687,25 @@ pub struct ControllerActorInspection {
     pub dispatch_attempts: Vec<DispatchAttemptStatus>,
     pub admin_operations: Vec<AdminOperationStatus>,
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueProjectionInspection {
+    /// `consistent`, `runtime_stale`, `runtime_missing`, `document_missing`,
+    /// `document_unavailable`, or `document_invalid`.
+    pub status: String,
+    #[serde(default)]
+    pub actor_generation: Option<u64>,
+    #[serde(default)]
+    pub runtime_generation: Option<u64>,
+    #[serde(default)]
+    pub runtime_head_id: Option<String>,
+    #[serde(default)]
+    pub runtime_prompt: Option<String>,
+    #[serde(default)]
+    pub document_prompt: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

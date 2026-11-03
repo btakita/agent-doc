@@ -205,18 +205,14 @@ pub fn decide_read_only_terminal_projection(
     if authority_matches_required_scope {
         return ReadOnlyTerminalProjectionDecision::Converged;
     }
-    // `#capturednativesaveowner`: the realtime persistence rule is independent
-    // of closeout phase. A retained `response_captured` controller can own the
-    // same exact native-save retry as `write_applied`; classifying it as
-    // `ObserveOnly` calls that controller-owned state non-recoverable and
-    // strands both its state-edge retry and any steering waiting behind it.
-    // Only direct closeout *resume* remains fenced to `write_applied` below.
-    if retained_document_write_blocks
-        && matches!(
-            cycle_phase,
-            Some(CyclePhase::ResponseCaptured | CyclePhase::WriteApplied)
-        )
-    {
+    // `#capturednativesaveowner` / `#retainedbackgroundprojection`: realtime
+    // persistence is independent of closeout phase. The durable retained
+    // projection is the ownership proof; a cycle may already be committed (or
+    // its phase projection may lag) while that exact native-save retry remains
+    // live. Calling it `ObserveOnly` labels controller-owned work
+    // non-recoverable and strands both the retry and steering behind it. Only
+    // direct closeout *resume* remains fenced to `write_applied` below.
+    if retained_document_write_blocks {
         if !editor_delivery_converged {
             return ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery;
         }
@@ -1328,6 +1324,25 @@ impl std::fmt::Display for SessionCheckInterrupted {
 
 impl std::error::Error for SessionCheckInterrupted {}
 
+/// A read-only check observed a durable controller-owned persistence effect
+/// that has not reached its editor-native save receipt yet.
+///
+/// This is deliberately carried separately from [`SessionCheckInterrupted`].
+/// The foreground check did not fail and must not hold the critical path while
+/// the controller owns the next state edge, but the closeout is not terminal
+/// either: embedded callers receive this typed non-terminal result and the CLI
+/// only turns it into exit `0` after printing the background ownership state.
+#[derive(Debug)]
+pub struct SessionCheckBackgroundPending(pub String);
+
+impl std::fmt::Display for SessionCheckBackgroundPending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for SessionCheckBackgroundPending {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResponseOrphanGuardDisposition {
     Clear,
@@ -1471,17 +1486,27 @@ fn response_orphan_interruption(error: anyhow::Error) -> anyhow::Error {
     .into()
 }
 
-/// Print an INTERRUPTED outcome to stdout and exit `1`, as the CLI always has;
-/// pass every other result through.
+/// Print a typed non-terminal outcome at the CLI boundary.
+///
+/// A foreground interruption remains exit `1`. A controller-owned persistence
+/// wait exits `0` after reporting `BACKGROUND PENDING`: the controller is
+/// already doing the work, while the absence of an `OK` line preserves the
+/// fact that no terminal save receipt exists yet.
 fn exit_on_interrupted(file: &Path, outcome: Result<()>) -> Result<()> {
     match outcome {
-        Err(error) => match error.downcast::<SessionCheckInterrupted>() {
-            Ok(SessionCheckInterrupted(message)) => {
+        Err(error) => match error.downcast::<SessionCheckBackgroundPending>() {
+            Ok(SessionCheckBackgroundPending(message)) => {
                 println!("{}", message);
-                crate::profile::report_now(file);
-                std::process::exit(1);
+                Ok(())
             }
-            Err(other) => Err(other),
+            Err(error) => match error.downcast::<SessionCheckInterrupted>() {
+                Ok(SessionCheckInterrupted(message)) => {
+                    println!("{}", message);
+                    crate::profile::report_now(file);
+                    std::process::exit(1);
+                }
+                Err(other) => Err(other),
+            },
         },
         ok => ok,
     }
@@ -1577,6 +1602,47 @@ pub fn read_only_terminal_projection_detail(
             "the editor holds unmerged visible text (state=editor_holds_unmerged_visible_text, operator_action=reconcile_editor_buffer_with_retained_write): it refused every native save of the retained write after the controller's replica rebuilds, so this is not a pending acknowledgement; the controller asks that editor to roll its visible buffer forward in place"
         }
     }
+}
+
+/// Whether terminal convergence is waiting solely on a durable controller
+/// owner. This state is non-terminal but it is not a foreground failure: the
+/// exact write and its retry are already retained, and another foreground
+/// attempt could only race or duplicate them.
+fn background_owns_read_only_projection(
+    decision: ReadOnlyTerminalProjectionDecision,
+    ownership: agent_doc_turn::write_ownership::RetainedWriteVerdict,
+    projection_matches: bool,
+    operator_edit_lead: bool,
+) -> bool {
+    !projection_matches
+        && !operator_edit_lead
+        && ownership == agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred
+        && matches!(
+            decision,
+            ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery
+                | ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+        )
+}
+
+fn background_owned_projection_message(
+    file: &Path,
+    authority_content: &str,
+    disk_content: &str,
+    decision: ReadOnlyTerminalProjectionDecision,
+    divergence_owner_note: &str,
+) -> String {
+    format!(
+        "[session-check] BACKGROUND PENDING: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}, component_divergence={}); {}. {}. terminal=false foreground_action=none; terminal status is withheld until the editor-native save receipt converges. No response was replayed and no force-disk write was attempted",
+        file.display(),
+        agent_doc_hash::content_hash(authority_content),
+        agent_doc_hash::content_hash(disk_content),
+        agent_doc_document::authority_hashes::format_authority_disk_component_divergence(
+            authority_content,
+            disk_content,
+        ),
+        read_only_terminal_projection_detail(decision),
+        divergence_owner_note,
+    )
 }
 
 /// `#splicesessionack` (GH #273 remainder): the INTERRUPTED line for a durable
@@ -2131,6 +2197,31 @@ fn run_with_options_inner(
                 &authority_content,
                 &disk_content,
                 "read_only_terminal_convergence",
+            );
+        }
+        // `#retainedbackgroundprojection`: once the coherent ownership cut
+        // proves a durable controller holder, an unsettled editor projection
+        // is background work rather than a foreground interruption. Returning
+        // the typed non-terminal outcome here is important in both directions:
+        // the CLI does not stall/retry the critical path, while embedded
+        // callers cannot mistake exit-0 reporting for terminal convergence.
+        // No response replay, force-disk write, guard sweep, or terminal `OK`
+        // can run until a later observation sees the exact save receipt.
+        if background_owns_read_only_projection(
+            terminal_projection_decision,
+            ownership.verdict(),
+            projection_matches,
+            operator_edit_lead,
+        ) {
+            return Err(
+                SessionCheckBackgroundPending(background_owned_projection_message(
+                    file,
+                    &authority_content,
+                    &disk_content,
+                    terminal_projection_decision,
+                    &divergence_owner_note,
+                ))
+                .into(),
             );
         }
         // `#splicesessionack`: fail closed while the exhausted state holds,
@@ -5017,7 +5108,13 @@ mod terminal_convergence_tests {
 
     #[test]
     fn retained_capture_session_check_waits_for_delivery_before_editor_owned_save() {
-        for phase in [CyclePhase::ResponseCaptured, CyclePhase::WriteApplied] {
+        for phase in [
+            CyclePhase::PreflightStarted,
+            CyclePhase::ResponseCaptured,
+            CyclePhase::WriteApplied,
+            CyclePhase::Committed,
+            CyclePhase::Abandoned,
+        ] {
             assert_eq!(
                 decide_read_only_terminal_projection(false, Some(phase), true, false, false),
                 ReadOnlyTerminalProjectionDecision::AwaitEditorDelivery,
@@ -5087,8 +5184,8 @@ mod terminal_convergence_tests {
                 "terminal phase {phase:?} with no retained block must try to converge"
             );
         }
-        // A retained write still has an owner, so it keeps waiting rather than
-        // racing the controller with an editor save.
+        // A retained projection is the durable owner even after the response
+        // cycle commits, so the editor-native save remains background work.
         assert_eq!(
             decide_read_only_terminal_projection(
                 false,
@@ -5097,7 +5194,7 @@ mod terminal_convergence_tests {
                 true,
                 false
             ),
-            ReadOnlyTerminalProjectionDecision::ObserveOnly,
+            ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave,
         );
         // An OPEN cycle is owned by definition — unchanged.
         assert_eq!(
@@ -5109,6 +5206,75 @@ mod terminal_convergence_tests {
                 false,
             ),
             ReadOnlyTerminalProjectionDecision::ObserveOnly,
+        );
+    }
+
+    /// `#retainedbackgroundprojection`: a retained delivery can outlive the
+    /// response cycle. The live editor then holds the canonical queue while
+    /// disk still shows the older queue. That is controller-owned background
+    /// persistence, not a foreground INTERRUPTED result. It becomes terminal
+    /// only after the native-save receipt makes the required projection match.
+    #[test]
+    fn retained_queue_projection_is_background_pending_until_save_receipt() {
+        let authority = concat!(
+            "# Task\n\n",
+            "<!-- agent:exchange -->\nanswered\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- new queue head\n<!-- /agent:queue -->\n",
+        );
+        let disk = authority.replace("new queue head", "old queue head");
+        let decision = decide_read_only_terminal_projection(
+            false,
+            Some(CyclePhase::Committed),
+            true,
+            true,
+            false,
+        );
+        assert_eq!(
+            decision,
+            ReadOnlyTerminalProjectionDecision::RequestNativeEditorSave
+        );
+        assert!(background_owns_read_only_projection(
+            decision,
+            agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred,
+            false,
+            false,
+        ));
+
+        let message = background_owned_projection_message(
+            Path::new("sdk-dev.md"),
+            authority,
+            &disk,
+            decision,
+            "The controller owns the next closeout attempt",
+        );
+        for needle in [
+            "[session-check] BACKGROUND PENDING:",
+            "component_divergence=queue:",
+            "terminal=false foreground_action=none",
+            "terminal status is withheld until the editor-native save receipt converges",
+            "No response was replayed and no force-disk write was attempted",
+        ] {
+            assert!(message.contains(needle), "{needle}: {message}");
+        }
+        assert!(!message.contains("INTERRUPTED"), "{message}");
+
+        assert!(
+            !background_owns_read_only_projection(
+                decision,
+                agent_doc_turn::write_ownership::RetainedWriteVerdict::Deferred,
+                true,
+                false,
+            ),
+            "the exact save receipt unlocks terminal validation"
+        );
+        assert!(
+            !background_owns_read_only_projection(
+                ReadOnlyTerminalProjectionDecision::EditorHoldsUnmergedVisibleText,
+                agent_doc_turn::write_ownership::RetainedWriteVerdict::EditorHoldsUnmergedVisibleText,
+                false,
+                false,
+            ),
+            "operator-owned exhaustion remains a foreground interruption"
         );
     }
 
@@ -6224,6 +6390,29 @@ mod settle_window_tests {
         });
         assert!(out.is_ok());
         assert_eq!(calls.get(), 3);
+    }
+
+    /// `#retainedbackgroundprojection`: controller-owned persistence is
+    /// already running off the foreground critical path. The old INTERRUPTED
+    /// classification spent the whole settle window polling it before still
+    /// failing the turn. The typed background outcome returns immediately and
+    /// remains distinguishable from terminal success to embedded callers.
+    #[test]
+    fn background_owned_projection_does_not_spend_the_settle_window() {
+        let calls = Cell::new(0);
+        let out = settle_until_converged(Duration::from_secs(5), Duration::from_millis(1), || {
+            calls.set(calls.get() + 1);
+            Err(SessionCheckBackgroundPending(
+                "[session-check] BACKGROUND PENDING: terminal=false".to_string(),
+            )
+            .into())
+        });
+        assert_eq!(calls.get(), 1, "background work is sampled once");
+        let error = out.expect_err("background pending is not terminal success");
+        assert!(
+            error.downcast_ref::<SessionCheckBackgroundPending>().is_some(),
+            "the typed non-terminal outcome must survive the settle boundary"
+        );
     }
 
     /// `#scsettleexit`: an INTERRUPTED outcome must never exit the process from

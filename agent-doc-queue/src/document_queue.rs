@@ -2016,14 +2016,15 @@ fn tracked_prompt_ids_by_entry(entries: &[QueueEntry]) -> Vec<Option<String>> {
     entries
         .iter()
         .map(|entry| match entry {
+            // Resolve the canonical head identity after stripping binary
+            // projections. This preserves a primary `do [#id]` before a
+            // trailing operator-request id while keeping free-text transcripts
+            // free-text when annotations contain incidental `[#id]` tokens.
             QueueEntry::Prompt(prompt) | QueueEntry::Completed(prompt) => {
-                let operator_action_ids =
-                    agent_doc_document::queue_projection::operator_action_ids(&prompt.text);
-                let text = agent_doc_document::queue_projection::remove_operator_action_ids(
-                    &prompt.text,
-                    &operator_action_ids,
-                );
-                do_prompt_id(&text)
+                match agent_doc_element_queue::queue_head_identity(&prompt.text) {
+                    agent_doc_element_queue::QueueItemIdentity::Id(id) => Some(id),
+                    agent_doc_element_queue::QueueItemIdentity::FreeText(_) => None,
+                }
             }
             _ => None,
         })
@@ -13154,6 +13155,30 @@ mod tests {
         assert_eq!(
             cleared,
             "- ### 🚧 sdk-demo.md queue annotation fix [#subagent-operator-request-sdk-demo]\n- another task\n"
+        );
+    }
+
+    /// An operator-action projection appends a secondary request id. The
+    /// fail-closed projection guard must continue to recognize the first id as
+    /// the tracked work node rather than deleting both ids during comparison.
+    #[test]
+    fn operator_action_projection_preserves_the_primary_tracked_id() {
+        let body = "- do [#apipendingorphans]\n";
+        let request = "subagent-operator-request-pending-rows".to_string();
+        let actions = vec![("do [#apipendingorphans]".to_string(), request.clone())];
+        let open = std::collections::HashSet::from([request]);
+
+        let (projected, reparsed) = project_prompt_operator_actions(body, &actions, &open)
+            .unwrap()
+            .expect("tracked row receives operator-action projection");
+
+        assert_eq!(
+            projected,
+            "- ### 🙋 do [#apipendingorphans] [#subagent-operator-request-pending-rows]\n"
+        );
+        assert_eq!(
+            tracked_prompt_ids_by_entry(&reparsed),
+            vec![Some("apipendingorphans".to_string())]
         );
     }
 

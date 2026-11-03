@@ -45,7 +45,17 @@ const FALLBACK_RESPONSE_TIMESTAMP: &str = "1970-01-01T00:00:00.000Z";
 /// without introducing another queue entry type.
 pub const WAITING_ON_YOU_ROOT_MARKER: &str = "<!-- agent-doc:waiting-on-you -->";
 pub const WAITING_ON_YOU_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
-pub const WAITING_ON_YOU_METADATA_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+pub const AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:reply -->";
+pub const AGENT_DOC_REPLY_PRESENTATION: &str = "▫️";
+pub const LEGACY_AGENT_DOC_REPLY_MARKER: &str = "<!-- agent-doc:waiting-metadata -->";
+
+pub fn is_agent_doc_reply_row(text: &str) -> bool {
+    text.contains(AGENT_DOC_REPLY_MARKER) || text.contains(LEGACY_AGENT_DOC_REPLY_MARKER)
+}
+
+fn agent_doc_reply_suffix() -> String {
+    format!("{AGENT_DOC_REPLY_PRESENTATION} {AGENT_DOC_REPLY_MARKER}")
+}
 const WAITING_ON_YOU_ROOT_TEXT: &str =
     "Waiting on you — answer by adding a child line under an item";
 
@@ -4815,7 +4825,7 @@ pub fn project_waiting_on_you_tree(document: &str, response_body: &str) -> Resul
             .and_then(|packet| packet.response_timestamp.as_deref())
             .unwrap_or(response_timestamp);
         if let Some((raw, true)) = existing.get(&todo.id) {
-            let child = unstrike_waiting_metadata(raw)?;
+            let child = normalize_agent_doc_reply_rows(raw)?;
             children.push(ensure_waiting_response_timestamp(&child, timestamp));
             continue;
         }
@@ -4922,7 +4932,7 @@ fn project_external_waiting_items(
                         });
                     !generated_response_metadata
                         && matches!(entry, QueueEntry::Prompt(child)
-                    if !child.text.contains(WAITING_ON_YOU_METADATA_MARKER)
+                    if !is_agent_doc_reply_row(&child.text)
                         && !agent_doc_element_queue::struck_work_text(&child.text)
                             .trim_start()
                             .starts_with("**")
@@ -4973,12 +4983,12 @@ fn project_external_waiting_items(
     Ok(Some(out))
 }
 
-/// Migrate legacy struck waiting metadata without touching operator-authored
-/// response edges nested beside it.
-fn unstrike_waiting_metadata(raw: &str) -> Result<String> {
+/// Migrate legacy generated reply rows without touching operator-authored
+/// response edges nested beside them.
+fn normalize_agent_doc_reply_rows(raw: &str) -> Result<String> {
     let without_lifecycle =
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(raw);
-    Ok(agent_doc_markdown_ast::overlay::normalize_waiting_metadata_strikes(
+    Ok(agent_doc_markdown_ast::overlay::normalize_agent_doc_reply_rows(
         &without_lifecycle,
     ))
 }
@@ -5116,7 +5126,7 @@ fn existing_waiting_children(
                     child_end = candidate_span.start;
                     break;
                 }
-                if matches!(candidate, QueueEntry::Prompt(prompt) if !prompt.text.contains(WAITING_ON_YOU_METADATA_MARKER))
+                if matches!(candidate, QueueEntry::Prompt(prompt) if !is_agent_doc_reply_row(&prompt.text))
                 {
                     has_operator_reply = true;
                 }
@@ -5322,8 +5332,7 @@ fn latest_response_timestamp(source: &str) -> Option<&str> {
 
 fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> String {
     if child.lines().any(|line| {
-        line.trim_start().starts_with("- **Timestamp:** ")
-            && line.contains(WAITING_ON_YOU_METADATA_MARKER)
+        line.trim_start().starts_with("- **Timestamp:** ") && is_agent_doc_reply_row(line)
     }) {
         return child.to_string();
     }
@@ -5332,17 +5341,14 @@ fn ensure_waiting_response_timestamp(child: &str, response_timestamp: &str) -> S
     let mut inserted = false;
     for line in child.split_inclusive('\n') {
         out.push_str(line);
-        if !inserted
-            && line.contains("**Response:**")
-            && line.contains(WAITING_ON_YOU_METADATA_MARKER)
-        {
+        if !inserted && line.contains("**Response:**") && is_agent_doc_reply_row(line) {
             if !line.ends_with('\n') {
                 out.push('\n');
             }
             out.push_str("      - **Timestamp:** ");
             out.push_str(response_timestamp);
             out.push(' ');
-            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push_str(&agent_doc_reply_suffix());
             out.push('\n');
             inserted = true;
         }
@@ -5381,7 +5387,8 @@ fn render_waiting_metadata(
     let row = " ".repeat(indent);
     let child = " ".repeat(indent + 2);
     let grandchild = " ".repeat(indent + 4);
-    let mut out = format!("{row}- **Response:** {summary} {WAITING_ON_YOU_METADATA_MARKER}");
+    let reply_suffix = agent_doc_reply_suffix();
+    let mut out = format!("{row}- **Response:** {summary} {reply_suffix}");
     // `#waitingresponsededup`: this is a free-text Response node, so its text
     // is itself the summary. A nested Summary belongs only under an identity
     // container (`Response [#id]`), which this waiting projection does not
@@ -5390,40 +5397,40 @@ fn render_waiting_metadata(
     out.push_str(&format!("\n{child}- **Timestamp:** "));
     out.push_str(response_timestamp);
     out.push(' ');
-    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+    out.push_str(&reply_suffix);
     if let Some(packet) = packet {
         if !packet.context.is_empty() {
             out.push_str(&format!("\n{child}- **Context:** "));
             out.push_str(&packet.context);
             out.push(' ');
-            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push_str(&reply_suffix);
         }
         out.push_str(&format!("\n{child}- **Question:** "));
         out.push_str(&packet.request);
         out.push(' ');
-        out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+        out.push_str(&reply_suffix);
         if !packet.choices.is_empty() {
             out.push_str(&format!("\n{child}- **Choices:** "));
-            out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+            out.push_str(&reply_suffix);
             for choice in &packet.choices {
                 out.push_str(&format!("\n{grandchild}- "));
                 out.push_str(choice);
                 out.push(' ');
-                out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+                out.push_str(&reply_suffix);
             }
         }
     } else {
         out.push_str(&format!(
             "\n{child}- **Question:** What decision or completion result should be recorded? "
         ));
-        out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+        out.push_str(&reply_suffix);
     }
     out.push_str(&format!("\n{child}- **Next actions:** "));
-    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+    out.push_str(&reply_suffix);
     out.push_str(&format!("\n{grandchild}- **Action:** "));
     out.push_str(&todo.action);
     out.push(' ');
-    out.push_str(WAITING_ON_YOU_METADATA_MARKER);
+    out.push_str(&reply_suffix);
     out.push('\n');
     // A Todo may discuss agent-doc's own exchange syntax. The waiting tree is
     // generated queue state, so encode that boundary token in the mirror while
@@ -5566,6 +5573,11 @@ mod tests {
         );
         assert!(projected.contains("**Next actions:**"));
         assert!(projected.contains("**Action:** Approve and merge PR #42."));
+        assert!(projected.contains(&agent_doc_reply_suffix()), "{projected}");
+        assert!(
+            !projected.contains(LEGACY_AGENT_DOC_REPLY_MARKER),
+            "new projections must use canonical ownership: {projected}"
+        );
         assert!(
             !projected.contains("~~**Response:")
                 && !projected.contains("~~**Question:")
@@ -5672,9 +5684,10 @@ mod tests {
             "{projected}"
         );
         assert!(
-            projected.contains(
-                "**Timestamp:** 2026-11-02T10:45-05:00 <!-- agent-doc:waiting-metadata -->"
-            ),
+            projected.contains(&format!(
+                "**Timestamp:** 2026-11-02T10:45-05:00 {}",
+                agent_doc_reply_suffix()
+            )),
             "{projected}"
         );
         assert!(
@@ -5845,7 +5858,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_unstrikes_legacy_waiting_metadata_without_losing_answer_edges() {
+    fn refresh_migrates_legacy_reply_rows_without_losing_answer_edges() {
         let response = "### Re: approval — test · 2026-11-02T10:45-05:00\n\nWaiting for approval.";
         let legacy = concat!(
             "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n",
@@ -5866,6 +5879,11 @@ mod tests {
         assert!(repaired.contains("        - approved\n"), "{repaired}");
         assert!(repaired.contains("- **Response:** Approve and merge PR #42."));
         assert!(repaired.contains("- **Timestamp:** 2026-11-02T10:45-05:00"));
+        assert!(repaired.contains(&agent_doc_reply_suffix()), "{repaired}");
+        assert!(
+            !repaired.contains(LEGACY_AGENT_DOC_REPLY_MARKER),
+            "{repaired}"
+        );
         assert!(!repaired.contains("~~**Response:"), "{repaired}");
         assert!(!repaired.contains("~~**Question:"), "{repaired}");
     }

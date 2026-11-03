@@ -332,8 +332,13 @@ pub fn provision_and_route_pane(
     // owner using the existing LayoutProvision start contract; never resume the
     // queue merely to satisfy geometry. The child rechecks pause at startup.
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(file)?;
-    if agent_doc_sqlite::state_store::load_effective_queue_control_for_path(&project_root, file)?
-        .is_some()
+    if let Some(control) =
+        agent_doc_sqlite::state_store::load_effective_queue_control_for_path(&project_root, file)?
+        && route_owned_start_blocked_by_queue_control(
+            true,
+            RouteOwnedStartAdmission::NewSession(RouteOwnedStartPurpose::Dispatch),
+            &control.state,
+        )
     {
         return provision_pane(
             tmux,
@@ -610,6 +615,7 @@ pub fn auto_start_in_session_with_lock_mode(
         if route_owned_start_blocked_by_queue_control(
             true,
             RouteOwnedStartAdmission::NewSession(start_purpose),
+            &control.state,
         ) {
             agent_doc_ops_log_io::log_op(
                 file,

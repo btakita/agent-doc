@@ -8274,6 +8274,9 @@ Body\n\
                 state,
                 reason,
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();

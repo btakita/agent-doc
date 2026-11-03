@@ -115,6 +115,18 @@ pub struct QueueControlStatus {
     pub state: String,
     pub reason: Option<String>,
     pub operation_receipt_id: Option<u64>,
+    #[serde(default)]
+    pub actor_generation: Option<u64>,
+    #[serde(default)]
+    pub target_item_id: Option<String>,
+    #[serde(default)]
+    pub lease_expires_at: Option<u64>,
+    /// Whether this row currently governs queue admission. `state` is retained
+    /// for audit even after a drain's generation/target lease is spent.
+    #[serde(default)]
+    pub effective: bool,
+    #[serde(default)]
+    pub effectiveness_reason: Option<String>,
     pub updated_at: u64,
 }
 
@@ -125,6 +137,9 @@ pub struct QueueControlInsert<'a> {
     pub state: &'a str,
     pub reason: Option<&'a str>,
     pub operation_receipt_id: Option<u64>,
+    pub actor_generation: Option<u64>,
+    pub target_item_id: Option<&'a str>,
+    pub lease_expires_at: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1118,6 +1133,9 @@ WHERE fact_type <> 'document_authority_observed';
             state TEXT NOT NULL,
             reason TEXT,
             operation_receipt_id INTEGER,
+            actor_generation INTEGER,
+            target_item_id TEXT,
+            lease_expires_at INTEGER,
             updated_at INTEGER NOT NULL,
             UNIQUE(scope_kind, scope_id)
         );
@@ -2779,6 +2797,17 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 /// the normal open path.
 const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     (
+        "queue_controls",
+        "actor_generation",
+        "actor_generation INTEGER",
+    ),
+    ("queue_controls", "target_item_id", "target_item_id TEXT"),
+    (
+        "queue_controls",
+        "lease_expires_at",
+        "lease_expires_at INTEGER",
+    ),
+    (
         "context_manifest",
         "harness",
         "harness TEXT NOT NULL DEFAULT 'unknown'",
@@ -3705,6 +3734,118 @@ pub fn load_queue_head_from_db(
     .context("failed to load queue head from controller state")
 }
 
+/// Default bounded lifetime for a document drain whose caller did not provide
+/// an explicit expiry. The lease is only eligible to retire at an idle/closed
+/// boundary; a live actor or the named queue target keeps the drain effective,
+/// so long turns cannot lose their fence merely because wall time advanced.
+pub const DEFAULT_QUEUE_DRAIN_LEASE_SECS: u64 = 6 * 60 * 60;
+
+struct QueueControlEffectivenessFacts<'a> {
+    scope_kind: &'a str,
+    scope_id: &'a str,
+    state: &'a str,
+    control_generation: Option<u64>,
+    target_item_id: Option<&'a str>,
+    lease_expires_at: Option<u64>,
+    updated_at: u64,
+    now: u64,
+}
+
+fn queue_control_effectiveness(
+    conn: &Connection,
+    facts: QueueControlEffectivenessFacts<'_>,
+) -> Result<(bool, String)> {
+    let QueueControlEffectivenessFacts {
+        scope_kind,
+        scope_id,
+        state,
+        control_generation,
+        target_item_id,
+        lease_expires_at,
+        updated_at,
+        now,
+    } = facts;
+    match state {
+        "resumed" => return Ok((false, "resumed".to_string())),
+        // Pause is operator authority, not a lease. It deliberately survives
+        // actor replacement and controller restart until an explicit resume.
+        "paused" => return Ok((true, "explicit_pause".to_string())),
+        "draining" => {}
+        other => return Ok((true, format!("unknown_state_fail_closed:{other}"))),
+    }
+
+    let expires_at = lease_expires_at
+        .unwrap_or_else(|| updated_at.saturating_add(DEFAULT_QUEUE_DRAIN_LEASE_SECS));
+    if scope_kind != "document" {
+        let live_actor_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM documents WHERE actor_state NOT IN ('ready', 'closed', 'blocked')",
+            [],
+            |row| row.get(0),
+        )?;
+        if live_actor_count > 0 {
+            return Ok((true, "project_drain_actor_live".to_string()));
+        }
+        return Ok(if now < expires_at {
+            (true, "project_drain_lease_active".to_string())
+        } else {
+            (false, "project_drain_lease_expired".to_string())
+        });
+    }
+
+    let actor: Option<(u64, String)> = conn
+        .query_row(
+            "SELECT generation, actor_state FROM documents WHERE document_id = ?1",
+            [scope_id],
+            |row| {
+                let generation: i64 = row.get(0)?;
+                Ok((u64::try_from(generation).unwrap_or_default(), row.get(1)?))
+            },
+        )
+        .optional()?;
+    let Some((actor_generation, actor_state)) = actor else {
+        return Ok((false, "drain_actor_absent".to_string()));
+    };
+    if control_generation.is_some_and(|generation| generation != actor_generation) {
+        return Ok((
+            false,
+            format!(
+                "drain_generation_superseded:control={} actor={actor_generation}",
+                control_generation.unwrap_or_default()
+            ),
+        ));
+    }
+
+    let target_present = if let Some(target) = target_item_id {
+        conn.query_row(
+            "SELECT head_id FROM queue_heads WHERE document_id = ?1 AND head_id = ?2 AND state NOT IN ('completed', 'closed', 'lost') LIMIT 1",
+            params![scope_id, target],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some()
+    } else {
+        false
+    };
+    if target_present {
+        return Ok((true, "drain_target_present".to_string()));
+    }
+
+    // A long-running live turn cannot be retired by time. Starting is also
+    // protected because startup may legitimately exceed the nominal lease.
+    if !matches!(actor_state.as_str(), "ready" | "closed" | "blocked") {
+        return Ok((true, format!("drain_actor_live:{actor_state}")));
+    }
+    if now < expires_at {
+        return Ok((true, "drain_lease_active".to_string()));
+    }
+    let legacy = if control_generation.is_none() && target_item_id.is_none() {
+        "legacy_"
+    } else {
+        ""
+    };
+    Ok((false, format!("{legacy}drain_lease_expired_at_idle")))
+}
+
 pub fn load_queue_control_from_db(
     conn: &Connection,
     scope_kind: &str,
@@ -3719,6 +3860,9 @@ pub fn load_queue_control_from_db(
             state,
             reason,
             operation_receipt_id,
+            actor_generation,
+            target_item_id,
+            lease_expires_at,
             updated_at
         FROM queue_controls
         WHERE scope_kind = ?1 AND scope_id = ?2
@@ -3727,20 +3871,52 @@ pub fn load_queue_control_from_db(
         |row| {
             let receipt_id: i64 = row.get("id")?;
             let operation_receipt_id: Option<i64> = row.get("operation_receipt_id")?;
+            let actor_generation: Option<i64> = row.get("actor_generation")?;
+            let lease_expires_at: Option<i64> = row.get("lease_expires_at")?;
             let updated_at: i64 = row.get("updated_at")?;
+            let state: String = row.get("state")?;
+            let updated_at = sqlite_u64(updated_at, "queue control updated_at")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let actor_generation = actor_generation
+                .map(|value| sqlite_u64(value, "queue control actor generation"))
+                .transpose()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let lease_expires_at = lease_expires_at
+                .map(|value| sqlite_u64(value, "queue control lease expiry"))
+                .transpose()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let target_item_id: Option<String> = row.get("target_item_id")?;
+            let (effective, effectiveness_reason) = queue_control_effectiveness(
+                conn,
+                QueueControlEffectivenessFacts {
+                    scope_kind,
+                    scope_id,
+                    state: &state,
+                    control_generation: actor_generation,
+                    target_item_id: target_item_id.as_deref(),
+                    lease_expires_at,
+                    updated_at,
+                    now: timestamp_secs(),
+                },
+            )
+            .map_err(|_| rusqlite::Error::InvalidQuery)?;
             Ok(QueueControlStatus {
                 receipt_id: sqlite_u64(receipt_id, "queue control receipt id")
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
                 scope_kind: row.get("scope_kind")?,
                 scope_id: row.get("scope_id")?,
-                state: row.get("state")?,
+                state,
                 reason: row.get("reason")?,
                 operation_receipt_id: operation_receipt_id
                     .map(|value| sqlite_u64(value, "queue control operation receipt id"))
                     .transpose()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?,
-                updated_at: sqlite_u64(updated_at, "queue control updated_at")
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                actor_generation,
+                target_item_id,
+                lease_expires_at,
+                effective,
+                effectiveness_reason: Some(effectiveness_reason),
+                updated_at,
             })
         },
     )
@@ -3754,12 +3930,12 @@ pub fn load_effective_queue_control_from_db(
     project_scope_id: &str,
 ) -> Result<Option<QueueControlStatus>> {
     if let Some(control) = load_queue_control_from_db(conn, "document", document_id)?
-        && control.state != "resumed"
+        && control.effective
     {
         return Ok(Some(control));
     }
     let project = load_queue_control_from_db(conn, "project", project_scope_id)?;
-    Ok(project.filter(|control| control.state != "resumed"))
+    Ok(project.filter(|control| control.effective))
 }
 
 /// Resolve durable queue control for one document using the same canonical path
@@ -6166,13 +6342,19 @@ pub fn upsert_queue_control_in_db(
             state,
             reason,
             operation_receipt_id,
+            actor_generation,
+            target_item_id,
+            lease_expires_at,
             updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET
             state = excluded.state,
             reason = excluded.reason,
             operation_receipt_id = excluded.operation_receipt_id,
+            actor_generation = excluded.actor_generation,
+            target_item_id = excluded.target_item_id,
+            lease_expires_at = excluded.lease_expires_at,
             updated_at = excluded.updated_at
         "#,
         params![
@@ -6183,6 +6365,15 @@ pub fn upsert_queue_control_in_db(
             control
                 .operation_receipt_id
                 .map(|receipt_id| sqlite_i64(receipt_id, "queue control operation receipt id"))
+                .transpose()?,
+            control
+                .actor_generation
+                .map(|generation| sqlite_i64(generation, "queue control actor generation"))
+                .transpose()?,
+            control.target_item_id,
+            control
+                .lease_expires_at
+                .map(|expires| sqlite_i64(expires, "queue control lease expiry"))
                 .transpose()?,
             now
         ],
@@ -9143,6 +9334,9 @@ mod tests {
                 state: "paused",
                 reason: Some("store actor count test"),
                 operation_receipt_id: Some(1),
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )?;
         insert_queue_backpressure_in_db(
@@ -10649,6 +10843,9 @@ mod tests {
                 state: "paused",
                 reason: Some("file cache conflict quarantine"),
                 operation_receipt_id: Some(7),
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )?;
         drop(conn);
@@ -10852,6 +11049,209 @@ mod state_db_corruption_evidence_tests {
             retained
                 .iter()
                 .all(|event| event.event_id != "a-1" && event.event_id != "a-stale")
+        );
+    }
+
+    fn insert_queue_control_test_actor(
+        conn: &Connection,
+        document_id: &str,
+        generation: u64,
+        state: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO documents (document_id, canonical_path, session_id, generation, pane_id, window_id, harness_id, actor_state) VALUES (?1, ?1, 'session', ?2, '%1', '@1', 'codex', ?3)",
+            params![document_id, i64::try_from(generation).unwrap(), state],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn legacy_idle_drain_expires_but_pause_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        reset_state_db_schema_convergence_memo();
+        let document_id = dir.path().join("task.md").to_string_lossy().into_owned();
+        let conn = open_state_db(dir.path()).unwrap();
+        insert_queue_control_test_actor(&conn, &document_id, 20, "ready");
+        upsert_queue_control_in_db(
+            &conn,
+            &QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &document_id,
+                state: "draining",
+                reason: Some("legacy diagnostic-only until-id"),
+                operation_receipt_id: Some(31),
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE queue_controls SET updated_at = ?1 WHERE scope_kind = 'document' AND scope_id = ?2",
+            params![
+                i64::try_from(timestamp_secs() - DEFAULT_QUEUE_DRAIN_LEASE_SECS - 1).unwrap(),
+                document_id
+            ],
+        )
+        .unwrap();
+        drop(conn);
+
+        // Re-open simulates controller restart and legacy-column migration.
+        let conn = open_state_db(dir.path()).unwrap();
+        let stale = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(!stale.effective);
+        assert_eq!(
+            stale.effectiveness_reason.as_deref(),
+            Some("legacy_drain_lease_expired_at_idle")
+        );
+        assert!(
+            load_effective_queue_control_from_db(
+                &conn,
+                &document_id,
+                &dir.path().to_string_lossy()
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        upsert_queue_control_in_db(
+            &conn,
+            &QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &document_id,
+                state: "paused",
+                reason: Some("operator pause"),
+                operation_receipt_id: None,
+                actor_generation: Some(1),
+                target_item_id: None,
+                lease_expires_at: Some(1),
+            },
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open_state_db(dir.path()).unwrap();
+        let paused = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(paused.effective);
+        assert_eq!(
+            paused.effectiveness_reason.as_deref(),
+            Some("explicit_pause")
+        );
+    }
+
+    #[test]
+    fn legacy_queue_control_table_adds_structured_drain_columns_without_losing_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_db_path(dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let legacy = Connection::open(&path).unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE queue_controls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    scope_kind TEXT NOT NULL,
+                    scope_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    reason TEXT,
+                    operation_receipt_id INTEGER,
+                    updated_at INTEGER NOT NULL,
+                    UNIQUE(scope_kind, scope_id)
+                );
+                INSERT INTO queue_controls (scope_kind, scope_id, state, reason, operation_receipt_id, updated_at)
+                VALUES ('document', '/tmp/legacy.md', 'draining', 'legacy drain', 31, 1);",
+            )
+            .unwrap();
+        drop(legacy);
+        reset_state_db_schema_convergence_memo();
+
+        let conn = open_state_db(dir.path()).unwrap();
+        for column in ["actor_generation", "target_item_id", "lease_expires_at"] {
+            assert!(column_exists(&conn, "queue_controls", column).unwrap());
+        }
+        let control = load_queue_control_from_db(&conn, "document", "/tmp/legacy.md")
+            .unwrap()
+            .unwrap();
+        assert_eq!(control.operation_receipt_id, Some(31));
+        assert_eq!(control.actor_generation, None);
+        assert_eq!(control.target_item_id, None);
+        assert_eq!(control.lease_expires_at, None);
+        assert!(!control.effective);
+        assert_eq!(
+            control.effectiveness_reason.as_deref(),
+            Some("drain_actor_absent")
+        );
+    }
+
+    #[test]
+    fn drain_generation_target_and_live_turn_prevent_premature_retirement() {
+        let dir = tempfile::tempdir().unwrap();
+        reset_state_db_schema_convergence_memo();
+        let document_id = dir.path().join("task.md").to_string_lossy().into_owned();
+        let conn = open_state_db(dir.path()).unwrap();
+        insert_queue_control_test_actor(&conn, &document_id, 20, "busy");
+        upsert_queue_control_in_db(
+            &conn,
+            &QueueControlInsert {
+                scope_kind: "document",
+                scope_id: &document_id,
+                state: "draining",
+                reason: Some("drain target"),
+                operation_receipt_id: None,
+                actor_generation: Some(20),
+                target_item_id: Some("#target"),
+                lease_expires_at: Some(timestamp_secs() - 60 * 60),
+            },
+        )
+        .unwrap();
+        let live = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(live.effective, "a long live turn must retain the drain");
+        assert_eq!(
+            live.effectiveness_reason.as_deref(),
+            Some("drain_actor_live:busy")
+        );
+
+        conn.execute(
+            "UPDATE documents SET actor_state = 'ready' WHERE document_id = ?1",
+            [&document_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO queue_heads (document_id, queue_name, generation, head_id, prompt, state, priority, selected_at, updated_at) VALUES (?1, 'agent:queue', 20, '#target', 'target', 'running', 0, 1, 1)",
+            [&document_id],
+        )
+        .unwrap();
+        let targeted = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(targeted.effective);
+        assert_eq!(
+            targeted.effectiveness_reason.as_deref(),
+            Some("drain_target_present")
+        );
+
+        conn.execute(
+            "UPDATE documents SET generation = 21 WHERE document_id = ?1",
+            [&document_id],
+        )
+        .unwrap();
+        let superseded = load_queue_control_from_db(&conn, "document", &document_id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !superseded.effective,
+            "an old generation cannot fence its successor"
+        );
+        assert!(
+            superseded
+                .effectiveness_reason
+                .as_deref()
+                .unwrap()
+                .starts_with("drain_generation_superseded")
         );
     }
 }

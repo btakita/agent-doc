@@ -294,6 +294,9 @@ mod tests {
                 state,
                 reason: Some("test pause"),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();

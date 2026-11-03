@@ -18905,6 +18905,9 @@ mod tests {
                     "stale route-owned supervisor (pid 999) replaying already-answered queue item",
                 ),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();
@@ -19005,6 +19008,9 @@ mod tests {
                     "stale route-owned supervisor (pid 999) replaying already-answered queue item",
                 ),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();
@@ -19137,6 +19143,9 @@ mod tests {
                     "stale route-owned supervisor (pid {dead_pid}) replaying already-answered queue item after reboot"
                 )),
                 operation_receipt_id: None,
+                actor_generation: None,
+                target_item_id: None,
+                lease_expires_at: None,
             },
         )
         .unwrap();

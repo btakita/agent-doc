@@ -73,6 +73,28 @@ pub struct CapturedCloseoutMutationPlan {
     pub status: Option<String>,
 }
 
+/// Opaque proof that response input comes from a binary-owned replay path.
+///
+/// Public command surfaces can construct only the fresh/default value.  The
+/// retained-capture and repair-replay constructors mint the replay value, so a
+/// caller-controlled `--origin` string cannot impersonate recovery authority.
+#[derive(Clone, Debug, Default)]
+pub struct ResponseInputProvenance {
+    binary_owned_replay: bool,
+}
+
+impl ResponseInputProvenance {
+    fn binary_owned_replay() -> Self {
+        Self {
+            binary_owned_replay: true,
+        }
+    }
+
+    pub fn is_binary_owned_replay(&self) -> bool {
+        self.binary_owned_replay
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
     pub file: PathBuf,
@@ -81,6 +103,7 @@ pub struct CommandOptions {
     pub is_ipc: bool,
     pub force_disk: bool,
     pub origin: Option<String>,
+    pub response_input_provenance: ResponseInputProvenance,
     /// Explicit closeout intent: the response creates no actionable follow-up work.
     /// The runtime encodes this as a transient guard marker in captured response
     /// evidence so pre-write and pre-commit checks share the same durable proof.
@@ -219,6 +242,7 @@ impl CommandOptions {
             is_ipc: false,
             force_disk: false,
             origin: Some("captured_finalize_resume".to_string()),
+            response_input_provenance: ResponseInputProvenance::binary_owned_replay(),
             no_pending_capture: plan.no_pending_capture,
             pending_add: plan.pending_add,
             pending_add_to: plan.pending_add_to,
@@ -278,6 +302,7 @@ impl CommandOptions {
             is_ipc: false,
             force_disk,
             origin: Some("repair_replay".to_string()),
+            response_input_provenance: ResponseInputProvenance::binary_owned_replay(),
             no_pending_capture: false,
             pending_add: Vec::new(),
             pending_add_to: Vec::new(),

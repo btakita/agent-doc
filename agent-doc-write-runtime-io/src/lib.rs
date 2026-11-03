@@ -4854,14 +4854,7 @@ fn validate_blocking_operator_request_recommendations(
     // Captured-finalize and repair replay re-apply binary-owned response input
     // that may predate this validation contract.  Reject only a response being
     // authored now; never wedge recovery of an already retained capture.
-    if matches!(
-        options.origin.as_deref(),
-        Some(
-            "captured_finalize_resume"
-                | "captured_finalize_resume_tracked_work"
-                | "repair_replay"
-        )
-    ) {
+    if options.response_input_provenance.is_binary_owned_replay() {
         return Ok(());
     }
     if let Some(error) = packets.iter().find_map(|packet| {
@@ -6648,6 +6641,8 @@ mod tests {
                 agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
             );
         current.origin = Some("skill".to_string());
+        current.response_input_provenance =
+            agent_doc_write_command_io::ResponseInputProvenance::default();
         let error = validate_blocking_operator_request_recommendations(&current, &packets)
             .unwrap_err()
             .to_string();
@@ -6660,13 +6655,29 @@ mod tests {
         let packets = agent_doc_turn::response_text::blocking_operator_request_packets(&valid);
         validate_blocking_operator_request_recommendations(&current, &packets).unwrap();
 
+        let legacy_packets =
+            agent_doc_turn::response_text::blocking_operator_request_packets(response);
+        for spoofed_origin in [
+            "captured_finalize_resume",
+            "captured_finalize_resume_tracked_work",
+            "repair_replay",
+        ] {
+            current.origin = Some(spoofed_origin.to_string());
+            let error =
+                validate_blocking_operator_request_recommendations(&current, &legacy_packets)
+                    .unwrap_err()
+                    .to_string();
+            assert!(
+                error.contains("Recommended because"),
+                "public origin `{spoofed_origin}` must not confer replay authority: {error}"
+            );
+        }
+
         let captured_replay =
             agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
                 doc,
                 agent_doc_write_command_io::CapturedCloseoutMutationPlan::default(),
             );
-        let legacy_packets =
-            agent_doc_turn::response_text::blocking_operator_request_packets(response);
         validate_blocking_operator_request_recommendations(&captured_replay, &legacy_packets)
             .expect("pre-upgrade retained captures must remain recoverable");
 

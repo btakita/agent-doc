@@ -6844,6 +6844,8 @@ fn try_main() -> anyhow::Result<()> {
                     is_ipc: args.ipc,
                     force_disk: args.force_disk,
                     origin: args.origin,
+                    response_input_provenance:
+                        agent_doc_write_command_io::ResponseInputProvenance::default(),
                     no_pending_capture: args.no_pending_capture,
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,
@@ -6920,6 +6922,8 @@ fn try_main() -> anyhow::Result<()> {
                     is_ipc: args.ipc,
                     force_disk: args.force_disk,
                     origin: args.origin,
+                    response_input_provenance:
+                        agent_doc_write_command_io::ResponseInputProvenance::default(),
                     no_pending_capture: args.no_pending_capture,
                     pending_add: args.pending_add,
                     pending_add_to: args.pending_add_to,

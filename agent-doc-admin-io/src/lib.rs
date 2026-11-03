@@ -48,6 +48,8 @@ pub struct ControllerActorInspectionView {
     #[serde(default)]
     pub queue_head: Option<QueueHeadStatus>,
     #[serde(default)]
+    pub queue_projection: QueueProjectionInspectionView,
+    #[serde(default)]
     pub queue_control: Option<QueueControlStatus>,
     #[serde(default)]
     pub queue_controls: Vec<QueueControlStatus>,
@@ -59,6 +61,23 @@ pub struct ControllerActorInspectionView {
     pub dispatch_attempts: Vec<DispatchAttemptStatus>,
     pub admin_operations: Vec<AdminOperationStatus>,
     pub projection_diagnostics: Vec<ProjectionDiagnosticStatus>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueProjectionInspectionView {
+    pub status: String,
+    #[serde(default)]
+    pub actor_generation: Option<u64>,
+    #[serde(default)]
+    pub runtime_generation: Option<u64>,
+    #[serde(default)]
+    pub runtime_head_id: Option<String>,
+    #[serde(default)]
+    pub runtime_prompt: Option<String>,
+    #[serde(default)]
+    pub document_prompt: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
 }
 
 pub trait AdminControllerEffects {
@@ -336,6 +355,17 @@ fn inspect_text_lines(inspection: &ControllerActorInspectionView) -> Vec<String>
             live_replicas,
             controller_freshness_summary(inspection.freshness.as_ref())
         ));
+        if inspection.queue_projection.status != "consistent" {
+            lines.push(format!(
+                "  queue_projection={} detail={}",
+                inspection.queue_projection.status,
+                inspection
+                    .queue_projection
+                    .detail
+                    .as_deref()
+                    .unwrap_or("none")
+            ));
+        }
         if let Some(remedy) = inspection
             .editor_replica
             .as_ref()

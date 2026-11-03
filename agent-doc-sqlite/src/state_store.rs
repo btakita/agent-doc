@@ -1179,6 +1179,22 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             ),
         ),
         (
+            "realtime_steering_observed",
+            prune_superseded_realtime_steering_observations(conn),
+        ),
+        (
+            "undo_checkpointed",
+            prune_superseding_fact_to(conn, "undo_checkpointed", UNDO_FACTS_KEPT_PER_DOCUMENT),
+        ),
+        (
+            "undo_checkpoint_cleared",
+            prune_superseding_fact_to(
+                conn,
+                "undo_checkpoint_cleared",
+                UNDO_FACTS_KEPT_PER_DOCUMENT,
+            ),
+        ),
+        (
             EDITOR_VIEW_BINDING_FACT_TYPE,
             prune_editor_view_binding_facts(conn),
         ),
@@ -1449,6 +1465,52 @@ const RESPONSE_CAPTURES_KEPT_PER_DOCUMENT: i64 = 3;
 /// numbers within a turn make this the highest-**row-count** fact after the
 /// authority observations (1,441 rows / 3MB live on 2026-07-18).
 const TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
+
+/// How many undo checkpoint/clear snapshots to keep per document.
+///
+/// Both facts assign the undo projection wholesale. Keeping the newest rows of
+/// each kind preserves their relative replay order, so the newest checkpoint
+/// or clear still wins, while bounding the full-document images embedded in
+/// `undo_checkpointed`. Live `haiven-dev` evidence on 2026-11-02 was 1,223
+/// checkpoint rows holding 78 MB; one document alone retained 78 rows / 13 MB.
+const UNDO_FACTS_KEPT_PER_DOCUMENT: i64 = 2;
+
+/// Drop superseded realtime steering snapshots within one closeout cycle.
+///
+/// Steering is not superseding per document: a later cycle start clears the
+/// prior cycle, and a stale observation for an old cycle is ignored. It *is*
+/// superseding within `(document_hash, cycle_id)`, where the reducer replaces
+/// `closeout.realtime_steering` wholesale. Retaining the last row for every
+/// cycle therefore preserves replay ordering against preflight/commit/abandon
+/// facts and the exact final projection, while removing repeated snapshots.
+///
+/// Live `haiven-dev` evidence on 2026-11-02 was 36,138 rows / 109 MB but only
+/// 5,533 distinct document-cycle keys.
+fn prune_superseded_realtime_steering_observations(conn: &Connection) -> Result<()> {
+    // Rank the fact's rows once per batch instead of probing later rows for
+    // every candidate. On the 36k-row live ledger the window plan took 17 ms;
+    // the equivalent correlated JSON scan took 1.0 s for its first batch.
+    delete_state_events_planned_by_read(
+        conn,
+        r#"
+        SELECT rowid FROM (
+          SELECT rowid,
+                 row_number() OVER (
+                   PARTITION BY document_hash,
+                                json_extract(payload_json, '$.fact.cycle_id')
+                   ORDER BY id DESC
+                 ) AS replay_rank
+          FROM state_events
+          WHERE fact_type = 'realtime_steering_observed'
+        )
+        WHERE replay_rank > 1
+        LIMIT 2000
+        "#,
+        [],
+    )
+    .context("failed to prune superseded realtime steering observations")?;
+    Ok(())
+}
 
 /// Drop `visible_write_commit_candidate_observed` rows the projection can no
 /// longer elect (`#visiblecandidateretention`).
@@ -9230,6 +9292,91 @@ mod tests {
         Ok(())
     }
 
+    /// Realtime steering replaces the snapshot for its own cycle, but a stale
+    /// old-cycle observation must not evict a newer cycle's steering.
+    #[test]
+    fn superseded_realtime_steering_is_pruned_per_document_cycle() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let observe = |event_id: &str, doc: &str, cycle: &str| {
+            let payload = format!(r#"{{"fact":{{"cycle_id":"{cycle}"}}}}"#);
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, ?2, 'closeout', 'realtime_steering_observed', ?3, 0)",
+                rusqlite::params![event_id, doc, payload],
+            )
+        };
+
+        observe("a-c1-1", "docA", "cycle-1")?;
+        observe("a-c2-1", "docA", "cycle-2")?;
+        observe("a-c1-2", "docA", "cycle-1")?;
+        observe("a-c2-2", "docA", "cycle-2")?;
+        observe("b-c1-1", "docB", "cycle-1")?;
+
+        prune_superseded_realtime_steering_observations(&conn)?;
+
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type = 'realtime_steering_observed' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec!["a-c1-2", "a-c2-2", "b-c1-1"],
+            "the last observation for each document-cycle key survives"
+        );
+        Ok(())
+    }
+
+    /// Undo checkpoints and clears each supersede older rows. Retaining both
+    /// kinds independently preserves the chronological winner across them.
+    #[test]
+    fn superseded_undo_facts_are_pruned_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        let insert = |event_id: &str, doc: &str, fact_type: &str| {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, ?2, 'document', ?3, '{}', 0)",
+                rusqlite::params![event_id, doc, fact_type],
+            )
+        };
+        for i in 0..5 {
+            insert(&format!("a-checkpoint-{i}"), "docA", "undo_checkpointed")?;
+            insert(&format!("a-clear-{i}"), "docA", "undo_checkpoint_cleared")?;
+        }
+        insert("b-checkpoint-0", "docB", "undo_checkpointed")?;
+
+        prune_superseding_fact_to(&conn, "undo_checkpointed", UNDO_FACTS_KEPT_PER_DOCUMENT)?;
+        prune_superseding_fact_to(
+            &conn,
+            "undo_checkpoint_cleared",
+            UNDO_FACTS_KEPT_PER_DOCUMENT,
+        )?;
+
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type IN ('undo_checkpointed', 'undo_checkpoint_cleared') ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec![
+                "a-checkpoint-3",
+                "a-clear-3",
+                "a-checkpoint-4",
+                "a-clear-4",
+                "b-checkpoint-0",
+            ],
+            "newest rows of each kind survive in their original replay order"
+        );
+        Ok(())
+    }
+
     /// `#visiblecandidateretention`: `observe_commit_candidate` maintains a MAP
     /// keyed by `commit_candidate_hash`, so several candidates stay live for one
     /// document at once. Retention must mirror that map — keep the highest
@@ -9310,6 +9457,11 @@ mod tests {
             "visible_write_commit_candidate_observed",
             r#"{"fact":{"commit_candidate_hash":"c1","model_revision":1}}"#,
         )?;
+        insert(
+            "steering",
+            "realtime_steering_observed",
+            r#"{"fact":{"cycle_id":"cycle-1"}}"#,
+        )?;
         insert("checkpoint", "crdt_recovery_projection_checkpointed", "{}")?;
         insert(
             "deferred",
@@ -9322,13 +9474,14 @@ mod tests {
         conn.busy_timeout(Duration::ZERO)?;
 
         prune_superseded_visible_write_commit_candidates(&conn)?;
+        prune_superseded_realtime_steering_observations(&conn)?;
         prune_superseding_fact_to(&conn, "crdt_recovery_projection_checkpointed", 1)?;
         prune_converged_document_write_intents(&conn)?;
 
         writer.execute_batch("ROLLBACK")?;
         let rows: i64 =
             conn.query_row("SELECT COUNT(*) FROM state_events", [], |row| row.get(0))?;
-        assert_eq!(rows, 3, "nothing was prunable, so nothing was deleted");
+        assert_eq!(rows, 4, "nothing was prunable, so nothing was deleted");
         Ok(())
     }
 

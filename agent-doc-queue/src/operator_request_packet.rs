@@ -29,6 +29,86 @@ pub struct StructuredChoiceDecision {
     pub selected_label: Option<String>,
 }
 
+/// A `(Recommended)` marker is an operator-facing judgment, not decoration.
+/// New choice prompts must state the evidence for that judgment explicitly so
+/// the recommendation survives projection without relying on hidden reasoning.
+pub fn recommended_choice_rationale_error(label: &str, description: &str) -> Option<String> {
+    let label = label.trim();
+    if !label.to_ascii_lowercase().ends_with("(recommended)") {
+        return None;
+    }
+
+    let description = description.trim();
+    const PREFIX: &str = "recommended because ";
+    let lowercase = description.to_ascii_lowercase();
+    let Some(rationale) = lowercase.strip_prefix(PREFIX) else {
+        return Some(format!(
+            "recommended choice `{label}` must start its description with `Recommended because <contextual reason>`"
+        ));
+    };
+    let substantive_words = rationale
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .filter(|word| {
+            !matches!(
+                *word,
+                "a" | "an"
+                    | "and"
+                    | "be"
+                    | "best"
+                    | "better"
+                    | "because"
+                    | "choice"
+                    | "choose"
+                    | "chosen"
+                    | "it"
+                    | "is"
+                    | "option"
+                    | "prefer"
+                    | "preferred"
+                    | "recommend"
+                    | "recommendation"
+                    | "recommended"
+                    | "select"
+                    | "selected"
+                    | "should"
+                    | "that"
+                    | "the"
+                    | "this"
+                    | "to"
+            )
+        })
+        .take(2)
+        .count();
+    if substantive_words < 2 {
+        return Some(format!(
+            "recommended choice `{label}` needs a concrete contextual reason, not a tautological recommendation"
+        ));
+    }
+    None
+}
+
+/// Validate recommendation rationale in a newly emitted blocking packet.
+/// Parsing remains backward-compatible for committed legacy packets; callers
+/// use this gate only while accepting a new response.
+pub fn blocking_operator_request_recommendation_error(
+    packet: &BlockingOperatorRequestPacket,
+) -> Option<String> {
+    packet.choice_labels.iter().find_map(|label| {
+        if !label.trim().to_ascii_lowercase().ends_with("(recommended)") {
+            return None;
+        }
+        let prefix = format!("**{label}**:");
+        let description = packet
+            .choice_rows
+            .iter()
+            .find_map(|row| row.strip_prefix(&prefix))
+            .map(str::trim)
+            .unwrap_or_default();
+        recommended_choice_rationale_error(label, description)
+    })
+}
+
 /// Parse final `**Decision record**` blocks emitted after a terminal or
 /// sequential operator choice. Examples inside fenced code are ignored.
 pub fn structured_choice_decisions(response: &str) -> Vec<StructuredChoiceDecision> {
@@ -422,5 +502,54 @@ mod tests {
     fn ignores_decision_record_examples_in_fences() {
         let response = "```md\n**Decision record**:\n- **Selected:** **staging**.\n```\n";
         assert!(structured_choice_decisions(response).is_empty());
+    }
+
+    #[test]
+    fn recommended_choice_requires_an_explicit_contextual_reason() {
+        assert!(recommended_choice_rationale_error(
+            "Leave uncommitted (Recommended)",
+            "Recommended because the integration regression remains unresolved; keeping the worktree intact preserves the pending fix."
+        )
+        .is_none());
+        assert!(
+            recommended_choice_rationale_error(
+                "Leave uncommitted (Recommended)",
+                "Keep the worktree available before committing."
+            )
+            .unwrap()
+            .contains("must start")
+        );
+        assert!(
+            recommended_choice_rationale_error(
+                "Leave uncommitted (Recommended)",
+                "Recommended because it is the recommended choice."
+            )
+            .unwrap()
+            .contains("tautological")
+        );
+        assert!(
+            recommended_choice_rationale_error("Commit now", "Commit the verified patch.")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn blocking_packet_exposes_missing_recommendation_rationale_without_rejecting_parse() {
+        let response = concat!(
+            "[#subagent-operator-request-disposition] subagent operator request\n",
+            "- *kind:* question\n",
+            "- *blocking:* true\n",
+            "- *request:*\n  - How should the worktree be handled?\n",
+            "- *choices:*\n",
+            "  - **Leave uncommitted (Recommended)**: Keep the worktree available.\n",
+            "  - **Commit now**: Commit the verified patch.\n",
+        );
+        let packets = blocking_operator_request_packets(response);
+        assert_eq!(packets.len(), 1, "legacy packets remain readable");
+        assert!(
+            blocking_operator_request_recommendation_error(&packets[0])
+                .unwrap()
+                .contains("must start")
+        );
     }
 }
